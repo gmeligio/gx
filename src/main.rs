@@ -1,11 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use std::env;
-use std::path::PathBuf;
-
-mod commands;
-mod manifest;
-mod workflow;
+use gv::{commands, repo};
 
 #[derive(Parser)]
 #[command(name = "gv")]
@@ -23,28 +18,19 @@ enum Commands {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let repo_root = find_repo_root()?;
+
+    let repo_root = match repo::find_root() {
+        Ok(root) => root,
+        Err(e) if e.downcast_ref::<repo::DotGitHubFolderNotFound>().is_some() => {
+            println!(".github folder not found. gv didn't modify any file.");
+            return Ok(());
+        }
+        Err(e) => return Err(e),
+    };
 
     match cli.command {
         Commands::Set => commands::set::execute(&repo_root)?,
     }
 
     Ok(())
-}
-
-fn find_repo_root() -> Result<PathBuf> {
-    let current_dir = env::current_dir()?;
-
-    let mut dir = current_dir.as_path();
-    loop {
-        if dir.join(".github").exists() {
-            return Ok(dir.to_path_buf());
-        }
-        match dir.parent() {
-            Some(parent) => dir = parent,
-            None => break,
-        }
-    }
-
-    Ok(current_dir)
 }
