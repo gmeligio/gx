@@ -50,7 +50,7 @@ fn test_find_root_without_github_folder() {
     let error = result.unwrap_err();
     assert!(
         error
-            .downcast_ref::<gv::repo::DotGitHubFolderNotFound>()
+            .downcast_ref::<gv::repo::GithubFolderNotFound>()
             .is_some()
     );
 }

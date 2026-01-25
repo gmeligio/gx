@@ -21,7 +21,7 @@ fn main() -> Result<()> {
 
     let repo_root = match repo::find_root() {
         Ok(root) => root,
-        Err(e) if e.downcast_ref::<repo::DotGitHubFolderNotFound>().is_some() => {
+        Err(e) if e.downcast_ref::<repo::GithubFolderNotFound>().is_some() => {
             println!(".github folder not found. gv didn't modify any file.");
             return Ok(());
         }
