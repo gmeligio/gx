@@ -22,7 +22,7 @@ impl Manifest {
     }
 
     pub fn load_from_repo(repo_root: &Path) -> Result<Self> {
-        let manifest_path = repo_root.join(".github").join("gv.toml");
+        let manifest_path = repo_root.join(".github").join("gx.toml");
         Self::load(&manifest_path)
     }
 }
@@ -47,9 +47,18 @@ mod tests {
 
         let manifest = Manifest::load(file.path()).unwrap();
 
-        assert_eq!(manifest.actions.get("actions/checkout"), Some(&"v4".to_string()));
-        assert_eq!(manifest.actions.get("actions/setup-node"), Some(&"v4".to_string()));
-        assert_eq!(manifest.actions.get("docker/build-push-action"), Some(&"v5".to_string()));
+        assert_eq!(
+            manifest.actions.get("actions/checkout"),
+            Some(&"v4".to_string())
+        );
+        assert_eq!(
+            manifest.actions.get("actions/setup-node"),
+            Some(&"v4".to_string())
+        );
+        assert_eq!(
+            manifest.actions.get("docker/build-push-action"),
+            Some(&"v5".to_string())
+        );
     }
 
     #[test]

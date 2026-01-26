@@ -4,7 +4,7 @@ The manifest file defines which versions of GitHub Actions to use across all you
 
 ## Location
 
-The manifest must be located at `.github/gv.toml` in your repository root.
+The manifest must be located at `.github/gx.toml` in your repository root.
 
 ## Format
 
@@ -48,4 +48,4 @@ An empty `[actions]` section is valid:
 [actions]
 ```
 
-Running `gv pin` with an empty manifest will not modify any workflows.
+Running `gx pin` with an empty manifest will not modify any workflows.

@@ -5,19 +5,19 @@ The `pin` command updates all GitHub Actions in your workflows to match the vers
 ## Usage
 
 ```bash
-gv pin
+gx pin
 ```
 
 ## What it does
 
-1. Reads action versions from `.github/gv.toml`
+1. Reads action versions from `.github/gx.toml`
 2. Scans all workflow files in `.github/workflows/`
 3. Updates action references to the pinned versions
 4. Reports which workflows were updated and what changed
 
 ## Example
 
-Given this manifest (`.github/gv.toml`):
+Given this manifest (`.github/gx.toml`):
 
 ```toml
 [actions]
@@ -33,7 +33,7 @@ steps:
   - uses: actions/setup-node@v3
 ```
 
-Running `gv pin` will update the workflow to:
+Running `gx pin` will update the workflow to:
 
 ```yaml
 steps:

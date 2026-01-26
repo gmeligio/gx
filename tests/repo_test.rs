@@ -18,7 +18,7 @@ fn test_find_root_with_github_folder() {
     let original_dir = env::current_dir().unwrap();
     env::set_current_dir(root).unwrap();
 
-    let result = gv::repo::find_root();
+    let result = gx::repo::find_root();
 
     // Restore original directory
     env::set_current_dir(original_dir).unwrap();
@@ -41,7 +41,7 @@ fn test_find_root_without_github_folder() {
     let original_dir = env::current_dir().unwrap();
     env::set_current_dir(root).unwrap();
 
-    let result = gv::repo::find_root();
+    let result = gx::repo::find_root();
 
     // Restore original directory
     env::set_current_dir(original_dir).unwrap();
@@ -50,7 +50,7 @@ fn test_find_root_without_github_folder() {
     let error = result.unwrap_err();
     assert!(
         error
-            .downcast_ref::<gv::repo::GithubFolderNotFound>()
+            .downcast_ref::<gx::repo::GithubFolderNotFound>()
             .is_some()
     );
 }

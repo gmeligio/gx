@@ -1,4 +1,4 @@
-# gv
+# gx
 CLI to manage GitHub Actions dependencies.
 
 ## Commands

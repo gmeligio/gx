@@ -11,7 +11,7 @@ fn create_test_repo(temp_dir: &TempDir) -> std::path::PathBuf {
 }
 
 #[test]
-fn test_gv_pin_updates_workflows() {
+fn test_gx_pin_updates_workflows() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -21,7 +21,7 @@ fn test_gv_pin_updates_workflows() {
 "actions/checkout" = "v4"
 "actions/setup-node" = "v4"
 "#;
-    let manifest_path = root.join(".github").join("gv.toml");
+    let manifest_path = root.join(".github").join("gx.toml");
     let mut manifest_file = fs::File::create(&manifest_path).unwrap();
     manifest_file
         .write_all(manifest_content.as_bytes())
@@ -44,7 +44,7 @@ jobs:
         .unwrap();
 
     // Execute command
-    let result = gv::commands::pin::run(&root);
+    let result = gx::commands::pin::run(&root);
     assert!(result.is_ok());
 
     // Verify workflow was updated
@@ -55,7 +55,7 @@ jobs:
 }
 
 #[test]
-fn test_gv_pin_with_no_workflows() {
+fn test_gx_pin_with_no_workflows() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -64,13 +64,13 @@ fn test_gv_pin_with_no_workflows() {
 [actions]
 "actions/checkout" = "v4"
 "#;
-    let manifest_path = root.join(".github").join("gv.toml");
+    let manifest_path = root.join(".github").join("gx.toml");
     let mut manifest_file = fs::File::create(&manifest_path).unwrap();
     manifest_file
         .write_all(manifest_content.as_bytes())
         .unwrap();
 
     // Execute command - should succeed but not update anything
-    let result = gv::commands::pin::run(&root);
+    let result = gx::commands::pin::run(&root);
     assert!(result.is_ok());
 }

@@ -8,12 +8,12 @@ pub fn run(repo_root: &Path) -> Result<()> {
     let manifest = Manifest::load_from_repo(repo_root)?;
 
     if manifest.actions.is_empty() {
-        println!("No actions defined in .github/gv.toml");
+        println!("No actions defined in .github/gx.toml");
         return Ok(());
     }
 
     println!(
-        "Loaded {} action(s) from .github/gv.toml",
+        "Loaded {} action(s) from .github/gx.toml",
         manifest.actions.len()
     );
 
