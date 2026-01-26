@@ -13,7 +13,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Apply action versions from .github/gv.toml to all workflows
-    Set,
+    Pin,
 }
 
 fn main() -> Result<()> {
@@ -29,7 +29,7 @@ fn main() -> Result<()> {
     };
 
     match cli.command {
-        Commands::Set => commands::set::execute(&repo_root)?,
+        Commands::Pin => commands::pin::run(&repo_root)?,
     }
 
     Ok(())

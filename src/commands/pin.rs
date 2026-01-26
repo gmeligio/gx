@@ -4,7 +4,7 @@ use std::path::Path;
 use crate::manifest::Manifest;
 use crate::workflow::{UpdateResult, WorkflowUpdater};
 
-pub fn execute(repo_root: &Path) -> Result<()> {
+pub fn run(repo_root: &Path) -> Result<()> {
     let manifest = Manifest::load_from_repo(repo_root)?;
 
     if manifest.actions.is_empty() {
