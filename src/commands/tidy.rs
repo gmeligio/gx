@@ -261,7 +261,7 @@ pub fn run(repo_root: &Path) -> Result<()> {
 
     // Apply manifest versions to workflows
     if manifest.actions.is_empty() {
-        println!("\nNo actions defined in {}", manifest.path().display());
+        println!("\nNo actions defined in {}", manifest.path()?.display());
         return Ok(());
     }
 

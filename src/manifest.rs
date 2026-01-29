@@ -1,8 +1,22 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+
+#[derive(Debug)]
+pub struct ManifestPathNotInitialized;
+
+impl std::fmt::Display for ManifestPathNotInitialized {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Manifest path not initialized. Use load_from_repo or load to create a manifest with a path."
+        )
+    }
+}
+
+impl std::error::Error for ManifestPathNotInitialized {}
 
 /// Step-level override for a specific step index
 #[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq)]
@@ -42,8 +56,11 @@ pub struct Manifest {
 }
 
 impl Manifest {
-    pub fn path(&self) -> &Path {
-        self.path.as_ref().expect("Manifest path not initialized")
+    pub fn path(&self) -> Result<&Path> {
+        self.path
+            .as_ref()
+            .map(|p| p.as_path())
+            .ok_or_else(|| anyhow!(ManifestPathNotInitialized))
     }
 
     pub fn load(path: &Path) -> Result<Self> {
@@ -81,7 +98,7 @@ impl Manifest {
     }
 
     pub fn save(&self) -> Result<()> {
-        let path = self.path();
+        let path = self.path()?;
         let content =
             toml::to_string_pretty(self).context("Failed to serialize manifest to TOML")?;
 
@@ -449,5 +466,21 @@ mod tests {
                 .get("actions/checkout"),
             Some(&"v3".to_string())
         );
+    }
+
+    #[test]
+    fn test_path_not_initialized_error() {
+        let manifest = Manifest::default();
+        let result = manifest.path();
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Manifest path not initialized"));
+    }
+
+    #[test]
+    fn test_save_without_path_fails() {
+        let manifest = Manifest::default();
+        let result = manifest.save();
+        assert!(result.is_err());
     }
 }
