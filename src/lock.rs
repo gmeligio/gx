@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
+const LOCK_FILE_NAME: &'static str = "gx.lock";
+
 /// Lock file structure that maps action@version to resolved commit SHA
 #[derive(Debug, Deserialize, Serialize)]
 pub struct LockFile {
@@ -22,11 +24,6 @@ impl LockFile {
         Ok(lock)
     }
 
-    pub fn load_from_repo(repo_root: &Path) -> Result<Self> {
-        let lock_path = repo_root.join(".github").join("gx.lock");
-        Self::load(&lock_path)
-    }
-
     pub fn load_or_default(path: &Path) -> Result<Self> {
         if path.exists() {
             Self::load(path)
@@ -36,7 +33,7 @@ impl LockFile {
     }
 
     pub fn load_from_repo_or_default(repo_root: &Path) -> Result<Self> {
-        let lock_path = repo_root.join(".github").join("gx.lock");
+        let lock_path = repo_root.join(".github").join(LOCK_FILE_NAME);
         Self::load_or_default(&lock_path)
     }
 
@@ -51,7 +48,8 @@ impl LockFile {
     }
 
     pub fn save_to_repo(&self, repo_root: &Path) -> Result<()> {
-        let lock_path = repo_root.join(".github").join("gx.lock");
+        let lock_path = repo_root.join(".github").join(LOCK_FILE_NAME);
+        println!("Lock file updated: {}", lock_path.display());
         self.save(&lock_path)
     }
 

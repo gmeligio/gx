@@ -37,21 +37,30 @@ pub struct Manifest {
     pub actions: HashMap<String, String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub workflows: HashMap<String, WorkflowOverride>,
+    #[serde(skip)]
+    path: Option<std::path::PathBuf>,
 }
 
 impl Manifest {
+    pub fn path(&self) -> &Path {
+        self.path.as_ref().expect("Manifest path not initialized")
+    }
+
     pub fn load(path: &Path) -> Result<Self> {
         let content = fs::read_to_string(path)
             .with_context(|| format!("Failed to read manifest file: {}", path.display()))?;
 
-        let manifest: Manifest = toml::from_str(&content)
+        let mut manifest: Manifest = toml::from_str(&content)
             .with_context(|| format!("Failed to parse manifest file: {}", path.display()))?;
+
+        manifest.path = Some(path.to_path_buf());
 
         Ok(manifest)
     }
 
     pub fn load_from_repo(repo_root: &Path) -> Result<Self> {
-        let manifest_path = repo_root.join(".github").join("gx.toml");
+        const MANIFEST_FILE_NAME: &str = "gx.toml";
+        let manifest_path = repo_root.join(".github").join(MANIFEST_FILE_NAME);
         Self::load(&manifest_path)
     }
 
@@ -59,28 +68,28 @@ impl Manifest {
         if path.exists() {
             Self::load(path)
         } else {
-            Ok(Self::default())
+            let mut manifest = Self::default();
+            manifest.path = Some(path.to_path_buf());
+            Ok(manifest)
         }
     }
 
     pub fn load_from_repo_or_default(repo_root: &Path) -> Result<Self> {
-        let manifest_path = repo_root.join(".github").join("gx.toml");
+        const MANIFEST_FILE_NAME: &str = "gx.toml";
+        let manifest_path = repo_root.join(".github").join(MANIFEST_FILE_NAME);
         Self::load_or_default(&manifest_path)
     }
 
-    pub fn save(&self, path: &Path) -> Result<()> {
+    pub fn save(&self) -> Result<()> {
+        let path = self.path();
         let content =
             toml::to_string_pretty(self).context("Failed to serialize manifest to TOML")?;
 
         fs::write(path, content)
             .with_context(|| format!("Failed to write manifest file: {}", path.display()))?;
 
+        println!("\nManifest updated: {}", path.display());
         Ok(())
-    }
-
-    pub fn save_to_repo(&self, repo_root: &Path) -> Result<()> {
-        let manifest_path = repo_root.join(".github").join("gx.toml");
-        self.save(&manifest_path)
     }
 
     pub fn merge(&mut self, other: &HashMap<String, String>) {
@@ -126,6 +135,7 @@ impl Default for Manifest {
         Self {
             actions: HashMap::new(),
             workflows: HashMap::new(),
+            path: None,
         }
     }
 }
@@ -208,7 +218,8 @@ mod tests {
             .insert("actions/setup-node".to_string(), "v3".to_string());
 
         let file = NamedTempFile::new().unwrap();
-        manifest.save(file.path()).unwrap();
+        manifest.path = Some(file.path().to_path_buf());
+        manifest.save().unwrap();
 
         let loaded = Manifest::load(file.path()).unwrap();
         assert_eq!(
@@ -421,7 +432,8 @@ mod tests {
             .insert("actions/checkout".to_string(), "v3".to_string());
 
         let file = NamedTempFile::new().unwrap();
-        manifest.save(file.path()).unwrap();
+        manifest.path = Some(file.path().to_path_buf());
+        manifest.save().unwrap();
 
         let loaded = Manifest::load(file.path()).unwrap();
         assert_eq!(

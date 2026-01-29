@@ -12,7 +12,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Ensure gx.toml matches workflows: add missing actions, remove unused, update workflows
+    /// Ensure the manifest and lock matches the workflow code: add missing actions, remove unused, update workflows
     Tidy,
 }
 

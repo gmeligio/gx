@@ -245,8 +245,7 @@ pub fn run(repo_root: &Path) -> Result<()> {
 
     // Save manifest if changed
     if manifest_changed {
-        manifest.save_to_repo(repo_root)?;
-        println!("\nManifest updated: .github/gx.toml");
+        manifest.save()?;
     } else if missing.is_empty() && unused.is_empty() {
         println!("\nManifest is already in sync with workflows.");
     }
@@ -259,11 +258,10 @@ pub fn run(repo_root: &Path) -> Result<()> {
 
     // Save lock file
     lock.save_to_repo(repo_root)?;
-    println!("Lock file updated: .github/gx.lock");
 
-    // Apply manifest versions to workflows (pin functionality)
+    // Apply manifest versions to workflows
     if manifest.actions.is_empty() {
-        println!("\nNo actions defined in .github/gx.toml");
+        println!("\nNo actions defined in {}", manifest.path().display());
         return Ok(());
     }
 
@@ -376,7 +374,6 @@ fn update_lock_file(
     _tree: &ActionVersionTree,
     config: &Config,
 ) -> Result<()> {
-    // GitHub token is optional - if not provided, we'll skip resolution
     let github = GitHubClient::new(config.github_token.clone())?;
 
     if !config.has_github_token() {
