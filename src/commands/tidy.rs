@@ -69,7 +69,7 @@ pub fn run(repo_root: &Path) -> Result<()> {
 
     debug!("Scanning workflows...");
     for workflow in &workflows {
-        debug!("  {}", workflow.display());
+        debug!("{}", workflow.display());
     }
 
     let extracted = updater.extract_all()?;
@@ -96,7 +96,7 @@ pub fn run(repo_root: &Path) -> Result<()> {
     if !unused.is_empty() {
         info!("Removing unused actions from manifest:");
         for action in &unused {
-            info!("  - {}", action);
+            info!("- {}", action);
             manifest.remove(action);
         }
     }
@@ -108,7 +108,7 @@ pub fn run(repo_root: &Path) -> Result<()> {
             let versions = action_versions.unique_versions(action_name);
             let version = select_version(&versions);
             manifest.set((*action_name).clone(), version.clone());
-            info!("  + {}@{}", action_name, version);
+            info!("+ {}@{}", action_name, version);
         }
     }
 
@@ -149,7 +149,7 @@ pub fn run(repo_root: &Path) -> Result<()> {
         if !updated_actions.is_empty() {
             info!("Updating action versions in manifest:");
             for update in &updated_actions {
-                info!("  ~ {}", update);
+                info!("~ {}", update);
             }
         }
     }
@@ -182,7 +182,7 @@ pub fn run(repo_root: &Path) -> Result<()> {
         info!("Version corrections:");
         for c in &corrections {
             info!(
-                "  {} {} -> {} (SHA {} points to {})",
+                "{} {} -> {} (SHA {} points to {})",
                 c.action, c.old_version, c.new_version, c.sha, c.new_version
             );
         }
@@ -238,7 +238,7 @@ fn update_lock_file(
                     } else if let Some(correct_version) = select_best_tag(&tags) {
                         // Version comment doesn't match SHA - use the correct version
                         info!(
-                            "  Corrected {} version: {} -> {} (SHA {} points to {})",
+                            "Corrected {} version: {} -> {} (SHA {} points to {})",
                             action, version, correct_version, workflow_sha, correct_version
                         );
 
@@ -253,9 +253,8 @@ fn update_lock_file(
                         manifest.set(action.clone(), correct_version.clone());
                         correct_version
                     } else {
-                        // No tags found for this SHA, keep original version
                         warn!(
-                            "  No tags found for {} SHA {}, keeping version {}",
+                            "No tags found for {} SHA {}, keeping version {}",
                             action, workflow_sha, version
                         );
                         version.clone()
@@ -264,13 +263,10 @@ fn update_lock_file(
                 Err(e) => {
                     // Log warning but continue - don't fail the whole operation
                     if e.downcast_ref::<GitHubTokenRequired>().is_some() {
-                        warn!(
-                            "GITHUB_TOKEN not set. Cannot validate {} SHA.",
-                            action
-                        );
+                        warn!("GITHUB_TOKEN not set. Cannot validate {} SHA.", action);
                         warn!("Set GITHUB_TOKEN to resolve version tags to commit SHAs.");
                     } else {
-                        warn!("  Could not validate {} SHA: {}", action, e);
+                        warn!("Could not validate {} SHA: {}", action, e);
                     }
                     version.clone()
                 }
@@ -280,7 +276,7 @@ fn update_lock_file(
             lock.set(action, &final_version, workflow_sha.clone());
         } else if !lock.has(action, version) {
             // No workflow SHA - resolve via GitHub API
-            debug!("  Resolving {}@{} ...", action, version);
+            debug!("Resolving {}@{} ...", action, version);
             match github.resolve_ref(action, version) {
                 Ok(sha) => {
                     lock.set(action, version, sha);
@@ -293,7 +289,7 @@ fn update_lock_file(
                         );
                         warn!("Set GITHUB_TOKEN to resolve version tags to commit SHAs.");
                     } else {
-                        warn!("  Could not resolve {}@{}: {}", action, version, e);
+                        warn!("Could not resolve {}@{}: {}", action, version, e);
                     }
                 }
             }
@@ -334,9 +330,9 @@ fn print_update_results(results: &[UpdateResult]) {
     } else {
         info!("Updated workflows:");
         for result in results {
-            info!("  {}", result.file.display());
+            info!("{}", result.file.display());
             for change in &result.changes {
-                info!("    - {}", change);
+                info!("- {}", change);
             }
         }
         info!("{} workflow(s) updated.", results.len());
