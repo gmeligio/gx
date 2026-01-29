@@ -1,21 +1,23 @@
 # Manifest file
 
-The manifest file defines which versions of GitHub Actions to use across all your workflows.
+The manifest file defines which versions of GitHub Actions to use across all your workflows, with support for hierarchical overrides.
 
 ## Location
 
 The manifest must be located at `.github/gx.toml` in your repository root.
 
+The lock file (`.github/gx.lock`) stores the resolved commit SHAs and is automatically managed by `gx tidy`.
+
 ## Format
 
-The manifest uses TOML format with an `[actions]` section:
+The manifest uses TOML format with an `[actions]` section for global defaults:
 
 ```toml
 [actions]
 "owner/action-name" = "version"
 ```
 
-## Example
+## Simple example
 
 ```toml
 [actions]
@@ -24,6 +26,49 @@ The manifest uses TOML format with an `[actions]` section:
 "actions/setup-python" = "v5"
 "docker/build-push-action" = "v5"
 ```
+
+## Hierarchical overrides
+
+When different versions are needed in specific contexts, use hierarchical overrides:
+
+### Workflow-level override
+
+```toml
+[actions]
+"actions/checkout" = "v4"
+
+[workflows."deploy.yml".actions]
+"actions/checkout" = "v3"
+```
+
+### Job-level override
+
+```toml
+[actions]
+"actions/checkout" = "v4"
+
+[workflows."ci.yml".jobs."legacy-build".actions]
+"actions/checkout" = "v3"
+```
+
+### Step-level override
+
+```toml
+[actions]
+"actions/checkout" = "v4"
+
+[workflows."ci.yml".jobs."build".steps."0".actions]
+"actions/checkout" = "v3"
+```
+
+## Override precedence
+
+Versions are resolved from most specific to least specific:
+
+1. Step-level (`workflows."x".jobs."y".steps."0".actions`)
+2. Job-level (`workflows."x".jobs."y".actions`)
+3. Workflow-level (`workflows."x".actions`)
+4. Global (`actions`)
 
 ## Action names
 

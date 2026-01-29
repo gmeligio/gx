@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use glob::glob;
 use regex::Regex;
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -12,6 +13,41 @@ pub struct WorkflowUpdater {
 pub struct UpdateResult {
     pub file: PathBuf,
     pub changes: Vec<String>,
+}
+
+/// Location of an action within a workflow file
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActionLocation {
+    pub workflow: String,
+    pub job: String,
+    pub step_index: usize,
+}
+
+/// An action extracted from a workflow file with full location info
+#[derive(Debug, Clone)]
+pub struct ExtractedAction {
+    pub name: String,
+    pub version: String,
+    pub file: PathBuf,
+    pub location: ActionLocation,
+}
+
+/// Minimal workflow structure for YAML parsing
+#[derive(Debug, Deserialize)]
+struct Workflow {
+    #[serde(default)]
+    jobs: HashMap<String, Job>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Job {
+    #[serde(default)]
+    steps: Vec<Step>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Step {
+    uses: Option<String>,
 }
 
 impl WorkflowUpdater {
@@ -94,6 +130,91 @@ impl WorkflowUpdater {
 
         Ok(results)
     }
+
+    pub fn extract_actions(&self, workflow_path: &Path) -> Result<Vec<ExtractedAction>> {
+        let content = fs::read_to_string(workflow_path)
+            .with_context(|| format!("Failed to read workflow: {}", workflow_path.display()))?;
+
+        let workflow_name = workflow_path
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        let mut actions = Vec::new();
+
+        // First, build a map of uses line -> comment version from raw content
+        let mut version_comments = HashMap::new();
+        let uses_with_comment_re = Regex::new(r"uses:\s*([^#\n]+)#\s*v?(\S+)")?;
+
+        for line in content.lines() {
+            if let Some(cap) = uses_with_comment_re.captures(line) {
+                let uses_part = cap[1].trim().to_string();
+                let mut comment_version = cap[2].to_string();
+                // Normalize: ensure it starts with 'v'
+                if !comment_version.starts_with('v') {
+                    comment_version = format!("v{}", comment_version);
+                }
+                version_comments.insert(uses_part, comment_version);
+            }
+        }
+
+        // Parse YAML to get structured job/step info
+        let workflow: Workflow = serde_yaml_ng::from_str(&content).with_context(|| {
+            format!("Failed to parse workflow YAML: {}", workflow_path.display())
+        })?;
+
+        // Pattern to parse uses: owner/repo@ref
+        let uses_re = Regex::new(r"^([^@\s]+)@([^\s#]+)")?;
+
+        for (job_name, job) in &workflow.jobs {
+            for (step_index, step) in job.steps.iter().enumerate() {
+                if let Some(uses) = &step.uses {
+                    if let Some(cap) = uses_re.captures(uses) {
+                        let name = cap[1].to_string();
+                        let ref_or_sha = cap[2].to_string();
+
+                        // Skip local actions (./path) and docker actions (docker://)
+                        if name.starts_with('.') || name.starts_with("docker://") {
+                            continue;
+                        }
+
+                        // Extract version: check if we found a comment for this uses line
+                        let version = if let Some(comment_version) = version_comments.get(uses) {
+                            comment_version.clone()
+                        } else {
+                            // No comment, use the ref as-is
+                            ref_or_sha
+                        };
+
+                        actions.push(ExtractedAction {
+                            name,
+                            version,
+                            file: workflow_path.to_path_buf(),
+                            location: ActionLocation {
+                                workflow: workflow_name.clone(),
+                                job: job_name.clone(),
+                                step_index,
+                            },
+                        });
+                    }
+                }
+            }
+        }
+
+        Ok(actions)
+    }
+
+    pub fn extract_all(&self) -> Result<Vec<ExtractedAction>> {
+        let workflows = self.find_workflows()?;
+        let mut all_actions = Vec::new();
+
+        for workflow in workflows {
+            let actions = self.extract_actions(&workflow)?;
+            all_actions.extend(actions);
+        }
+
+        Ok(all_actions)
+    }
 }
 
 #[cfg(test)]
@@ -149,5 +270,234 @@ jobs:
         let updated = fs::read_to_string(&workflow_path).unwrap();
         assert!(updated.contains("actions/checkout@v4"));
         assert!(updated.contains("actions/setup-node@v3")); // unchanged
+    }
+
+    #[test]
+    fn test_extract_actions() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = r#"name: CI
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v3
+      - uses: docker/build-push-action@v5
+"#;
+        let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
+
+        let updater = WorkflowUpdater::new(temp_dir.path());
+        let actions = updater.extract_actions(&workflow_path).unwrap();
+
+        assert_eq!(actions.len(), 3);
+
+        // Check that all actions were found (order may vary due to HashMap)
+        let action_names: Vec<_> = actions.iter().map(|a| a.name.as_str()).collect();
+        assert!(action_names.contains(&"actions/checkout"));
+        assert!(action_names.contains(&"actions/setup-node"));
+        assert!(action_names.contains(&"docker/build-push-action"));
+
+        // Check location info
+        for action in &actions {
+            assert_eq!(action.location.workflow, "ci.yml");
+            assert_eq!(action.location.job, "build");
+        }
+    }
+
+    #[test]
+    fn test_extract_actions_skips_local() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = r#"name: CI
+jobs:
+  build:
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./local/action
+      - uses: ./.github/actions/my-action
+"#;
+        let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
+
+        let updater = WorkflowUpdater::new(temp_dir.path());
+        let actions = updater.extract_actions(&workflow_path).unwrap();
+
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].name, "actions/checkout");
+    }
+
+    #[test]
+    fn test_extract_actions_multiple_jobs() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = r#"name: CI
+jobs:
+  build:
+    steps:
+      - uses: actions/checkout@v4
+  test:
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+"#;
+        let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
+
+        let updater = WorkflowUpdater::new(temp_dir.path());
+        let actions = updater.extract_actions(&workflow_path).unwrap();
+
+        assert_eq!(actions.len(), 3);
+
+        // Find actions by job
+        let build_actions: Vec<_> = actions
+            .iter()
+            .filter(|a| a.location.job == "build")
+            .collect();
+        let test_actions: Vec<_> = actions
+            .iter()
+            .filter(|a| a.location.job == "test")
+            .collect();
+
+        assert_eq!(build_actions.len(), 1);
+        assert_eq!(test_actions.len(), 2);
+    }
+
+    #[test]
+    fn test_extract_all() {
+        let temp_dir = TempDir::new().unwrap();
+        create_test_workflow(
+            temp_dir.path(),
+            "ci.yml",
+            "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4",
+        );
+        create_test_workflow(
+            temp_dir.path(),
+            "deploy.yml",
+            "jobs:\n  deploy:\n    steps:\n      - uses: docker/build-push-action@v5",
+        );
+
+        let updater = WorkflowUpdater::new(temp_dir.path());
+        let actions = updater.extract_all().unwrap();
+
+        assert_eq!(actions.len(), 2);
+    }
+
+    #[test]
+    fn test_extract_actions_with_sha_and_comment() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = r#"name: CI
+jobs:
+  build:
+    steps:
+      - uses: actions/checkout@abc123def456 # v4
+      - uses: actions/setup-node@xyz789 #v3
+"#;
+        let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
+
+        let updater = WorkflowUpdater::new(temp_dir.path());
+        let actions = updater.extract_actions(&workflow_path).unwrap();
+
+        assert_eq!(actions.len(), 2);
+
+        let checkout = actions
+            .iter()
+            .find(|a| a.name == "actions/checkout")
+            .unwrap();
+        assert_eq!(checkout.version, "v4");
+
+        let setup_node = actions
+            .iter()
+            .find(|a| a.name == "actions/setup-node")
+            .unwrap();
+        assert_eq!(setup_node.version, "v3");
+    }
+
+    #[test]
+    fn test_extract_actions_comment_without_v_prefix() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = r#"name: CI
+jobs:
+  build:
+    steps:
+      - uses: actions/checkout@abc123 # 4
+"#;
+        let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
+
+        let updater = WorkflowUpdater::new(temp_dir.path());
+        let actions = updater.extract_actions(&workflow_path).unwrap();
+
+        assert_eq!(actions.len(), 1);
+        // Should normalize to v4
+        assert_eq!(actions[0].version, "v4");
+    }
+
+    #[test]
+    fn test_extract_actions_tag_without_comment() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = r#"name: CI
+jobs:
+  build:
+    steps:
+      - uses: actions/checkout@v4
+"#;
+        let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
+
+        let updater = WorkflowUpdater::new(temp_dir.path());
+        let actions = updater.extract_actions(&workflow_path).unwrap();
+
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].version, "v4");
+    }
+
+    #[test]
+    fn test_extract_actions_sha_without_comment() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = r#"name: CI
+jobs:
+  build:
+    steps:
+      - uses: actions/checkout@abc123def456
+"#;
+        let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
+
+        let updater = WorkflowUpdater::new(temp_dir.path());
+        let actions = updater.extract_actions(&workflow_path).unwrap();
+
+        assert_eq!(actions.len(), 1);
+        // Should use SHA as version when no comment
+        assert_eq!(actions[0].version, "abc123def456");
+    }
+
+    #[test]
+    fn test_extract_actions_real_world_format() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = r#"on:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+
+      - name: Login
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+"#;
+        let workflow_path = create_test_workflow(temp_dir.path(), "test.yml", content);
+
+        let updater = WorkflowUpdater::new(temp_dir.path());
+        let actions = updater.extract_actions(&workflow_path).unwrap();
+
+        assert_eq!(actions.len(), 2);
+
+        let checkout = actions
+            .iter()
+            .find(|a| a.name == "actions/checkout")
+            .unwrap();
+        assert_eq!(checkout.version, "v6.0.1");
+
+        let login = actions
+            .iter()
+            .find(|a| a.name == "docker/login-action")
+            .unwrap();
+        assert_eq!(login.version, "v3.6.0");
     }
 }

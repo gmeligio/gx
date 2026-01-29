@@ -12,8 +12,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Apply action versions from .github/gx.toml to all workflows
-    Pin,
+    /// Ensure gx.toml matches workflows: add missing actions, remove unused, update workflows
+    Tidy,
 }
 
 fn main() -> Result<()> {
@@ -29,7 +29,7 @@ fn main() -> Result<()> {
     };
 
     match cli.command {
-        Commands::Pin => commands::pin::run(&repo_root)?,
+        Commands::Tidy => commands::tidy::run(&repo_root)?,
     }
 
     Ok(())
