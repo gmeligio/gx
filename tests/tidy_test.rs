@@ -322,7 +322,7 @@ jobs:
 }
 
 #[test]
-fn test_gx_tidy_hierarchical_versions() {
+fn test_gx_tidy_multiple_versions_picks_highest() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -346,26 +346,19 @@ jobs:
     let result = gx::commands::tidy::run(&root);
     assert!(result.is_ok());
 
-    // Verify manifest has hierarchical structure
+    // Verify manifest has single global version (highest semver = v4)
     let manifest_path = root.join(".github").join("gx.toml");
     let manifest_content = fs::read_to_string(&manifest_path).unwrap();
 
-    // Should have global version (highest semver = v4)
     assert!(manifest_content.contains("[actions]"));
     assert!(manifest_content.contains("\"actions/checkout\" = \"v4\""));
 
-    // Should have job-level override for test job (v3)
-    assert!(
-        manifest_content.contains("workflows")
-            && manifest_content.contains("ci.yml")
-            && manifest_content.contains("test")
-            && manifest_content.contains("v3"),
-        "Expected job-level override for test job with v3"
-    );
+    // Should NOT have any workflow overrides
+    assert!(!manifest_content.contains("[workflows"));
 }
 
 #[test]
-fn test_gx_tidy_workflow_level_override() {
+fn test_gx_tidy_multiple_workflows_unified_version() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -394,15 +387,14 @@ jobs:
     let result = gx::commands::tidy::run(&root);
     assert!(result.is_ok());
 
-    // Verify manifest
+    // Verify manifest has single global version (highest = v4)
     let manifest_path = root.join(".github").join("gx.toml");
     let manifest_content = fs::read_to_string(&manifest_path).unwrap();
 
-    // Should have global version (highest = v4)
     assert!(manifest_content.contains("\"actions/checkout\" = \"v4\""));
 
-    // Should have workflow-level override for deploy.yml (v3)
-    assert!(manifest_content.contains("[workflows.\"deploy.yml\".actions]"));
+    // Should NOT have any workflow overrides
+    assert!(!manifest_content.contains("[workflows"));
 }
 
 #[test]

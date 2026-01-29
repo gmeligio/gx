@@ -18,39 +18,11 @@ impl std::fmt::Display for ManifestPathNotInitialized {
 
 impl std::error::Error for ManifestPathNotInitialized {}
 
-/// Step-level override for a specific step index
-#[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq)]
-pub struct StepOverride {
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub actions: HashMap<String, String>,
-}
-
-/// Job-level configuration with optional step overrides
-/// Steps are keyed by string index (e.g., "0", "1") for TOML compatibility
-#[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq)]
-pub struct JobOverride {
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub actions: HashMap<String, String>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub steps: HashMap<String, StepOverride>,
-}
-
-/// Workflow-level configuration with optional job overrides
-#[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq)]
-pub struct WorkflowOverride {
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub actions: HashMap<String, String>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub jobs: HashMap<String, JobOverride>,
-}
-
-/// The main manifest structure with global actions and workflow overrides
+/// The main manifest structure mapping actions to versions
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Manifest {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub actions: HashMap<String, String>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub workflows: HashMap<String, WorkflowOverride>,
     #[serde(skip)]
     path: Option<std::path::PathBuf>,
 }
@@ -108,50 +80,12 @@ impl Manifest {
         println!("\nManifest updated: {}", path.display());
         Ok(())
     }
-
-    pub fn merge(&mut self, other: &HashMap<String, String>) {
-        for (action, version) in other {
-            // Only add if not already present (existing entries take precedence)
-            self.actions
-                .entry(action.clone())
-                .or_insert_with(|| version.clone());
-        }
-    }
-
-    /// Check if the manifest has any workflow-level overrides
-    pub fn has_overrides(&self) -> bool {
-        !self.workflows.is_empty()
-    }
-
-    /// Get workflow override or create default
-    pub fn workflow_mut(&mut self, workflow: &str) -> &mut WorkflowOverride {
-        self.workflows
-            .entry(workflow.to_string())
-            .or_insert_with(WorkflowOverride::default)
-    }
-
-    /// Get job override within a workflow, or create default
-    pub fn job_mut(&mut self, workflow: &str, job: &str) -> &mut JobOverride {
-        self.workflow_mut(workflow)
-            .jobs
-            .entry(job.to_string())
-            .or_insert_with(JobOverride::default)
-    }
-
-    /// Get step override within a job, or create default
-    pub fn step_mut(&mut self, workflow: &str, job: &str, step: usize) -> &mut StepOverride {
-        self.job_mut(workflow, job)
-            .steps
-            .entry(step.to_string())
-            .or_insert_with(StepOverride::default)
-    }
 }
 
 impl Default for Manifest {
     fn default() -> Self {
         Self {
             actions: HashMap::new(),
-            workflows: HashMap::new(),
             path: None,
         }
     }
@@ -245,225 +179,6 @@ mod tests {
         );
         assert_eq!(
             loaded.actions.get("actions/setup-node"),
-            Some(&"v3".to_string())
-        );
-    }
-
-    #[test]
-    fn test_merge_new_actions() {
-        let mut manifest = Manifest::default();
-        manifest
-            .actions
-            .insert("actions/checkout".to_string(), "v4".to_string());
-
-        let mut new_actions = HashMap::new();
-        new_actions.insert("actions/setup-node".to_string(), "v3".to_string());
-
-        manifest.merge(&new_actions);
-
-        assert_eq!(manifest.actions.len(), 2);
-        assert_eq!(
-            manifest.actions.get("actions/setup-node"),
-            Some(&"v3".to_string())
-        );
-    }
-
-    #[test]
-    fn test_merge_existing_preserved() {
-        let mut manifest = Manifest::default();
-        manifest
-            .actions
-            .insert("actions/checkout".to_string(), "v4".to_string());
-
-        let mut new_actions = HashMap::new();
-        new_actions.insert("actions/checkout".to_string(), "v3".to_string()); // different version
-
-        manifest.merge(&new_actions);
-
-        // Existing entry should be preserved
-        assert_eq!(
-            manifest.actions.get("actions/checkout"),
-            Some(&"v4".to_string())
-        );
-    }
-
-    #[test]
-    fn test_parse_manifest_with_workflow_overrides() {
-        let content = r#"
-[actions]
-"actions/checkout" = "v4"
-
-[workflows."ci.yml".actions]
-"actions/checkout" = "v3"
-"#;
-
-        let mut file = NamedTempFile::new().unwrap();
-        file.write_all(content.as_bytes()).unwrap();
-
-        let manifest = Manifest::load(file.path()).unwrap();
-
-        assert_eq!(
-            manifest.actions.get("actions/checkout"),
-            Some(&"v4".to_string())
-        );
-        assert_eq!(
-            manifest
-                .workflows
-                .get("ci.yml")
-                .unwrap()
-                .actions
-                .get("actions/checkout"),
-            Some(&"v3".to_string())
-        );
-    }
-
-    #[test]
-    fn test_parse_manifest_with_job_overrides() {
-        let content = r#"
-[actions]
-"actions/checkout" = "v4"
-
-[workflows."ci.yml".jobs."test".actions]
-"actions/checkout" = "v2"
-"#;
-
-        let mut file = NamedTempFile::new().unwrap();
-        file.write_all(content.as_bytes()).unwrap();
-
-        let manifest = Manifest::load(file.path()).unwrap();
-
-        assert_eq!(
-            manifest
-                .workflows
-                .get("ci.yml")
-                .unwrap()
-                .jobs
-                .get("test")
-                .unwrap()
-                .actions
-                .get("actions/checkout"),
-            Some(&"v2".to_string())
-        );
-    }
-
-    #[test]
-    fn test_parse_manifest_with_step_overrides() {
-        let content = r#"
-[actions]
-"actions/checkout" = "v4"
-
-[workflows."ci.yml".jobs."test".steps."0".actions]
-"actions/checkout" = "v1"
-"#;
-
-        let mut file = NamedTempFile::new().unwrap();
-        file.write_all(content.as_bytes()).unwrap();
-
-        let manifest = Manifest::load(file.path()).unwrap();
-
-        assert_eq!(
-            manifest
-                .workflows
-                .get("ci.yml")
-                .unwrap()
-                .jobs
-                .get("test")
-                .unwrap()
-                .steps
-                .get("0")
-                .unwrap()
-                .actions
-                .get("actions/checkout"),
-            Some(&"v1".to_string())
-        );
-    }
-
-    #[test]
-    fn test_workflow_mut_creates_entry() {
-        let mut manifest = Manifest::default();
-        manifest
-            .workflow_mut("ci.yml")
-            .actions
-            .insert("actions/checkout".to_string(), "v3".to_string());
-
-        assert!(manifest.workflows.contains_key("ci.yml"));
-        assert_eq!(
-            manifest
-                .workflows
-                .get("ci.yml")
-                .unwrap()
-                .actions
-                .get("actions/checkout"),
-            Some(&"v3".to_string())
-        );
-    }
-
-    #[test]
-    fn test_job_mut_creates_entry() {
-        let mut manifest = Manifest::default();
-        manifest
-            .job_mut("ci.yml", "build")
-            .actions
-            .insert("actions/checkout".to_string(), "v2".to_string());
-
-        assert!(
-            manifest
-                .workflows
-                .get("ci.yml")
-                .unwrap()
-                .jobs
-                .contains_key("build")
-        );
-    }
-
-    #[test]
-    fn test_step_mut_creates_entry() {
-        let mut manifest = Manifest::default();
-        manifest
-            .step_mut("ci.yml", "build", 0)
-            .actions
-            .insert("actions/checkout".to_string(), "v1".to_string());
-
-        assert!(
-            manifest
-                .workflows
-                .get("ci.yml")
-                .unwrap()
-                .jobs
-                .get("build")
-                .unwrap()
-                .steps
-                .contains_key("0")
-        );
-    }
-
-    #[test]
-    fn test_save_and_load_with_overrides() {
-        let mut manifest = Manifest::default();
-        manifest
-            .actions
-            .insert("actions/checkout".to_string(), "v4".to_string());
-        manifest
-            .workflow_mut("ci.yml")
-            .actions
-            .insert("actions/checkout".to_string(), "v3".to_string());
-
-        let file = NamedTempFile::new().unwrap();
-        manifest.path = Some(file.path().to_path_buf());
-        manifest.save().unwrap();
-
-        let loaded = Manifest::load(file.path()).unwrap();
-        assert_eq!(
-            loaded.actions.get("actions/checkout"),
-            Some(&"v4".to_string())
-        );
-        assert_eq!(
-            loaded
-                .workflows
-                .get("ci.yml")
-                .unwrap()
-                .actions
-                .get("actions/checkout"),
             Some(&"v3".to_string())
         );
     }
