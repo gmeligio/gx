@@ -1,12 +1,10 @@
 use std::env;
 
 /// Application configuration loaded from environment variables
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Config {
     /// GitHub API token for authenticated requests
     pub github_token: Option<String>,
-    /// Whether to show verbose output
-    pub verbose: bool,
 }
 
 impl Config {
@@ -14,20 +12,7 @@ impl Config {
     pub fn from_env() -> Self {
         Self {
             github_token: env::var("GITHUB_TOKEN").ok(),
-            verbose: false,
         }
-    }
-
-    /// Set verbose mode
-    pub fn with_verbose(mut self, verbose: bool) -> Self {
-        self.verbose = verbose;
-        self
-    }
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self::from_env()
     }
 }
 

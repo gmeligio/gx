@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use glob::glob;
+use log::warn;
 use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -74,7 +75,7 @@ impl WorkflowUpdater {
             for entry in glob(&pattern).context("Failed to read glob pattern")? {
                 match entry {
                     Ok(path) => workflows.push(path),
-                    Err(e) => eprintln!("Warning: Error reading path: {}", e),
+                    Err(e) => warn!("Error reading path: {}", e),
                 }
             }
         }

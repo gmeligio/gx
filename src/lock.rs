@@ -1,10 +1,11 @@
 use anyhow::{Context, Result, anyhow};
+use log::info;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::error::LockFilePathNotInitialized;
+use crate::error::PathNotInitialized;
 
 const LOCK_FILE_NAME: &str = "gx.lock";
 
@@ -24,7 +25,7 @@ impl LockFile {
         self.path
             .as_ref()
             .map(|p| p.as_path())
-            .ok_or_else(|| anyhow!(LockFilePathNotInitialized))
+            .ok_or_else(|| anyhow!(PathNotInitialized::lock_file()))
     }
 
     pub fn load(path: &Path) -> Result<Self> {
@@ -61,7 +62,7 @@ impl LockFile {
         fs::write(path, content)
             .with_context(|| format!("Failed to write lock file: {}", path.display()))?;
 
-        println!("Lock file updated: {}", path.display());
+        info!("Lock file updated: {}", path.display());
         Ok(())
     }
 

@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, anyhow};
 use serde::Deserialize;
+use std::env;
 use std::time::Duration;
 
 use crate::error::GitHubTokenRequired;
@@ -15,6 +16,11 @@ pub struct GitHubClient {
 }
 
 impl GitHubClient {
+    /// Create a new GitHub client, reading token from GITHUB_TOKEN environment variable
+    pub fn from_env() -> Result<Self> {
+        Self::new(env::var("GITHUB_TOKEN").ok())
+    }
+
     pub fn new(token: Option<String>) -> Result<Self> {
         let client = reqwest::blocking::Client::builder()
             .user_agent(USER_AGENT)
@@ -125,6 +131,8 @@ impl GitHubClient {
     /// Get all tags that point to a specific commit SHA
     ///
     /// Returns tag names without the "refs/tags/" prefix (e.g., ["v5", "v5.0.0"])
+    /// Note: This only works for lightweight tags. Annotated tags store the tag object SHA,
+    /// not the commit SHA, so they won't match.
     pub fn get_tags_for_sha(&self, owner_repo: &str, sha: &str) -> Result<Vec<String>> {
         let token = self.token.as_ref().ok_or_else(|| anyhow!(GitHubTokenRequired))?;
 
@@ -152,7 +160,12 @@ impl GitHubClient {
         let tags: Vec<String> = refs
             .into_iter()
             .filter(|r| r.object.sha == sha)
-            .map(|r| r.ref_name.strip_prefix("refs/tags/").unwrap_or(&r.ref_name).to_string())
+            .map(|r| {
+                r.ref_name
+                    .strip_prefix("refs/tags/")
+                    .unwrap_or(&r.ref_name)
+                    .to_string()
+            })
             .collect();
 
         Ok(tags)

@@ -1,10 +1,11 @@
 use anyhow::{Context, Result, anyhow};
+use log::info;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use crate::error::ManifestPathNotInitialized;
+use crate::error::PathNotInitialized;
 
 /// The main manifest structure mapping actions to versions
 #[derive(Debug, Deserialize, Serialize)]
@@ -22,7 +23,7 @@ impl Manifest {
         self.path
             .as_ref()
             .map(|p| p.as_path())
-            .ok_or_else(|| anyhow!(ManifestPathNotInitialized))
+            .ok_or_else(|| anyhow!(PathNotInitialized::manifest()))
     }
 
     pub fn load(path: &Path) -> Result<Self> {
@@ -67,7 +68,7 @@ impl Manifest {
         fs::write(path, content)
             .with_context(|| format!("Failed to write manifest file: {}", path.display()))?;
 
-        println!("\nManifest updated: {}", path.display());
+        info!("Manifest updated: {}", path.display());
         Ok(())
     }
 

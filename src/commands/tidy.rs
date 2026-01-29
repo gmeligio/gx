@@ -1,8 +1,9 @@
 use anyhow::Result;
+use log::{debug, info, warn};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use crate::config::Config;
+use crate::error::GitHubTokenRequired;
 use crate::git::is_commit_sha;
 use crate::github::GitHubClient;
 use crate::lock::LockFile;
@@ -57,20 +58,18 @@ impl ActionVersions {
     }
 }
 
-pub fn run(repo_root: &Path, config: &Config) -> Result<()> {
+pub fn run(repo_root: &Path) -> Result<()> {
     let updater = WorkflowUpdater::new(repo_root);
 
     let workflows = updater.find_workflows()?;
     if workflows.is_empty() {
-        println!("No workflows found in .github/workflows/");
+        info!("No workflows found in .github/workflows/");
         return Ok(());
     }
 
-    if config.verbose {
-        println!("Scanning workflows...");
-        for workflow in &workflows {
-            println!("  {}", workflow.display());
-        }
+    debug!("Scanning workflows...");
+    for workflow in &workflows {
+        debug!("  {}", workflow.display());
     }
 
     let extracted = updater.extract_all()?;
@@ -95,21 +94,21 @@ pub fn run(repo_root: &Path, config: &Config) -> Result<()> {
 
     // Remove unused actions from manifest
     if !unused.is_empty() {
-        println!("\nRemoving unused actions from manifest:");
+        info!("Removing unused actions from manifest:");
         for action in &unused {
-            println!("  - {}", action);
+            info!("  - {}", action);
             manifest.remove(action);
         }
     }
 
     // Add missing actions to manifest (using highest version if multiple exist)
     if !missing.is_empty() {
-        println!("\nAdding missing actions to manifest:");
+        info!("Adding missing actions to manifest:");
         for action_name in &missing {
             let versions = action_versions.unique_versions(action_name);
             let version = select_version(&versions);
             manifest.set((*action_name).clone(), version.clone());
-            println!("  + {}@{}", action_name, version);
+            info!("  + {}@{}", action_name, version);
         }
     }
 
@@ -148,15 +147,15 @@ pub fn run(repo_root: &Path, config: &Config) -> Result<()> {
         }
 
         if !updated_actions.is_empty() {
-            println!("\nUpdating action versions in manifest:");
+            info!("Updating action versions in manifest:");
             for update in &updated_actions {
-                println!("  ~ {}", update);
+                info!("  ~ {}", update);
             }
         }
     }
 
     // Update lock file with resolved commit SHAs and validate version comments
-    let corrections = update_lock_file(&mut lock, &mut manifest, &config, &action_versions)?;
+    let corrections = update_lock_file(&mut lock, &mut manifest, &action_versions)?;
 
     // Save manifest if changed (includes corrections)
     manifest.save_if_changed()?;
@@ -169,7 +168,7 @@ pub fn run(repo_root: &Path, config: &Config) -> Result<()> {
 
     // Apply manifest versions to workflows using SHAs from lock file
     if manifest.actions.is_empty() {
-        println!("\nNo actions defined in {}", manifest.path()?.display());
+        info!("No actions defined in {}", manifest.path()?.display());
         return Ok(());
     }
 
@@ -180,9 +179,9 @@ pub fn run(repo_root: &Path, config: &Config) -> Result<()> {
 
     // Print summary of version corrections
     if !corrections.is_empty() {
-        println!("\nVersion corrections:");
+        info!("Version corrections:");
         for c in &corrections {
-            println!(
+            info!(
                 "  {} {} -> {} (SHA {} points to {})",
                 c.action, c.old_version, c.new_version, c.sha, c.new_version
             );
@@ -204,7 +203,6 @@ fn select_version(versions: &[String]) -> String {
 fn update_lock_file(
     lock: &mut LockFile,
     manifest: &mut Manifest,
-    config: &Config,
     action_versions: &ActionVersions,
 ) -> Result<Vec<VersionCorrection>> {
     let mut corrections = Vec::new();
@@ -225,57 +223,80 @@ fn update_lock_file(
         return Ok(corrections);
     }
 
-    // Token is required for resolving new actions and validating SHAs
-    if config.github_token.is_none() {
-        if needs_resolving || has_workflow_shas {
-            println!("GITHUB_TOKEN not set. Skipping SHA resolution for new actions.");
-            println!("Set GITHUB_TOKEN to resolve version tags to commit SHAs.");
-        }
-        return Ok(corrections);
-    }
-
-    let github = GitHubClient::new(config.github_token.clone())?;
+    let github = GitHubClient::from_env()?;
 
     // Process each action in manifest
     for (action, version) in manifest.actions.clone().iter() {
         // Check if workflow has a SHA for this action
         if let Some(workflow_sha) = action_versions.get_sha(action) {
-            // Use workflow SHA directly
-            lock.set(action, version, workflow_sha.clone());
-
-            // Validate that version comment matches the SHA
-            match github.get_tags_for_sha(action, workflow_sha) {
+            // Validate that version comment matches the SHA and determine correct version
+            let final_version = match github.get_tags_for_sha(action, workflow_sha) {
                 Ok(tags) => {
-                    if !tags.iter().any(|t| t == version) {
-                        // Version comment doesn't match SHA - find the correct version
-                        if let Some(correct_version) = select_best_tag(&tags) {
-                            println!(
-                                "  Corrected {} version: {} -> {} (SHA {} points to {})",
-                                action, version, correct_version, workflow_sha, correct_version
-                            );
+                    if tags.iter().any(|t| t == version) {
+                        // Version matches SHA, use as-is
+                        version.clone()
+                    } else if let Some(correct_version) = select_best_tag(&tags) {
+                        // Version comment doesn't match SHA - use the correct version
+                        info!(
+                            "  Corrected {} version: {} -> {} (SHA {} points to {})",
+                            action, version, correct_version, workflow_sha, correct_version
+                        );
 
-                            corrections.push(VersionCorrection {
-                                action: action.clone(),
-                                old_version: version.clone(),
-                                new_version: correct_version.clone(),
-                                sha: workflow_sha.clone(),
-                            });
+                        corrections.push(VersionCorrection {
+                            action: action.clone(),
+                            old_version: version.clone(),
+                            new_version: correct_version.clone(),
+                            sha: workflow_sha.clone(),
+                        });
 
-                            // Update manifest with correct version
-                            manifest.set(action.clone(), correct_version);
-                        }
+                        // Update manifest with correct version
+                        manifest.set(action.clone(), correct_version.clone());
+                        correct_version
+                    } else {
+                        // No tags found for this SHA, keep original version
+                        warn!(
+                            "  No tags found for {} SHA {}, keeping version {}",
+                            action, workflow_sha, version
+                        );
+                        version.clone()
                     }
                 }
                 Err(e) => {
                     // Log warning but continue - don't fail the whole operation
-                    eprintln!("  Warning: Could not validate {} SHA: {}", action, e);
+                    if e.downcast_ref::<GitHubTokenRequired>().is_some() {
+                        warn!(
+                            "GITHUB_TOKEN not set. Cannot validate {} SHA.",
+                            action
+                        );
+                        warn!("Set GITHUB_TOKEN to resolve version tags to commit SHAs.");
+                    } else {
+                        warn!("  Could not validate {} SHA: {}", action, e);
+                    }
+                    version.clone()
                 }
-            }
+            };
+
+            // Set lock entry with the validated/corrected version
+            lock.set(action, &final_version, workflow_sha.clone());
         } else if !lock.has(action, version) {
             // No workflow SHA - resolve via GitHub API
-            println!("  Resolving {}@{} ...", action, version);
-            let sha = github.resolve_ref(action, version)?;
-            lock.set(action, version, sha);
+            debug!("  Resolving {}@{} ...", action, version);
+            match github.resolve_ref(action, version) {
+                Ok(sha) => {
+                    lock.set(action, version, sha);
+                }
+                Err(e) => {
+                    if e.downcast_ref::<GitHubTokenRequired>().is_some() {
+                        warn!(
+                            "GITHUB_TOKEN not set. Cannot resolve {}@{} to commit SHA.",
+                            action, version
+                        );
+                        warn!("Set GITHUB_TOKEN to resolve version tags to commit SHAs.");
+                    } else {
+                        warn!("  Could not resolve {}@{}: {}", action, version, e);
+                    }
+                }
+            }
         }
     }
 
@@ -309,16 +330,16 @@ fn select_best_tag(tags: &[String]) -> Option<String> {
 
 fn print_update_results(results: &[UpdateResult]) {
     if results.is_empty() {
-        println!("\nWorkflows are already up to date.");
+        info!("Workflows are already up to date.");
     } else {
-        println!("\nUpdated workflows:");
+        info!("Updated workflows:");
         for result in results {
-            println!("  {}", result.file.display());
+            info!("  {}", result.file.display());
             for change in &result.changes {
-                println!("    - {}", change);
+                info!("    - {}", change);
             }
         }
-        println!("\n{} workflow(s) updated.", results.len());
+        info!("{} workflow(s) updated.", results.len());
     }
 }
 

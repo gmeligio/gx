@@ -1,35 +1,38 @@
 use std::fmt;
 use std::path::PathBuf;
 
-/// Error when the manifest file path has not been initialized
+/// Error when a file path has not been initialized
 #[derive(Debug)]
-pub struct ManifestPathNotInitialized;
+pub struct PathNotInitialized {
+    pub file_type: &'static str,
+}
 
-impl fmt::Display for ManifestPathNotInitialized {
+impl PathNotInitialized {
+    pub fn manifest() -> Self {
+        Self {
+            file_type: "Manifest",
+        }
+    }
+
+    pub fn lock_file() -> Self {
+        Self {
+            file_type: "LockFile",
+        }
+    }
+}
+
+impl fmt::Display for PathNotInitialized {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Manifest path not initialized. Use load_from_repo or load to create a manifest with a path."
+            "{} path not initialized. Use load_from_repo or load to create a {} with a path.",
+            self.file_type,
+            self.file_type.to_lowercase()
         )
     }
 }
 
-impl std::error::Error for ManifestPathNotInitialized {}
-
-/// Error when the lock file path has not been initialized
-#[derive(Debug)]
-pub struct LockFilePathNotInitialized;
-
-impl fmt::Display for LockFilePathNotInitialized {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "LockFile path not initialized. Use load_from_repo or load to create a lock file with a path."
-        )
-    }
-}
-
-impl std::error::Error for LockFilePathNotInitialized {}
+impl std::error::Error for PathNotInitialized {}
 
 /// Error when .github folder is not found in the repository
 #[derive(Debug)]
