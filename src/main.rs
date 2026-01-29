@@ -1,7 +1,8 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use env_logger::Env;
 use gx::{commands, repo};
+use log::LevelFilter;
+use std::io::Write;
 
 #[derive(Parser)]
 #[command(name = "gx")]
@@ -24,9 +25,23 @@ enum Commands {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Initialize logger: use RUST_LOG env var, or default based on --verbose flag
-    let default_level = if cli.verbose { "debug" } else { "info" };
-    env_logger::Builder::from_env(Env::default().default_filter_or(default_level)).init();
+    let mut builder = env_logger::builder();
+    builder.filter_level(if cli.verbose {
+        LevelFilter::Debug
+    } else {
+        LevelFilter::Info
+    });
+    builder.format(|buf, record| {
+        let level = record.level();
+        let style = &buf.default_level_style(level);
+
+        writeln!(buf, "[{style}{level}{style:#}] {}", record.args())
+    });
+    if !cli.verbose {
+        builder.format_timestamp(None);
+    }
+
+    builder.init();
 
     let repo_root = match repo::find_root() {
         Ok(root) => root,
