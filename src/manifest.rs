@@ -4,19 +4,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-#[derive(Debug)]
-pub struct ManifestPathNotInitialized;
-
-impl std::fmt::Display for ManifestPathNotInitialized {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Manifest path not initialized. Use load_from_repo or load to create a manifest with a path."
-        )
-    }
-}
-
-impl std::error::Error for ManifestPathNotInitialized {}
+use crate::error::ManifestPathNotInitialized;
 
 /// The main manifest structure mapping actions to versions
 #[derive(Debug, Deserialize, Serialize)]
@@ -25,6 +13,8 @@ pub struct Manifest {
     pub actions: HashMap<String, String>,
     #[serde(skip)]
     path: Option<std::path::PathBuf>,
+    #[serde(skip)]
+    changed: bool,
 }
 
 impl Manifest {
@@ -80,6 +70,31 @@ impl Manifest {
         println!("\nManifest updated: {}", path.display());
         Ok(())
     }
+
+    /// Save the manifest only if there were changes
+    pub fn save_if_changed(&self) -> Result<()> {
+        if self.changed {
+            self.save()
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Set or update an action version, tracking changes
+    pub fn set(&mut self, action: String, version: String) {
+        let existing = self.actions.get(&action);
+        if existing != Some(&version) {
+            self.actions.insert(action, version);
+            self.changed = true;
+        }
+    }
+
+    /// Remove an action, tracking changes
+    pub fn remove(&mut self, action: &str) {
+        if self.actions.remove(action).is_some() {
+            self.changed = true;
+        }
+    }
 }
 
 impl Default for Manifest {
@@ -87,6 +102,7 @@ impl Default for Manifest {
         Self {
             actions: HashMap::new(),
             path: None,
+            changed: false,
         }
     }
 }

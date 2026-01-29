@@ -2,7 +2,7 @@ use semver::Version;
 
 /// Attempts to parse a version string into a semver Version.
 /// Handles common formats like "v4", "v4.1", "v4.1.2", "4.1.2"
-pub fn parse_semver(version: &str) -> Option<Version> {
+fn parse_semver(version: &str) -> Option<Version> {
     // Strip leading 'v' or 'V' if present
     let normalized = version
         .strip_prefix('v')
@@ -33,7 +33,7 @@ pub fn parse_semver(version: &str) -> Option<Version> {
 /// If both are valid semver, uses semver comparison.
 /// If only one is valid semver, that one wins.
 /// If neither is valid semver, returns the first one.
-pub fn higher_version<'a>(a: &'a str, b: &'a str) -> &'a str {
+fn higher_version<'a>(a: &'a str, b: &'a str) -> &'a str {
     let parsed_a = parse_semver(a);
     let parsed_b = parse_semver(b);
 
@@ -55,11 +55,6 @@ pub fn higher_version<'a>(a: &'a str, b: &'a str) -> &'a str {
 /// Returns None if the list is empty.
 pub fn find_highest_version<'a>(versions: &[&'a str]) -> Option<&'a str> {
     versions.iter().copied().reduce(higher_version)
-}
-
-/// Checks if a version string looks like a semver version (vs a branch or SHA)
-pub fn is_semver_like(version: &str) -> bool {
-    parse_semver(version).is_some()
 }
 
 #[cfg(test)]
@@ -138,14 +133,5 @@ mod tests {
     fn test_find_highest_version_empty() {
         let versions: Vec<&str> = vec![];
         assert_eq!(find_highest_version(&versions), None);
-    }
-
-    #[test]
-    fn test_is_semver_like() {
-        assert!(is_semver_like("v4"));
-        assert!(is_semver_like("v4.1.2"));
-        assert!(is_semver_like("1.0.0"));
-        assert!(!is_semver_like("main"));
-        assert!(!is_semver_like("abc123"));
     }
 }

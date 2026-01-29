@@ -6,6 +6,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::git::is_commit_sha;
+
 pub struct WorkflowUpdater {
     workflows_dir: PathBuf,
 }
@@ -28,6 +30,8 @@ pub struct ActionLocation {
 pub struct ExtractedAction {
     pub name: String,
     pub version: String,
+    /// The commit SHA if present in the workflow (when format is `SHA # version`)
+    pub sha: Option<String>,
     pub file: PathBuf,
     pub location: ActionLocation,
 }
@@ -179,17 +183,27 @@ impl WorkflowUpdater {
                             continue;
                         }
 
-                        // Extract version: check if we found a comment for this uses line
-                        let version = if let Some(comment_version) = version_comments.get(uses) {
-                            comment_version.clone()
-                        } else {
-                            // No comment, use the ref as-is
-                            ref_or_sha
-                        };
+                        // Extract version and SHA from uses line
+                        // If there's a comment, use comment as version; if ref is SHA, store it
+                        let (version, sha) =
+                            if let Some(comment_version) = version_comments.get(uses) {
+                                // Has a comment - use comment as version
+                                // If ref is a SHA, store it
+                                let sha = if is_commit_sha(&ref_or_sha) {
+                                    Some(ref_or_sha)
+                                } else {
+                                    None
+                                };
+                                (comment_version.clone(), sha)
+                            } else {
+                                // No comment, use the ref as-is, no SHA stored
+                                (ref_or_sha, None)
+                            };
 
                         actions.push(ExtractedAction {
                             name,
                             version,
+                            sha,
                             file: workflow_path.to_path_buf(),
                             location: ActionLocation {
                                 workflow: workflow_name.clone(),
@@ -494,12 +508,61 @@ jobs:
             .find(|a| a.name == "actions/checkout")
             .unwrap();
         assert_eq!(checkout.version, "v6.0.1");
+        assert_eq!(
+            checkout.sha.as_deref(),
+            Some("8e8c483db84b4bee98b60c0593521ed34d9990e8")
+        );
 
         let login = actions
             .iter()
             .find(|a| a.name == "docker/login-action")
             .unwrap();
         assert_eq!(login.version, "v3.6.0");
+        assert_eq!(
+            login.sha.as_deref(),
+            Some("5e57cd118135c172c3672efd75eb46360885c0ef")
+        );
+    }
+
+    #[test]
+    fn test_extract_actions_sha_field_none_for_tag() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = r#"name: CI
+jobs:
+  build:
+    steps:
+      - uses: actions/checkout@v4
+"#;
+        let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
+
+        let updater = WorkflowUpdater::new(temp_dir.path());
+        let actions = updater.extract_actions(&workflow_path).unwrap();
+
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].version, "v4");
+        // No SHA when using a tag without comment
+        assert!(actions[0].sha.is_none());
+    }
+
+    #[test]
+    fn test_extract_actions_sha_field_none_for_short_ref() {
+        let temp_dir = TempDir::new().unwrap();
+        // Short SHA (not 40 chars) with comment
+        let content = r#"name: CI
+jobs:
+  build:
+    steps:
+      - uses: actions/checkout@abc123 # v4
+"#;
+        let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
+
+        let updater = WorkflowUpdater::new(temp_dir.path());
+        let actions = updater.extract_actions(&workflow_path).unwrap();
+
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].version, "v4");
+        // Short refs are not treated as SHAs
+        assert!(actions[0].sha.is_none());
     }
 
     #[test]

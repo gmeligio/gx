@@ -3,17 +3,29 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use crate::config::Config;
+use crate::git::is_commit_sha;
 use crate::github::GitHubClient;
 use crate::lock::LockFile;
 use crate::manifest::Manifest;
 use crate::version::find_highest_version;
 use crate::workflow::{ExtractedAction, UpdateResult, WorkflowUpdater};
 
+/// Tracks a version correction when SHA doesn't match the version comment
+#[derive(Debug)]
+struct VersionCorrection {
+    action: String,
+    old_version: String,
+    new_version: String,
+    sha: String,
+}
+
 /// Groups action versions across all workflows
 #[derive(Debug, Default)]
 struct ActionVersions {
     /// Maps action name to set of versions found in workflows
     versions: HashMap<String, HashSet<String>>,
+    /// Maps action name to SHA if present in workflow (first one wins)
+    shas: HashMap<String, String>,
 }
 
 impl ActionVersions {
@@ -22,6 +34,11 @@ impl ActionVersions {
             .entry(action.name.clone())
             .or_default()
             .insert(action.version.clone());
+
+        // Store SHA if present (first one wins for consistency)
+        if let Some(sha) = &action.sha {
+            self.shas.entry(action.name.clone()).or_insert(sha.clone());
+        }
     }
 
     fn unique_versions(&self, action: &str) -> Vec<String> {
@@ -34,13 +51,14 @@ impl ActionVersions {
     fn action_names(&self) -> Vec<String> {
         self.versions.keys().cloned().collect()
     }
+
+    fn get_sha(&self, action: &str) -> Option<&String> {
+        self.shas.get(action)
+    }
 }
 
-pub fn run(repo_root: &Path) -> Result<()> {
-    let config = Config::from_env();
+pub fn run(repo_root: &Path, config: &Config) -> Result<()> {
     let updater = WorkflowUpdater::new(repo_root);
-
-    println!("Scanning workflows...");
 
     let workflows = updater.find_workflows()?;
     if workflows.is_empty() {
@@ -48,8 +66,11 @@ pub fn run(repo_root: &Path) -> Result<()> {
         return Ok(());
     }
 
-    for workflow in &workflows {
-        println!("  {}", workflow.display());
+    if config.verbose {
+        println!("Scanning workflows...");
+        for workflow in &workflows {
+            println!("  {}", workflow.display());
+        }
     }
 
     let extracted = updater.extract_all()?;
@@ -72,16 +93,13 @@ pub fn run(repo_root: &Path) -> Result<()> {
     let missing: Vec<_> = workflow_actions.difference(&manifest_actions).collect();
     let unused: Vec<_> = manifest_actions.difference(&workflow_actions).collect();
 
-    let mut manifest_changed = false;
-
     // Remove unused actions from manifest
     if !unused.is_empty() {
         println!("\nRemoving unused actions from manifest:");
         for action in &unused {
             println!("  - {}", action);
-            manifest.actions.remove(*action);
+            manifest.remove(action);
         }
-        manifest_changed = true;
     }
 
     // Add missing actions to manifest (using highest version if multiple exist)
@@ -90,12 +108,9 @@ pub fn run(repo_root: &Path) -> Result<()> {
         for action_name in &missing {
             let versions = action_versions.unique_versions(action_name);
             let version = select_version(&versions);
-            manifest
-                .actions
-                .insert((*action_name).clone(), version.clone());
+            manifest.set((*action_name).clone(), version.clone());
             println!("  + {}@{}", action_name, version);
         }
-        manifest_changed = true;
     }
 
     // Update existing actions only if manifest has SHA but workflow has tag
@@ -114,8 +129,7 @@ pub fn run(repo_root: &Path) -> Result<()> {
                 // Only update if:
                 // 1. Versions differ, AND
                 // 2. Manifest has a SHA (40 hex chars) and workflow has a semantic version
-                let manifest_is_sha = manifest_version.len() >= 40
-                    && manifest_version.chars().all(|c| c.is_ascii_hexdigit());
+                let manifest_is_sha = is_commit_sha(&manifest_version);
                 let workflow_is_semver = workflow_version.starts_with('v')
                     || workflow_version
                         .chars()
@@ -124,14 +138,11 @@ pub fn run(repo_root: &Path) -> Result<()> {
                         .unwrap_or(false);
 
                 if workflow_version != &manifest_version && manifest_is_sha && workflow_is_semver {
-                    manifest
-                        .actions
-                        .insert((*action_name).clone(), workflow_version.clone());
+                    manifest.set((*action_name).clone(), workflow_version.clone());
                     updated_actions.push(format!(
                         "{}@{} (was {})",
                         action_name, workflow_version, manifest_version
                     ));
-                    manifest_changed = true;
                 }
             }
         }
@@ -144,21 +155,17 @@ pub fn run(repo_root: &Path) -> Result<()> {
         }
     }
 
-    // Save manifest if changed
-    if manifest_changed {
-        manifest.save()?;
-    } else if missing.is_empty() && unused.is_empty() {
-        println!("\nManifest is already in sync with workflows.");
-    }
+    // Update lock file with resolved commit SHAs and validate version comments
+    let corrections = update_lock_file(&mut lock, &mut manifest, &config, &action_versions)?;
 
-    // Update lock file with resolved commit SHAs
-    update_lock_file(&mut lock, &manifest, &config)?;
+    // Save manifest if changed (includes corrections)
+    manifest.save_if_changed()?;
 
     // Remove unused entries from lock file
     lock.remove_unused(&manifest.actions);
 
-    // Save lock file
-    lock.save_to_repo(repo_root)?;
+    // Save lock file only if changed
+    lock.save_if_changed()?;
 
     // Apply manifest versions to workflows using SHAs from lock file
     if manifest.actions.is_empty() {
@@ -170,6 +177,17 @@ pub fn run(repo_root: &Path) -> Result<()> {
     let update_map = lock.build_update_map(&manifest.actions);
     let results = updater.update_all(&update_map)?;
     print_update_results(&results);
+
+    // Print summary of version corrections
+    if !corrections.is_empty() {
+        println!("\nVersion corrections:");
+        for c in &corrections {
+            println!(
+                "  {} {} -> {} (SHA {} points to {})",
+                c.action, c.old_version, c.new_version, c.sha, c.new_version
+            );
+        }
+    }
 
     Ok(())
 }
@@ -183,36 +201,110 @@ fn select_version(versions: &[String]) -> String {
         .to_string()
 }
 
-fn update_lock_file(lock: &mut LockFile, manifest: &Manifest, config: &Config) -> Result<()> {
+fn update_lock_file(
+    lock: &mut LockFile,
+    manifest: &mut Manifest,
+    config: &Config,
+    action_versions: &ActionVersions,
+) -> Result<Vec<VersionCorrection>> {
+    let mut corrections = Vec::new();
+
+    // Check if there are any actions that need resolving
+    let needs_resolving = manifest
+        .actions
+        .iter()
+        .any(|(action, version)| !lock.has(action, version));
+
+    // Also check if any actions have SHAs that need validation
+    let has_workflow_shas = manifest
+        .actions
+        .keys()
+        .any(|action| action_versions.get_sha(action).is_some());
+
+    if !needs_resolving && !has_workflow_shas {
+        return Ok(corrections);
+    }
+
+    // Token is required for resolving new actions and validating SHAs
+    if config.github_token.is_none() {
+        if needs_resolving || has_workflow_shas {
+            println!("GITHUB_TOKEN not set. Skipping SHA resolution for new actions.");
+            println!("Set GITHUB_TOKEN to resolve version tags to commit SHAs.");
+        }
+        return Ok(corrections);
+    }
+
     let github = GitHubClient::new(config.github_token.clone())?;
 
-    if !config.has_github_token() {
-        println!("  Note: GITHUB_TOKEN not set. Skipping SHA resolution for new actions.");
-        println!("  Set GITHUB_TOKEN to resolve version tags to commit SHAs.");
-        return Ok(());
+    // Process each action in manifest
+    for (action, version) in manifest.actions.clone().iter() {
+        // Check if workflow has a SHA for this action
+        if let Some(workflow_sha) = action_versions.get_sha(action) {
+            // Use workflow SHA directly
+            lock.set(action, version, workflow_sha.clone());
+
+            // Validate that version comment matches the SHA
+            match github.get_tags_for_sha(action, workflow_sha) {
+                Ok(tags) => {
+                    if !tags.iter().any(|t| t == version) {
+                        // Version comment doesn't match SHA - find the correct version
+                        if let Some(correct_version) = select_best_tag(&tags) {
+                            println!(
+                                "  Corrected {} version: {} -> {} (SHA {} points to {})",
+                                action, version, correct_version, workflow_sha, correct_version
+                            );
+
+                            corrections.push(VersionCorrection {
+                                action: action.clone(),
+                                old_version: version.clone(),
+                                new_version: correct_version.clone(),
+                                sha: workflow_sha.clone(),
+                            });
+
+                            // Update manifest with correct version
+                            manifest.set(action.clone(), correct_version);
+                        }
+                    }
+                }
+                Err(e) => {
+                    // Log warning but continue - don't fail the whole operation
+                    eprintln!("  Warning: Could not validate {} SHA: {}", action, e);
+                }
+            }
+        } else if !lock.has(action, version) {
+            // No workflow SHA - resolve via GitHub API
+            println!("  Resolving {}@{} ...", action, version);
+            let sha = github.resolve_ref(action, version)?;
+            lock.set(action, version, sha);
+        }
     }
 
-    // Resolve each action@version to commit SHA
-    for (action, version) in &manifest.actions {
-        // Skip if already in lock file
-        if lock.has(action, version) {
-            continue;
-        }
+    Ok(corrections)
+}
 
-        // Resolve via GitHub API
-        println!("  Resolving {}@{} ...", action, version);
-        match github.resolve_ref(action, version) {
-            Ok(sha) => {
-                lock.set(action, version, sha);
-            }
-            Err(e) => {
-                eprintln!("  Warning: Failed to resolve {}@{}: {}", action, version, e);
-                eprintln!("  Skipping lock for this action.");
-            }
-        }
+/// Select the best tag from a list (prefers shorter semver-like tags)
+fn select_best_tag(tags: &[String]) -> Option<String> {
+    if tags.is_empty() {
+        return None;
     }
 
-    Ok(())
+    // Prefer tags that look like semver (v1, v1.2, v1.2.3)
+    // Sort by: semver-like first, then by length (shorter is better for major version tags)
+    let mut sorted_tags: Vec<_> = tags.iter().collect();
+    sorted_tags.sort_by(|a, b| {
+        let a_is_semver =
+            a.starts_with('v') && a.chars().nth(1).is_some_and(|c| c.is_ascii_digit());
+        let b_is_semver =
+            b.starts_with('v') && b.chars().nth(1).is_some_and(|c| c.is_ascii_digit());
+
+        match (a_is_semver, b_is_semver) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.len().cmp(&b.len()),
+        }
+    });
+
+    sorted_tags.first().map(|s| (*s).clone())
 }
 
 fn print_update_results(results: &[UpdateResult]) {
@@ -240,6 +332,7 @@ mod tests {
         ExtractedAction {
             name: name.to_string(),
             version: version.to_string(),
+            sha: None,
             file: PathBuf::from(format!(".github/workflows/{}", workflow)),
             location: ActionLocation {
                 workflow: workflow.to_string(),
@@ -297,5 +390,74 @@ mod tests {
             changes: vec!["actions/checkout@v4".to_string()],
         }];
         print_update_results(&results);
+    }
+
+    #[test]
+    fn test_select_best_tag_empty() {
+        let tags: Vec<String> = vec![];
+        assert!(select_best_tag(&tags).is_none());
+    }
+
+    #[test]
+    fn test_select_best_tag_prefers_semver() {
+        let tags = vec![
+            "release-1".to_string(),
+            "v4".to_string(),
+            "latest".to_string(),
+        ];
+        assert_eq!(select_best_tag(&tags), Some("v4".to_string()));
+    }
+
+    #[test]
+    fn test_select_best_tag_prefers_shorter_semver() {
+        // Both are semver-like, should prefer shorter (v4 over v4.0.0)
+        let tags = vec!["v4.0.0".to_string(), "v4".to_string(), "v4.0".to_string()];
+        assert_eq!(select_best_tag(&tags), Some("v4".to_string()));
+    }
+
+    #[test]
+    fn test_select_best_tag_single() {
+        let tags = vec!["v5".to_string()];
+        assert_eq!(select_best_tag(&tags), Some("v5".to_string()));
+    }
+
+    #[test]
+    fn test_action_versions_collects_sha() {
+        let mut versions = ActionVersions::default();
+        let mut action = make_action("actions/checkout", "v4", "ci.yml");
+        action.sha = Some("abc123def456789012345678901234567890abcd".to_string());
+        versions.add(&action);
+
+        assert_eq!(
+            versions.get_sha("actions/checkout"),
+            Some(&"abc123def456789012345678901234567890abcd".to_string())
+        );
+    }
+
+    #[test]
+    fn test_action_versions_sha_first_wins() {
+        let mut versions = ActionVersions::default();
+
+        let mut action1 = make_action("actions/checkout", "v4", "ci.yml");
+        action1.sha = Some("first_sha_12345678901234567890123456789012".to_string());
+        versions.add(&action1);
+
+        let mut action2 = make_action("actions/checkout", "v4", "deploy.yml");
+        action2.sha = Some("second_sha_1234567890123456789012345678901".to_string());
+        versions.add(&action2);
+
+        // First SHA should win
+        assert_eq!(
+            versions.get_sha("actions/checkout"),
+            Some(&"first_sha_12345678901234567890123456789012".to_string())
+        );
+    }
+
+    #[test]
+    fn test_action_versions_no_sha() {
+        let mut versions = ActionVersions::default();
+        versions.add(&make_action("actions/checkout", "v4", "ci.yml"));
+
+        assert!(versions.get_sha("actions/checkout").is_none());
     }
 }

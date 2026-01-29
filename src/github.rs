@@ -1,20 +1,13 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use serde::Deserialize;
 use std::time::Duration;
+
+use crate::error::GitHubTokenRequired;
+use crate::git::{is_commit_sha, GitRef, GitRefEntry};
 
 const GITHUB_API_BASE: &str = "https://api.github.com";
 const USER_AGENT: &str = "gx-cli";
 const REQUEST_TIMEOUT_SECS: u64 = 30;
-
-#[derive(Debug, Deserialize)]
-struct GitRef {
-    object: GitObject,
-}
-
-#[derive(Debug, Deserialize)]
-struct GitObject {
-    sha: String,
-}
 
 pub struct GitHubClient {
     client: reqwest::blocking::Client,
@@ -41,7 +34,7 @@ impl GitHubClient {
     /// - resolve_ref("github/codeql-action/upload-sarif", "v4") -> "abc123..." (subpath action)
     pub fn resolve_ref(&self, owner_repo: &str, ref_name: &str) -> Result<String> {
         // If it already looks like a full SHA (40 hex chars), return it
-        if ref_name.len() == 40 && ref_name.chars().all(|c| c.is_ascii_hexdigit()) {
+        if is_commit_sha(ref_name) {
             return Ok(ref_name.to_string());
         }
 
@@ -81,14 +74,12 @@ impl GitHubClient {
     }
 
     fn fetch_ref(&self, url: &str) -> Result<String> {
-        let mut request = self.client.get(url);
+        let token = self.token.as_ref().ok_or_else(|| anyhow!(GitHubTokenRequired))?;
 
-        // Add authorization header if token is available
-        if let Some(token) = &self.token {
-            request = request.header("Authorization", format!("Bearer {}", token));
-        }
-
-        let response = request
+        let response = self
+            .client
+            .get(url)
+            .header("Authorization", format!("Bearer {}", token))
             .send()
             .with_context(|| format!("Failed to fetch ref from {}", url))?;
 
@@ -104,14 +95,12 @@ impl GitHubClient {
     }
 
     fn fetch_commit_sha(&self, url: &str) -> Result<String> {
-        let mut request = self.client.get(url);
+        let token = self.token.as_ref().ok_or_else(|| anyhow!(GitHubTokenRequired))?;
 
-        // Add authorization header if token is available
-        if let Some(token) = &self.token {
-            request = request.header("Authorization", format!("Bearer {}", token));
-        }
-
-        let response = request
+        let response = self
+            .client
+            .get(url)
+            .header("Authorization", format!("Bearer {}", token))
             .send()
             .with_context(|| format!("Failed to fetch commit from {}", url))?;
 
@@ -129,6 +118,44 @@ impl GitHubClient {
             .context("Failed to parse GitHub API commit response")?;
 
         Ok(commit.sha)
+    }
+}
+
+impl GitHubClient {
+    /// Get all tags that point to a specific commit SHA
+    ///
+    /// Returns tag names without the "refs/tags/" prefix (e.g., ["v5", "v5.0.0"])
+    pub fn get_tags_for_sha(&self, owner_repo: &str, sha: &str) -> Result<Vec<String>> {
+        let token = self.token.as_ref().ok_or_else(|| anyhow!(GitHubTokenRequired))?;
+
+        // Handle subpath actions (e.g., "github/codeql-action/upload-sarif")
+        let base_repo = owner_repo.split('/').take(2).collect::<Vec<_>>().join("/");
+
+        let url = format!("{}/repos/{}/git/refs/tags", GITHUB_API_BASE, base_repo);
+
+        let response = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", token))
+            .send()
+            .with_context(|| format!("Failed to fetch tags from {}", url))?;
+
+        if !response.status().is_success() {
+            anyhow::bail!("GitHub API returned status {}", response.status());
+        }
+
+        let refs: Vec<GitRefEntry> = response
+            .json()
+            .context("Failed to parse GitHub API tags response")?;
+
+        // Filter tags that point to the given SHA and extract tag names
+        let tags: Vec<String> = refs
+            .into_iter()
+            .filter(|r| r.object.sha == sha)
+            .map(|r| r.ref_name.strip_prefix("refs/tags/").unwrap_or(&r.ref_name).to_string())
+            .collect();
+
+        Ok(tags)
     }
 }
 
@@ -183,5 +210,18 @@ mod tests {
         let sha = client.resolve_ref("actions/checkout", "main").unwrap();
         assert_eq!(sha.len(), 40);
         assert!(sha.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    #[ignore]
+    fn test_get_tags_for_sha() {
+        let token = std::env::var("GITHUB_TOKEN").ok();
+        let client = GitHubClient::new(token).unwrap();
+        // First resolve v4 to get the SHA
+        let sha = client.resolve_ref("actions/checkout", "v4").unwrap();
+        // Then get tags for that SHA
+        let tags = client.get_tags_for_sha("actions/checkout", &sha).unwrap();
+        // v4 should be in the list
+        assert!(tags.contains(&"v4".to_string()), "Expected v4 in tags: {:?}", tags);
     }
 }

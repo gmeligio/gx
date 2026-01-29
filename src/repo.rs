@@ -1,16 +1,7 @@
 use anyhow::{Context, Result, anyhow};
 use std::{env, path::PathBuf};
 
-#[derive(Debug)]
-pub struct GithubFolderNotFound;
-
-impl std::fmt::Display for GithubFolderNotFound {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, ".github folder not found")
-    }
-}
-
-impl std::error::Error for GithubFolderNotFound {}
+pub use crate::error::GithubFolderNotFound;
 
 pub fn find_root() -> Result<PathBuf> {
     let cwd = env::current_dir()?;
