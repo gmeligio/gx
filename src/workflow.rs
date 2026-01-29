@@ -91,7 +91,8 @@ impl WorkflowUpdater {
 
         for (action, version) in actions {
             let escaped_action = regex::escape(action);
-            let pattern = format!(r"(uses:\s*{})@[^\s#]+", escaped_action);
+            // Match "uses: action@ref" and optionally capture any existing comment
+            let pattern = format!(r"(uses:\s*{})@[^\s#]+(\s*#[^\n]*)?", escaped_action);
             let re = Regex::new(&pattern)?;
 
             if re.is_match(&updated_content) {
@@ -499,5 +500,109 @@ jobs:
             .find(|a| a.name == "docker/login-action")
             .unwrap();
         assert_eq!(login.version, "v3.6.0");
+    }
+
+    #[test]
+    fn test_update_workflow_uses_commit_sha() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = r#"name: CI
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+"#;
+        let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
+
+        let updater = WorkflowUpdater::new(temp_dir.path());
+        let mut actions = HashMap::new();
+        // Simulate the format from lock.build_update_map(): "SHA # version"
+        actions.insert(
+            "actions/checkout".to_string(),
+            "abc123def456 # v4".to_string(),
+        );
+
+        let result = updater.update_workflow(&workflow_path, &actions).unwrap();
+
+        assert_eq!(result.changes.len(), 1);
+
+        // Verify the workflow was updated with the SHA, not the tag
+        let updated = fs::read_to_string(&workflow_path).unwrap();
+        assert!(
+            updated.contains("actions/checkout@abc123def456 # v4"),
+            "Expected SHA with comment, got: {}",
+            updated
+        );
+        assert!(
+            !updated.contains("actions/checkout@v4"),
+            "Should not contain tag without SHA"
+        );
+    }
+
+    #[test]
+    fn test_update_workflow_no_duplicate_comments() {
+        let temp_dir = TempDir::new().unwrap();
+        // Start with a workflow that already has a comment
+        let content = r#"name: CI
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3 # v3
+      - uses: actions/setup-node@old_sha # v2
+"#;
+        let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
+
+        let updater = WorkflowUpdater::new(temp_dir.path());
+        let mut actions = HashMap::new();
+        // Update both actions with new SHAs
+        actions.insert(
+            "actions/checkout".to_string(),
+            "abc123def456 # v4".to_string(),
+        );
+        actions.insert(
+            "actions/setup-node".to_string(),
+            "xyz789012345 # v3".to_string(),
+        );
+
+        let result = updater.update_workflow(&workflow_path, &actions).unwrap();
+
+        assert_eq!(result.changes.len(), 2);
+
+        // Verify no duplicate comments
+        let updated = fs::read_to_string(&workflow_path).unwrap();
+
+        // Should have the new SHA with new comment
+        assert!(
+            updated.contains("actions/checkout@abc123def456 # v4"),
+            "Expected new SHA with comment, got: {}",
+            updated
+        );
+
+        // Should NOT have duplicate comments like "# v4 # v3"
+        assert!(
+            !updated.contains("# v4 # v3"),
+            "Found duplicate comment in: {}",
+            updated
+        );
+        assert!(
+            !updated.contains("# v3 # v3"),
+            "Found duplicate comment in: {}",
+            updated
+        );
+
+        // Verify setup-node was also updated correctly
+        assert!(
+            updated.contains("actions/setup-node@xyz789012345 # v3"),
+            "Expected setup-node with new SHA and comment, got: {}",
+            updated
+        );
+        assert!(
+            !updated.contains("# v3 # v2"),
+            "Found duplicate comment in: {}",
+            updated
+        );
     }
 }

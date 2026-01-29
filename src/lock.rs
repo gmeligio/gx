@@ -80,6 +80,28 @@ impl LockFile {
         let key = format!("{}@{}", action, version);
         self.actions.contains_key(&key)
     }
+
+    /// Build a map of action names to "SHA # version" for workflow updates
+    /// Takes versions from the manifest and SHAs from the lock file
+    pub fn build_update_map(
+        &self,
+        manifest_actions: &HashMap<String, String>,
+    ) -> HashMap<String, String> {
+        let mut update_map = HashMap::new();
+
+        for (action, version) in manifest_actions {
+            if let Some(sha) = self.get(action, version) {
+                // Format as "SHA # version" for the workflow update
+                let update_value = format!("{} # {}", sha, version);
+                update_map.insert(action.clone(), update_value);
+            } else {
+                // Fallback to version if SHA not found in lock file
+                update_map.insert(action.clone(), version.clone());
+            }
+        }
+
+        update_map
+    }
 }
 
 impl Default for LockFile {
@@ -222,5 +244,40 @@ mod tests {
             lock.get("actions/checkout", "v4"),
             Some(&"new_sha".to_string())
         );
+    }
+
+    #[test]
+    fn test_build_update_map() {
+        let mut lock = LockFile::default();
+        lock.set("actions/checkout", "v4", "abc123def456".to_string());
+        lock.set("actions/setup-node", "v3", "789xyz012".to_string());
+
+        let mut manifest_actions = HashMap::new();
+        manifest_actions.insert("actions/checkout".to_string(), "v4".to_string());
+        manifest_actions.insert("actions/setup-node".to_string(), "v3".to_string());
+
+        let update_map = lock.build_update_map(&manifest_actions);
+
+        assert_eq!(
+            update_map.get("actions/checkout"),
+            Some(&"abc123def456 # v4".to_string())
+        );
+        assert_eq!(
+            update_map.get("actions/setup-node"),
+            Some(&"789xyz012 # v3".to_string())
+        );
+    }
+
+    #[test]
+    fn test_build_update_map_fallback_to_version() {
+        let lock = LockFile::default(); // Empty lock file
+
+        let mut manifest_actions = HashMap::new();
+        manifest_actions.insert("actions/checkout".to_string(), "v4".to_string());
+
+        let update_map = lock.build_update_map(&manifest_actions);
+
+        // Should fallback to version if SHA not in lock file
+        assert_eq!(update_map.get("actions/checkout"), Some(&"v4".to_string()));
     }
 }

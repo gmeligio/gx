@@ -259,13 +259,15 @@ pub fn run(repo_root: &Path) -> Result<()> {
     // Save lock file
     lock.save_to_repo(repo_root)?;
 
-    // Apply manifest versions to workflows
+    // Apply manifest versions to workflows using SHAs from lock file
     if manifest.actions.is_empty() {
         println!("\nNo actions defined in {}", manifest.path()?.display());
         return Ok(());
     }
 
-    let results = updater.update_all(&manifest.actions)?;
+    // Build update map with SHAs from lock file and version comments from manifest
+    let update_map = lock.build_update_map(&manifest.actions);
+    let results = updater.update_all(&update_map)?;
     print_update_results(&results);
 
     Ok(())
