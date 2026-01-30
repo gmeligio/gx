@@ -139,8 +139,7 @@ pub fn run(repo_root: &Path) -> Result<()> {
                 if workflow_version != &manifest_version && manifest_is_sha && workflow_is_semver {
                     manifest.set((*action_name).clone(), workflow_version.clone());
                     updated_actions.push(format!(
-                        "{}@{} (was {})",
-                        action_name, workflow_version, manifest_version
+                        "{action_name}@{workflow_version} (was {manifest_version})"
                     ));
                 }
             }
@@ -355,7 +354,7 @@ mod tests {
             name: name.to_string(),
             version: version.to_string(),
             sha: None,
-            file: PathBuf::from(format!(".github/workflows/{}", workflow)),
+            file: PathBuf::from(format!(".github/workflows/{workflow}")),
             location: ActionLocation {
                 workflow: workflow.to_string(),
                 job: "build".to_string(),

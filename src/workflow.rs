@@ -68,7 +68,7 @@ impl WorkflowUpdater {
         for extension in &["yml", "yaml"] {
             let pattern = self
                 .workflows_dir
-                .join(format!("*.{}", extension))
+                .join(format!("*.{extension}"))
                 .to_string_lossy()
                 .to_string();
 
@@ -97,15 +97,15 @@ impl WorkflowUpdater {
         for (action, version) in actions {
             let escaped_action = regex::escape(action);
             // Match "uses: action@ref" and optionally capture any existing comment
-            let pattern = format!(r"(uses:\s*{})@[^\s#]+(\s*#[^\n]*)?", escaped_action);
+            let pattern = format!(r"(uses:\s*{escaped_action})@[^\s#]+(\s*#[^\n]*)?");
             let re = Regex::new(&pattern)?;
 
             if re.is_match(&updated_content) {
-                let replacement = format!("${{1}}@{}", version);
+                let replacement = format!("${{1}}@{version}");
                 let new_content = re.replace_all(&updated_content, replacement.as_str());
 
                 if new_content != updated_content {
-                    changes.push(format!("{}@{}", action, version));
+                    changes.push(format!("{action}@{version}"));
                     updated_content = new_content.to_string();
                 }
             }
@@ -158,7 +158,7 @@ impl WorkflowUpdater {
                 let mut comment_version = cap[2].to_string();
                 // Normalize: ensure it starts with 'v'
                 if !comment_version.starts_with('v') {
-                    comment_version = format!("v{}", comment_version);
+                    comment_version = format!("v{comment_version}");
                 }
                 version_comments.insert(uses_part, comment_version);
             }

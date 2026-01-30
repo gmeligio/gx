@@ -15,13 +15,13 @@ fn parse_semver(version: &str) -> Option<Version> {
     }
 
     // Try adding .0 for versions like "4.1"
-    let with_patch = format!("{}.0", normalized);
+    let with_patch = format!("{normalized}.0");
     if let Ok(v) = Version::parse(&with_patch) {
         return Some(v);
     }
 
     // Try adding .0.0 for versions like "4"
-    let with_minor_patch = format!("{}.0.0", normalized);
+    let with_minor_patch = format!("{normalized}.0.0");
     if let Ok(v) = Version::parse(&with_minor_patch) {
         return Some(v);
     }

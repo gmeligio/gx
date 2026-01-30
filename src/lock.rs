@@ -68,16 +68,12 @@ impl LockFile {
 
     /// Save the lock file only if there were changes
     pub fn save_if_changed(&self) -> Result<()> {
-        if self.changed {
-            self.save()
-        } else {
-            Ok(())
-        }
+        if self.changed { self.save() } else { Ok(()) }
     }
 
     /// Set or update a locked action version
     pub fn set(&mut self, action: &str, version: &str, commit_sha: String) {
-        let key = format!("{}@{}", action, version);
+        let key = format!("{action}@{version}");
         let existing = self.actions.get(&key);
         if existing != Some(&commit_sha) {
             self.actions.insert(key, commit_sha);
@@ -87,7 +83,7 @@ impl LockFile {
 
     /// Get the locked commit SHA for an action@version
     pub fn get(&self, action: &str, version: &str) -> Option<&String> {
-        let key = format!("{}@{}", action, version);
+        let key = format!("{action}@{version}");
         self.actions.get(&key)
     }
 
@@ -95,7 +91,7 @@ impl LockFile {
     pub fn remove_unused(&mut self, used_actions: &HashMap<String, String>) {
         let used_keys: std::collections::HashSet<String> = used_actions
             .iter()
-            .map(|(action, version)| format!("{}@{}", action, version))
+            .map(|(action, version)| format!("{action}@{version}"))
             .collect();
 
         let original_len = self.actions.len();
@@ -107,7 +103,7 @@ impl LockFile {
 
     /// Check if lock file has an entry for the given action@version
     pub fn has(&self, action: &str, version: &str) -> bool {
-        let key = format!("{}@{}", action, version);
+        let key = format!("{action}@{version}");
         self.actions.contains_key(&key)
     }
 
@@ -122,7 +118,7 @@ impl LockFile {
         for (action, version) in manifest_actions {
             if let Some(sha) = self.get(action, version) {
                 // Format as "SHA # version" for the workflow update
-                let update_value = format!("{} # {}", sha, version);
+                let update_value = format!("{sha} # {version}");
                 update_map.insert(action.clone(), update_value);
             } else {
                 // Fallback to version if SHA not found in lock file

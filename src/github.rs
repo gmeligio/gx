@@ -4,7 +4,7 @@ use std::env;
 use std::time::Duration;
 
 use crate::error::GitHubTokenRequired;
-use crate::git::{is_commit_sha, GitRef, GitRefEntry};
+use crate::git::{GitRef, GitRefEntry, is_commit_sha};
 
 const GITHUB_API_BASE: &str = "https://api.github.com";
 const USER_AGENT: &str = "gx-cli";
@@ -49,28 +49,19 @@ impl GitHubClient {
         let base_repo = owner_repo.split('/').take(2).collect::<Vec<_>>().join("/");
 
         // Try to resolve as a tag or branch
-        let url = format!(
-            "{}/repos/{}/git/ref/tags/{}",
-            GITHUB_API_BASE, base_repo, ref_name
-        );
+        let url = format!("{GITHUB_API_BASE}/repos/{base_repo}/git/ref/tags/{ref_name}");
 
         match self.fetch_ref(&url) {
             Ok(sha) => return Ok(sha),
             Err(_) => {
                 // Not a tag, try as a branch
-                let url = format!(
-                    "{}/repos/{}/git/ref/heads/{}",
-                    GITHUB_API_BASE, base_repo, ref_name
-                );
+                let url = format!("{GITHUB_API_BASE}/repos/{base_repo}/git/ref/heads/{ref_name}");
 
                 match self.fetch_ref(&url) {
                     Ok(sha) => return Ok(sha),
                     Err(_) => {
                         // Not a branch either, try to get commit directly
-                        let url = format!(
-                            "{}/repos/{}/commits/{}",
-                            GITHUB_API_BASE, base_repo, ref_name
-                        );
+                        let url = format!("{GITHUB_API_BASE}/repos/{base_repo}/commits/{ref_name}");
 
                         self.fetch_commit_sha(&url)
                     }
@@ -80,14 +71,17 @@ impl GitHubClient {
     }
 
     fn fetch_ref(&self, url: &str) -> Result<String> {
-        let token = self.token.as_ref().ok_or_else(|| anyhow!(GitHubTokenRequired))?;
+        let token = self
+            .token
+            .as_ref()
+            .ok_or_else(|| anyhow!(GitHubTokenRequired))?;
 
         let response = self
             .client
             .get(url)
-            .header("Authorization", format!("Bearer {}", token))
+            .header("Authorization", format!("Bearer {token}"))
             .send()
-            .with_context(|| format!("Failed to fetch ref from {}", url))?;
+            .with_context(|| format!("Failed to fetch ref from {url}"))?;
 
         if !response.status().is_success() {
             anyhow::bail!("GitHub API returned status {}", response.status());
@@ -101,14 +95,17 @@ impl GitHubClient {
     }
 
     fn fetch_commit_sha(&self, url: &str) -> Result<String> {
-        let token = self.token.as_ref().ok_or_else(|| anyhow!(GitHubTokenRequired))?;
+        let token = self
+            .token
+            .as_ref()
+            .ok_or_else(|| anyhow!(GitHubTokenRequired))?;
 
         let response = self
             .client
             .get(url)
-            .header("Authorization", format!("Bearer {}", token))
+            .header("Authorization", format!("Bearer {token}"))
             .send()
-            .with_context(|| format!("Failed to fetch commit from {}", url))?;
+            .with_context(|| format!("Failed to fetch commit from {url}"))?;
 
         if !response.status().is_success() {
             anyhow::bail!("GitHub API returned status {}", response.status());
@@ -134,19 +131,22 @@ impl GitHubClient {
     /// Note: This only works for lightweight tags. Annotated tags store the tag object SHA,
     /// not the commit SHA, so they won't match.
     pub fn get_tags_for_sha(&self, owner_repo: &str, sha: &str) -> Result<Vec<String>> {
-        let token = self.token.as_ref().ok_or_else(|| anyhow!(GitHubTokenRequired))?;
+        let token = self
+            .token
+            .as_ref()
+            .ok_or_else(|| anyhow!(GitHubTokenRequired))?;
 
         // Handle subpath actions (e.g., "github/codeql-action/upload-sarif")
         let base_repo = owner_repo.split('/').take(2).collect::<Vec<_>>().join("/");
 
-        let url = format!("{}/repos/{}/git/refs/tags", GITHUB_API_BASE, base_repo);
+        let url = format!("{GITHUB_API_BASE}/repos/{base_repo}/git/refs/tags");
 
         let response = self
             .client
             .get(&url)
-            .header("Authorization", format!("Bearer {}", token))
+            .header("Authorization", format!("Bearer {token}"))
             .send()
-            .with_context(|| format!("Failed to fetch tags from {}", url))?;
+            .with_context(|| format!("Failed to fetch tags from {url}"))?;
 
         if !response.status().is_success() {
             anyhow::bail!("GitHub API returned status {}", response.status());
@@ -235,6 +235,10 @@ mod tests {
         // Then get tags for that SHA
         let tags = client.get_tags_for_sha("actions/checkout", &sha).unwrap();
         // v4 should be in the list
-        assert!(tags.contains(&"v4".to_string()), "Expected v4 in tags: {:?}", tags);
+        assert!(
+            tags.contains(&"v4".to_string()),
+            "Expected v4 in tags: {:?}",
+            tags
+        );
     }
 }
