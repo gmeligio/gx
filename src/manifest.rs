@@ -5,8 +5,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-use crate::error::PathNotInitialized;
-
 /// Errors that can occur when working with manifest files
 #[derive(Debug, Error)]
 pub enum ManifestError {
@@ -34,8 +32,10 @@ pub enum ManifestError {
     #[error("failed to serialize manifest to TOML")]
     Serialize(#[source] toml::ser::Error),
 
-    #[error(transparent)]
-    PathNotInitialized(#[from] PathNotInitialized),
+    #[error(
+        "`ManifestFile.path` not initialized. Use load_from_repo or load to create a ManifestFile with a path."
+    )]
+    PathNotInitialized(),
 }
 
 /// The main manifest structure mapping actions to versions
@@ -54,10 +54,10 @@ impl Manifest {
     ///
     /// # Errors
     /// Returns `PathNotInitialized` if the path has not been initialized
-    pub fn path(&self) -> Result<&Path, PathNotInitialized> {
+    pub fn path(&self) -> Result<&Path, ManifestError> {
         self.path
             .as_deref()
-            .ok_or_else(PathNotInitialized::manifest)
+            .ok_or_else(ManifestError::PathNotInitialized)
     }
 
     /// Load a manifest from the given path.
@@ -263,7 +263,7 @@ mod tests {
         let result = manifest.path();
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("Manifest path not initialized"));
+        assert!(err_msg.contains("`ManifestFile.path` not initialized"));
     }
 
     #[test]

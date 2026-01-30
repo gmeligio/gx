@@ -5,8 +5,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-use crate::error::PathNotInitialized;
-
 const LOCK_FILE_NAME: &str = "gx.lock";
 
 /// Errors that can occur when working with lock files
@@ -36,8 +34,10 @@ pub enum LockFileError {
     #[error("failed to serialize lock file to TOML")]
     Serialize(#[source] toml::ser::Error),
 
-    #[error(transparent)]
-    PathNotInitialized(#[from] PathNotInitialized),
+    #[error(
+        "`LockFile.path` not initialized. Use load_from_repo or load to create a LockFile with a path."
+    )]
+    PathNotInitialized(),
 }
 
 /// Lock file structure that maps action@version to resolved commit SHA
@@ -57,10 +57,10 @@ impl LockFile {
     /// # Errors
     ///
     /// Return `PathNotInitialized` if the path is not initialized.
-    pub fn path(&self) -> Result<&Path, PathNotInitialized> {
+    pub fn path(&self) -> Result<&Path, LockFileError> {
         self.path
             .as_deref()
-            .ok_or_else(PathNotInitialized::lock_file)
+            .ok_or_else(LockFileError::PathNotInitialized)
     }
 
     /// Load a lock file from the given path.
@@ -115,7 +115,9 @@ impl LockFile {
     ///
     /// # Errors
     ///
-    /// Returns an error if the path is not initialized, serialization fails, or the file cannot be written.
+    /// - Returns `LockFileError::PathNotInitialized` if the path is not initialized,
+    /// - Returns `LockFileError::Serialize` if serialization fails
+    /// - Returns `LockFileError::Write` if the file cannot be written.
     pub fn save(&self) -> Result<(), LockFileError> {
         let path = self.path()?;
         let content = toml::to_string_pretty(self).map_err(LockFileError::Serialize)?;
@@ -289,7 +291,7 @@ mod tests {
         let result = lock.path();
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("LockFile path not initialized"));
+        assert!(err_msg.contains("`LockFile.path` not initialized"));
     }
 
     #[test]

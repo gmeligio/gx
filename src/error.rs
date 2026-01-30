@@ -1,28 +1,5 @@
 use thiserror::Error;
 
-/// Error when a file path has not been initialized
-#[derive(Debug, Error)]
-#[error("{file_type} path not initialized. Use load_from_repo or load to create a {} with a path.", file_type.to_lowercase())]
-pub struct PathNotInitialized {
-    pub file_type: &'static str,
-}
-
-impl PathNotInitialized {
-    #[must_use]
-    pub fn manifest() -> Self {
-        Self {
-            file_type: "Manifest",
-        }
-    }
-
-    #[must_use]
-    pub fn lock_file() -> Self {
-        Self {
-            file_type: "LockFile",
-        }
-    }
-}
-
 /// Error when .github folder is not found in the repository
 #[derive(Debug, Error)]
 #[error(".github folder not found")]
