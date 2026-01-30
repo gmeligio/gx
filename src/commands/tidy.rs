@@ -96,7 +96,7 @@ pub fn run(repo_root: &Path) -> Result<()> {
     if !unused.is_empty() {
         info!("Removing unused actions from manifest:");
         for action in &unused {
-            info!("- {}", action);
+            info!("- {action}");
             manifest.remove(action);
         }
     }
@@ -108,7 +108,7 @@ pub fn run(repo_root: &Path) -> Result<()> {
             let versions = action_versions.unique_versions(action_name);
             let version = select_version(&versions);
             manifest.set((*action_name).clone(), version.clone());
-            info!("+ {}@{}", action_name, version);
+            info!("+ {action_name}@{version}");
         }
     }
 
@@ -148,7 +148,7 @@ pub fn run(repo_root: &Path) -> Result<()> {
         if !updated_actions.is_empty() {
             info!("Updating action versions in manifest:");
             for update in &updated_actions {
-                info!("~ {}", update);
+                info!("~ {update}");
             }
         }
     }
@@ -237,8 +237,7 @@ fn update_lock_file(
                     } else if let Some(correct_version) = select_best_tag(&tags) {
                         // Version comment doesn't match SHA - use the correct version
                         info!(
-                            "Corrected {} version: {} -> {} (SHA {} points to {})",
-                            action, version, correct_version, workflow_sha, correct_version
+                            "Corrected {action} version: {version} -> {correct_version} (SHA {workflow_sha} points to {correct_version})"
                         );
 
                         corrections.push(VersionCorrection {
@@ -253,8 +252,7 @@ fn update_lock_file(
                         correct_version
                     } else {
                         warn!(
-                            "No tags found for {} SHA {}, keeping version {}",
-                            action, workflow_sha, version
+                            "No tags found for {action} SHA {workflow_sha}, keeping version {version}"
                         );
                         version.clone()
                     }
@@ -263,13 +261,11 @@ fn update_lock_file(
                     // Log warning and continue. Don't fail the whole operation
                     if e.downcast_ref::<GitHubTokenRequired>().is_some() {
                         warn!(
-                            "GITHUB_TOKEN not set. Without it, can not validate for {} that {} commit SHA matches the {} version.",
-                            action, workflow_sha, version
+                            "GITHUB_TOKEN not set. Without it, can not validate for {action} that {workflow_sha} commit SHA matches the {version} version."
                         );
                     } else {
                         warn!(
-                            "For {} action could not validate {} commit SHA: {}",
-                            action, workflow_sha, e
+                            "For {action} action could not validate {workflow_sha} commit SHA: {e}"
                         );
                     }
                     version.clone()
@@ -288,12 +284,11 @@ fn update_lock_file(
                 Err(e) => {
                     if e.downcast_ref::<GitHubTokenRequired>().is_some() {
                         warn!(
-                            "GITHUB_TOKEN not set. Cannot resolve {}@{} to commit SHA.",
-                            action, version
+                            "GITHUB_TOKEN not set. Cannot resolve {action}@{version} to commit SHA."
                         );
                         warn!("Set GITHUB_TOKEN to resolve version tags to commit SHAs.");
                     } else {
-                        warn!("Could not resolve {}@{}: {}", action, version, e);
+                        warn!("Could not resolve {action}@{version}: {e}");
                     }
                 }
             }
@@ -336,7 +331,7 @@ fn print_update_results(results: &[UpdateResult]) {
         for result in results {
             info!("{}", result.file.display());
             for change in &result.changes {
-                info!("- {}", change);
+                info!("- {change}");
             }
         }
         info!("{} workflow(s) updated.", results.len());

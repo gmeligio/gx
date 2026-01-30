@@ -75,7 +75,7 @@ impl WorkflowUpdater {
             for entry in glob(&pattern).context("Failed to read glob pattern")? {
                 match entry {
                     Ok(path) => workflows.push(path),
-                    Err(e) => warn!("Error reading path: {}", e),
+                    Err(e) => warn!("Error reading path: {e}"),
                 }
             }
         }
