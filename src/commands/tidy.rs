@@ -261,12 +261,17 @@ fn update_lock_file(
                     }
                 }
                 Err(e) => {
-                    // Log warning but continue - don't fail the whole operation
+                    // Log warning and continue. Don't fail the whole operation
                     if e.downcast_ref::<GitHubTokenRequired>().is_some() {
-                        warn!("GITHUB_TOKEN not set. Cannot validate {} SHA.", action);
-                        warn!("Set GITHUB_TOKEN to resolve version tags to commit SHAs.");
+                        warn!(
+                            "GITHUB_TOKEN not set. Without it, can not validate for {} that {} commit SHA matches the {} version.",
+                            action, workflow_sha, version
+                        );
                     } else {
-                        warn!("Could not validate {} SHA: {}", action, e);
+                        warn!(
+                            "For {} action could not validate {} commit SHA: {}",
+                            action, workflow_sha, e
+                        );
                     }
                     version.clone()
                 }
@@ -275,7 +280,7 @@ fn update_lock_file(
             // Set lock entry with the validated/corrected version
             lock.set(action, &final_version, workflow_sha.clone());
         } else if !lock.has(action, version) {
-            // No workflow SHA - resolve via GitHub API
+            // Resolve via GitHub API when there is no workflow SHA
             debug!("Resolving {}@{} ...", action, version);
             match github.resolve_ref(action, version) {
                 Ok(sha) => {

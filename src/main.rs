@@ -26,17 +26,18 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let mut builder = env_logger::builder();
-    builder.filter_level(if cli.verbose {
-        LevelFilter::Debug
-    } else {
-        LevelFilter::Info
-    });
-    builder.format(|buf, record| {
-        let level = record.level();
-        let style = &buf.default_level_style(level);
+    builder
+        .filter_level(match cli.verbose {
+            true => LevelFilter::Debug,
+            false => LevelFilter::Info,
+        })
+        .format(|buf, record| {
+            let level = record.level();
+            let style = &buf.default_level_style(level);
 
-        writeln!(buf, "[{style}{level}{style:#}] {}", record.args())
-    });
+            writeln!(buf, "[{style}{level}{style:#}] {}", record.args())
+        });
+
     if !cli.verbose {
         builder.format_timestamp(None);
     }
