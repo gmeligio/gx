@@ -5,7 +5,7 @@ use std::path::Path;
 
 use crate::git::is_commit_sha;
 use crate::github::{GitHubClient, GitHubError};
-use crate::lock::LockFile;
+use crate::lock::Lock;
 use crate::manifest::Manifest;
 use crate::version::find_highest_version;
 use crate::workflow::{ExtractedAction, UpdateResult, WorkflowUpdater};
@@ -61,14 +61,13 @@ impl ActionVersions {
 ///
 /// # Errors
 ///
-/// Returns an error if workflows cannot be read, the manifest or lock file cannot be loaded,
-/// or files cannot be saved.
+/// Returns an error if workflows cannot be read or files cannot be saved.
 ///
 /// # Panics
 ///
 /// Panics if an action in the intersection of workflow and manifest actions is not found
 /// in the manifest (this should never happen due to the intersection logic).
-pub fn run(repo_root: &Path) -> Result<()> {
+pub fn run<M: Manifest, L: Lock>(repo_root: &Path, mut manifest: M, mut lock: L) -> Result<()> {
     let updater = WorkflowUpdater::new(repo_root);
 
     let workflows = updater.find_workflows()?;
@@ -92,11 +91,7 @@ pub fn run(repo_root: &Path) -> Result<()> {
 
     let workflow_actions: HashSet<String> = action_versions.action_names().into_iter().collect();
 
-    // Load current manifest and lock file
-    let mut manifest = Manifest::load_from_repo_or_default(repo_root)?;
-    let mut lock = LockFile::load_from_repo_or_default(repo_root)?;
-
-    let manifest_actions: HashSet<String> = manifest.actions.keys().cloned().collect();
+    let manifest_actions: HashSet<String> = manifest.actions().keys().cloned().collect();
 
     // Find differences
     let missing: Vec<_> = workflow_actions.difference(&manifest_actions).collect();
@@ -133,7 +128,7 @@ pub fn run(repo_root: &Path) -> Result<()> {
 
             if versions.len() == 1 {
                 let workflow_version = &versions[0];
-                let manifest_version = manifest.actions.get(*action_name).unwrap().clone();
+                let manifest_version = manifest.actions().get(*action_name).unwrap().clone();
 
                 // Only update if:
                 // 1. Versions differ, AND
@@ -169,19 +164,21 @@ pub fn run(repo_root: &Path) -> Result<()> {
     manifest.save_if_changed()?;
 
     // Remove unused entries from lock file
-    lock.remove_unused(&manifest.actions);
+    // Clone the actions to avoid borrow issues with trait methods
+    let actions_for_cleanup: HashMap<String, String> = manifest.actions().clone();
+    lock.remove_unused(&actions_for_cleanup);
 
     // Save lock file only if changed
     lock.save_if_changed()?;
 
     // Apply manifest versions to workflows using SHAs from lock file
-    if manifest.actions.is_empty() {
-        info!("No actions defined in {}", manifest.path()?.display());
+    if manifest.actions().is_empty() {
+        info!("No actions found in {}", manifest.path()?.display());
         return Ok(());
     }
 
     // Build update map with SHAs from lock file and version comments from manifest
-    let update_map = lock.build_update_map(&manifest.actions);
+    let update_map = lock.build_update_map(manifest.actions());
     let results = updater.update_all(&update_map)?;
     print_update_results(&results);
 
@@ -208,22 +205,22 @@ fn select_version(versions: &[String]) -> String {
         .to_string()
 }
 
-fn update_lock_file(
-    lock: &mut LockFile,
-    manifest: &mut Manifest,
+fn update_lock_file<M: Manifest, L: Lock>(
+    lock: &mut L,
+    manifest: &mut M,
     action_versions: &ActionVersions,
 ) -> Result<Vec<VersionCorrection>> {
     let mut corrections = Vec::new();
 
     // Check if there are any actions that need resolving
     let needs_resolving = manifest
-        .actions
+        .actions()
         .iter()
         .any(|(action, version)| !lock.has(action, version));
 
     // Also check if any actions have SHAs that need validation
     let has_workflow_shas = manifest
-        .actions
+        .actions()
         .keys()
         .any(|action| action_versions.get_sha(action).is_some());
 
@@ -233,8 +230,11 @@ fn update_lock_file(
 
     let github = GitHubClient::from_env()?;
 
+    // Clone actions to avoid borrow issues with trait methods
+    let actions_snapshot: HashMap<String, String> = manifest.actions().clone();
+
     // Process each action in manifest
-    for (action, version) in &manifest.actions.clone() {
+    for (action, version) in &actions_snapshot {
         // Check if workflow has a SHA for this action
         if let Some(workflow_sha) = action_versions.get_sha(action) {
             // Validate that version comment matches the SHA and determine correct version

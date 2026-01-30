@@ -5,7 +5,41 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-const LOCK_FILE_NAME: &str = "gx.lock";
+pub const LOCK_FILE_NAME: &str = "gx.lock";
+
+/// Trait defining operations on a lock file (action@version → SHA mapping)
+pub trait Lock {
+    /// Get a reference to the actions map
+    fn actions(&self) -> &HashMap<String, String>;
+
+    /// Set or update a locked action version with its commit SHA
+    fn set(&mut self, action: &str, version: &str, commit_sha: String);
+
+    /// Get the locked commit SHA for an action@version
+    fn get(&self, action: &str, version: &str) -> Option<&String>;
+
+    /// Check if lock file has an entry for the given action@version
+    fn has(&self, action: &str, version: &str) -> bool;
+
+    /// Remove entries for actions no longer in use
+    fn remove_unused(&mut self, used_actions: &HashMap<String, String>);
+
+    /// Build a map of action names to "SHA # version" for workflow updates
+    /// Takes versions from the manifest and SHAs from the lock
+    fn build_update_map(
+        &self,
+        manifest_actions: &HashMap<String, String>,
+    ) -> HashMap<String, String>;
+
+    /// Save the lock file only if there were changes
+    ///
+    /// Required for file-based lock files. It's a no-op for in-memory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if saving is required but fails.
+    fn save_if_changed(&mut self) -> Result<(), LockFileError>;
+}
 
 /// Errors that can occur when working with lock files
 #[derive(Debug, Error)]
@@ -35,14 +69,14 @@ pub enum LockFileError {
     Serialize(#[source] toml::ser::Error),
 
     #[error(
-        "`LockFile.path` not initialized. Use load_from_repo or load to create a LockFile with a path."
+        "`LockFile.path` not initialized. Use load_or_default or load to create a LockFile with a path."
     )]
     PathNotInitialized(),
 }
 
 /// Lock file structure that maps action@version to resolved commit SHA
 #[derive(Debug, Default, Deserialize, Serialize)]
-pub struct LockFile {
+pub struct FileLock {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub actions: HashMap<String, String>,
     #[serde(skip)]
@@ -51,7 +85,7 @@ pub struct LockFile {
     changed: bool,
 }
 
-impl LockFile {
+impl FileLock {
     /// Get the path of the lock file.
     ///
     /// # Errors
@@ -74,7 +108,7 @@ impl LockFile {
             source,
         })?;
 
-        let mut lock: LockFile =
+        let mut lock: FileLock =
             toml::from_str(&content).map_err(|source| LockFileError::Parse {
                 path: path.to_path_buf(),
                 source: Box::new(source),
@@ -101,16 +135,6 @@ impl LockFile {
         }
     }
 
-    /// Load the lock file from the repository's `.github` folder, or return a default.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the file exists but cannot be read or parsed.
-    pub fn load_from_repo_or_default(repo_root: &Path) -> Result<Self, LockFileError> {
-        let lock_path = repo_root.join(".github").join(LOCK_FILE_NAME);
-        Self::load_or_default(&lock_path)
-    }
-
     /// Save the lock file to disk.
     ///
     /// # Errors
@@ -130,18 +154,14 @@ impl LockFile {
         info!("Lock file updated: {}", path.display());
         Ok(())
     }
+}
 
-    /// Save the lock file only if there were changes.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if saving is required but fails.
-    pub fn save_if_changed(&self) -> Result<(), LockFileError> {
-        if self.changed { self.save() } else { Ok(()) }
+impl Lock for FileLock {
+    fn actions(&self) -> &HashMap<String, String> {
+        &self.actions
     }
 
-    /// Set or update a locked action version
-    pub fn set(&mut self, action: &str, version: &str, commit_sha: String) {
+    fn set(&mut self, action: &str, version: &str, commit_sha: String) {
         let key = format!("{action}@{version}");
         let existing = self.actions.get(&key);
         if existing != Some(&commit_sha) {
@@ -150,15 +170,17 @@ impl LockFile {
         }
     }
 
-    /// Get the locked commit SHA for an action@version
-    #[must_use]
-    pub fn get(&self, action: &str, version: &str) -> Option<&String> {
+    fn get(&self, action: &str, version: &str) -> Option<&String> {
         let key = format!("{action}@{version}");
         self.actions.get(&key)
     }
 
-    /// Remove entries for actions no longer in use
-    pub fn remove_unused(&mut self, used_actions: &HashMap<String, String>) {
+    fn has(&self, action: &str, version: &str) -> bool {
+        let key = format!("{action}@{version}");
+        self.actions.contains_key(&key)
+    }
+
+    fn remove_unused(&mut self, used_actions: &HashMap<String, String>) {
         let used_keys: std::collections::HashSet<String> = used_actions
             .iter()
             .map(|(action, version)| format!("{action}@{version}"))
@@ -171,17 +193,7 @@ impl LockFile {
         }
     }
 
-    /// Check if lock file has an entry for the given action@version
-    #[must_use]
-    pub fn has(&self, action: &str, version: &str) -> bool {
-        let key = format!("{action}@{version}");
-        self.actions.contains_key(&key)
-    }
-
-    /// Build a map of action names to "SHA # version" for workflow updates
-    /// Takes versions from the manifest and SHAs from the lock file
-    #[must_use]
-    pub fn build_update_map(
+    fn build_update_map(
         &self,
         manifest_actions: &HashMap<String, String>,
     ) -> HashMap<String, String> {
@@ -199,6 +211,68 @@ impl LockFile {
         }
 
         update_map
+    }
+
+    fn save_if_changed(&mut self) -> Result<(), LockFileError> {
+        if self.changed { self.save() } else { Ok(()) }
+    }
+}
+
+/// In-memory lock file that doesn't persist to disk
+#[derive(Debug, Default)]
+pub struct MemoryLock {
+    actions: HashMap<String, String>,
+}
+
+impl Lock for MemoryLock {
+    fn actions(&self) -> &HashMap<String, String> {
+        &self.actions
+    }
+
+    fn set(&mut self, action: &str, version: &str, commit_sha: String) {
+        let key = format!("{action}@{version}");
+        self.actions.insert(key, commit_sha);
+    }
+
+    fn get(&self, action: &str, version: &str) -> Option<&String> {
+        let key = format!("{action}@{version}");
+        self.actions.get(&key)
+    }
+
+    fn has(&self, action: &str, version: &str) -> bool {
+        let key = format!("{action}@{version}");
+        self.actions.contains_key(&key)
+    }
+
+    fn remove_unused(&mut self, used_actions: &HashMap<String, String>) {
+        let used_keys: std::collections::HashSet<String> = used_actions
+            .iter()
+            .map(|(action, version)| format!("{action}@{version}"))
+            .collect();
+
+        self.actions.retain(|key, _| used_keys.contains(key));
+    }
+
+    fn build_update_map(
+        &self,
+        manifest_actions: &HashMap<String, String>,
+    ) -> HashMap<String, String> {
+        let mut update_map = HashMap::new();
+
+        for (action, version) in manifest_actions {
+            if let Some(sha) = self.get(action, version) {
+                let update_value = format!("{sha} # {version}");
+                update_map.insert(action.clone(), update_value);
+            } else {
+                update_map.insert(action.clone(), version.clone());
+            }
+        }
+
+        update_map
+    }
+
+    fn save_if_changed(&mut self) -> Result<(), LockFileError> {
+        Ok(()) // no-op for in-memory
     }
 }
 
@@ -219,7 +293,7 @@ mod tests {
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
-        let lock = LockFile::load(file.path()).unwrap();
+        let lock = FileLock::load(file.path()).unwrap();
 
         assert_eq!(
             lock.get("actions/checkout", "v4"),
@@ -238,7 +312,7 @@ mod tests {
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
-        let lock = LockFile::load(file.path()).unwrap();
+        let lock = FileLock::load(file.path()).unwrap();
         assert!(lock.actions.is_empty());
     }
 
@@ -251,7 +325,7 @@ mod tests {
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
-        let lock = LockFile::load_or_default(file.path()).unwrap();
+        let lock = FileLock::load_or_default(file.path()).unwrap();
         assert_eq!(
             lock.get("actions/checkout", "v4"),
             Some(&"abc123".to_string())
@@ -260,13 +334,13 @@ mod tests {
 
     #[test]
     fn test_load_or_default_missing() {
-        let lock = LockFile::load_or_default(Path::new("/nonexistent/path/gx.lock")).unwrap();
+        let lock = FileLock::load_or_default(Path::new("/nonexistent/path/gx.lock")).unwrap();
         assert!(lock.actions.is_empty());
     }
 
     #[test]
     fn test_save_and_load() {
-        let mut lock = LockFile::default();
+        let mut lock = FileLock::default();
         lock.set("actions/checkout", "v4", "abc123def456".to_string());
         lock.set("actions/setup-node", "v3", "789xyz012".to_string());
 
@@ -274,7 +348,7 @@ mod tests {
         lock.path = Some(file.path().to_path_buf());
         lock.save().unwrap();
 
-        let loaded = LockFile::load(file.path()).unwrap();
+        let loaded = FileLock::load(file.path()).unwrap();
         assert_eq!(
             loaded.get("actions/checkout", "v4"),
             Some(&"abc123def456".to_string())
@@ -287,7 +361,7 @@ mod tests {
 
     #[test]
     fn test_path_not_initialized_error() {
-        let lock = LockFile::default();
+        let lock = FileLock::default();
         let result = lock.path();
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
@@ -296,14 +370,14 @@ mod tests {
 
     #[test]
     fn test_save_without_path_fails() {
-        let lock = LockFile::default();
+        let lock = FileLock::default();
         let result = lock.save();
         assert!(result.is_err());
     }
 
     #[test]
     fn test_set_and_get() {
-        let mut lock = LockFile::default();
+        let mut lock = FileLock::default();
         lock.set("actions/checkout", "v4", "abc123".to_string());
 
         assert_eq!(
@@ -315,7 +389,7 @@ mod tests {
 
     #[test]
     fn test_has() {
-        let mut lock = LockFile::default();
+        let mut lock = FileLock::default();
         lock.set("actions/checkout", "v4", "abc123".to_string());
 
         assert!(lock.has("actions/checkout", "v4"));
@@ -325,7 +399,7 @@ mod tests {
 
     #[test]
     fn test_remove_unused() {
-        let mut lock = LockFile::default();
+        let mut lock = FileLock::default();
         lock.set("actions/checkout", "v4", "abc123".to_string());
         lock.set("actions/setup-node", "v3", "def456".to_string());
         lock.set("actions/old-action", "v1", "xyz789".to_string());
@@ -343,7 +417,7 @@ mod tests {
 
     #[test]
     fn test_update_existing_sha() {
-        let mut lock = LockFile::default();
+        let mut lock = FileLock::default();
         lock.set("actions/checkout", "v4", "old_sha".to_string());
         lock.set("actions/checkout", "v4", "new_sha".to_string());
 
@@ -355,7 +429,7 @@ mod tests {
 
     #[test]
     fn test_build_update_map() {
-        let mut lock = LockFile::default();
+        let mut lock = FileLock::default();
         lock.set("actions/checkout", "v4", "abc123def456".to_string());
         lock.set("actions/setup-node", "v3", "789xyz012".to_string());
 
@@ -377,7 +451,7 @@ mod tests {
 
     #[test]
     fn test_build_update_map_fallback_to_version() {
-        let lock = LockFile::default(); // Empty lock file
+        let lock = FileLock::default(); // Empty lock file
 
         let mut manifest_actions = HashMap::new();
         manifest_actions.insert("actions/checkout".to_string(), "v4".to_string());

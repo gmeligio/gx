@@ -1,6 +1,9 @@
 use gx::commands::tidy;
+use gx::lock::{FileLock, MemoryLock};
+use gx::manifest::{FileManifest, MemoryManifest};
 use std::fs;
 use std::io::Write;
+use std::path::Path;
 use tempfile::TempDir;
 
 fn create_test_repo(temp_dir: &TempDir) -> std::path::PathBuf {
@@ -11,8 +14,30 @@ fn create_test_repo(temp_dir: &TempDir) -> std::path::PathBuf {
     root.to_path_buf()
 }
 
+/// Helper to run tidy with appropriate DI based on manifest existence (same logic as main.rs)
+fn run_tidy(repo_root: &Path) -> anyhow::Result<()> {
+    let manifest_path = repo_root.join(".github").join("gx.toml");
+    let lock_path = repo_root.join(".github").join("gx.lock");
+
+    if manifest_path.exists() {
+        let manifest = FileManifest::load_or_default(&manifest_path)?;
+        let lock = FileLock::load_or_default(&lock_path)?;
+        tidy::run(repo_root, manifest, lock)
+    } else {
+        let manifest = MemoryManifest::default();
+        let lock = MemoryLock::default();
+        tidy::run(repo_root, manifest, lock)
+    }
+}
+
+/// Helper to create an empty manifest file (triggers file-backed mode)
+fn create_empty_manifest(root: &Path) {
+    let manifest_path = root.join(".github").join("gx.toml");
+    fs::write(&manifest_path, "[actions]\n").unwrap();
+}
+
 #[test]
-fn test_gx_tidy_creates_manifest_from_workflows() {
+fn test_gx_tidy_memory_only_mode_no_manifest_created() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -32,11 +57,59 @@ jobs:
         .write_all(workflow_content.as_bytes())
         .unwrap();
 
-    // Execute command
-    let result = tidy::run(&root);
+    // Execute command (memory-only mode since no manifest exists)
+    let result = run_tidy(&root);
     assert!(result.is_ok());
 
-    // Verify manifest was created
+    // Verify NO manifest was created (memory-only mode)
+    let manifest_path = root.join(".github").join("gx.toml");
+    assert!(
+        !manifest_path.exists(),
+        "Manifest should not be created in memory-only mode"
+    );
+
+    // Verify NO lock file was created
+    let lock_path = root.join(".github").join("gx.lock");
+    assert!(
+        !lock_path.exists(),
+        "Lock file should not be created in memory-only mode"
+    );
+
+    // Workflow should remain unchanged in memory-only mode (no SHAs resolved)
+    let workflow_content_after = fs::read_to_string(&workflow_path).unwrap();
+    assert!(workflow_content_after.contains("actions/checkout@v4"));
+    assert!(workflow_content_after.contains("actions/setup-node@v3"));
+}
+
+#[test]
+fn test_gx_tidy_file_mode_creates_manifest_from_workflows() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = create_test_repo(&temp_dir);
+
+    // Create empty manifest to trigger file-backed mode
+    create_empty_manifest(&root);
+
+    // Create workflow
+    let workflow_content = "name: CI
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v3
+";
+    let workflow_path = root.join(".github").join("workflows").join("ci.yml");
+    let mut workflow_file = fs::File::create(&workflow_path).unwrap();
+    workflow_file
+        .write_all(workflow_content.as_bytes())
+        .unwrap();
+
+    // Execute command (file-backed mode since manifest exists)
+    let result = run_tidy(&root);
+    assert!(result.is_ok());
+
+    // Verify manifest was updated
     let manifest_path = root.join(".github").join("gx.toml");
     assert!(manifest_path.exists());
 
@@ -81,7 +154,7 @@ jobs:
         .unwrap();
 
     // Execute command
-    let result = tidy::run(&root);
+    let result = run_tidy(&root);
     assert!(result.is_ok());
 
     // Verify workflow was updated
@@ -122,7 +195,7 @@ jobs:
         .unwrap();
 
     // Execute command
-    let result = tidy::run(&root);
+    let result = run_tidy(&root);
     assert!(result.is_ok());
 
     // Verify unused action was removed from manifest
@@ -163,7 +236,7 @@ jobs:
         .unwrap();
 
     // Execute command
-    let result = tidy::run(&root);
+    let result = run_tidy(&root);
     assert!(result.is_ok());
 
     // Verify missing actions were added
@@ -203,7 +276,7 @@ jobs:
         .unwrap();
 
     // Execute command
-    let result = tidy::run(&root);
+    let result = run_tidy(&root);
     assert!(result.is_ok());
 
     // Verify manifest keeps v4 (manifest is source of truth for versions)
@@ -219,6 +292,9 @@ jobs:
 fn test_gx_tidy_multiple_workflows() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
+
+    // Create empty manifest to trigger file-backed mode
+    create_empty_manifest(&root);
 
     // Create first workflow
     let ci_content = "name: CI
@@ -243,7 +319,7 @@ jobs:
     deploy_file.write_all(deploy_content.as_bytes()).unwrap();
 
     // Execute command
-    let result = tidy::run(&root);
+    let result = run_tidy(&root);
     assert!(result.is_ok());
 
     // Verify manifest contains actions from both workflows
@@ -257,6 +333,9 @@ jobs:
 fn test_gx_tidy_skips_local_actions() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
+
+    // Create empty manifest to trigger file-backed mode
+    create_empty_manifest(&root);
 
     // Create workflow with local action
     let workflow_content = "name: CI
@@ -274,7 +353,7 @@ jobs:
         .unwrap();
 
     // Execute command
-    let result = tidy::run(&root);
+    let result = run_tidy(&root);
     assert!(result.is_ok());
 
     // Verify manifest only contains remote action
@@ -293,7 +372,7 @@ fn test_gx_tidy_no_workflows() {
     // No workflows, just empty directory
 
     // Execute command - should succeed
-    let result = tidy::run(&root);
+    let result = run_tidy(&root);
     assert!(result.is_ok());
 }
 
@@ -318,7 +397,7 @@ jobs:
         .unwrap();
 
     // Execute command - should succeed
-    let result = tidy::run(&root);
+    let result = run_tidy(&root);
     assert!(result.is_ok());
 }
 
@@ -326,6 +405,9 @@ jobs:
 fn test_gx_tidy_multiple_versions_picks_highest() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
+
+    // Create empty manifest to trigger file-backed mode
+    create_empty_manifest(&root);
 
     // Create workflow with different versions in different jobs
     let workflow_content = "name: CI
@@ -344,7 +426,7 @@ jobs:
         .unwrap();
 
     // Execute command
-    let result = tidy::run(&root);
+    let result = run_tidy(&root);
     assert!(result.is_ok());
 
     // Verify manifest has single global version (highest semver = v4)
@@ -362,6 +444,9 @@ jobs:
 fn test_gx_tidy_multiple_workflows_unified_version() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
+
+    // Create empty manifest to trigger file-backed mode
+    create_empty_manifest(&root);
 
     // Create two workflows with different versions
     let ci_content = "name: CI
@@ -385,7 +470,7 @@ jobs:
     deploy_file.write_all(deploy_content.as_bytes()).unwrap();
 
     // Execute command
-    let result = tidy::run(&root);
+    let result = run_tidy(&root);
     assert!(result.is_ok());
 
     // Verify manifest has single global version (highest = v4)
@@ -403,6 +488,9 @@ fn test_gx_tidy_idempotent() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
+    // Create empty manifest to trigger file-backed mode
+    create_empty_manifest(&root);
+
     // Create workflow
     let workflow_content = "name: CI
 jobs:
@@ -417,13 +505,13 @@ jobs:
         .unwrap();
 
     // Execute command twice
-    let result1 = tidy::run(&root);
+    let result1 = run_tidy(&root);
     assert!(result1.is_ok());
 
     let manifest_after_first = fs::read_to_string(root.join(".github").join("gx.toml")).unwrap();
     let workflow_after_first = fs::read_to_string(&workflow_path).unwrap();
 
-    let result2 = tidy::run(&root);
+    let result2 = run_tidy(&root);
     assert!(result2.is_ok());
 
     let manifest_after_second = fs::read_to_string(root.join(".github").join("gx.toml")).unwrap();
@@ -438,6 +526,9 @@ jobs:
 fn test_gx_tidy_with_sha_and_comment() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
+
+    // Create empty manifest to trigger file-backed mode
+    create_empty_manifest(&root);
 
     // Create workflow with SHA and comment tag
     let workflow_content = "name: CI
@@ -454,7 +545,7 @@ jobs:
         .unwrap();
 
     // Execute command
-    let result = tidy::run(&root);
+    let result = run_tidy(&root);
     assert!(result.is_ok());
 
     // Verify manifest contains version tags from comments, not SHAs
@@ -476,6 +567,9 @@ jobs:
 fn test_gx_tidy_real_world_workflow_format() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
+
+    // Create empty manifest to trigger file-backed mode
+    create_empty_manifest(&root);
 
     // Create workflow with real-world format (name, SHA, and version comment)
     let workflow_content = "on:
@@ -501,7 +595,7 @@ jobs:
         .unwrap();
 
     // Execute command
-    let result = tidy::run(&root);
+    let result = run_tidy(&root);
     assert!(result.is_ok());
 
     // Verify manifest contains version tags from comments, not SHAs
