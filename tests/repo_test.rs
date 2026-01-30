@@ -1,3 +1,4 @@
+use gx::repo;
 use std::env;
 use std::fs;
 use tempfile::TempDir;
@@ -26,7 +27,7 @@ fn test_find_root_with_github_folder() {
     let original_dir = env::current_dir().unwrap();
     env::set_current_dir(root).unwrap();
 
-    let result = gx::repo::find_root();
+    let result = repo::find_root();
 
     // Restore original directory
     env::set_current_dir(original_dir).unwrap();
@@ -49,16 +50,14 @@ fn test_find_root_without_github_folder() {
     let original_dir = env::current_dir().unwrap();
     env::set_current_dir(root).unwrap();
 
-    let result = gx::repo::find_root();
+    let result = repo::find_root();
 
     // Restore original directory
     env::set_current_dir(original_dir).unwrap();
 
     assert!(result.is_err());
-    let error = result.unwrap_err();
-    assert!(
-        error
-            .downcast_ref::<gx::error::GithubFolderNotFound>()
-            .is_some()
-    );
+    assert!(matches!(
+        result.unwrap_err(),
+        repo::RepoError::GithubFolder()
+    ));
 }

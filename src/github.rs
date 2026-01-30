@@ -3,7 +3,6 @@ use std::env;
 use std::time::Duration;
 use thiserror::Error;
 
-use crate::error::GitHubTokenRequired;
 use crate::git::is_commit_sha;
 
 const GITHUB_API_BASE: &str = "https://api.github.com";
@@ -13,8 +12,12 @@ const REQUEST_TIMEOUT_SECS: u64 = 30;
 /// Errors that can occur when interacting with the GitHub API
 #[derive(Debug, Error)]
 pub enum GitHubError {
-    #[error(transparent)]
-    TokenRequired(#[from] GitHubTokenRequired),
+    #[error(
+        "GITHUB_TOKEN environment variable is required for this operation.\n\
+         Set it with: export GITHUB_TOKEN=<your-token>\n\
+         Create a token at: https://github.com/settings/tokens"
+    )]
+    TokenRequired(),
 
     #[error("failed to create HTTP client")]
     ClientInit(#[source] reqwest::Error),
@@ -139,7 +142,7 @@ impl GitHubClient {
     }
 
     fn fetch_ref(&self, url: &str) -> Result<String, GitHubError> {
-        let token = self.token.as_ref().ok_or(GitHubTokenRequired)?;
+        let token = self.token.as_ref().ok_or(GitHubError::TokenRequired())?;
 
         let response = self
             .client
@@ -170,7 +173,7 @@ impl GitHubClient {
     }
 
     fn fetch_commit_sha(&self, url: &str) -> Result<String, GitHubError> {
-        let token = self.token.as_ref().ok_or(GitHubTokenRequired)?;
+        let token = self.token.as_ref().ok_or(GitHubError::TokenRequired())?;
 
         let response = self
             .client
@@ -217,7 +220,7 @@ impl GitHubClient {
         owner_repo: &str,
         sha: &str,
     ) -> Result<Vec<String>, GitHubError> {
-        let token = self.token.as_ref().ok_or(GitHubTokenRequired)?;
+        let token = self.token.as_ref().ok_or(GitHubError::TokenRequired())?;
 
         // Handle subpath actions (e.g., "github/codeql-action/upload-sarif")
         let base_repo = owner_repo.split('/').take(2).collect::<Vec<_>>().join("/");

@@ -1,3 +1,4 @@
+use gx::commands::tidy;
 use std::fs;
 use std::io::Write;
 use tempfile::TempDir;
@@ -32,7 +33,7 @@ jobs:
         .unwrap();
 
     // Execute command
-    let result = gx::commands::tidy::run(&root);
+    let result = tidy::run(&root);
     assert!(result.is_ok());
 
     // Verify manifest was created
@@ -80,7 +81,7 @@ jobs:
         .unwrap();
 
     // Execute command
-    let result = gx::commands::tidy::run(&root);
+    let result = tidy::run(&root);
     assert!(result.is_ok());
 
     // Verify workflow was updated
@@ -121,7 +122,7 @@ jobs:
         .unwrap();
 
     // Execute command
-    let result = gx::commands::tidy::run(&root);
+    let result = tidy::run(&root);
     assert!(result.is_ok());
 
     // Verify unused action was removed from manifest
@@ -162,7 +163,7 @@ jobs:
         .unwrap();
 
     // Execute command
-    let result = gx::commands::tidy::run(&root);
+    let result = tidy::run(&root);
     assert!(result.is_ok());
 
     // Verify missing actions were added
@@ -202,7 +203,7 @@ jobs:
         .unwrap();
 
     // Execute command
-    let result = gx::commands::tidy::run(&root);
+    let result = tidy::run(&root);
     assert!(result.is_ok());
 
     // Verify manifest keeps v4 (manifest is source of truth for versions)
@@ -242,7 +243,7 @@ jobs:
     deploy_file.write_all(deploy_content.as_bytes()).unwrap();
 
     // Execute command
-    let result = gx::commands::tidy::run(&root);
+    let result = tidy::run(&root);
     assert!(result.is_ok());
 
     // Verify manifest contains actions from both workflows
@@ -273,7 +274,7 @@ jobs:
         .unwrap();
 
     // Execute command
-    let result = gx::commands::tidy::run(&root);
+    let result = tidy::run(&root);
     assert!(result.is_ok());
 
     // Verify manifest only contains remote action
@@ -292,7 +293,7 @@ fn test_gx_tidy_no_workflows() {
     // No workflows, just empty directory
 
     // Execute command - should succeed
-    let result = gx::commands::tidy::run(&root);
+    let result = tidy::run(&root);
     assert!(result.is_ok());
 }
 
@@ -317,7 +318,7 @@ jobs:
         .unwrap();
 
     // Execute command - should succeed
-    let result = gx::commands::tidy::run(&root);
+    let result = tidy::run(&root);
     assert!(result.is_ok());
 }
 
@@ -343,7 +344,7 @@ jobs:
         .unwrap();
 
     // Execute command
-    let result = gx::commands::tidy::run(&root);
+    let result = tidy::run(&root);
     assert!(result.is_ok());
 
     // Verify manifest has single global version (highest semver = v4)
@@ -384,7 +385,7 @@ jobs:
     deploy_file.write_all(deploy_content.as_bytes()).unwrap();
 
     // Execute command
-    let result = gx::commands::tidy::run(&root);
+    let result = tidy::run(&root);
     assert!(result.is_ok());
 
     // Verify manifest has single global version (highest = v4)
@@ -416,13 +417,13 @@ jobs:
         .unwrap();
 
     // Execute command twice
-    let result1 = gx::commands::tidy::run(&root);
+    let result1 = tidy::run(&root);
     assert!(result1.is_ok());
 
     let manifest_after_first = fs::read_to_string(root.join(".github").join("gx.toml")).unwrap();
     let workflow_after_first = fs::read_to_string(&workflow_path).unwrap();
 
-    let result2 = gx::commands::tidy::run(&root);
+    let result2 = tidy::run(&root);
     assert!(result2.is_ok());
 
     let manifest_after_second = fs::read_to_string(root.join(".github").join("gx.toml")).unwrap();
@@ -453,7 +454,7 @@ jobs:
         .unwrap();
 
     // Execute command
-    let result = gx::commands::tidy::run(&root);
+    let result = tidy::run(&root);
     assert!(result.is_ok());
 
     // Verify manifest contains version tags from comments, not SHAs
@@ -500,7 +501,7 @@ jobs:
         .unwrap();
 
     // Execute command
-    let result = gx::commands::tidy::run(&root);
+    let result = tidy::run(&root);
     assert!(result.is_ok());
 
     // Verify manifest contains version tags from comments, not SHAs
