@@ -1,13 +1,44 @@
-use anyhow::{Context, Result, anyhow};
 use log::info;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use thiserror::Error;
 
 use crate::error::PathNotInitialized;
 
 const LOCK_FILE_NAME: &str = "gx.lock";
+
+/// Errors that can occur when working with lock files
+#[derive(Debug, Error)]
+pub enum LockFileError {
+    #[error("failed to read lock file: {}", path.display())]
+    Read {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("failed to parse lock file: {}", path.display())]
+    Parse {
+        path: PathBuf,
+        #[source]
+        source: Box<toml::de::Error>,
+    },
+
+    #[error("failed to write lock file: {}", path.display())]
+    Write {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("failed to serialize lock file to TOML")]
+    Serialize(#[source] toml::ser::Error),
+
+    #[error(transparent)]
+    PathNotInitialized(#[from] PathNotInitialized),
+}
 
 /// Lock file structure that maps action@version to resolved commit SHA
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -26,24 +57,39 @@ impl LockFile {
     /// # Errors
     ///
     /// Return `PathNotInitialized` if the path is not initialized.
-    pub fn path(&self) -> Result<&Path> {
+    pub fn path(&self) -> Result<&Path, PathNotInitialized> {
         self.path
             .as_deref()
-            .ok_or_else(|| anyhow!(PathNotInitialized::lock_file()))
+            .ok_or_else(PathNotInitialized::lock_file)
     }
 
-    pub fn load(path: &Path) -> Result<Self> {
-        let content = fs::read_to_string(path)
-            .with_context(|| format!("Failed to read lock file: {}", path.display()))?;
+    /// Load a lock file from the given path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be read or parsed.
+    pub fn load(path: &Path) -> Result<Self, LockFileError> {
+        let content = fs::read_to_string(path).map_err(|source| LockFileError::Read {
+            path: path.to_path_buf(),
+            source,
+        })?;
 
-        let mut lock: LockFile = toml::from_str(&content)
-            .with_context(|| format!("Failed to parse lock file: {}", path.display()))?;
+        let mut lock: LockFile =
+            toml::from_str(&content).map_err(|source| LockFileError::Parse {
+                path: path.to_path_buf(),
+                source: Box::new(source),
+            })?;
 
         lock.path = Some(path.to_path_buf());
         Ok(lock)
     }
 
-    pub fn load_or_default(path: &Path) -> Result<Self> {
+    /// Load a lock file from the given path, or return a default if it doesn't exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file exists but cannot be read or parsed.
+    pub fn load_or_default(path: &Path) -> Result<Self, LockFileError> {
         if path.exists() {
             Self::load(path)
         } else {
@@ -55,25 +101,40 @@ impl LockFile {
         }
     }
 
-    pub fn load_from_repo_or_default(repo_root: &Path) -> Result<Self> {
+    /// Load the lock file from the repository's `.github` folder, or return a default.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file exists but cannot be read or parsed.
+    pub fn load_from_repo_or_default(repo_root: &Path) -> Result<Self, LockFileError> {
         let lock_path = repo_root.join(".github").join(LOCK_FILE_NAME);
         Self::load_or_default(&lock_path)
     }
 
-    pub fn save(&self) -> Result<()> {
+    /// Save the lock file to disk.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the path is not initialized, serialization fails, or the file cannot be written.
+    pub fn save(&self) -> Result<(), LockFileError> {
         let path = self.path()?;
-        let content =
-            toml::to_string_pretty(self).context("Failed to serialize lock file to TOML")?;
+        let content = toml::to_string_pretty(self).map_err(LockFileError::Serialize)?;
 
-        fs::write(path, content)
-            .with_context(|| format!("Failed to write lock file: {}", path.display()))?;
+        fs::write(path, content).map_err(|source| LockFileError::Write {
+            path: path.to_path_buf(),
+            source,
+        })?;
 
         info!("Lock file updated: {}", path.display());
         Ok(())
     }
 
-    /// Save the lock file only if there were changes
-    pub fn save_if_changed(&self) -> Result<()> {
+    /// Save the lock file only if there were changes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if saving is required but fails.
+    pub fn save_if_changed(&self) -> Result<(), LockFileError> {
         if self.changed { self.save() } else { Ok(()) }
     }
 

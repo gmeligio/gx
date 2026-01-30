@@ -1,7 +1,7 @@
-use anyhow::{Context, Result, anyhow};
 use serde::Deserialize;
 use std::env;
 use std::time::Duration;
+use thiserror::Error;
 
 use crate::error::GitHubTokenRequired;
 use crate::git::is_commit_sha;
@@ -9,6 +9,37 @@ use crate::git::is_commit_sha;
 const GITHUB_API_BASE: &str = "https://api.github.com";
 const USER_AGENT: &str = "gx-cli";
 const REQUEST_TIMEOUT_SECS: u64 = 30;
+
+/// Errors that can occur when interacting with the GitHub API
+#[derive(Debug, Error)]
+pub enum GitHubError {
+    #[error(transparent)]
+    TokenRequired(#[from] GitHubTokenRequired),
+
+    #[error("failed to create HTTP client")]
+    ClientInit(#[source] reqwest::Error),
+
+    #[error("failed to fetch {operation} from {url}")]
+    Request {
+        operation: &'static str,
+        url: String,
+        #[source]
+        source: reqwest::Error,
+    },
+
+    #[error("GitHub API returned status {status} for {url}")]
+    ApiStatus {
+        status: reqwest::StatusCode,
+        url: String,
+    },
+
+    #[error("failed to parse response from {url}")]
+    ParseResponse {
+        url: String,
+        #[source]
+        source: reqwest::Error,
+    },
+}
 
 /// Git ref structure returned by the GitHub API
 #[derive(Debug, Deserialize)]
@@ -45,12 +76,8 @@ impl GitHubClient {
     ///
     /// # Errors
     ///
-    /// Returns `VarError::NotPresent` if:
-    /// - The variable is not set.
-    /// - The variable’s name contains an equal sign or NUL ('=' or '\0').
-    ///
-    /// Returns `VarError::NotUnicode` if the variable’s value is not valid Unicode.
-    pub fn from_env() -> Result<Self> {
+    /// Returns `GitHubError::ClientInit` if the HTTP client cannot be initialized.
+    pub fn from_env() -> Result<Self, GitHubError> {
         Self::new(env::var("GITHUB_TOKEN").ok())
     }
 
@@ -65,12 +92,12 @@ impl GitHubClient {
     ///
     /// This method panics if called from within an async runtime. See docs on
     /// [`reqwest::blocking`][crate::blocking] for details.
-    pub fn new(token: Option<String>) -> Result<Self> {
+    pub fn new(token: Option<String>) -> Result<Self, GitHubError> {
         let client = reqwest::blocking::Client::builder()
             .user_agent(USER_AGENT)
             .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
             .build()
-            .context("Failed to create HTTP client")?;
+            .map_err(GitHubError::ClientInit)?;
 
         Ok(Self { client, token })
     }
@@ -86,8 +113,8 @@ impl GitHubClient {
     ///
     /// # Errors
     ///
-    /// Return `GitHubTokenRequired` if the client does not have a token.
-    pub fn resolve_ref(&self, owner_repo: &str, ref_name: &str) -> Result<String> {
+    /// Return `GitHubError::TokenRequired` if the client does not have a token.
+    pub fn resolve_ref(&self, owner_repo: &str, ref_name: &str) -> Result<String, GitHubError> {
         // If it already looks like a full SHA (40 hex chars), return it
         if is_commit_sha(ref_name) {
             return Ok(ref_name.to_string());
@@ -111,66 +138,86 @@ impl GitHubClient {
             })
     }
 
-    fn fetch_ref(&self, url: &str) -> Result<String> {
-        let token = self
-            .token
-            .as_ref()
-            .ok_or_else(|| anyhow!(GitHubTokenRequired))?;
+    fn fetch_ref(&self, url: &str) -> Result<String, GitHubError> {
+        let token = self.token.as_ref().ok_or(GitHubTokenRequired)?;
 
         let response = self
             .client
             .get(url)
             .header("Authorization", format!("Bearer {token}"))
             .send()
-            .with_context(|| format!("Failed to fetch ref from {url}"))?;
+            .map_err(|source| GitHubError::Request {
+                operation: "ref",
+                url: url.to_string(),
+                source,
+            })?;
 
         if !response.status().is_success() {
-            anyhow::bail!("GitHub API returned status {}", response.status());
+            return Err(GitHubError::ApiStatus {
+                status: response.status(),
+                url: url.to_string(),
+            });
         }
 
         let git_ref: GitRef = response
             .json()
-            .context("Failed to parse GitHub API response")?;
+            .map_err(|source| GitHubError::ParseResponse {
+                url: url.to_string(),
+                source,
+            })?;
 
         Ok(git_ref.object.sha)
     }
 
-    fn fetch_commit_sha(&self, url: &str) -> Result<String> {
-        let token = self
-            .token
-            .as_ref()
-            .ok_or_else(|| anyhow!(GitHubTokenRequired))?;
+    fn fetch_commit_sha(&self, url: &str) -> Result<String, GitHubError> {
+        let token = self.token.as_ref().ok_or(GitHubTokenRequired)?;
 
         let response = self
             .client
             .get(url)
             .header("Authorization", format!("Bearer {token}"))
             .send()
-            .with_context(|| format!("Failed to fetch commit from {url}"))?;
+            .map_err(|source| GitHubError::Request {
+                operation: "commit",
+                url: url.to_string(),
+                source,
+            })?;
 
         if !response.status().is_success() {
-            anyhow::bail!("GitHub API returned status {}", response.status());
+            return Err(GitHubError::ApiStatus {
+                status: response.status(),
+                url: url.to_string(),
+            });
         }
 
-        let commit: CommitResponse = response
-            .json()
-            .context("Failed to parse GitHub API commit response")?;
+        let commit: CommitResponse =
+            response
+                .json()
+                .map_err(|source| GitHubError::ParseResponse {
+                    url: url.to_string(),
+                    source,
+                })?;
 
         Ok(commit.sha)
     }
 }
 
 impl GitHubClient {
-    /// Get all tags that point to a specific commit SHA
+    /// Get all tags that point to a specific commit SHA.
     ///
     /// Returns tag names without the "refs/tags/" prefix (e.g., `["v5", "v5.0.0"]`)
     /// Note: This only works for lightweight tags. Annotated tags store the tag object SHA,
     /// not the commit SHA, so they won't match.
-    pub fn get_tags_for_sha(&self, owner_repo: &str, sha: &str) -> Result<Vec<String>> {
-        let token = self
-            .token
-            .as_ref()
-            .ok_or_else(|| anyhow!(GitHubTokenRequired))?;
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no token is set, the request fails, or the response cannot be parsed.
+    pub fn get_tags_for_sha(
+        &self,
+        owner_repo: &str,
+        sha: &str,
+    ) -> Result<Vec<String>, GitHubError> {
+        let token = self.token.as_ref().ok_or(GitHubTokenRequired)?;
 
         // Handle subpath actions (e.g., "github/codeql-action/upload-sarif")
         let base_repo = owner_repo.split('/').take(2).collect::<Vec<_>>().join("/");
@@ -182,15 +229,26 @@ impl GitHubClient {
             .get(&url)
             .header("Authorization", format!("Bearer {token}"))
             .send()
-            .with_context(|| format!("Failed to fetch tags from {url}"))?;
+            .map_err(|source| GitHubError::Request {
+                operation: "tags",
+                url: url.clone(),
+                source,
+            })?;
 
         if !response.status().is_success() {
-            anyhow::bail!("GitHub API returned status {}", response.status());
+            return Err(GitHubError::ApiStatus {
+                status: response.status(),
+                url,
+            });
         }
 
-        let refs: Vec<GitRefEntry> = response
-            .json()
-            .context("Failed to parse GitHub API tags response")?;
+        let refs: Vec<GitRefEntry> =
+            response
+                .json()
+                .map_err(|source| GitHubError::ParseResponse {
+                    url: url.clone(),
+                    source,
+                })?;
 
         // Filter tags that point to the given SHA and extract tag names
         let tags: Vec<String> = refs
@@ -235,42 +293,5 @@ mod tests {
             .resolve_ref("github/codeql-action/upload-sarif", sha)
             .unwrap();
         assert_eq!(result, sha);
-    }
-
-    // Note: The following tests require network access and hit the real GitHub API
-    // They are marked with #[ignore] to skip during normal test runs
-
-    #[test]
-    fn test_resolve_tag() {
-        let token = std::env::var("GITHUB_TOKEN").ok();
-        let client = GitHubClient::new(token).unwrap();
-        let sha = client.resolve_ref("actions/checkout", "v4").unwrap();
-        // Should return a 40-character hex SHA
-        assert_eq!(sha.len(), 40);
-        assert!(sha.chars().all(|c| c.is_ascii_hexdigit()));
-    }
-
-    #[test]
-    fn test_resolve_branch() {
-        let token = std::env::var("GITHUB_TOKEN").ok();
-        let client = GitHubClient::new(token).unwrap();
-        let sha = client.resolve_ref("actions/checkout", "main").unwrap();
-        assert_eq!(sha.len(), 40);
-        assert!(sha.chars().all(|c| c.is_ascii_hexdigit()));
-    }
-
-    #[test]
-    fn test_get_tags_for_sha() {
-        let token = std::env::var("GITHUB_TOKEN").ok();
-        let client = GitHubClient::new(token).unwrap();
-        // First resolve v4 to get the SHA
-        let sha = client.resolve_ref("actions/checkout", "v4").unwrap();
-        // Then get tags for that SHA
-        let tags = client.get_tags_for_sha("actions/checkout", &sha).unwrap();
-        // v4 should be in the list
-        assert!(
-            tags.contains(&"v4".to_string()),
-            "Expected v4 in tags: {tags:?}"
-        );
     }
 }

@@ -3,6 +3,11 @@ use std::{env, path::PathBuf};
 
 use crate::error::GithubFolderNotFound;
 
+/// Find the root of the git repository containing the current directory.
+///
+/// # Errors
+///
+/// Returns an error if no git repository is found, the repository is bare, or the `.github` folder is missing.
 pub fn find_root() -> Result<PathBuf> {
     let cwd = env::current_dir()?;
 

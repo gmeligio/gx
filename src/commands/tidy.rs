@@ -3,9 +3,8 @@ use log::{debug, info, warn};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use crate::error::GitHubTokenRequired;
 use crate::git::is_commit_sha;
-use crate::github::GitHubClient;
+use crate::github::{GitHubClient, GitHubError};
 use crate::lock::LockFile;
 use crate::manifest::Manifest;
 use crate::version::find_highest_version;
@@ -58,6 +57,17 @@ impl ActionVersions {
     }
 }
 
+/// Run the tidy command to synchronize workflow actions with the manifest.
+///
+/// # Errors
+///
+/// Returns an error if workflows cannot be read, the manifest or lock file cannot be loaded,
+/// or files cannot be saved.
+///
+/// # Panics
+///
+/// Panics if an action in the intersection of workflow and manifest actions is not found
+/// in the manifest (this should never happen due to the intersection logic).
 pub fn run(repo_root: &Path) -> Result<()> {
     let updater = WorkflowUpdater::new(repo_root);
 
@@ -258,7 +268,7 @@ fn update_lock_file(
                 }
                 Err(e) => {
                     // Log warning and continue. Don't fail the whole operation
-                    if e.downcast_ref::<GitHubTokenRequired>().is_some() {
+                    if matches!(e, GitHubError::TokenRequired(_)) {
                         warn!(
                             "GITHUB_TOKEN not set. Without it, can not validate for {action} that {workflow_sha} commit SHA matches the {version} version."
                         );
@@ -281,7 +291,7 @@ fn update_lock_file(
                     lock.set(action, version, sha);
                 }
                 Err(e) => {
-                    if e.downcast_ref::<GitHubTokenRequired>().is_some() {
+                    if matches!(e, GitHubError::TokenRequired(_)) {
                         warn!(
                             "GITHUB_TOKEN not set. Cannot resolve {action}@{version} to commit SHA."
                         );

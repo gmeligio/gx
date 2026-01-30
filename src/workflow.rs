@@ -1,4 +1,3 @@
-use anyhow::{Context, Result};
 use glob::glob;
 use log::warn;
 use regex::Regex;
@@ -6,8 +5,40 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use thiserror::Error;
 
 use crate::git::is_commit_sha;
+
+/// Errors that can occur when working with workflow files
+#[derive(Debug, Error)]
+pub enum WorkflowError {
+    #[error("failed to read glob pattern")]
+    Glob(#[from] glob::PatternError),
+
+    #[error("failed to read workflow: {}", path.display())]
+    Read {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("failed to parse YAML in workflow: {}", path.display())]
+    Parse {
+        path: PathBuf,
+        #[source]
+        source: serde_yaml_ng::Error,
+    },
+
+    #[error("failed to write workflow: {}", path.display())]
+    Write {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("invalid regex pattern")]
+    Regex(#[from] regex::Error),
+}
 
 pub struct WorkflowUpdater {
     workflows_dir: PathBuf,
@@ -63,7 +94,12 @@ impl WorkflowUpdater {
         }
     }
 
-    pub fn find_workflows(&self) -> Result<Vec<PathBuf>> {
+    /// Find all workflow files in the repository's `.github/workflows` folder.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the glob pattern is invalid.
+    pub fn find_workflows(&self) -> Result<Vec<PathBuf>, WorkflowError> {
         let mut workflows = Vec::new();
 
         for extension in &["yml", "yaml"] {
@@ -73,7 +109,7 @@ impl WorkflowUpdater {
                 .to_string_lossy()
                 .to_string();
 
-            for entry in glob(&pattern).context("Failed to read glob pattern")? {
+            for entry in glob(&pattern)? {
                 match entry {
                     Ok(path) => workflows.push(path),
                     Err(e) => warn!("Error reading path: {e}"),
@@ -84,13 +120,20 @@ impl WorkflowUpdater {
         Ok(workflows)
     }
 
+    /// Update action versions in a single workflow file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be read, the regex pattern is invalid, or the file cannot be written.
     pub fn update_workflow(
         &self,
         workflow_path: &Path,
         actions: &HashMap<String, String>,
-    ) -> Result<UpdateResult> {
-        let content = fs::read_to_string(workflow_path)
-            .with_context(|| format!("Failed to read workflow: {}", workflow_path.display()))?;
+    ) -> Result<UpdateResult, WorkflowError> {
+        let content = fs::read_to_string(workflow_path).map_err(|source| WorkflowError::Read {
+            path: workflow_path.to_path_buf(),
+            source,
+        })?;
 
         let mut updated_content = content.clone();
         let mut changes = Vec::new();
@@ -113,8 +156,9 @@ impl WorkflowUpdater {
         }
 
         if !changes.is_empty() {
-            fs::write(workflow_path, &updated_content).with_context(|| {
-                format!("Failed to write workflow: {}", workflow_path.display())
+            fs::write(workflow_path, &updated_content).map_err(|source| WorkflowError::Write {
+                path: workflow_path.to_path_buf(),
+                source,
             })?;
         }
 
@@ -124,7 +168,15 @@ impl WorkflowUpdater {
         })
     }
 
-    pub fn update_all(&self, actions: &HashMap<String, String>) -> Result<Vec<UpdateResult>> {
+    /// Update action versions in all workflow files.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any workflow file cannot be processed.
+    pub fn update_all(
+        &self,
+        actions: &HashMap<String, String>,
+    ) -> Result<Vec<UpdateResult>, WorkflowError> {
         let workflows = self.find_workflows()?;
         let mut results = Vec::new();
 
@@ -138,9 +190,19 @@ impl WorkflowUpdater {
         Ok(results)
     }
 
-    pub fn extract_actions(&self, workflow_path: &Path) -> Result<Vec<ExtractedAction>> {
-        let content = fs::read_to_string(workflow_path)
-            .with_context(|| format!("Failed to read workflow: {}", workflow_path.display()))?;
+    /// Extract all actions from a single workflow file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be read, parsed as YAML, or the regex pattern is invalid.
+    pub fn extract_actions(
+        &self,
+        workflow_path: &Path,
+    ) -> Result<Vec<ExtractedAction>, WorkflowError> {
+        let content = fs::read_to_string(workflow_path).map_err(|source| WorkflowError::Read {
+            path: workflow_path.to_path_buf(),
+            source,
+        })?;
 
         let workflow_name = workflow_path
             .file_name()
@@ -166,9 +228,11 @@ impl WorkflowUpdater {
         }
 
         // Parse YAML to get structured job/step info
-        let workflow: Workflow = serde_yaml_ng::from_str(&content).with_context(|| {
-            format!("Failed to parse workflow YAML: {}", workflow_path.display())
-        })?;
+        let workflow: Workflow =
+            serde_yaml_ng::from_str(&content).map_err(|source| WorkflowError::Parse {
+                path: workflow_path.to_path_buf(),
+                source,
+            })?;
 
         // Pattern to parse uses: owner/repo@ref
         let uses_re = Regex::new(r"^([^@\s]+)@([^\s#]+)")?;
@@ -220,7 +284,12 @@ impl WorkflowUpdater {
         Ok(actions)
     }
 
-    pub fn extract_all(&self) -> Result<Vec<ExtractedAction>> {
+    /// Extract all actions from all workflow files.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any workflow file cannot be processed.
+    pub fn extract_all(&self) -> Result<Vec<ExtractedAction>, WorkflowError> {
         let workflows = self.find_workflows()?;
         let mut all_actions = Vec::new();
 

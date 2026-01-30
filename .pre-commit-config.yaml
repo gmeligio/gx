@@ -8,10 +8,10 @@ repos:
             pass_filenames: false
             types: [file, rust]
             language: system
-          # - id: cargo-linter
-          #   name: Cargo Linter
-          #   description: Run cargo linter on files included in the commit. clippy should be installed before-hand.
-          #   entry: cargo clippy --fix
-          #   pass_filenames: false
-          #   types: [file, rust]
-          #   language: system
+          - id: cargo-linter
+            name: Cargo Linter
+            description: Run cargo linter on files included in the commit. clippy should be installed before-hand.
+            entry: cargo clippy --fix --allow-dirty
+            pass_filenames: false
+            types: [file, rust]
+            language: system
