@@ -19,6 +19,10 @@ pub struct Manifest {
 }
 
 impl Manifest {
+    /// Get the path to the manifest file
+    ///
+    /// # Errors
+    /// Returns `PathNotInitialized` if the path has not been initialized
     pub fn path(&self) -> Result<&Path> {
         self.path
             .as_deref()

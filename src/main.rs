@@ -27,9 +27,10 @@ fn main() -> Result<()> {
 
     let mut builder = env_logger::builder();
     builder
-        .filter_level(match cli.verbose {
-            true => LevelFilter::Debug,
-            false => LevelFilter::Info,
+        .filter_level(if cli.verbose {
+            LevelFilter::Debug
+        } else {
+            LevelFilter::Info
         })
         .format(|buf, record| {
             let level = record.level();

@@ -88,6 +88,7 @@ impl LockFile {
     }
 
     /// Get the locked commit SHA for an action@version
+    #[must_use]
     pub fn get(&self, action: &str, version: &str) -> Option<&String> {
         let key = format!("{action}@{version}");
         self.actions.get(&key)
@@ -108,6 +109,7 @@ impl LockFile {
     }
 
     /// Check if lock file has an entry for the given action@version
+    #[must_use]
     pub fn has(&self, action: &str, version: &str) -> bool {
         let key = format!("{action}@{version}");
         self.actions.contains_key(&key)
@@ -115,6 +117,7 @@ impl LockFile {
 
     /// Build a map of action names to "SHA # version" for workflow updates
     /// Takes versions from the manifest and SHAs from the lock file
+    #[must_use]
     pub fn build_update_map(
         &self,
         manifest_actions: &HashMap<String, String>,

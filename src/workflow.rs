@@ -56,6 +56,7 @@ struct Step {
 }
 
 impl WorkflowUpdater {
+    #[must_use]
     pub fn new(repo_root: &Path) -> Self {
         Self {
             workflows_dir: repo_root.join(".github").join("workflows"),
@@ -262,7 +263,7 @@ mod tests {
     #[test]
     fn test_update_workflow() {
         let temp_dir = TempDir::new().unwrap();
-        let content = r#"name: CI
+        let content = "name: CI
 on: push
 jobs:
   build:
@@ -270,27 +271,29 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-node@v3
-"#;
+";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let updater = WorkflowUpdater::new(temp_dir.path());
+        let workflow_updater = WorkflowUpdater::new(temp_dir.path());
         let mut actions = HashMap::new();
         actions.insert("actions/checkout".to_string(), "v4".to_string());
 
-        let result = updater.update_workflow(&workflow_path, &actions).unwrap();
+        let result = workflow_updater
+            .update_workflow(&workflow_path, &actions)
+            .unwrap();
 
         assert_eq!(result.changes.len(), 1);
         assert!(result.changes[0].contains("actions/checkout@v4"));
 
-        let updated = fs::read_to_string(&workflow_path).unwrap();
-        assert!(updated.contains("actions/checkout@v4"));
-        assert!(updated.contains("actions/setup-node@v3")); // unchanged
+        let updated_workflow = fs::read_to_string(&workflow_path).unwrap();
+        assert!(updated_workflow.contains("actions/checkout@v4"));
+        assert!(updated_workflow.contains("actions/setup-node@v3")); // unchanged
     }
 
     #[test]
     fn test_extract_actions() {
         let temp_dir = TempDir::new().unwrap();
-        let content = r#"name: CI
+        let content = "name: CI
 on: push
 jobs:
   build:
@@ -299,7 +302,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v3
       - uses: docker/build-push-action@v5
-"#;
+";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
         let updater = WorkflowUpdater::new(temp_dir.path());
@@ -323,14 +326,14 @@ jobs:
     #[test]
     fn test_extract_actions_skips_local() {
         let temp_dir = TempDir::new().unwrap();
-        let content = r#"name: CI
+        let content = "name: CI
 jobs:
   build:
     steps:
       - uses: actions/checkout@v4
       - uses: ./local/action
       - uses: ./.github/actions/my-action
-"#;
+";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
         let updater = WorkflowUpdater::new(temp_dir.path());
@@ -343,7 +346,7 @@ jobs:
     #[test]
     fn test_extract_actions_multiple_jobs() {
         let temp_dir = TempDir::new().unwrap();
-        let content = r#"name: CI
+        let content = "name: CI
 jobs:
   build:
     steps:
@@ -352,7 +355,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-node@v3
-"#;
+";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
         let updater = WorkflowUpdater::new(temp_dir.path());
@@ -397,13 +400,13 @@ jobs:
     #[test]
     fn test_extract_actions_with_sha_and_comment() {
         let temp_dir = TempDir::new().unwrap();
-        let content = r#"name: CI
+        let content = "name: CI
 jobs:
   build:
     steps:
       - uses: actions/checkout@abc123def456 # v4
       - uses: actions/setup-node@xyz789 #v3
-"#;
+";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
         let updater = WorkflowUpdater::new(temp_dir.path());
@@ -427,12 +430,12 @@ jobs:
     #[test]
     fn test_extract_actions_comment_without_v_prefix() {
         let temp_dir = TempDir::new().unwrap();
-        let content = r#"name: CI
+        let content = "name: CI
 jobs:
   build:
     steps:
       - uses: actions/checkout@abc123 # 4
-"#;
+";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
         let updater = WorkflowUpdater::new(temp_dir.path());
@@ -446,12 +449,12 @@ jobs:
     #[test]
     fn test_extract_actions_tag_without_comment() {
         let temp_dir = TempDir::new().unwrap();
-        let content = r#"name: CI
+        let content = "name: CI
 jobs:
   build:
     steps:
       - uses: actions/checkout@v4
-"#;
+";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
         let updater = WorkflowUpdater::new(temp_dir.path());
@@ -464,12 +467,12 @@ jobs:
     #[test]
     fn test_extract_actions_sha_without_comment() {
         let temp_dir = TempDir::new().unwrap();
-        let content = r#"name: CI
+        let content = "name: CI
 jobs:
   build:
     steps:
       - uses: actions/checkout@abc123def456
-"#;
+";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
         let updater = WorkflowUpdater::new(temp_dir.path());
@@ -483,7 +486,7 @@ jobs:
     #[test]
     fn test_extract_actions_real_world_format() {
         let temp_dir = TempDir::new().unwrap();
-        let content = r#"on:
+        let content = "on:
   pull_request:
 
 jobs:
@@ -495,7 +498,7 @@ jobs:
 
       - name: Login
         uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
-"#;
+";
         let workflow_path = create_test_workflow(temp_dir.path(), "test.yml", content);
 
         let updater = WorkflowUpdater::new(temp_dir.path());
@@ -527,12 +530,12 @@ jobs:
     #[test]
     fn test_extract_actions_sha_field_none_for_tag() {
         let temp_dir = TempDir::new().unwrap();
-        let content = r#"name: CI
+        let content = "name: CI
 jobs:
   build:
     steps:
       - uses: actions/checkout@v4
-"#;
+";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
         let updater = WorkflowUpdater::new(temp_dir.path());
@@ -548,12 +551,12 @@ jobs:
     fn test_extract_actions_sha_field_none_for_short_ref() {
         let temp_dir = TempDir::new().unwrap();
         // Short SHA (not 40 chars) with comment
-        let content = r#"name: CI
+        let content = "name: CI
 jobs:
   build:
     steps:
       - uses: actions/checkout@abc123 # v4
-"#;
+";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
         let updater = WorkflowUpdater::new(temp_dir.path());
@@ -568,17 +571,17 @@ jobs:
     #[test]
     fn test_update_workflow_uses_commit_sha() {
         let temp_dir = TempDir::new().unwrap();
-        let content = r#"name: CI
+        let content = "name: CI
 on: push
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-"#;
+";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let updater = WorkflowUpdater::new(temp_dir.path());
+        let workflow_updater = WorkflowUpdater::new(temp_dir.path());
         let mut actions = HashMap::new();
         // Simulate the format from lock.build_update_map(): "SHA # version"
         actions.insert(
@@ -586,7 +589,9 @@ jobs:
             "abc123def456 # v4".to_string(),
         );
 
-        let result = updater.update_workflow(&workflow_path, &actions).unwrap();
+        let result = workflow_updater
+            .update_workflow(&workflow_path, &actions)
+            .unwrap();
 
         assert_eq!(result.changes.len(), 1);
 
@@ -594,8 +599,7 @@ jobs:
         let updated = fs::read_to_string(&workflow_path).unwrap();
         assert!(
             updated.contains("actions/checkout@abc123def456 # v4"),
-            "Expected SHA with comment, got: {}",
-            updated
+            "Expected SHA with comment, got: {updated}"
         );
         assert!(
             !updated.contains("actions/checkout@v4"),
@@ -607,7 +611,7 @@ jobs:
     fn test_update_workflow_no_duplicate_comments() {
         let temp_dir = TempDir::new().unwrap();
         // Start with a workflow that already has a comment
-        let content = r#"name: CI
+        let content = "name: CI
 on: push
 jobs:
   build:
@@ -615,10 +619,10 @@ jobs:
     steps:
       - uses: actions/checkout@v3 # v3
       - uses: actions/setup-node@old_sha # v2
-"#;
+";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let updater = WorkflowUpdater::new(temp_dir.path());
+        let workflow_updater = WorkflowUpdater::new(temp_dir.path());
         let mut actions = HashMap::new();
         // Update both actions with new SHAs
         actions.insert(
@@ -630,7 +634,9 @@ jobs:
             "xyz789012345 # v3".to_string(),
         );
 
-        let result = updater.update_workflow(&workflow_path, &actions).unwrap();
+        let result = workflow_updater
+            .update_workflow(&workflow_path, &actions)
+            .unwrap();
 
         assert_eq!(result.changes.len(), 2);
 
@@ -640,32 +646,27 @@ jobs:
         // Should have the new SHA with new comment
         assert!(
             updated.contains("actions/checkout@abc123def456 # v4"),
-            "Expected new SHA with comment, got: {}",
-            updated
+            "Expected new SHA with comment, got: {updated}"
         );
 
         // Should NOT have duplicate comments like "# v4 # v3"
         assert!(
             !updated.contains("# v4 # v3"),
-            "Found duplicate comment in: {}",
-            updated
+            "Found duplicate comment in: {updated}"
         );
         assert!(
             !updated.contains("# v3 # v3"),
-            "Found duplicate comment in: {}",
-            updated
+            "Found duplicate comment in: {updated}"
         );
 
         // Verify setup-node was also updated correctly
         assert!(
             updated.contains("actions/setup-node@xyz789012345 # v3"),
-            "Expected setup-node with new SHA and comment, got: {}",
-            updated
+            "Expected setup-node with new SHA and comment, got: {updated}"
         );
         assert!(
             !updated.contains("# v3 # v2"),
-            "Found duplicate comment in: {}",
-            updated
+            "Found duplicate comment in: {updated}"
         );
     }
 }

@@ -64,7 +64,7 @@ fn test_gx_tidy_updates_workflows_from_manifest() {
         .unwrap();
 
     // Create workflow with older versions
-    let workflow_content = r#"name: CI
+    let workflow_content = "name: CI
 on: push
 jobs:
   build:
@@ -72,7 +72,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-node@v3
-"#;
+";
     let workflow_path = root.join(".github").join("workflows").join("ci.yml");
     let mut workflow_file = fs::File::create(&workflow_path).unwrap();
     workflow_file
@@ -108,12 +108,12 @@ fn test_gx_tidy_removes_unused_actions() {
         .unwrap();
 
     // Create workflow that only uses checkout
-    let workflow_content = r#"name: CI
+    let workflow_content = "name: CI
 jobs:
   build:
     steps:
       - uses: actions/checkout@v4
-"#;
+";
     let workflow_path = root.join(".github").join("workflows").join("ci.yml");
     let mut workflow_file = fs::File::create(&workflow_path).unwrap();
     workflow_file
@@ -147,14 +147,14 @@ fn test_gx_tidy_adds_missing_actions() {
         .unwrap();
 
     // Create workflow with additional actions
-    let workflow_content = r#"name: CI
+    let workflow_content = "name: CI
 jobs:
   build:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v3
       - uses: docker/build-push-action@v5
-"#;
+";
     let workflow_path = root.join(".github").join("workflows").join("ci.yml");
     let mut workflow_file = fs::File::create(&workflow_path).unwrap();
     workflow_file
@@ -189,12 +189,12 @@ fn test_gx_tidy_preserves_existing_versions() {
         .unwrap();
 
     // Create workflow using older version
-    let workflow_content = r#"name: CI
+    let workflow_content = "name: CI
 jobs:
   build:
     steps:
       - uses: actions/checkout@v3
-"#;
+";
     let workflow_path = root.join(".github").join("workflows").join("ci.yml");
     let mut workflow_file = fs::File::create(&workflow_path).unwrap();
     workflow_file
@@ -220,23 +220,23 @@ fn test_gx_tidy_multiple_workflows() {
     let root = create_test_repo(&temp_dir);
 
     // Create first workflow
-    let ci_content = r#"name: CI
+    let ci_content = "name: CI
 jobs:
   build:
     steps:
       - uses: actions/checkout@v4
-"#;
+";
     let ci_path = root.join(".github").join("workflows").join("ci.yml");
     let mut ci_file = fs::File::create(&ci_path).unwrap();
     ci_file.write_all(ci_content.as_bytes()).unwrap();
 
     // Create second workflow
-    let deploy_content = r#"name: Deploy
+    let deploy_content = "name: Deploy
 jobs:
   deploy:
     steps:
       - uses: docker/build-push-action@v5
-"#;
+";
     let deploy_path = root.join(".github").join("workflows").join("deploy.yml");
     let mut deploy_file = fs::File::create(&deploy_path).unwrap();
     deploy_file.write_all(deploy_content.as_bytes()).unwrap();
@@ -258,14 +258,14 @@ fn test_gx_tidy_skips_local_actions() {
     let root = create_test_repo(&temp_dir);
 
     // Create workflow with local action
-    let workflow_content = r#"name: CI
+    let workflow_content = "name: CI
 jobs:
   build:
     steps:
       - uses: actions/checkout@v4
       - uses: ./local/action
       - uses: ./.github/actions/my-action
-"#;
+";
     let workflow_path = root.join(".github").join("workflows").join("ci.yml");
     let mut workflow_file = fs::File::create(&workflow_path).unwrap();
     workflow_file
@@ -327,7 +327,7 @@ fn test_gx_tidy_multiple_versions_picks_highest() {
     let root = create_test_repo(&temp_dir);
 
     // Create workflow with different versions in different jobs
-    let workflow_content = r#"name: CI
+    let workflow_content = "name: CI
 jobs:
   build:
     steps:
@@ -335,7 +335,7 @@ jobs:
   test:
     steps:
       - uses: actions/checkout@v3
-"#;
+";
     let workflow_path = root.join(".github").join("workflows").join("ci.yml");
     let mut workflow_file = fs::File::create(&workflow_path).unwrap();
     workflow_file
@@ -363,22 +363,22 @@ fn test_gx_tidy_multiple_workflows_unified_version() {
     let root = create_test_repo(&temp_dir);
 
     // Create two workflows with different versions
-    let ci_content = r#"name: CI
+    let ci_content = "name: CI
 jobs:
   build:
     steps:
       - uses: actions/checkout@v4
-"#;
+";
     let ci_path = root.join(".github").join("workflows").join("ci.yml");
     let mut ci_file = fs::File::create(&ci_path).unwrap();
     ci_file.write_all(ci_content.as_bytes()).unwrap();
 
-    let deploy_content = r#"name: Deploy
+    let deploy_content = "name: Deploy
 jobs:
   deploy:
     steps:
       - uses: actions/checkout@v3
-"#;
+";
     let deploy_path = root.join(".github").join("workflows").join("deploy.yml");
     let mut deploy_file = fs::File::create(&deploy_path).unwrap();
     deploy_file.write_all(deploy_content.as_bytes()).unwrap();
@@ -403,12 +403,12 @@ fn test_gx_tidy_idempotent() {
     let root = create_test_repo(&temp_dir);
 
     // Create workflow
-    let workflow_content = r#"name: CI
+    let workflow_content = "name: CI
 jobs:
   build:
     steps:
       - uses: actions/checkout@v4
-"#;
+";
     let workflow_path = root.join(".github").join("workflows").join("ci.yml");
     let mut workflow_file = fs::File::create(&workflow_path).unwrap();
     workflow_file
@@ -439,13 +439,13 @@ fn test_gx_tidy_with_sha_and_comment() {
     let root = create_test_repo(&temp_dir);
 
     // Create workflow with SHA and comment tag
-    let workflow_content = r#"name: CI
+    let workflow_content = "name: CI
 jobs:
   build:
     steps:
       - uses: actions/checkout@abc123def456 # v4
       - uses: actions/setup-node@xyz789 #v3
-"#;
+";
     let workflow_path = root.join(".github").join("workflows").join("ci.yml");
     let mut workflow_file = fs::File::create(&workflow_path).unwrap();
     workflow_file
@@ -477,7 +477,7 @@ fn test_gx_tidy_real_world_workflow_format() {
     let root = create_test_repo(&temp_dir);
 
     // Create workflow with real-world format (name, SHA, and version comment)
-    let workflow_content = r#"on:
+    let workflow_content = "on:
   pull_request:
 
 permissions:
@@ -492,7 +492,7 @@ jobs:
 
       - name: Login to Docker Hub
         uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
-"#;
+";
     let workflow_path = root.join(".github").join("workflows").join("windows.yml");
     let mut workflow_file = fs::File::create(&workflow_path).unwrap();
     workflow_file
@@ -508,17 +508,15 @@ jobs:
     let manifest_content = fs::read_to_string(&manifest_path).unwrap();
 
     println!("=== Manifest content ===");
-    println!("{}", manifest_content);
+    println!("{manifest_content}");
 
     assert!(
         manifest_content.contains("\"actions/checkout\" = \"v6.0.1\""),
-        "Expected v6.0.1 in manifest, got: {}",
-        manifest_content
+        "Expected v6.0.1 in manifest, got: {manifest_content}"
     );
     assert!(
         manifest_content.contains("\"docker/login-action\" = \"v3.6.0\""),
-        "Expected v3.6.0 in manifest, got: {}",
-        manifest_content
+        "Expected v3.6.0 in manifest, got: {manifest_content}"
     );
 
     // Should NOT contain the SHAs in manifest

@@ -45,9 +45,8 @@ fn higher_version<'a>(a: &'a str, b: &'a str) -> &'a str {
                 b
             }
         }
-        (Some(_), None) => a,
+        (_, None) => a,
         (None, Some(_)) => b,
-        (None, None) => a, // Default to first if neither is semver
     }
 }
 

@@ -163,7 +163,7 @@ impl GitHubClient {
 impl GitHubClient {
     /// Get all tags that point to a specific commit SHA
     ///
-    /// Returns tag names without the "refs/tags/" prefix (e.g., ["v5", "v5.0.0"])
+    /// Returns tag names without the "refs/tags/" prefix (e.g., `["v5", "v5.0.0"]`)
     /// Note: This only works for lightweight tags. Annotated tags store the tag object SHA,
     /// not the commit SHA, so they won't match.
     pub fn get_tags_for_sha(&self, owner_repo: &str, sha: &str) -> Result<Vec<String>> {
