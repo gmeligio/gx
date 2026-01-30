@@ -1,35 +1,61 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use gx::{commands, repo};
+use gx::{commands, repo, repo::RepoError};
+use log::LevelFilter;
+use std::io::Write;
 
 #[derive(Parser)]
 #[command(name = "gx")]
 #[command(about = "CLI to manage GitHub Actions dependencies", long_about = None)]
 struct Cli {
+    /// Enable verbose output
+    #[arg(short, long, global = true)]
+    verbose: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Apply action versions from .github/gx.toml to all workflows
-    Pin,
+    /// Ensure the manifest and lock matches the workflow code: add missing actions, remove unused, update workflows
+    Tidy,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    let mut builder = env_logger::builder();
+    builder
+        .filter_level(if cli.verbose {
+            LevelFilter::Debug
+        } else {
+            LevelFilter::Info
+        })
+        .format(|buf, record| {
+            let level = record.level();
+            let style = &buf.default_level_style(level);
+
+            writeln!(buf, "[{style}{level}{style:#}] {}", record.args())
+        });
+
+    if !cli.verbose {
+        builder.format_timestamp(None);
+    }
+
+    builder.init();
+
     let repo_root = match repo::find_root() {
         Ok(root) => root,
-        Err(e) if e.downcast_ref::<repo::GithubFolderNotFound>().is_some() => {
-            println!(".github folder not found. gx didn't modify any file.");
+        Err(RepoError::GithubFolder()) => {
+            log::info!(".github folder not found. gx didn't modify any file.");
             return Ok(());
         }
-        Err(e) => return Err(e),
+        Err(e) => return Err(e.into()),
     };
 
     match cli.command {
-        Commands::Pin => commands::pin::run(&repo_root)?,
+        Commands::Tidy => commands::tidy::run(&repo_root)?,
     }
 
     Ok(())

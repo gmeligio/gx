@@ -1,1 +1,1 @@
-pub mod pin;
+pub mod tidy;
