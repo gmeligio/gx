@@ -8,7 +8,7 @@ use std::path::Path;
 use crate::error::PathNotInitialized;
 
 /// The main manifest structure mapping actions to versions
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct Manifest {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub actions: HashMap<String, String>,
@@ -21,8 +21,7 @@ pub struct Manifest {
 impl Manifest {
     pub fn path(&self) -> Result<&Path> {
         self.path
-            .as_ref()
-            .map(|p| p.as_path())
+            .as_deref()
             .ok_or_else(|| anyhow!(PathNotInitialized::manifest()))
     }
 
@@ -48,8 +47,10 @@ impl Manifest {
         if path.exists() {
             Self::load(path)
         } else {
-            let mut manifest = Self::default();
-            manifest.path = Some(path.to_path_buf());
+            let manifest = Self {
+                path: Some(path.to_path_buf()),
+                ..Default::default()
+            };
             Ok(manifest)
         }
     }
@@ -74,11 +75,7 @@ impl Manifest {
 
     /// Save the manifest only if there were changes
     pub fn save_if_changed(&self) -> Result<()> {
-        if self.changed {
-            self.save()
-        } else {
-            Ok(())
-        }
+        if self.changed { self.save() } else { Ok(()) }
     }
 
     /// Set or update an action version, tracking changes
@@ -94,16 +91,6 @@ impl Manifest {
     pub fn remove(&mut self, action: &str) {
         if self.actions.remove(action).is_some() {
             self.changed = true;
-        }
-    }
-}
-
-impl Default for Manifest {
-    fn default() -> Self {
-        Self {
-            actions: HashMap::new(),
-            path: None,
-            changed: false,
         }
     }
 }

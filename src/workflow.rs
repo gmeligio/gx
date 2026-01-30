@@ -174,45 +174,44 @@ impl WorkflowUpdater {
 
         for (job_name, job) in &workflow.jobs {
             for (step_index, step) in job.steps.iter().enumerate() {
-                if let Some(uses) = &step.uses {
-                    if let Some(cap) = uses_re.captures(uses) {
-                        let name = cap[1].to_string();
-                        let ref_or_sha = cap[2].to_string();
+                if let Some(uses) = &step.uses
+                    && let Some(cap) = uses_re.captures(uses)
+                {
+                    let name = cap[1].to_string();
+                    let ref_or_sha = cap[2].to_string();
 
-                        // Skip local actions (./path) and docker actions (docker://)
-                        if name.starts_with('.') || name.starts_with("docker://") {
-                            continue;
-                        }
-
-                        // Extract version and SHA from uses line
-                        // If there's a comment, use comment as version; if ref is SHA, store it
-                        let (version, sha) =
-                            if let Some(comment_version) = version_comments.get(uses) {
-                                // Has a comment - use comment as version
-                                // If ref is a SHA, store it
-                                let sha = if is_commit_sha(&ref_or_sha) {
-                                    Some(ref_or_sha)
-                                } else {
-                                    None
-                                };
-                                (comment_version.clone(), sha)
-                            } else {
-                                // No comment, use the ref as-is, no SHA stored
-                                (ref_or_sha, None)
-                            };
-
-                        actions.push(ExtractedAction {
-                            name,
-                            version,
-                            sha,
-                            file: workflow_path.to_path_buf(),
-                            location: ActionLocation {
-                                workflow: workflow_name.clone(),
-                                job: job_name.clone(),
-                                step_index,
-                            },
-                        });
+                    // Skip local actions (./path) and docker actions (docker://)
+                    if name.starts_with('.') || name.starts_with("docker://") {
+                        continue;
                     }
+
+                    // Extract version and SHA from uses line
+                    // If there's a comment, use comment as version; if ref is SHA, store it
+                    let (version, sha) = if let Some(comment_version) = version_comments.get(uses) {
+                        // Has a comment - use comment as version
+                        // If ref is a SHA, store it
+                        let sha = if is_commit_sha(&ref_or_sha) {
+                            Some(ref_or_sha)
+                        } else {
+                            None
+                        };
+                        (comment_version.clone(), sha)
+                    } else {
+                        // No comment, use the ref as-is, no SHA stored
+                        (ref_or_sha, None)
+                    };
+
+                    actions.push(ExtractedAction {
+                        name,
+                        version,
+                        sha,
+                        file: workflow_path.to_path_buf(),
+                        location: ActionLocation {
+                            workflow: workflow_name.clone(),
+                            job: job_name.clone(),
+                            step_index,
+                        },
+                    });
                 }
             }
         }

@@ -1,4 +1,5 @@
-use std::fmt;
+use std::error::Error;
+use std::fmt::{Display, Formatter, Result};
 use std::path::PathBuf;
 
 /// Error when a file path has not been initialized
@@ -8,12 +9,14 @@ pub struct PathNotInitialized {
 }
 
 impl PathNotInitialized {
+    #[must_use]
     pub fn manifest() -> Self {
         Self {
             file_type: "Manifest",
         }
     }
 
+    #[must_use]
     pub fn lock_file() -> Self {
         Self {
             file_type: "LockFile",
@@ -21,8 +24,8 @@ impl PathNotInitialized {
     }
 }
 
-impl fmt::Display for PathNotInitialized {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for PathNotInitialized {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         write!(
             f,
             "{} path not initialized. Use load_from_repo or load to create a {} with a path.",
@@ -32,26 +35,26 @@ impl fmt::Display for PathNotInitialized {
     }
 }
 
-impl std::error::Error for PathNotInitialized {}
+impl Error for PathNotInitialized {}
 
 /// Error when .github folder is not found in the repository
 #[derive(Debug)]
 pub struct GithubFolderNotFound;
 
-impl fmt::Display for GithubFolderNotFound {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for GithubFolderNotFound {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         write!(f, ".github folder not found")
     }
 }
 
-impl std::error::Error for GithubFolderNotFound {}
+impl Error for GithubFolderNotFound {}
 
-/// Error when GITHUB_TOKEN is required but not set
+/// Error when `GITHUB_TOKEN` is required but not set
 #[derive(Debug)]
 pub struct GitHubTokenRequired;
 
-impl fmt::Display for GitHubTokenRequired {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for GitHubTokenRequired {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         write!(
             f,
             "GITHUB_TOKEN environment variable is required for this operation.\n\
@@ -61,7 +64,7 @@ impl fmt::Display for GitHubTokenRequired {
     }
 }
 
-impl std::error::Error for GitHubTokenRequired {}
+impl Error for GitHubTokenRequired {}
 
 /// Error when reading a file fails
 #[derive(Debug)]
@@ -70,14 +73,14 @@ pub struct FileReadError {
     pub source: std::io::Error,
 }
 
-impl fmt::Display for FileReadError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for FileReadError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         write!(f, "Failed to read file: {}", self.path.display())
     }
 }
 
-impl std::error::Error for FileReadError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl Error for FileReadError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(&self.source)
     }
 }
@@ -89,14 +92,14 @@ pub struct FileWriteError {
     pub source: std::io::Error,
 }
 
-impl fmt::Display for FileWriteError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for FileWriteError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         write!(f, "Failed to write file: {}", self.path.display())
     }
 }
 
-impl std::error::Error for FileWriteError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl Error for FileWriteError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(&self.source)
     }
 }
@@ -108,14 +111,14 @@ pub struct TomlParseError {
     pub source: toml::de::Error,
 }
 
-impl fmt::Display for TomlParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for TomlParseError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         write!(f, "Failed to parse TOML file: {}", self.path.display())
     }
 }
 
-impl std::error::Error for TomlParseError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl Error for TomlParseError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(&self.source)
     }
 }

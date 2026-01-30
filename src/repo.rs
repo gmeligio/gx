@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, anyhow};
 use std::{env, path::PathBuf};
 
-pub use crate::error::GithubFolderNotFound;
+use crate::error::GithubFolderNotFound;
 
 pub fn find_root() -> Result<PathBuf> {
     let cwd = env::current_dir()?;

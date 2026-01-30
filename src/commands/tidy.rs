@@ -133,8 +133,7 @@ pub fn run(repo_root: &Path) -> Result<()> {
                     || workflow_version
                         .chars()
                         .next()
-                        .map(|c| c.is_ascii_digit())
-                        .unwrap_or(false);
+                        .is_some_and(|c| c.is_ascii_digit());
 
                 if workflow_version != &manifest_version && manifest_is_sha && workflow_is_semver {
                     manifest.set((*action_name).clone(), workflow_version.clone());
@@ -193,7 +192,7 @@ pub fn run(repo_root: &Path) -> Result<()> {
 /// Select the best version from a list of versions.
 /// Prefers the highest semantic version if available.
 fn select_version(versions: &[String]) -> String {
-    let version_refs: Vec<&str> = versions.iter().map(|s| s.as_str()).collect();
+    let version_refs: Vec<&str> = versions.iter().map(String::as_str).collect();
     find_highest_version(&version_refs)
         .unwrap_or(&versions[0])
         .to_string()
@@ -225,7 +224,7 @@ fn update_lock_file(
     let github = GitHubClient::from_env()?;
 
     // Process each action in manifest
-    for (action, version) in manifest.actions.clone().iter() {
+    for (action, version) in &manifest.actions.clone() {
         // Check if workflow has a SHA for this action
         if let Some(workflow_sha) = action_versions.get_sha(action) {
             // Validate that version comment matches the SHA and determine correct version
@@ -276,7 +275,7 @@ fn update_lock_file(
             lock.set(action, &final_version, workflow_sha.clone());
         } else if !lock.has(action, version) {
             // Resolve via GitHub API when there is no workflow SHA
-            debug!("Resolving {}@{} ...", action, version);
+            debug!("Resolving {action}@{version}");
             match github.resolve_ref(action, version) {
                 Ok(sha) => {
                     lock.set(action, version, sha);

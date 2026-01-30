@@ -9,6 +9,7 @@ pub struct Config {
 
 impl Config {
     /// Load configuration from environment variables
+    #[must_use]
     pub fn from_env() -> Self {
         Self {
             github_token: env::var("GITHUB_TOKEN").ok(),

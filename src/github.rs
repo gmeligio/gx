@@ -4,11 +4,36 @@ use std::env;
 use std::time::Duration;
 
 use crate::error::GitHubTokenRequired;
-use crate::git::{GitRef, GitRefEntry, is_commit_sha};
+use crate::git::is_commit_sha;
 
 const GITHUB_API_BASE: &str = "https://api.github.com";
 const USER_AGENT: &str = "gx-cli";
 const REQUEST_TIMEOUT_SECS: u64 = 30;
+
+/// Git ref structure returned by the GitHub API
+#[derive(Debug, Deserialize)]
+pub struct GitRef {
+    pub object: GitObject,
+}
+
+/// Git object containing a SHA
+#[derive(Debug, Deserialize)]
+pub struct GitObject {
+    pub sha: String,
+}
+
+/// Structure for git ref entries returned by the refs API
+#[derive(Debug, Deserialize)]
+pub struct GitRefEntry {
+    #[serde(rename = "ref")]
+    pub ref_name: String,
+    pub object: GitObject,
+}
+
+#[derive(Deserialize)]
+struct CommitResponse {
+    sha: String,
+}
 
 pub struct GitHubClient {
     client: reqwest::blocking::Client,
@@ -16,11 +41,30 @@ pub struct GitHubClient {
 }
 
 impl GitHubClient {
-    /// Create a new GitHub client, reading token from GITHUB_TOKEN environment variable
+    /// Create a new GitHub client, reading token from `GITHUB_TOKEN` environment variable
+    ///
+    /// # Errors
+    ///
+    /// Returns `VarError::NotPresent` if:
+    /// - The variable is not set.
+    /// - The variable’s name contains an equal sign or NUL ('=' or '\0').
+    ///
+    /// Returns `VarError::NotUnicode` if the variable’s value is not valid Unicode.
     pub fn from_env() -> Result<Self> {
         Self::new(env::var("GITHUB_TOKEN").ok())
     }
 
+    /// Create a new GitHub client with a custom token
+    ///
+    /// # Errors
+    ///
+    /// This method fails if TLS backend cannot be initialized, or the resolver
+    /// cannot load the system configuration.
+    ///
+    /// # Panics
+    ///
+    /// This method panics if called from within an async runtime. See docs on
+    /// [`reqwest::blocking`][crate::blocking] for details.
     pub fn new(token: Option<String>) -> Result<Self> {
         let client = reqwest::blocking::Client::builder()
             .user_agent(USER_AGENT)
@@ -33,11 +77,16 @@ impl GitHubClient {
 
     /// Resolve a ref (tag, branch, or commit) to a full commit SHA
     ///
-    /// Examples:
-    /// - resolve_ref("actions/checkout", "v4") -> "abc123..."
-    /// - resolve_ref("actions/checkout", "main") -> "def456..."
-    /// - resolve_ref("actions/checkout", "abc123") -> "abc123..." (if valid)
-    /// - resolve_ref("github/codeql-action/upload-sarif", "v4") -> "abc123..." (subpath action)
+    /// # Examples
+    ///
+    /// - `resolve_ref("actions/checkout", "v4") -> "abc123..."`
+    /// - `resolve_ref("actions/checkout", "main") -> "def456..." -> "def456..."`
+    /// - `resolve_ref("actions/checkout", "abc123") -> "abc123..." -> "abc123..."` (if valid)
+    /// - `resolve_ref("github/codeql-action/upload-sarif", "v4") -> "abc123..." -> "abc123..."` (subpath action)
+    ///
+    /// # Errors
+    ///
+    /// Return `GitHubTokenRequired` if the client does not have a token.
     pub fn resolve_ref(&self, owner_repo: &str, ref_name: &str) -> Result<String> {
         // If it already looks like a full SHA (40 hex chars), return it
         if is_commit_sha(ref_name) {
@@ -51,23 +100,15 @@ impl GitHubClient {
         // Try to resolve as a tag or branch
         let url = format!("{GITHUB_API_BASE}/repos/{base_repo}/git/ref/tags/{ref_name}");
 
-        match self.fetch_ref(&url) {
-            Ok(sha) => return Ok(sha),
-            Err(_) => {
-                // Not a tag, try as a branch
+        self.fetch_ref(&url)
+            .or_else(|_| {
                 let url = format!("{GITHUB_API_BASE}/repos/{base_repo}/git/ref/heads/{ref_name}");
-
-                match self.fetch_ref(&url) {
-                    Ok(sha) => return Ok(sha),
-                    Err(_) => {
-                        // Not a branch either, try to get commit directly
-                        let url = format!("{GITHUB_API_BASE}/repos/{base_repo}/commits/{ref_name}");
-
-                        self.fetch_commit_sha(&url)
-                    }
-                }
-            }
-        }
+                self.fetch_ref(&url)
+            })
+            .or_else(|_| {
+                let url = format!("{GITHUB_API_BASE}/repos/{base_repo}/commits/{ref_name}");
+                self.fetch_commit_sha(&url)
+            })
     }
 
     fn fetch_ref(&self, url: &str) -> Result<String> {
@@ -109,11 +150,6 @@ impl GitHubClient {
 
         if !response.status().is_success() {
             anyhow::bail!("GitHub API returned status {}", response.status());
-        }
-
-        #[derive(Deserialize)]
-        struct CommitResponse {
-            sha: String,
         }
 
         let commit: CommitResponse = response
@@ -205,7 +241,6 @@ mod tests {
     // They are marked with #[ignore] to skip during normal test runs
 
     #[test]
-    #[ignore]
     fn test_resolve_tag() {
         let token = std::env::var("GITHUB_TOKEN").ok();
         let client = GitHubClient::new(token).unwrap();
@@ -216,7 +251,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_resolve_branch() {
         let token = std::env::var("GITHUB_TOKEN").ok();
         let client = GitHubClient::new(token).unwrap();
@@ -226,7 +260,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_get_tags_for_sha() {
         let token = std::env::var("GITHUB_TOKEN").ok();
         let client = GitHubClient::new(token).unwrap();
@@ -237,8 +270,7 @@ mod tests {
         // v4 should be in the list
         assert!(
             tags.contains(&"v4".to_string()),
-            "Expected v4 in tags: {:?}",
-            tags
+            "Expected v4 in tags: {tags:?}"
         );
     }
 }

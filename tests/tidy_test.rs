@@ -16,7 +16,7 @@ fn test_gx_tidy_creates_manifest_from_workflows() {
     let root = create_test_repo(&temp_dir);
 
     // Create workflow without manifest
-    let workflow_content = r#"name: CI
+    let workflow_content = "name: CI
 on: push
 jobs:
   build:
@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v3
-"#;
+";
     let workflow_path = root.join(".github").join("workflows").join("ci.yml");
     let mut workflow_file = fs::File::create(&workflow_path).unwrap();
     workflow_file

@@ -10,7 +10,7 @@ use crate::error::PathNotInitialized;
 const LOCK_FILE_NAME: &str = "gx.lock";
 
 /// Lock file structure that maps action@version to resolved commit SHA
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct LockFile {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub actions: HashMap<String, String>,
@@ -21,10 +21,14 @@ pub struct LockFile {
 }
 
 impl LockFile {
+    /// Get the path of the lock file.
+    ///
+    /// # Errors
+    ///
+    /// Return `PathNotInitialized` if the path is not initialized.
     pub fn path(&self) -> Result<&Path> {
         self.path
-            .as_ref()
-            .map(|p| p.as_path())
+            .as_deref()
             .ok_or_else(|| anyhow!(PathNotInitialized::lock_file()))
     }
 
@@ -43,8 +47,10 @@ impl LockFile {
         if path.exists() {
             Self::load(path)
         } else {
-            let mut lock = Self::default();
-            lock.path = Some(path.to_path_buf());
+            let lock = Self {
+                path: Some(path.to_path_buf()),
+                ..Default::default()
+            };
             Ok(lock)
         }
     }
@@ -127,16 +133,6 @@ impl LockFile {
         }
 
         update_map
-    }
-}
-
-impl Default for LockFile {
-    fn default() -> Self {
-        Self {
-            actions: HashMap::new(),
-            path: None,
-            changed: false,
-        }
     }
 }
 

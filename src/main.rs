@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use gx::{commands, repo};
+use gx::{commands, error::GithubFolderNotFound, repo};
 use log::LevelFilter;
 use std::io::Write;
 
@@ -46,7 +46,7 @@ fn main() -> Result<()> {
 
     let repo_root = match repo::find_root() {
         Ok(root) => root,
-        Err(e) if e.downcast_ref::<repo::GithubFolderNotFound>().is_some() => {
+        Err(e) if e.downcast_ref::<GithubFolderNotFound>().is_some() => {
             log::info!(".github folder not found. gx didn't modify any file.");
             return Ok(());
         }
