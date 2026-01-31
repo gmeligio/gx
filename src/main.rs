@@ -10,6 +10,7 @@ use std::path::Path;
 #[derive(Parser)]
 #[command(name = "gx")]
 #[command(about = "CLI to manage GitHub Actions dependencies", long_about = None)]
+#[command(version)]
 struct Cli {
     /// Enable verbose output
     #[arg(short, long, global = true)]
