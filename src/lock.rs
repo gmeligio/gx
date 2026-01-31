@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 pub const LOCK_FILE_NAME: &str = "gx.lock";
+pub const LOCK_FILE_VERSION: &str = "1.0";
 
 /// Trait defining operations on a lock file (action@version → SHA mapping)
 pub trait Lock {
@@ -75,14 +76,27 @@ pub enum LockFileError {
 }
 
 /// Lock file structure that maps action@version to resolved commit SHA
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct FileLock {
+    #[serde(default = "default_version")]
+    pub version: String,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub actions: HashMap<String, String>,
     #[serde(skip)]
     path: Option<PathBuf>,
     #[serde(skip)]
     changed: bool,
+}
+
+impl Default for FileLock {
+    fn default() -> Self {
+        Self {
+            version: default_version(),
+            actions: HashMap::new(),
+            path: None,
+            changed: false,
+        }
+    }
 }
 
 impl FileLock {
@@ -276,6 +290,10 @@ impl Lock for MemoryLock {
     }
 }
 
+fn default_version() -> String {
+    LOCK_FILE_VERSION.to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -460,5 +478,57 @@ mod tests {
 
         // Should fallback to version if SHA not in lock file
         assert_eq!(update_map.get("actions/checkout"), Some(&"v4".to_string()));
+    }
+
+    #[test]
+    fn test_version_serialization() {
+        let mut lock = FileLock::default();
+        lock.set("actions/checkout", "v4", "abc123".to_string());
+
+        let content = toml::to_string_pretty(&lock).unwrap();
+
+        // Version should appear at the top, before [actions]
+        assert!(content.starts_with("version = \"1.0\""));
+        assert!(content.contains("[actions]"));
+
+        // Version line should come before actions section
+        let version_pos = content.find("version").unwrap();
+        let actions_pos = content.find("[actions]").unwrap();
+        assert!(version_pos < actions_pos);
+    }
+
+    #[test]
+    fn test_version_deserialization() {
+        let content = r#"
+version = "1.0"
+
+[actions]
+"actions/checkout@v4" = "abc123"
+"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+
+        let lock = FileLock::load(file.path()).unwrap();
+        assert_eq!(lock.version, "1.0");
+        assert_eq!(
+            lock.get("actions/checkout", "v4"),
+            Some(&"abc123".to_string())
+        );
+    }
+
+    #[test]
+    fn test_update_content_to_latest_version() {
+        // Old lock files without version should get default version
+        let content = r#"
+[actions]
+"actions/checkout@v4" = "abc123"
+"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+
+        let lock = FileLock::load(file.path()).unwrap();
+        assert_eq!(lock.version, LOCK_FILE_VERSION);
     }
 }
