@@ -340,7 +340,7 @@ fn print_update_results(results: &[UpdateResult]) {
         for result in results {
             info!("{}", result.file.display());
             for change in &result.changes {
-                info!("- {change}");
+                info!("~ {change}");
             }
         }
         info!("{} workflow(s) updated.", results.len());

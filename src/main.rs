@@ -3,7 +3,7 @@ use clap::{Parser, Subcommand};
 use gx::lock::{FileLock, LOCK_FILE_NAME, MemoryLock};
 use gx::manifest::{FileManifest, MANIFEST_FILE_NAME, MemoryManifest};
 use gx::{commands, repo, repo::RepoError};
-use log::LevelFilter;
+use log::{LevelFilter, info};
 use std::io::Write;
 
 #[derive(Parser)]
@@ -22,6 +22,8 @@ struct Cli {
 enum Commands {
     /// Ensure the manifest and lock matches the workflow code: add missing actions, remove unused, update workflows
     Tidy,
+    /// Create manifest and lock files from current workflows
+    Freeze,
 }
 
 fn main() -> Result<()> {
@@ -38,11 +40,10 @@ fn main() -> Result<()> {
         Err(e) => return Err(e.into()),
     };
 
+    let manifest_path = repo_root.join(".github").join(MANIFEST_FILE_NAME);
+    let lock_path = repo_root.join(".github").join(LOCK_FILE_NAME);
     match cli.command {
         Commands::Tidy => {
-            let manifest_path = repo_root.join(".github").join(MANIFEST_FILE_NAME);
-            let lock_path = repo_root.join(".github").join(LOCK_FILE_NAME);
-
             if manifest_path.exists() {
                 // File-backed mode: use manifest and lock file
                 let manifest = FileManifest::load_or_default(&manifest_path)?;
@@ -56,6 +57,18 @@ fn main() -> Result<()> {
 
                 commands::tidy::run(&repo_root, manifest, lock)?;
             }
+        }
+        Commands::Freeze => {
+            if manifest_path.exists() {
+                anyhow::bail!("Already frozen. Use `gx tidy` to update.");
+            }
+
+            info!("Freezing actions to manifest...");
+
+            let manifest = FileManifest::load_or_default(&manifest_path)?;
+            let lock = FileLock::load_or_default(&lock_path)?;
+
+            commands::tidy::run(&repo_root, manifest, lock)?;
         }
     }
 
