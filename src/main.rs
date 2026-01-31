@@ -1,5 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use gx::lock::{FileLock, LOCK_FILE_NAME, MemoryLock};
+use gx::manifest::{FileManifest, MANIFEST_FILE_NAME, MemoryManifest};
 use gx::{commands, repo, repo::RepoError};
 use log::LevelFilter;
 use std::io::Write;
@@ -25,6 +27,42 @@ enum Commands {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    init_logging(&cli);
+
+    let repo_root = match repo::find_root() {
+        Ok(root) => root,
+        Err(RepoError::GithubFolder()) => {
+            log::info!(".github folder not found. gx didn't modify any file.");
+            return Ok(());
+        }
+        Err(e) => return Err(e.into()),
+    };
+
+    match cli.command {
+        Commands::Tidy => {
+            let manifest_path = repo_root.join(".github").join(MANIFEST_FILE_NAME);
+            let lock_path = repo_root.join(".github").join(LOCK_FILE_NAME);
+
+            if manifest_path.exists() {
+                // File-backed mode: use manifest and lock file
+                let manifest = FileManifest::load_or_default(&manifest_path)?;
+                let lock = FileLock::load_or_default(&lock_path)?;
+
+                commands::tidy::run(&repo_root, manifest, lock)?;
+            } else {
+                // Memory-only mode: no manifest/lock persistence
+                let manifest = MemoryManifest::default();
+                let lock = MemoryLock::default();
+
+                commands::tidy::run(&repo_root, manifest, lock)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn init_logging(cli: &Cli) {
     let mut builder = env_logger::builder();
     builder
         .filter_level(if cli.verbose {
@@ -44,19 +82,4 @@ fn main() -> Result<()> {
     }
 
     builder.init();
-
-    let repo_root = match repo::find_root() {
-        Ok(root) => root,
-        Err(RepoError::GithubFolder()) => {
-            log::info!(".github folder not found. gx didn't modify any file.");
-            return Ok(());
-        }
-        Err(e) => return Err(e.into()),
-    };
-
-    match cli.command {
-        Commands::Tidy => commands::tidy::run(&repo_root)?,
-    }
-
-    Ok(())
 }
