@@ -78,7 +78,7 @@ pub enum LockFileError {
 /// Lock file structure that maps action@version to resolved commit SHA
 #[derive(Debug, Deserialize, Serialize)]
 pub struct FileLock {
-    #[serde(default = "default_version")]
+    #[serde(default)]
     pub version: String,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub actions: HashMap<String, String>,
@@ -91,7 +91,7 @@ pub struct FileLock {
 impl Default for FileLock {
     fn default() -> Self {
         Self {
-            version: default_version(),
+            version: LOCK_FILE_VERSION.to_string(),
             actions: HashMap::new(),
             path: None,
             changed: false,
@@ -129,6 +129,13 @@ impl FileLock {
             })?;
 
         lock.path = Some(path.to_path_buf());
+
+        // Mark as changed if version differs, triggering an update on save
+        if lock.version != LOCK_FILE_VERSION {
+            lock.version = LOCK_FILE_VERSION.to_string();
+            lock.changed = true;
+        }
+
         Ok(lock)
     }
 
@@ -288,10 +295,6 @@ impl Lock for MemoryLock {
     fn save_if_changed(&mut self) -> Result<(), LockFileError> {
         Ok(()) // no-op for in-memory
     }
-}
-
-fn default_version() -> String {
-    LOCK_FILE_VERSION.to_string()
 }
 
 #[cfg(test)]
@@ -519,7 +522,7 @@ version = "1.0"
 
     #[test]
     fn test_update_content_to_latest_version() {
-        // Old lock files without version should get default version
+        // Old lock files without version should get default version and mark as changed
         let content = r#"
 [actions]
 "actions/checkout@v4" = "abc123"
@@ -530,5 +533,31 @@ version = "1.0"
 
         let lock = FileLock::load(file.path()).unwrap();
         assert_eq!(lock.version, LOCK_FILE_VERSION);
+        assert!(
+            lock.changed,
+            "should be marked as changed when version differs"
+        );
+    }
+
+    #[test]
+    fn test_current_version_not_marked_changed() {
+        // Lock files with current version should not be marked as changed
+        let content = format!(
+            r#"version = "{LOCK_FILE_VERSION}"
+
+[actions]
+"actions/checkout@v4" = "abc123"
+"#
+        );
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+
+        let lock = FileLock::load(file.path()).unwrap();
+        assert_eq!(lock.version, LOCK_FILE_VERSION);
+        assert!(
+            !lock.changed,
+            "should not be marked as changed when version matches"
+        );
     }
 }
