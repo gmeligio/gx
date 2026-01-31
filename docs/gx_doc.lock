@@ -1,3 +1,5 @@
+version = "1.0"
+
 [actions]
 "actions/checkout@v4" = "123132141231312"
 "actions/checkout@v3" = "123132141231312"
