@@ -5,6 +5,7 @@ use gx::manifest::{FileManifest, MANIFEST_FILE_NAME, MemoryManifest};
 use gx::{commands, repo, repo::RepoError};
 use log::{LevelFilter, info};
 use std::io::Write;
+use std::path::Path;
 
 #[derive(Parser)]
 #[command(name = "gx")]
@@ -33,8 +34,8 @@ fn main() -> Result<()> {
 
     let repo_root = match repo::find_root() {
         Ok(root) => root,
-        Err(RepoError::GithubFolder()) => {
-            log::info!(".github folder not found. gx didn't modify any file.");
+        Err(RepoError::GithubFolder) => {
+            info!(".github folder not found. gx didn't modify any file.");
             return Ok(());
         }
         Err(e) => return Err(e.into()),
@@ -45,36 +46,36 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::Tidy => {
             if manifest_path.exists() {
-                // File-backed mode: use manifest and lock file
-                let manifest = FileManifest::load_or_default(&manifest_path)?;
-                let lock = FileLock::load_or_default(&lock_path)?;
-
-                commands::tidy::run(&repo_root, manifest, lock)?;
+                run_file_backed(&repo_root, &manifest_path, &lock_path)
             } else {
-                // Memory-only mode: no manifest/lock persistence
-                let manifest = MemoryManifest::default();
-                let lock = MemoryLock::default();
-
-                commands::tidy::run(&repo_root, manifest, lock)?;
+                run_memory_only(&repo_root)
             }
         }
         Commands::Freeze => {
             if manifest_path.exists() {
                 anyhow::bail!("Already frozen. Use `gx tidy` to update.");
             }
-
             info!("Freezing actions to manifest...");
-
-            let manifest = FileManifest::load_or_default(&manifest_path)?;
-            let lock = FileLock::load_or_default(&lock_path)?;
-
-            commands::tidy::run(&repo_root, manifest, lock)?;
+            run_file_backed(&repo_root, &manifest_path, &lock_path)
         }
     }
-
-    Ok(())
 }
 
+/// Run tidy with file-backed manifest and lock (persists to disk)
+fn run_file_backed(repo_root: &Path, manifest_path: &Path, lock_path: &Path) -> Result<()> {
+    let manifest = FileManifest::load_or_default(manifest_path)?;
+    let lock = FileLock::load_or_default(lock_path)?;
+    commands::tidy::run(repo_root, manifest, lock)
+}
+
+/// Run tidy with in-memory manifest and lock (no persistence)
+fn run_memory_only(repo_root: &Path) -> Result<()> {
+    let manifest = MemoryManifest::default();
+    let lock = MemoryLock::default();
+    commands::tidy::run(repo_root, manifest, lock)
+}
+
+/// Initialize logging based on the verbosity level specified in the CLI
 fn init_logging(cli: &Cli) {
     let mut builder = env_logger::builder();
     builder

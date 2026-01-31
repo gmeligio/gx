@@ -17,7 +17,7 @@ pub enum GitHubError {
          Set it with: export GITHUB_TOKEN=<your-token>\n\
          Create a token at: https://github.com/settings/tokens"
     )]
-    TokenRequired(),
+    TokenRequired,
 
     #[error("failed to create HTTP client")]
     ClientInit(#[source] reqwest::Error),
@@ -142,7 +142,7 @@ impl GitHubClient {
     }
 
     fn fetch_ref(&self, url: &str) -> Result<String, GitHubError> {
-        let token = self.token.as_ref().ok_or(GitHubError::TokenRequired())?;
+        let token = self.token.as_ref().ok_or(GitHubError::TokenRequired)?;
 
         let response = self
             .client
@@ -173,7 +173,7 @@ impl GitHubClient {
     }
 
     fn fetch_commit_sha(&self, url: &str) -> Result<String, GitHubError> {
-        let token = self.token.as_ref().ok_or(GitHubError::TokenRequired())?;
+        let token = self.token.as_ref().ok_or(GitHubError::TokenRequired)?;
 
         let response = self
             .client
@@ -220,7 +220,7 @@ impl GitHubClient {
         owner_repo: &str,
         sha: &str,
     ) -> Result<Vec<String>, GitHubError> {
-        let token = self.token.as_ref().ok_or(GitHubError::TokenRequired())?;
+        let token = self.token.as_ref().ok_or(GitHubError::TokenRequired)?;
 
         // Handle subpath actions (e.g., "github/codeql-action/upload-sarif")
         let base_repo = owner_repo.split('/').take(2).collect::<Vec<_>>().join("/");

@@ -71,7 +71,7 @@ pub enum LockFileError {
     #[error(
         "`LockFile.path` not initialized. Use load_or_default or load to create a LockFile with a path."
     )]
-    PathNotInitialized(),
+    PathNotInitialized,
 }
 
 /// Lock file structure that maps action@version to resolved commit SHA
@@ -94,7 +94,7 @@ impl FileLock {
     pub fn path(&self) -> Result<&Path, LockFileError> {
         self.path
             .as_deref()
-            .ok_or_else(LockFileError::PathNotInitialized)
+            .ok_or(LockFileError::PathNotInitialized)
     }
 
     /// Load a lock file from the given path.
