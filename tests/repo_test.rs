@@ -56,8 +56,5 @@ fn test_find_root_without_github_folder() {
     env::set_current_dir(original_dir).unwrap();
 
     assert!(result.is_err());
-    assert!(matches!(
-        result.unwrap_err(),
-        repo::RepoError::GithubFolder()
-    ));
+    assert!(matches!(result.unwrap_err(), repo::RepoError::GithubFolder));
 }

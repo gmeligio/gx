@@ -6,7 +6,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum RepoError {
     #[error(".github folder not found")]
-    GithubFolder(),
+    GithubFolder,
 
     #[error("repository has no work tree")]
     BareRepository,
@@ -35,6 +35,6 @@ pub fn find_root() -> Result<PathBuf, RepoError> {
     if root.join(".github").is_dir() {
         Ok(root)
     } else {
-        Err(RepoError::GithubFolder())
+        Err(RepoError::GithubFolder)
     }
 }

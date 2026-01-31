@@ -268,7 +268,7 @@ fn update_lock_file<M: Manifest, L: Lock>(
                 }
                 Err(e) => {
                     // Log warning and continue. Don't fail the whole operation
-                    if matches!(e, GitHubError::TokenRequired()) {
+                    if matches!(e, GitHubError::TokenRequired) {
                         warn!(
                             "GITHUB_TOKEN not set. Without it, can not validate for {action} that {workflow_sha} commit SHA matches the {version} version."
                         );
@@ -291,7 +291,7 @@ fn update_lock_file<M: Manifest, L: Lock>(
                     lock.set(action, version, sha);
                 }
                 Err(e) => {
-                    if matches!(e, GitHubError::TokenRequired()) {
+                    if matches!(e, GitHubError::TokenRequired) {
                         warn!(
                             "GITHUB_TOKEN not set. Cannot resolve {action}@{version} to commit SHA."
                         );
@@ -340,7 +340,7 @@ fn print_update_results(results: &[UpdateResult]) {
         for result in results {
             info!("{}", result.file.display());
             for change in &result.changes {
-                info!("- {change}");
+                info!("~ {change}");
             }
         }
         info!("{} workflow(s) updated.", results.len());

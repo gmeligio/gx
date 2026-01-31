@@ -1,9 +1,10 @@
 [package]
 name = "gx"
+version = "0.2.0"
 description = "CLI to manage GitHub Actions dependencies"
-edition = "2024"
 license = "MIT"
-version = "0.1.0"
+edition = "2024"
+authors = ["Eligio Mariño"]
 
 [dependencies]
 anyhow = "1"

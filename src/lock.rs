@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 pub const LOCK_FILE_NAME: &str = "gx.lock";
+pub const LOCK_FILE_VERSION: &str = "1.0";
 
 /// Trait defining operations on a lock file (action@version → SHA mapping)
 pub trait Lock {
@@ -71,18 +72,31 @@ pub enum LockFileError {
     #[error(
         "`LockFile.path` not initialized. Use load_or_default or load to create a LockFile with a path."
     )]
-    PathNotInitialized(),
+    PathNotInitialized,
 }
 
 /// Lock file structure that maps action@version to resolved commit SHA
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct FileLock {
+    #[serde(default)]
+    pub version: String,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub actions: HashMap<String, String>,
     #[serde(skip)]
     path: Option<PathBuf>,
     #[serde(skip)]
     changed: bool,
+}
+
+impl Default for FileLock {
+    fn default() -> Self {
+        Self {
+            version: LOCK_FILE_VERSION.to_string(),
+            actions: HashMap::new(),
+            path: None,
+            changed: false,
+        }
+    }
 }
 
 impl FileLock {
@@ -94,7 +108,7 @@ impl FileLock {
     pub fn path(&self) -> Result<&Path, LockFileError> {
         self.path
             .as_deref()
-            .ok_or_else(LockFileError::PathNotInitialized)
+            .ok_or(LockFileError::PathNotInitialized)
     }
 
     /// Load a lock file from the given path.
@@ -115,6 +129,13 @@ impl FileLock {
             })?;
 
         lock.path = Some(path.to_path_buf());
+
+        // Mark as changed if version differs, triggering an update on save
+        if lock.version != LOCK_FILE_VERSION {
+            lock.version = LOCK_FILE_VERSION.to_string();
+            lock.changed = true;
+        }
+
         Ok(lock)
     }
 
@@ -460,5 +481,83 @@ mod tests {
 
         // Should fallback to version if SHA not in lock file
         assert_eq!(update_map.get("actions/checkout"), Some(&"v4".to_string()));
+    }
+
+    #[test]
+    fn test_version_serialization() {
+        let mut lock = FileLock::default();
+        lock.set("actions/checkout", "v4", "abc123".to_string());
+
+        let content = toml::to_string_pretty(&lock).unwrap();
+
+        // Version should appear at the top, before [actions]
+        assert!(content.starts_with("version = \"1.0\""));
+        assert!(content.contains("[actions]"));
+
+        // Version line should come before actions section
+        let version_pos = content.find("version").unwrap();
+        let actions_pos = content.find("[actions]").unwrap();
+        assert!(version_pos < actions_pos);
+    }
+
+    #[test]
+    fn test_version_deserialization() {
+        let content = r#"
+version = "1.0"
+
+[actions]
+"actions/checkout@v4" = "abc123"
+"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+
+        let lock = FileLock::load(file.path()).unwrap();
+        assert_eq!(lock.version, "1.0");
+        assert_eq!(
+            lock.get("actions/checkout", "v4"),
+            Some(&"abc123".to_string())
+        );
+    }
+
+    #[test]
+    fn test_update_content_to_latest_version() {
+        // Old lock files without version should get default version and mark as changed
+        let content = r#"
+[actions]
+"actions/checkout@v4" = "abc123"
+"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+
+        let lock = FileLock::load(file.path()).unwrap();
+        assert_eq!(lock.version, LOCK_FILE_VERSION);
+        assert!(
+            lock.changed,
+            "should be marked as changed when version differs"
+        );
+    }
+
+    #[test]
+    fn test_current_version_not_marked_changed() {
+        // Lock files with current version should not be marked as changed
+        let content = format!(
+            r#"version = "{LOCK_FILE_VERSION}"
+
+[actions]
+"actions/checkout@v4" = "abc123"
+"#
+        );
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+
+        let lock = FileLock::load(file.path()).unwrap();
+        assert_eq!(lock.version, LOCK_FILE_VERSION);
+        assert!(
+            !lock.changed,
+            "should not be marked as changed when version matches"
+        );
     }
 }

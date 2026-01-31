@@ -62,7 +62,7 @@ pub enum ManifestError {
     #[error(
         "`ManifestFile.path` not initialized. Use load_or_default or load to create a ManifestFile with a path."
     )]
-    PathNotInitialized(),
+    PathNotInitialized,
 }
 
 /// The main manifest structure mapping actions to versions
@@ -161,7 +161,7 @@ impl Manifest for FileManifest {
     fn path(&self) -> Result<&Path, ManifestError> {
         self.path
             .as_deref()
-            .ok_or_else(ManifestError::PathNotInitialized)
+            .ok_or(ManifestError::PathNotInitialized)
     }
 }
 
