@@ -5,31 +5,42 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
+use crate::domain::{ActionId, ActionSpec, Version};
+
 pub const MANIFEST_FILE_NAME: &str = "gx.toml";
 
 /// Trait defining operations on a manifest (action → version mapping)
-pub trait Manifest {
-    /// Get a reference to the actions map
-    fn actions(&self) -> &HashMap<String, String>;
+pub trait ManifestStore {
+    /// Get all action specs from the manifest
+    fn specs(&self) -> Vec<ActionSpec>;
 
     /// Set or update an action version
-    fn set(&mut self, action: String, version: String);
+    fn set(&mut self, id: ActionId, version: Version);
 
     /// Remove an action
-    fn remove(&mut self, action: &str);
+    fn remove(&mut self, id: &ActionId);
+
+    /// Check if the manifest contains an action
+    fn contains(&self, id: &ActionId) -> bool;
+
+    /// Get the version for an action
+    fn get(&self, id: &ActionId) -> Option<&Version>;
 
     /// Save the manifest only if there were changes.
     ///
     /// # Errors
     ///
     /// Returns an error if saving is required but fails.
-    fn save_if_changed(&mut self) -> Result<(), ManifestError>;
+    fn save(&mut self) -> Result<(), ManifestError>;
 
     /// Get the path to the manifest file
     ///
     /// # Errors
     /// Returns `PathNotInitialized` if the path has not been initialized
     fn path(&self) -> Result<&Path, ManifestError>;
+
+    /// Check if manifest is empty
+    fn is_empty(&self) -> bool;
 }
 
 /// Errors that can occur when working with manifest files
@@ -65,14 +76,19 @@ pub enum ManifestError {
     PathNotInitialized,
 }
 
-/// The main manifest structure mapping actions to versions
+/// Internal structure for TOML serialization
 #[derive(Debug, Default, Deserialize, Serialize)]
-pub struct FileManifest {
+struct ManifestData {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub actions: HashMap<String, String>,
-    #[serde(skip)]
+    actions: HashMap<String, String>,
+}
+
+/// The main manifest structure mapping actions to versions
+#[derive(Debug, Default)]
+pub struct FileManifest {
+    /// Maps `ActionId` to `Version`
+    actions: HashMap<ActionId, Version>,
     path: Option<PathBuf>,
-    #[serde(skip)]
     changed: bool,
 }
 
@@ -88,15 +104,23 @@ impl FileManifest {
             source,
         })?;
 
-        let mut manifest: FileManifest =
+        let data: ManifestData =
             toml::from_str(&content).map_err(|source| ManifestError::Parse {
                 path: path.to_path_buf(),
                 source: Box::new(source),
             })?;
 
-        manifest.path = Some(path.to_path_buf());
+        let actions = data
+            .actions
+            .into_iter()
+            .map(|(k, v)| (ActionId(k), Version(v)))
+            .collect();
 
-        Ok(manifest)
+        Ok(Self {
+            actions,
+            path: Some(path.to_path_buf()),
+            changed: false,
+        })
     }
 
     /// Load a manifest from the given path, or return a default if it doesn't exist.
@@ -108,22 +132,26 @@ impl FileManifest {
         if path.exists() {
             Self::load(path)
         } else {
-            let manifest = Self {
+            Ok(Self {
                 path: Some(path.to_path_buf()),
                 ..Default::default()
-            };
-            Ok(manifest)
+            })
         }
     }
 
-    /// Save the manifest to disk.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the path is not initialized, serialization fails, or the file cannot be written.
-    pub fn save(&self) -> Result<(), ManifestError> {
+    fn save_to_disk(&self) -> Result<(), ManifestError> {
         let path = self.path()?;
-        let content = toml::to_string_pretty(self).map_err(ManifestError::Serialize)?;
+
+        // Convert to serializable format
+        let data = ManifestData {
+            actions: self
+                .actions
+                .iter()
+                .map(|(k, v)| (k.0.clone(), v.0.clone()))
+                .collect(),
+        };
+
+        let content = toml::to_string_pretty(&data).map_err(ManifestError::Serialize)?;
 
         fs::write(path, content).map_err(|source| ManifestError::Write {
             path: path.to_path_buf(),
@@ -135,27 +163,42 @@ impl FileManifest {
     }
 }
 
-impl Manifest for FileManifest {
-    fn actions(&self) -> &HashMap<String, String> {
-        &self.actions
+impl ManifestStore for FileManifest {
+    fn specs(&self) -> Vec<ActionSpec> {
+        self.actions
+            .iter()
+            .map(|(id, version)| ActionSpec::new(id.clone(), version.clone()))
+            .collect()
     }
 
-    fn set(&mut self, action: String, version: String) {
-        let existing = self.actions.get(&action);
+    fn set(&mut self, id: ActionId, version: Version) {
+        let existing = self.actions.get(&id);
         if existing != Some(&version) {
-            self.actions.insert(action, version);
+            self.actions.insert(id, version);
             self.changed = true;
         }
     }
 
-    fn remove(&mut self, action: &str) {
-        if self.actions.remove(action).is_some() {
+    fn remove(&mut self, id: &ActionId) {
+        if self.actions.remove(id).is_some() {
             self.changed = true;
         }
     }
 
-    fn save_if_changed(&mut self) -> Result<(), ManifestError> {
-        if self.changed { self.save() } else { Ok(()) }
+    fn contains(&self, id: &ActionId) -> bool {
+        self.actions.contains_key(id)
+    }
+
+    fn get(&self, id: &ActionId) -> Option<&Version> {
+        self.actions.get(id)
+    }
+
+    fn save(&mut self) -> Result<(), ManifestError> {
+        if self.changed {
+            self.save_to_disk()?;
+            self.changed = false;
+        }
+        Ok(())
     }
 
     fn path(&self) -> Result<&Path, ManifestError> {
@@ -163,33 +206,52 @@ impl Manifest for FileManifest {
             .as_deref()
             .ok_or(ManifestError::PathNotInitialized)
     }
+
+    fn is_empty(&self) -> bool {
+        self.actions.is_empty()
+    }
 }
 
 /// In-memory manifest that doesn't persist to disk
 #[derive(Debug, Default)]
 pub struct MemoryManifest {
-    pub actions: HashMap<String, String>,
+    actions: HashMap<ActionId, Version>,
 }
 
-impl Manifest for MemoryManifest {
-    fn actions(&self) -> &HashMap<String, String> {
-        &self.actions
+impl ManifestStore for MemoryManifest {
+    fn specs(&self) -> Vec<ActionSpec> {
+        self.actions
+            .iter()
+            .map(|(id, version)| ActionSpec::new(id.clone(), version.clone()))
+            .collect()
     }
 
-    fn set(&mut self, action: String, version: String) {
-        self.actions.insert(action, version);
+    fn set(&mut self, id: ActionId, version: Version) {
+        self.actions.insert(id, version);
     }
 
-    fn remove(&mut self, action: &str) {
-        self.actions.remove(action);
+    fn remove(&mut self, id: &ActionId) {
+        self.actions.remove(id);
     }
 
-    fn save_if_changed(&mut self) -> Result<(), ManifestError> {
+    fn contains(&self, id: &ActionId) -> bool {
+        self.actions.contains_key(id)
+    }
+
+    fn get(&self, id: &ActionId) -> Option<&Version> {
+        self.actions.get(id)
+    }
+
+    fn save(&mut self) -> Result<(), ManifestError> {
         Ok(()) // no-op for in-memory
     }
 
     fn path(&self) -> Result<&Path, ManifestError> {
         Ok(Path::new("in-memory"))
+    }
+
+    fn is_empty(&self) -> bool {
+        self.actions.is_empty()
     }
 }
 
@@ -214,16 +276,16 @@ mod tests {
         let manifest = FileManifest::load(file.path()).unwrap();
 
         assert_eq!(
-            manifest.actions.get("actions/checkout"),
-            Some(&"v4".to_string())
+            manifest.get(&ActionId::from("actions/checkout")),
+            Some(&Version::from("v4"))
         );
         assert_eq!(
-            manifest.actions.get("actions/setup-node"),
-            Some(&"v4".to_string())
+            manifest.get(&ActionId::from("actions/setup-node")),
+            Some(&Version::from("v4"))
         );
         assert_eq!(
-            manifest.actions.get("docker/build-push-action"),
-            Some(&"v5".to_string())
+            manifest.get(&ActionId::from("docker/build-push-action")),
+            Some(&Version::from("v5"))
         );
     }
 
@@ -235,7 +297,7 @@ mod tests {
         file.write_all(content.as_bytes()).unwrap();
 
         let manifest = FileManifest::load(file.path()).unwrap();
-        assert!(manifest.actions.is_empty());
+        assert!(manifest.is_empty());
     }
 
     #[test]
@@ -249,8 +311,8 @@ mod tests {
 
         let manifest = FileManifest::load_or_default(file.path()).unwrap();
         assert_eq!(
-            manifest.actions.get("actions/checkout"),
-            Some(&"v4".to_string())
+            manifest.get(&ActionId::from("actions/checkout")),
+            Some(&Version::from("v4"))
         );
     }
 
@@ -258,31 +320,28 @@ mod tests {
     fn test_load_or_default_missing() {
         let manifest =
             FileManifest::load_or_default(Path::new("/nonexistent/path/gx.toml")).unwrap();
-        assert!(manifest.actions.is_empty());
+        assert!(manifest.is_empty());
     }
 
     #[test]
     fn test_save_and_load() {
         let mut manifest = FileManifest::default();
-        manifest
-            .actions
-            .insert("actions/checkout".to_string(), "v4".to_string());
-        manifest
-            .actions
-            .insert("actions/setup-node".to_string(), "v3".to_string());
+        manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
+        manifest.set(ActionId::from("actions/setup-node"), Version::from("v3"));
 
         let file = NamedTempFile::new().unwrap();
         manifest.path = Some(file.path().to_path_buf());
+        manifest.changed = true;
         manifest.save().unwrap();
 
         let loaded = FileManifest::load(file.path()).unwrap();
         assert_eq!(
-            loaded.actions.get("actions/checkout"),
-            Some(&"v4".to_string())
+            loaded.get(&ActionId::from("actions/checkout")),
+            Some(&Version::from("v4"))
         );
         assert_eq!(
-            loaded.actions.get("actions/setup-node"),
-            Some(&"v3".to_string())
+            loaded.get(&ActionId::from("actions/setup-node")),
+            Some(&Version::from("v3"))
         );
     }
 
@@ -296,9 +355,21 @@ mod tests {
     }
 
     #[test]
-    fn test_save_without_path_fails() {
-        let manifest = FileManifest::default();
-        let result = manifest.save();
-        assert!(result.is_err());
+    fn test_specs() {
+        let mut manifest = MemoryManifest::default();
+        manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
+        manifest.set(ActionId::from("actions/setup-node"), Version::from("v3"));
+
+        let specs = manifest.specs();
+        assert_eq!(specs.len(), 2);
+    }
+
+    #[test]
+    fn test_contains() {
+        let mut manifest = MemoryManifest::default();
+        manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
+
+        assert!(manifest.contains(&ActionId::from("actions/checkout")));
+        assert!(!manifest.contains(&ActionId::from("actions/setup-node")));
     }
 }

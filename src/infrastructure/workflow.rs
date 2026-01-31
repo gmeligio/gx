@@ -7,7 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-use crate::git::is_commit_sha;
+use crate::domain::{ActionId, CommitSha, Version, is_commit_sha};
 
 /// Errors that can occur when working with workflow files
 #[derive(Debug, Error)]
@@ -40,15 +40,6 @@ pub enum WorkflowError {
     Regex(#[from] regex::Error),
 }
 
-pub struct WorkflowUpdater {
-    workflows_dir: PathBuf,
-}
-
-pub struct UpdateResult {
-    pub file: PathBuf,
-    pub changes: Vec<String>,
-}
-
 /// Location of an action within a workflow file
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActionLocation {
@@ -60,12 +51,18 @@ pub struct ActionLocation {
 /// An action extracted from a workflow file with full location info
 #[derive(Debug, Clone)]
 pub struct ExtractedAction {
-    pub name: String,
-    pub version: String,
+    pub id: ActionId,
+    pub version: Version,
     /// The commit SHA if present in the workflow (when format is `SHA # version`)
-    pub sha: Option<String>,
+    pub sha: Option<CommitSha>,
     pub file: PathBuf,
     pub location: ActionLocation,
+}
+
+/// Result of updating a workflow file
+pub struct UpdateResult {
+    pub file: PathBuf,
+    pub changes: Vec<String>,
 }
 
 /// Minimal workflow structure for YAML parsing
@@ -86,7 +83,12 @@ struct Step {
     uses: Option<String>,
 }
 
-impl WorkflowUpdater {
+/// Parser for extracting action information from workflow files
+pub struct WorkflowParser {
+    workflows_dir: PathBuf,
+}
+
+impl WorkflowParser {
     #[must_use]
     pub fn new(repo_root: &Path) -> Self {
         Self {
@@ -118,76 +120,6 @@ impl WorkflowUpdater {
         }
 
         Ok(workflows)
-    }
-
-    /// Update action versions in a single workflow file.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the file cannot be read, the regex pattern is invalid, or the file cannot be written.
-    pub fn update_workflow(
-        &self,
-        workflow_path: &Path,
-        actions: &HashMap<String, String>,
-    ) -> Result<UpdateResult, WorkflowError> {
-        let content = fs::read_to_string(workflow_path).map_err(|source| WorkflowError::Read {
-            path: workflow_path.to_path_buf(),
-            source,
-        })?;
-
-        let mut updated_content = content.clone();
-        let mut changes = Vec::new();
-
-        for (action, version) in actions {
-            let escaped_action = regex::escape(action);
-            // Match "uses: action@ref" and optionally capture any existing comment
-            let pattern = format!(r"(uses:\s*{escaped_action})@[^\s#]+(\s*#[^\n]*)?");
-            let re = Regex::new(&pattern)?;
-
-            if re.is_match(&updated_content) {
-                let replacement = format!("${{1}}@{version}");
-                let new_content = re.replace_all(&updated_content, replacement.as_str());
-
-                if new_content != updated_content {
-                    changes.push(format!("{action}@{version}"));
-                    updated_content = new_content.to_string();
-                }
-            }
-        }
-
-        if !changes.is_empty() {
-            fs::write(workflow_path, &updated_content).map_err(|source| WorkflowError::Write {
-                path: workflow_path.to_path_buf(),
-                source,
-            })?;
-        }
-
-        Ok(UpdateResult {
-            file: workflow_path.to_path_buf(),
-            changes,
-        })
-    }
-
-    /// Update action versions in all workflow files.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if any workflow file cannot be processed.
-    pub fn update_all(
-        &self,
-        actions: &HashMap<String, String>,
-    ) -> Result<Vec<UpdateResult>, WorkflowError> {
-        let workflows = self.find_workflows()?;
-        let mut results = Vec::new();
-
-        for workflow in workflows {
-            let result = self.update_workflow(&workflow, actions)?;
-            if !result.changes.is_empty() {
-                results.push(result);
-            }
-        }
-
-        Ok(results)
     }
 
     /// Extract all actions from a single workflow file.
@@ -256,18 +188,18 @@ impl WorkflowUpdater {
                         // Has a comment - use comment as version
                         // If ref is a SHA, store it
                         let sha = if is_commit_sha(&ref_or_sha) {
-                            Some(ref_or_sha)
+                            Some(CommitSha::from(ref_or_sha))
                         } else {
                             None
                         };
-                        (comment_version.clone(), sha)
+                        (Version::from(comment_version.clone()), sha)
                     } else {
                         // No comment, use the ref as-is, no SHA stored
-                        (ref_or_sha, None)
+                        (Version::from(ref_or_sha), None)
                     };
 
                     actions.push(ExtractedAction {
-                        name,
+                        id: ActionId::from(name),
                         version,
                         sha,
                         file: workflow_path.to_path_buf(),
@@ -302,6 +234,116 @@ impl WorkflowUpdater {
     }
 }
 
+/// Writer for updating action versions in workflow files
+pub struct WorkflowWriter {
+    workflows_dir: PathBuf,
+}
+
+impl WorkflowWriter {
+    #[must_use]
+    pub fn new(repo_root: &Path) -> Self {
+        Self {
+            workflows_dir: repo_root.join(".github").join("workflows"),
+        }
+    }
+
+    /// Find all workflow files in the repository's `.github/workflows` folder.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the glob pattern is invalid.
+    pub fn find_workflows(&self) -> Result<Vec<PathBuf>, WorkflowError> {
+        let mut workflows = Vec::new();
+
+        for extension in &["yml", "yaml"] {
+            let pattern = self
+                .workflows_dir
+                .join(format!("*.{extension}"))
+                .to_string_lossy()
+                .to_string();
+
+            for entry in glob(&pattern)? {
+                match entry {
+                    Ok(path) => workflows.push(path),
+                    Err(e) => warn!("Error reading path: {e}"),
+                }
+            }
+        }
+
+        Ok(workflows)
+    }
+
+    /// Update action versions in a single workflow file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be read, the regex pattern is invalid, or the file cannot be written.
+    pub fn update_workflow(
+        &self,
+        workflow_path: &Path,
+        actions: &HashMap<ActionId, String>,
+    ) -> Result<UpdateResult, WorkflowError> {
+        let content = fs::read_to_string(workflow_path).map_err(|source| WorkflowError::Read {
+            path: workflow_path.to_path_buf(),
+            source,
+        })?;
+
+        let mut updated_content = content.clone();
+        let mut changes = Vec::new();
+
+        for (action, version) in actions {
+            let escaped_action = regex::escape(action.as_str());
+            // Match "uses: action@ref" and optionally capture any existing comment
+            let pattern = format!(r"(uses:\s*{escaped_action})@[^\s#]+(\s*#[^\n]*)?");
+            let re = Regex::new(&pattern)?;
+
+            if re.is_match(&updated_content) {
+                let replacement = format!("${{1}}@{version}");
+                let new_content = re.replace_all(&updated_content, replacement.as_str());
+
+                if new_content != updated_content {
+                    changes.push(format!("{action}@{version}"));
+                    updated_content = new_content.to_string();
+                }
+            }
+        }
+
+        if !changes.is_empty() {
+            fs::write(workflow_path, &updated_content).map_err(|source| WorkflowError::Write {
+                path: workflow_path.to_path_buf(),
+                source,
+            })?;
+        }
+
+        Ok(UpdateResult {
+            file: workflow_path.to_path_buf(),
+            changes,
+        })
+    }
+
+    /// Update action versions in all workflow files.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any workflow file cannot be processed.
+    pub fn update_all(
+        &self,
+        actions: &HashMap<ActionId, String>,
+    ) -> Result<Vec<UpdateResult>, WorkflowError> {
+        let workflows = self.find_workflows()?;
+        let mut results = Vec::new();
+
+        for workflow in workflows {
+            let result = self.update_workflow(&workflow, actions)?;
+            if !result.changes.is_empty() {
+                results.push(result);
+            }
+        }
+
+        Ok(results)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -323,8 +365,8 @@ mod tests {
         create_test_workflow(temp_dir.path(), "ci.yml", "name: CI");
         create_test_workflow(temp_dir.path(), "deploy.yaml", "name: Deploy");
 
-        let updater = WorkflowUpdater::new(temp_dir.path());
-        let workflows = updater.find_workflows().unwrap();
+        let parser = WorkflowParser::new(temp_dir.path());
+        let workflows = parser.find_workflows().unwrap();
 
         assert_eq!(workflows.len(), 2);
     }
@@ -343,13 +385,11 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let workflow_updater = WorkflowUpdater::new(temp_dir.path());
+        let writer = WorkflowWriter::new(temp_dir.path());
         let mut actions = HashMap::new();
-        actions.insert("actions/checkout".to_string(), "v4".to_string());
+        actions.insert(ActionId::from("actions/checkout"), "v4".to_string());
 
-        let result = workflow_updater
-            .update_workflow(&workflow_path, &actions)
-            .unwrap();
+        let result = writer.update_workflow(&workflow_path, &actions).unwrap();
 
         assert_eq!(result.changes.len(), 1);
         assert!(result.changes[0].contains("actions/checkout@v4"));
@@ -374,13 +414,13 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let updater = WorkflowUpdater::new(temp_dir.path());
-        let actions = updater.extract_actions(&workflow_path).unwrap();
+        let parser = WorkflowParser::new(temp_dir.path());
+        let actions = parser.extract_actions(&workflow_path).unwrap();
 
         assert_eq!(actions.len(), 3);
 
         // Check that all actions were found (order may vary due to HashMap)
-        let action_names: Vec<_> = actions.iter().map(|a| a.name.as_str()).collect();
+        let action_names: Vec<_> = actions.iter().map(|a| a.id.as_str()).collect();
         assert!(action_names.contains(&"actions/checkout"));
         assert!(action_names.contains(&"actions/setup-node"));
         assert!(action_names.contains(&"docker/build-push-action"));
@@ -405,11 +445,11 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let updater = WorkflowUpdater::new(temp_dir.path());
-        let actions = updater.extract_actions(&workflow_path).unwrap();
+        let parser = WorkflowParser::new(temp_dir.path());
+        let actions = parser.extract_actions(&workflow_path).unwrap();
 
         assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].name, "actions/checkout");
+        assert_eq!(actions[0].id.as_str(), "actions/checkout");
     }
 
     #[test]
@@ -427,8 +467,8 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let updater = WorkflowUpdater::new(temp_dir.path());
-        let actions = updater.extract_actions(&workflow_path).unwrap();
+        let parser = WorkflowParser::new(temp_dir.path());
+        let actions = parser.extract_actions(&workflow_path).unwrap();
 
         assert_eq!(actions.len(), 3);
 
@@ -460,8 +500,8 @@ jobs:
             "jobs:\n  deploy:\n    steps:\n      - uses: docker/build-push-action@v5",
         );
 
-        let updater = WorkflowUpdater::new(temp_dir.path());
-        let actions = updater.extract_all().unwrap();
+        let parser = WorkflowParser::new(temp_dir.path());
+        let actions = parser.extract_all().unwrap();
 
         assert_eq!(actions.len(), 2);
     }
@@ -478,22 +518,22 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let updater = WorkflowUpdater::new(temp_dir.path());
-        let actions = updater.extract_actions(&workflow_path).unwrap();
+        let parser = WorkflowParser::new(temp_dir.path());
+        let actions = parser.extract_actions(&workflow_path).unwrap();
 
         assert_eq!(actions.len(), 2);
 
         let checkout = actions
             .iter()
-            .find(|a| a.name == "actions/checkout")
+            .find(|a| a.id.as_str() == "actions/checkout")
             .unwrap();
-        assert_eq!(checkout.version, "v4");
+        assert_eq!(checkout.version.as_str(), "v4");
 
         let setup_node = actions
             .iter()
-            .find(|a| a.name == "actions/setup-node")
+            .find(|a| a.id.as_str() == "actions/setup-node")
             .unwrap();
-        assert_eq!(setup_node.version, "v3");
+        assert_eq!(setup_node.version.as_str(), "v3");
     }
 
     #[test]
@@ -507,12 +547,12 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let updater = WorkflowUpdater::new(temp_dir.path());
-        let actions = updater.extract_actions(&workflow_path).unwrap();
+        let parser = WorkflowParser::new(temp_dir.path());
+        let actions = parser.extract_actions(&workflow_path).unwrap();
 
         assert_eq!(actions.len(), 1);
         // Should normalize to v4
-        assert_eq!(actions[0].version, "v4");
+        assert_eq!(actions[0].version.as_str(), "v4");
     }
 
     #[test]
@@ -526,11 +566,11 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let updater = WorkflowUpdater::new(temp_dir.path());
-        let actions = updater.extract_actions(&workflow_path).unwrap();
+        let parser = WorkflowParser::new(temp_dir.path());
+        let actions = parser.extract_actions(&workflow_path).unwrap();
 
         assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].version, "v4");
+        assert_eq!(actions[0].version.as_str(), "v4");
     }
 
     #[test]
@@ -544,12 +584,12 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let updater = WorkflowUpdater::new(temp_dir.path());
-        let actions = updater.extract_actions(&workflow_path).unwrap();
+        let parser = WorkflowParser::new(temp_dir.path());
+        let actions = parser.extract_actions(&workflow_path).unwrap();
 
         assert_eq!(actions.len(), 1);
         // Should use SHA as version when no comment
-        assert_eq!(actions[0].version, "abc123def456");
+        assert_eq!(actions[0].version.as_str(), "abc123def456");
     }
 
     #[test]
@@ -570,28 +610,28 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "test.yml", content);
 
-        let updater = WorkflowUpdater::new(temp_dir.path());
-        let actions = updater.extract_actions(&workflow_path).unwrap();
+        let parser = WorkflowParser::new(temp_dir.path());
+        let actions = parser.extract_actions(&workflow_path).unwrap();
 
         assert_eq!(actions.len(), 2);
 
         let checkout = actions
             .iter()
-            .find(|a| a.name == "actions/checkout")
+            .find(|a| a.id.as_str() == "actions/checkout")
             .unwrap();
-        assert_eq!(checkout.version, "v6.0.1");
+        assert_eq!(checkout.version.as_str(), "v6.0.1");
         assert_eq!(
-            checkout.sha.as_deref(),
+            checkout.sha.as_ref().map(CommitSha::as_str),
             Some("8e8c483db84b4bee98b60c0593521ed34d9990e8")
         );
 
         let login = actions
             .iter()
-            .find(|a| a.name == "docker/login-action")
+            .find(|a| a.id.as_str() == "docker/login-action")
             .unwrap();
-        assert_eq!(login.version, "v3.6.0");
+        assert_eq!(login.version.as_str(), "v3.6.0");
         assert_eq!(
-            login.sha.as_deref(),
+            login.sha.as_ref().map(CommitSha::as_str),
             Some("5e57cd118135c172c3672efd75eb46360885c0ef")
         );
     }
@@ -607,11 +647,11 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let updater = WorkflowUpdater::new(temp_dir.path());
-        let actions = updater.extract_actions(&workflow_path).unwrap();
+        let parser = WorkflowParser::new(temp_dir.path());
+        let actions = parser.extract_actions(&workflow_path).unwrap();
 
         assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].version, "v4");
+        assert_eq!(actions[0].version.as_str(), "v4");
         // No SHA when using a tag without comment
         assert!(actions[0].sha.is_none());
     }
@@ -628,11 +668,11 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let updater = WorkflowUpdater::new(temp_dir.path());
-        let actions = updater.extract_actions(&workflow_path).unwrap();
+        let parser = WorkflowParser::new(temp_dir.path());
+        let actions = parser.extract_actions(&workflow_path).unwrap();
 
         assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].version, "v4");
+        assert_eq!(actions[0].version.as_str(), "v4");
         // Short refs are not treated as SHAs
         assert!(actions[0].sha.is_none());
     }
@@ -650,17 +690,15 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let workflow_updater = WorkflowUpdater::new(temp_dir.path());
+        let writer = WorkflowWriter::new(temp_dir.path());
         let mut actions = HashMap::new();
         // Simulate the format from lock.build_update_map(): "SHA # version"
         actions.insert(
-            "actions/checkout".to_string(),
+            ActionId::from("actions/checkout"),
             "abc123def456 # v4".to_string(),
         );
 
-        let result = workflow_updater
-            .update_workflow(&workflow_path, &actions)
-            .unwrap();
+        let result = writer.update_workflow(&workflow_path, &actions).unwrap();
 
         assert_eq!(result.changes.len(), 1);
 
@@ -691,21 +729,19 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let workflow_updater = WorkflowUpdater::new(temp_dir.path());
+        let writer = WorkflowWriter::new(temp_dir.path());
         let mut actions = HashMap::new();
         // Update both actions with new SHAs
         actions.insert(
-            "actions/checkout".to_string(),
+            ActionId::from("actions/checkout"),
             "abc123def456 # v4".to_string(),
         );
         actions.insert(
-            "actions/setup-node".to_string(),
+            ActionId::from("actions/setup-node"),
             "xyz789012345 # v3".to_string(),
         );
 
-        let result = workflow_updater
-            .update_workflow(&workflow_path, &actions)
-            .unwrap();
+        let result = writer.update_workflow(&workflow_path, &actions).unwrap();
 
         assert_eq!(result.changes.len(), 2);
 
