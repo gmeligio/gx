@@ -11,20 +11,14 @@ pub const MANIFEST_FILE_NAME: &str = "gx.toml";
 
 /// Trait defining operations on a manifest (action → version mapping)
 pub trait ManifestStore {
-    /// Get all action specs from the manifest
-    fn specs(&self) -> Vec<ActionSpec>;
+    /// Get the version for an action
+    fn get(&self, id: &ActionId) -> Option<&Version>;
 
     /// Set or update an action version
     fn set(&mut self, id: ActionId, version: Version);
 
-    /// Remove an action
-    fn remove(&mut self, id: &ActionId);
-
     /// Check if the manifest contains an action
-    fn contains(&self, id: &ActionId) -> bool;
-
-    /// Get the version for an action
-    fn get(&self, id: &ActionId) -> Option<&Version>;
+    fn has(&self, id: &ActionId) -> bool;
 
     /// Save the manifest only if there were changes.
     ///
@@ -32,6 +26,12 @@ pub trait ManifestStore {
     ///
     /// Returns an error if saving is required but fails.
     fn save(&mut self) -> Result<(), ManifestError>;
+
+    /// Get all action specs from the manifest
+    fn specs(&self) -> Vec<ActionSpec>;
+
+    /// Remove an action
+    fn remove(&mut self, id: &ActionId);
 
     /// Get the path to the manifest file
     ///
@@ -119,7 +119,7 @@ impl FileManifest {
         Ok(Self {
             actions,
             path: Some(path.to_path_buf()),
-            dirty: false,
+            ..Default::default()
         })
     }
 
@@ -185,7 +185,7 @@ impl ManifestStore for FileManifest {
         }
     }
 
-    fn contains(&self, id: &ActionId) -> bool {
+    fn has(&self, id: &ActionId) -> bool {
         self.actions.contains_key(id)
     }
 
@@ -234,7 +234,7 @@ impl ManifestStore for MemoryManifest {
         self.actions.remove(id);
     }
 
-    fn contains(&self, id: &ActionId) -> bool {
+    fn has(&self, id: &ActionId) -> bool {
         self.actions.contains_key(id)
     }
 
@@ -369,7 +369,7 @@ mod tests {
         let mut manifest = MemoryManifest::default();
         manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
 
-        assert!(manifest.contains(&ActionId::from("actions/checkout")));
-        assert!(!manifest.contains(&ActionId::from("actions/setup-node")));
+        assert!(manifest.has(&ActionId::from("actions/checkout")));
+        assert!(!manifest.has(&ActionId::from("actions/setup-node")));
     }
 }

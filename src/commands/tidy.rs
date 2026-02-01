@@ -1,6 +1,6 @@
 use anyhow::Result;
 use log::{debug, info};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::Path;
 
 use crate::domain::{
@@ -129,8 +129,8 @@ pub fn run<M: ManifestStore, L: LockStore>(
     manifest.save()?;
 
     // Remove unused entries from lock file
-    let keys_to_keep: Vec<LockKey> = manifest.specs().iter().map(LockKey::from).collect();
-    lock.retain(&keys_to_keep);
+    let keys_to_retain: Vec<LockKey> = manifest.specs().iter().map(LockKey::from).collect();
+    lock.retain(&keys_to_retain);
 
     // Save lock file only if dirty
     lock.save()?;
@@ -142,11 +142,9 @@ pub fn run<M: ManifestStore, L: LockStore>(
     }
 
     // Build update map with SHAs from lock file and version comments from manifest
-    let update_map = lock.build_update_map(&keys_to_keep);
+    let update_map = lock.build_update_map(&keys_to_retain);
 
-    // Convert ActionId keys to String keys for workflow writer
-    let string_update_map: HashMap<ActionId, String> = update_map;
-    let results = writer.update_all(&string_update_map)?;
+    let results = writer.update_all(&update_map)?;
     print_update_results(&results);
 
     // Print summary of version corrections
