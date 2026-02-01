@@ -11,5 +11,6 @@ pub use manifest::{
 };
 pub use repo::{RepoError, find_root};
 pub use workflow::{
-    ActionLocation, ExtractedAction, UpdateResult, WorkflowError, WorkflowParser, WorkflowWriter,
+    ActionLocation, ExtractedAction, RawExtractedAction, UpdateResult, WorkflowError,
+    WorkflowParser, WorkflowWriter,
 };

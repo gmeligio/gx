@@ -94,7 +94,7 @@ pub struct FileLock {
     /// Maps `LockKey` to `CommitSha`
     actions: HashMap<LockKey, CommitSha>,
     path: Option<PathBuf>,
-    changed: bool,
+    dirty: bool,
 }
 
 impl FileLock {
@@ -131,13 +131,13 @@ impl FileLock {
             .filter_map(|(k, v)| LockKey::parse(&k).map(|key| (key, CommitSha(v))))
             .collect();
 
-        // Mark as changed if version differs, triggering an update on save
-        let changed = data.version != LOCK_FILE_VERSION;
+        // Mark as dirty if version differs, triggering an update on save
+        let dirty = data.version != LOCK_FILE_VERSION;
 
         Ok(Self {
             actions,
             path: Some(path.to_path_buf()),
-            changed,
+            dirty,
         })
     }
 
@@ -192,7 +192,7 @@ impl LockStore for FileLock {
         let existing = self.actions.get(&key);
         if existing != Some(&resolved.sha) {
             self.actions.insert(key, resolved.sha.clone());
-            self.changed = true;
+            self.dirty = true;
         }
     }
 
@@ -205,7 +205,7 @@ impl LockStore for FileLock {
         let original_len = self.actions.len();
         self.actions.retain(|key, _| used_keys.contains(key));
         if self.actions.len() != original_len {
-            self.changed = true;
+            self.dirty = true;
         }
     }
 
@@ -214,9 +214,10 @@ impl LockStore for FileLock {
 
         for key in keys {
             if let Some(sha) = self.get(key) {
-                // Format as "SHA # version" for the workflow update
-                let update_value = format!("{} # {}", sha, key.version);
-                update_map.insert(key.id.clone(), update_value);
+                // Use ResolvedAction to format as "SHA # version"
+                let resolved =
+                    ResolvedAction::new(key.id.clone(), key.version.clone(), sha.clone());
+                update_map.insert(key.id.clone(), resolved.to_workflow_ref());
             } else {
                 // Fallback to version if SHA not found in lock file
                 update_map.insert(key.id.clone(), key.version.0.clone());
@@ -227,9 +228,9 @@ impl LockStore for FileLock {
     }
 
     fn save(&mut self) -> Result<(), LockFileError> {
-        if self.changed {
+        if self.dirty {
             self.save_to_disk()?;
-            self.changed = false;
+            self.dirty = false;
         }
         Ok(())
     }
@@ -265,8 +266,10 @@ impl LockStore for MemoryLock {
 
         for key in keys {
             if let Some(sha) = self.get(key) {
-                let update_value = format!("{} # {}", sha, key.version);
-                update_map.insert(key.id.clone(), update_value);
+                // Use ResolvedAction to format as "SHA # version"
+                let resolved =
+                    ResolvedAction::new(key.id.clone(), key.version.clone(), sha.clone());
+                update_map.insert(key.id.clone(), resolved.to_workflow_ref());
             } else {
                 update_map.insert(key.id.clone(), key.version.0.clone());
             }
@@ -497,7 +500,7 @@ version = "1.0"
 
     #[test]
     fn test_update_content_to_latest_version() {
-        // Old lock files without version should get default version and mark as changed
+        // Old lock files without version should get default version and mark as dirty
         let content = r#"
 [actions]
 "actions/checkout@v4" = "abc123"
@@ -507,15 +510,12 @@ version = "1.0"
         file.write_all(content.as_bytes()).unwrap();
 
         let lock = FileLock::load(file.path()).unwrap();
-        assert!(
-            lock.changed,
-            "should be marked as changed when version differs"
-        );
+        assert!(lock.dirty, "should be marked as dirty when version differs");
     }
 
     #[test]
-    fn test_current_version_not_marked_changed() {
-        // Lock files with current version should not be marked as changed
+    fn test_current_version_not_marked_dirty() {
+        // Lock files with current version should not be marked as dirty
         let content = format!(
             r#"version = "{LOCK_FILE_VERSION}"
 
@@ -529,8 +529,8 @@ version = "1.0"
 
         let lock = FileLock::load(file.path()).unwrap();
         assert!(
-            !lock.changed,
-            "should not be marked as changed when version matches"
+            !lock.dirty,
+            "should not be marked as dirty when version matches"
         );
     }
 }

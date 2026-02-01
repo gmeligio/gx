@@ -1,5 +1,7 @@
 use std::fmt;
 
+use super::version::{is_commit_sha, normalize_version};
+
 /// Unique identifier for an action (e.g., "actions/checkout")
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ActionId(pub String);
@@ -171,6 +173,67 @@ impl From<&ResolvedAction> for LockKey {
     }
 }
 
+/// Raw data from a `uses:` line in a workflow file.
+/// Contains no interpretation - just the exact strings parsed from YAML.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawUsesRef {
+    /// The action name (e.g., "actions/checkout")
+    pub action_name: String,
+    /// The ref portion after @ (could be tag, SHA, or branch)
+    pub uses_ref: String,
+    /// The comment after #, if present (e.g., "v4" or "v4.0.1")
+    pub comment: Option<String>,
+}
+
+impl RawUsesRef {
+    #[must_use]
+    pub fn new(action_name: String, uses_ref: String, comment: Option<String>) -> Self {
+        Self {
+            action_name,
+            uses_ref,
+            comment,
+        }
+    }
+
+    /// Interpret this raw reference into domain types.
+    ///
+    /// Rules applied:
+    /// - If comment exists, normalize it (add 'v' prefix if missing) and use as version
+    /// - If comment exists and `uses_ref` is a 40-char hex SHA, store the SHA
+    /// - If no comment, use `uses_ref` as version (could be tag like "v4" or SHA)
+    #[must_use]
+    pub fn interpret(&self) -> InterpretedRef {
+        let (version, sha) = if let Some(comment) = &self.comment {
+            // Has a comment - use normalized comment as version
+            let normalized = normalize_version(comment);
+            // If ref is a SHA, store it
+            let sha = if is_commit_sha(&self.uses_ref) {
+                Some(CommitSha::from(self.uses_ref.clone()))
+            } else {
+                None
+            };
+            (Version::from(normalized), sha)
+        } else {
+            // No comment, use the ref as-is, no SHA stored
+            (Version::from(self.uses_ref.clone()), None)
+        };
+
+        InterpretedRef {
+            id: ActionId::from(self.action_name.clone()),
+            version,
+            sha,
+        }
+    }
+}
+
+/// Result of interpreting a raw workflow reference.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InterpretedRef {
+    pub id: ActionId,
+    pub version: Version,
+    pub sha: Option<CommitSha>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -228,5 +291,75 @@ mod tests {
         let key: LockKey = (&spec).into();
         assert_eq!(key.id.as_str(), "actions/checkout");
         assert_eq!(key.version.as_str(), "v4");
+    }
+
+    #[test]
+    fn test_raw_uses_ref_interpret_tag_only() {
+        let raw = RawUsesRef::new("actions/checkout".to_string(), "v4".to_string(), None);
+        let interpreted = raw.interpret();
+
+        assert_eq!(interpreted.id.as_str(), "actions/checkout");
+        assert_eq!(interpreted.version.as_str(), "v4");
+        assert!(interpreted.sha.is_none());
+    }
+
+    #[test]
+    fn test_raw_uses_ref_interpret_sha_with_comment() {
+        let raw = RawUsesRef::new(
+            "actions/checkout".to_string(),
+            "abc123def456789012345678901234567890abcd".to_string(),
+            Some("v4".to_string()),
+        );
+        let interpreted = raw.interpret();
+
+        assert_eq!(interpreted.id.as_str(), "actions/checkout");
+        assert_eq!(interpreted.version.as_str(), "v4");
+        assert_eq!(
+            interpreted.sha.as_ref().map(CommitSha::as_str),
+            Some("abc123def456789012345678901234567890abcd")
+        );
+    }
+
+    #[test]
+    fn test_raw_uses_ref_interpret_normalizes_version() {
+        let raw = RawUsesRef::new(
+            "actions/checkout".to_string(),
+            "abc123def456789012345678901234567890abcd".to_string(),
+            Some("4".to_string()), // No 'v' prefix
+        );
+        let interpreted = raw.interpret();
+
+        assert_eq!(interpreted.version.as_str(), "v4"); // Should be normalized
+    }
+
+    #[test]
+    fn test_raw_uses_ref_interpret_sha_without_comment() {
+        let raw = RawUsesRef::new(
+            "actions/checkout".to_string(),
+            "abc123def456789012345678901234567890abcd".to_string(),
+            None,
+        );
+        let interpreted = raw.interpret();
+
+        // Without comment, the SHA becomes the version
+        assert_eq!(
+            interpreted.version.as_str(),
+            "abc123def456789012345678901234567890abcd"
+        );
+        assert!(interpreted.sha.is_none());
+    }
+
+    #[test]
+    fn test_raw_uses_ref_interpret_short_ref_with_comment() {
+        // Short ref (not 40 chars) with comment - ref is NOT a SHA
+        let raw = RawUsesRef::new(
+            "actions/checkout".to_string(),
+            "abc123".to_string(),
+            Some("v4".to_string()),
+        );
+        let interpreted = raw.interpret();
+
+        assert_eq!(interpreted.version.as_str(), "v4");
+        assert!(interpreted.sha.is_none()); // Short ref is not stored as SHA
     }
 }

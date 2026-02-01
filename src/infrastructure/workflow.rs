@@ -7,7 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-use crate::domain::{ActionId, CommitSha, Version, is_commit_sha};
+use crate::domain::{ActionId, CommitSha, RawUsesRef, Version};
 
 /// Errors that can occur when working with workflow files
 #[derive(Debug, Error)]
@@ -56,6 +56,33 @@ pub struct ExtractedAction {
     /// The commit SHA if present in the workflow (when format is `SHA # version`)
     pub sha: Option<CommitSha>,
     pub file: PathBuf,
+    pub location: ActionLocation,
+}
+
+impl ExtractedAction {
+    /// Create an `ExtractedAction` from raw extraction data by interpreting it.
+    #[must_use]
+    pub fn from_raw(raw: &RawExtractedAction) -> Self {
+        let interpreted = raw.raw_ref.interpret();
+        Self {
+            id: interpreted.id,
+            version: interpreted.version,
+            sha: interpreted.sha,
+            file: raw.file.clone(),
+            location: raw.location.clone(),
+        }
+    }
+}
+
+/// Raw action data extracted from a workflow file (no interpretation applied).
+/// Use `ExtractedAction::from_raw()` to interpret this into domain types.
+#[derive(Debug, Clone)]
+pub struct RawExtractedAction {
+    /// Raw uses reference data (action name, ref, optional comment)
+    pub raw_ref: RawUsesRef,
+    /// File path of the workflow
+    pub file: PathBuf,
+    /// Location within the workflow
     pub location: ActionLocation,
 }
 
@@ -122,15 +149,18 @@ impl WorkflowParser {
         Ok(workflows)
     }
 
-    /// Extract all actions from a single workflow file.
+    /// Extract all actions from a single workflow file as raw data.
+    ///
+    /// Returns raw extraction without any interpretation. Use `ExtractedAction::from_raw()`
+    /// to interpret the raw data into domain types.
     ///
     /// # Errors
     ///
     /// Returns an error if the file cannot be read, parsed as YAML, or the regex pattern is invalid.
-    pub fn extract_actions(
+    pub fn extract_actions_raw(
         &self,
         workflow_path: &Path,
-    ) -> Result<Vec<ExtractedAction>, WorkflowError> {
+    ) -> Result<Vec<RawExtractedAction>, WorkflowError> {
         let content = fs::read_to_string(workflow_path).map_err(|source| WorkflowError::Read {
             path: workflow_path.to_path_buf(),
             source,
@@ -143,19 +173,16 @@ impl WorkflowParser {
 
         let mut actions = Vec::new();
 
-        // First, build a map of uses line -> comment version from raw content
-        let mut version_comments = HashMap::new();
-        let uses_with_comment_re = Regex::new(r"uses:\s*([^#\n]+)#\s*v?(\S+)")?;
+        // Build a map of uses line -> raw comment text from raw content
+        // Note: We capture the comment as-is without normalization
+        let mut comments = HashMap::new();
+        let uses_with_comment_re = Regex::new(r"uses:\s*([^#\n]+)#\s*(\S+)")?;
 
         for line in content.lines() {
             if let Some(cap) = uses_with_comment_re.captures(line) {
                 let uses_part = cap[1].trim().to_string();
-                let mut comment_version = cap[2].to_string();
-                // Normalize: ensure it starts with 'v'
-                if !comment_version.starts_with('v') {
-                    comment_version = format!("v{comment_version}");
-                }
-                version_comments.insert(uses_part, comment_version);
+                let comment = cap[2].to_string();
+                comments.insert(uses_part, comment);
             }
         }
 
@@ -174,34 +201,19 @@ impl WorkflowParser {
                 if let Some(uses) = &step.uses
                     && let Some(cap) = uses_re.captures(uses)
                 {
-                    let name = cap[1].to_string();
-                    let ref_or_sha = cap[2].to_string();
+                    let action_name = cap[1].to_string();
+                    let uses_ref = cap[2].to_string();
 
                     // Skip local actions (./path) and docker actions (docker://)
-                    if name.starts_with('.') || name.starts_with("docker://") {
+                    if action_name.starts_with('.') || action_name.starts_with("docker://") {
                         continue;
                     }
 
-                    // Extract version and SHA from uses line
-                    // If there's a comment, use comment as version; if ref is SHA, store it
-                    let (version, sha) = if let Some(comment_version) = version_comments.get(uses) {
-                        // Has a comment - use comment as version
-                        // If ref is a SHA, store it
-                        let sha = if is_commit_sha(&ref_or_sha) {
-                            Some(CommitSha::from(ref_or_sha))
-                        } else {
-                            None
-                        };
-                        (Version::from(comment_version.clone()), sha)
-                    } else {
-                        // No comment, use the ref as-is, no SHA stored
-                        (Version::from(ref_or_sha), None)
-                    };
+                    // Get comment if present (raw, no normalization)
+                    let comment = comments.get(uses).cloned();
 
-                    actions.push(ExtractedAction {
-                        id: ActionId::from(name),
-                        version,
-                        sha,
+                    actions.push(RawExtractedAction {
+                        raw_ref: RawUsesRef::new(action_name, uses_ref, comment),
                         file: workflow_path.to_path_buf(),
                         location: ActionLocation {
                             workflow: workflow_name.clone(),
@@ -216,21 +228,48 @@ impl WorkflowParser {
         Ok(actions)
     }
 
+    /// Extract all actions from a single workflow file.
+    ///
+    /// This is a convenience method that extracts raw data and interprets it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be read, parsed as YAML, or the regex pattern is invalid.
+    pub fn extract_actions(
+        &self,
+        workflow_path: &Path,
+    ) -> Result<Vec<ExtractedAction>, WorkflowError> {
+        let raw_actions = self.extract_actions_raw(workflow_path)?;
+        Ok(raw_actions.iter().map(ExtractedAction::from_raw).collect())
+    }
+
+    /// Extract all actions from all workflow files as raw data.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any workflow file cannot be processed.
+    pub fn extract_all_raw(&self) -> Result<Vec<RawExtractedAction>, WorkflowError> {
+        let workflows = self.find_workflows()?;
+        let mut all_actions = Vec::new();
+
+        for workflow in workflows {
+            let actions = self.extract_actions_raw(&workflow)?;
+            all_actions.extend(actions);
+        }
+
+        Ok(all_actions)
+    }
+
     /// Extract all actions from all workflow files.
+    ///
+    /// This is a convenience method that extracts raw data and interprets it.
     ///
     /// # Errors
     ///
     /// Returns an error if any workflow file cannot be processed.
     pub fn extract_all(&self) -> Result<Vec<ExtractedAction>, WorkflowError> {
-        let workflows = self.find_workflows()?;
-        let mut all_actions = Vec::new();
-
-        for workflow in workflows {
-            let actions = self.extract_actions(&workflow)?;
-            all_actions.extend(actions);
-        }
-
-        Ok(all_actions)
+        let raw_actions = self.extract_all_raw()?;
+        Ok(raw_actions.iter().map(ExtractedAction::from_raw).collect())
     }
 }
 

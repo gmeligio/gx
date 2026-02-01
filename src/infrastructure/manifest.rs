@@ -89,7 +89,7 @@ pub struct FileManifest {
     /// Maps `ActionId` to `Version`
     actions: HashMap<ActionId, Version>,
     path: Option<PathBuf>,
-    changed: bool,
+    dirty: bool,
 }
 
 impl FileManifest {
@@ -119,7 +119,7 @@ impl FileManifest {
         Ok(Self {
             actions,
             path: Some(path.to_path_buf()),
-            changed: false,
+            dirty: false,
         })
     }
 
@@ -175,13 +175,13 @@ impl ManifestStore for FileManifest {
         let existing = self.actions.get(&id);
         if existing != Some(&version) {
             self.actions.insert(id, version);
-            self.changed = true;
+            self.dirty = true;
         }
     }
 
     fn remove(&mut self, id: &ActionId) {
         if self.actions.remove(id).is_some() {
-            self.changed = true;
+            self.dirty = true;
         }
     }
 
@@ -194,9 +194,9 @@ impl ManifestStore for FileManifest {
     }
 
     fn save(&mut self) -> Result<(), ManifestError> {
-        if self.changed {
+        if self.dirty {
             self.save_to_disk()?;
-            self.changed = false;
+            self.dirty = false;
         }
         Ok(())
     }
@@ -331,7 +331,7 @@ mod tests {
 
         let file = NamedTempFile::new().unwrap();
         manifest.path = Some(file.path().to_path_buf());
-        manifest.changed = true;
+        manifest.dirty = true;
         manifest.save().unwrap();
 
         let loaded = FileManifest::load(file.path()).unwrap();
