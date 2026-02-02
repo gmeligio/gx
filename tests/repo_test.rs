@@ -1,4 +1,4 @@
-use gx::repo;
+use gx::infrastructure::repo;
 use std::env;
 use std::fs;
 use tempfile::TempDir;

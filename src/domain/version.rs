@@ -1,5 +1,36 @@
 use semver::Version;
 
+/// Check if a string is a full commit SHA (40 hexadecimal characters)
+#[must_use]
+pub fn is_commit_sha(s: &str) -> bool {
+    s.len() == 40 && s.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// Normalize a version string to have a 'v' prefix.
+/// Examples: "4" -> "v4", "4.1.0" -> "v4.1.0", "v4" -> "v4"
+#[must_use]
+pub fn normalize_version(version: &str) -> String {
+    if version.starts_with('v') || version.starts_with('V') {
+        version.to_string()
+    } else {
+        format!("v{version}")
+    }
+}
+
+/// Check if a string looks like a semantic version (tag).
+/// Returns true for "v4", "v4.1", "v4.1.0", "4.1.0", etc.
+#[must_use]
+pub fn is_semver_like(s: &str) -> bool {
+    let normalized = s
+        .strip_prefix('v')
+        .or_else(|| s.strip_prefix('V'))
+        .unwrap_or(s);
+    normalized
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_digit())
+}
+
 /// Attempts to parse a version string into a semver Version.
 /// Handles common formats like "v4", "v4.1", "v4.1.2", "4.1.2"
 fn parse_semver(version: &str) -> Option<Version> {
@@ -59,6 +90,26 @@ pub fn find_highest_version<'a>(versions: &[&'a str]) -> Option<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_is_commit_sha_valid() {
+        assert!(is_commit_sha("a1b2c3d4e5f6789012345678901234567890abcd"));
+        assert!(is_commit_sha("0000000000000000000000000000000000000000"));
+        assert!(is_commit_sha("ffffffffffffffffffffffffffffffffffffffff"));
+    }
+
+    #[test]
+    fn test_is_commit_sha_invalid_length() {
+        assert!(!is_commit_sha("abc123")); // Too short
+        assert!(!is_commit_sha("a1b2c3d4e5f6789012345678901234567890abcde")); // Too long (41 chars)
+        assert!(!is_commit_sha("")); // Empty
+    }
+
+    #[test]
+    fn test_is_commit_sha_invalid_chars() {
+        assert!(!is_commit_sha("g1b2c3d4e5f6789012345678901234567890abcd")); // 'g' is not hex
+        assert!(!is_commit_sha("a1b2c3d4e5f6789012345678901234567890abc!")); // '!' is not hex
+    }
 
     #[test]
     fn test_parse_semver_full() {
@@ -132,5 +183,35 @@ mod tests {
     fn test_find_highest_version_empty() {
         let versions: Vec<&str> = vec![];
         assert_eq!(find_highest_version(&versions), None);
+    }
+
+    #[test]
+    fn test_normalize_version_with_v_prefix() {
+        assert_eq!(normalize_version("v4"), "v4");
+        assert_eq!(normalize_version("v4.1.0"), "v4.1.0");
+        assert_eq!(normalize_version("V4"), "V4");
+    }
+
+    #[test]
+    fn test_normalize_version_without_v_prefix() {
+        assert_eq!(normalize_version("4"), "v4");
+        assert_eq!(normalize_version("4.1.0"), "v4.1.0");
+    }
+
+    #[test]
+    fn test_is_semver_like_valid() {
+        assert!(is_semver_like("v4"));
+        assert!(is_semver_like("v4.1"));
+        assert!(is_semver_like("v4.1.0"));
+        assert!(is_semver_like("4.1.0"));
+        assert!(is_semver_like("V4"));
+    }
+
+    #[test]
+    fn test_is_semver_like_invalid() {
+        assert!(!is_semver_like("main"));
+        assert!(!is_semver_like("develop"));
+        assert!(!is_semver_like("abc123def456789012345678901234567890abcd"));
+        assert!(!is_semver_like(""));
     }
 }

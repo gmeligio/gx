@@ -3,7 +3,9 @@ use std::env;
 use std::time::Duration;
 use thiserror::Error;
 
-use crate::git::is_commit_sha;
+use crate::domain::{
+    ActionId, CommitSha, ResolutionError, Version, VersionResolver, is_commit_sha,
+};
 
 const GITHUB_API_BASE: &str = "https://api.github.com";
 const USER_AGENT: &str = "gx-cli";
@@ -203,9 +205,7 @@ impl GitHubClient {
 
         Ok(commit.sha)
     }
-}
 
-impl GitHubClient {
     /// Get all tags that point to a specific commit SHA.
     ///
     /// Returns tag names without the "refs/tags/" prefix (e.g., `["v5", "v5.0.0"]`)
@@ -269,6 +269,38 @@ impl GitHubClient {
     }
 }
 
+impl VersionResolver for GitHubClient {
+    fn resolve(&self, id: &ActionId, version: &Version) -> Result<CommitSha, ResolutionError> {
+        self.resolve_ref(id.as_str(), version.as_str())
+            .map(CommitSha::from)
+            .map_err(|e| match e {
+                GitHubError::TokenRequired => ResolutionError::TokenRequired,
+                _ => ResolutionError::ResolveFailed {
+                    action: id.to_string(),
+                    version: version.to_string(),
+                    reason: e.to_string(),
+                },
+            })
+    }
+
+    fn tags_for_sha(
+        &self,
+        id: &ActionId,
+        sha: &CommitSha,
+    ) -> Result<Vec<Version>, ResolutionError> {
+        self.get_tags_for_sha(id.as_str(), sha.as_str())
+            .map(|tags| tags.into_iter().map(Version::from).collect())
+            .map_err(|e| match e {
+                GitHubError::TokenRequired => ResolutionError::TokenRequired,
+                _ => ResolutionError::ResolveFailed {
+                    action: id.to_string(),
+                    version: String::new(),
+                    reason: e.to_string(),
+                },
+            })
+    }
+}
+
 impl Default for GitHubClient {
     fn default() -> Self {
         Self::new(None).expect("Failed to create GitHub client")
@@ -296,5 +328,16 @@ mod tests {
             .resolve_ref("github/codeql-action/upload-sarif", sha)
             .unwrap();
         assert_eq!(result, sha);
+    }
+
+    #[test]
+    fn test_version_resolver_trait() {
+        let client = GitHubClient::new(None).unwrap();
+        let id = ActionId::from("actions/checkout");
+        let sha_version = Version::from("a1b2c3d4e5f6789012345678901234567890abcd");
+
+        // Full SHA should pass through
+        let result = client.resolve(&id, &sha_version).unwrap();
+        assert_eq!(result.as_str(), sha_version.as_str());
     }
 }

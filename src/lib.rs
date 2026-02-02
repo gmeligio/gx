@@ -1,9 +1,4 @@
 pub mod commands;
 pub mod config;
-pub mod git;
-pub mod github;
-pub mod lock;
-pub mod manifest;
-pub mod repo;
-pub mod version;
-pub mod workflow;
+pub mod domain;
+pub mod infrastructure;

@@ -1,7 +1,8 @@
 /target
 
 # LLM
-.claude
+.claude/*
+!.claude/CLAUDE.md
 
 # Test
 .github

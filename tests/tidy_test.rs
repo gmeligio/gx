@@ -1,6 +1,5 @@
 use gx::commands::tidy;
-use gx::lock::{FileLock, MemoryLock};
-use gx::manifest::{FileManifest, MemoryManifest};
+use gx::infrastructure::{FileLock, FileManifest, MemoryLock, MemoryManifest};
 use std::fs;
 use std::io::Write;
 use std::path::Path;
