@@ -3,8 +3,10 @@ name = "gx"
 version = "0.2.0"
 description = "CLI to manage GitHub Actions dependencies"
 license = "MIT"
+documentation = "https://docs.rs/gx"
 edition = "2024"
-authors = ["Eligio Mariño"]
+homepage = "https://github.com/gmeligio/gx"
+repository = "https://github.com/gmeligio/gx"
 
 [dependencies]
 anyhow = "1"
@@ -17,7 +19,7 @@ regex = "1"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
 semver = "1"
 serde = { version = "1", features = ["derive"] }
-serde_yaml_ng = "0.10"
+serde-saphyr = "0.0.17"
 thiserror = "2.0.18"
 toml = "0.8"
 

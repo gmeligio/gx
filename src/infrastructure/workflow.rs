@@ -7,7 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-use crate::git::is_commit_sha;
+use crate::domain::{ActionId, CommitSha, RawUsesRef, Version};
 
 /// Errors that can occur when working with workflow files
 #[derive(Debug, Error)]
@@ -26,7 +26,7 @@ pub enum WorkflowError {
     Parse {
         path: PathBuf,
         #[source]
-        source: serde_yaml_ng::Error,
+        source: Box<serde_saphyr::Error>,
     },
 
     #[error("failed to write workflow: {}", path.display())]
@@ -40,15 +40,6 @@ pub enum WorkflowError {
     Regex(#[from] regex::Error),
 }
 
-pub struct WorkflowUpdater {
-    workflows_dir: PathBuf,
-}
-
-pub struct UpdateResult {
-    pub file: PathBuf,
-    pub changes: Vec<String>,
-}
-
 /// Location of an action within a workflow file
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActionLocation {
@@ -60,12 +51,45 @@ pub struct ActionLocation {
 /// An action extracted from a workflow file with full location info
 #[derive(Debug, Clone)]
 pub struct ExtractedAction {
-    pub name: String,
-    pub version: String,
+    pub id: ActionId,
+    pub version: Version,
     /// The commit SHA if present in the workflow (when format is `SHA # version`)
-    pub sha: Option<String>,
+    pub sha: Option<CommitSha>,
     pub file: PathBuf,
     pub location: ActionLocation,
+}
+
+impl ExtractedAction {
+    /// Create an `ExtractedAction` from raw extraction data by interpreting it.
+    #[must_use]
+    pub fn from_raw(raw: &RawExtractedAction) -> Self {
+        let interpreted = raw.raw_ref.interpret();
+        Self {
+            id: interpreted.id,
+            version: interpreted.version,
+            sha: interpreted.sha,
+            file: raw.file.clone(),
+            location: raw.location.clone(),
+        }
+    }
+}
+
+/// Raw action data extracted from a workflow file (no interpretation applied).
+/// Use `ExtractedAction::from_raw()` to interpret this into domain types.
+#[derive(Debug, Clone)]
+pub struct RawExtractedAction {
+    /// Raw uses reference data (action name, ref, optional comment)
+    pub raw_ref: RawUsesRef,
+    /// File path of the workflow
+    pub file: PathBuf,
+    /// Location within the workflow
+    pub location: ActionLocation,
+}
+
+/// Result of updating a workflow file
+pub struct UpdateResult {
+    pub file: PathBuf,
+    pub changes: Vec<String>,
 }
 
 /// Minimal workflow structure for YAML parsing
@@ -86,7 +110,175 @@ struct Step {
     uses: Option<String>,
 }
 
-impl WorkflowUpdater {
+/// Parser for extracting action information from workflow files
+pub struct WorkflowParser {
+    workflows_dir: PathBuf,
+}
+
+impl WorkflowParser {
+    #[must_use]
+    pub fn new(repo_root: &Path) -> Self {
+        Self {
+            workflows_dir: repo_root.join(".github").join("workflows"),
+        }
+    }
+
+    /// Find all workflow files in the repository's `.github/workflows` folder.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the glob pattern is invalid.
+    pub fn find_workflows(&self) -> Result<Vec<PathBuf>, WorkflowError> {
+        let mut workflows = Vec::new();
+
+        for extension in &["yml", "yaml"] {
+            let pattern = self
+                .workflows_dir
+                .join(format!("*.{extension}"))
+                .to_string_lossy()
+                .to_string();
+
+            for entry in glob(&pattern)? {
+                match entry {
+                    Ok(path) => workflows.push(path),
+                    Err(e) => warn!("Error reading path: {e}"),
+                }
+            }
+        }
+
+        Ok(workflows)
+    }
+
+    /// Extract all actions from a single workflow file as raw data.
+    ///
+    /// Returns raw extraction without any interpretation. Use `ExtractedAction::from_raw()`
+    /// to interpret the raw data into domain types.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be read, parsed as YAML, or the regex pattern is invalid.
+    pub fn extract_actions_raw(
+        &self,
+        workflow_path: &Path,
+    ) -> Result<Vec<RawExtractedAction>, WorkflowError> {
+        let content = fs::read_to_string(workflow_path).map_err(|source| WorkflowError::Read {
+            path: workflow_path.to_path_buf(),
+            source,
+        })?;
+
+        let workflow_name = workflow_path
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        let mut actions = Vec::new();
+
+        // Build a map of uses line -> raw comment text from raw content
+        // Note: We capture the comment as-is without normalization
+        let mut comments = HashMap::new();
+        let uses_with_comment_re = Regex::new(r"uses:\s*([^#\n]+)#\s*(\S+)")?;
+
+        for line in content.lines() {
+            if let Some(cap) = uses_with_comment_re.captures(line) {
+                let uses_part = cap[1].trim().to_string();
+                let comment = cap[2].to_string();
+                comments.insert(uses_part, comment);
+            }
+        }
+
+        // Parse YAML to get structured job/step info
+        let workflow: Workflow =
+            serde_saphyr::from_str(&content).map_err(|source| WorkflowError::Parse {
+                path: workflow_path.to_path_buf(),
+                source: Box::new(source),
+            })?;
+
+        // Pattern to parse uses: owner/repo@ref
+        let uses_re = Regex::new(r"^([^@\s]+)@([^\s#]+)")?;
+
+        for (job_name, job) in &workflow.jobs {
+            for (step_index, step) in job.steps.iter().enumerate() {
+                if let Some(uses) = &step.uses
+                    && let Some(cap) = uses_re.captures(uses)
+                {
+                    let action_name = cap[1].to_string();
+                    let uses_ref = cap[2].to_string();
+
+                    // Skip local actions (./path) and docker actions (docker://)
+                    if action_name.starts_with('.') || action_name.starts_with("docker://") {
+                        continue;
+                    }
+
+                    // Get comment if present (raw, no normalization)
+                    let comment = comments.get(uses).cloned();
+
+                    actions.push(RawExtractedAction {
+                        raw_ref: RawUsesRef::new(action_name, uses_ref, comment),
+                        file: workflow_path.to_path_buf(),
+                        location: ActionLocation {
+                            workflow: workflow_name.clone(),
+                            job: job_name.clone(),
+                            step_index,
+                        },
+                    });
+                }
+            }
+        }
+
+        Ok(actions)
+    }
+
+    /// Extract all actions from a single workflow file.
+    ///
+    /// This is a convenience method that extracts raw data and interprets it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be read, parsed as YAML, or the regex pattern is invalid.
+    pub fn extract_actions(
+        &self,
+        workflow_path: &Path,
+    ) -> Result<Vec<ExtractedAction>, WorkflowError> {
+        let raw_actions = self.extract_actions_raw(workflow_path)?;
+        Ok(raw_actions.iter().map(ExtractedAction::from_raw).collect())
+    }
+
+    /// Extract all actions from all workflow files as raw data.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any workflow file cannot be processed.
+    pub fn extract_all_raw(&self) -> Result<Vec<RawExtractedAction>, WorkflowError> {
+        let workflows = self.find_workflows()?;
+        let mut all_actions = Vec::new();
+
+        for workflow in workflows {
+            let actions = self.extract_actions_raw(&workflow)?;
+            all_actions.extend(actions);
+        }
+
+        Ok(all_actions)
+    }
+
+    /// Extract all actions from all workflow files.
+    ///
+    /// This is a convenience method that extracts raw data and interprets it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any workflow file cannot be processed.
+    pub fn extract_all(&self) -> Result<Vec<ExtractedAction>, WorkflowError> {
+        let raw_actions = self.extract_all_raw()?;
+        Ok(raw_actions.iter().map(ExtractedAction::from_raw).collect())
+    }
+}
+
+/// Writer for updating action versions in workflow files
+pub struct WorkflowWriter {
+    workflows_dir: PathBuf,
+}
+
+impl WorkflowWriter {
     #[must_use]
     pub fn new(repo_root: &Path) -> Self {
         Self {
@@ -128,7 +320,7 @@ impl WorkflowUpdater {
     pub fn update_workflow(
         &self,
         workflow_path: &Path,
-        actions: &HashMap<String, String>,
+        actions: &HashMap<ActionId, String>,
     ) -> Result<UpdateResult, WorkflowError> {
         let content = fs::read_to_string(workflow_path).map_err(|source| WorkflowError::Read {
             path: workflow_path.to_path_buf(),
@@ -139,7 +331,7 @@ impl WorkflowUpdater {
         let mut changes = Vec::new();
 
         for (action, version) in actions {
-            let escaped_action = regex::escape(action);
+            let escaped_action = regex::escape(action.as_str());
             // Match "uses: action@ref" and optionally capture any existing comment
             let pattern = format!(r"(uses:\s*{escaped_action})@[^\s#]+(\s*#[^\n]*)?");
             let re = Regex::new(&pattern)?;
@@ -175,7 +367,7 @@ impl WorkflowUpdater {
     /// Returns an error if any workflow file cannot be processed.
     pub fn update_all(
         &self,
-        actions: &HashMap<String, String>,
+        actions: &HashMap<ActionId, String>,
     ) -> Result<Vec<UpdateResult>, WorkflowError> {
         let workflows = self.find_workflows()?;
         let mut results = Vec::new();
@@ -188,117 +380,6 @@ impl WorkflowUpdater {
         }
 
         Ok(results)
-    }
-
-    /// Extract all actions from a single workflow file.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the file cannot be read, parsed as YAML, or the regex pattern is invalid.
-    pub fn extract_actions(
-        &self,
-        workflow_path: &Path,
-    ) -> Result<Vec<ExtractedAction>, WorkflowError> {
-        let content = fs::read_to_string(workflow_path).map_err(|source| WorkflowError::Read {
-            path: workflow_path.to_path_buf(),
-            source,
-        })?;
-
-        let workflow_name = workflow_path
-            .file_name()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_default();
-
-        let mut actions = Vec::new();
-
-        // First, build a map of uses line -> comment version from raw content
-        let mut version_comments = HashMap::new();
-        let uses_with_comment_re = Regex::new(r"uses:\s*([^#\n]+)#\s*v?(\S+)")?;
-
-        for line in content.lines() {
-            if let Some(cap) = uses_with_comment_re.captures(line) {
-                let uses_part = cap[1].trim().to_string();
-                let mut comment_version = cap[2].to_string();
-                // Normalize: ensure it starts with 'v'
-                if !comment_version.starts_with('v') {
-                    comment_version = format!("v{comment_version}");
-                }
-                version_comments.insert(uses_part, comment_version);
-            }
-        }
-
-        // Parse YAML to get structured job/step info
-        let workflow: Workflow =
-            serde_yaml_ng::from_str(&content).map_err(|source| WorkflowError::Parse {
-                path: workflow_path.to_path_buf(),
-                source,
-            })?;
-
-        // Pattern to parse uses: owner/repo@ref
-        let uses_re = Regex::new(r"^([^@\s]+)@([^\s#]+)")?;
-
-        for (job_name, job) in &workflow.jobs {
-            for (step_index, step) in job.steps.iter().enumerate() {
-                if let Some(uses) = &step.uses
-                    && let Some(cap) = uses_re.captures(uses)
-                {
-                    let name = cap[1].to_string();
-                    let ref_or_sha = cap[2].to_string();
-
-                    // Skip local actions (./path) and docker actions (docker://)
-                    if name.starts_with('.') || name.starts_with("docker://") {
-                        continue;
-                    }
-
-                    // Extract version and SHA from uses line
-                    // If there's a comment, use comment as version; if ref is SHA, store it
-                    let (version, sha) = if let Some(comment_version) = version_comments.get(uses) {
-                        // Has a comment - use comment as version
-                        // If ref is a SHA, store it
-                        let sha = if is_commit_sha(&ref_or_sha) {
-                            Some(ref_or_sha)
-                        } else {
-                            None
-                        };
-                        (comment_version.clone(), sha)
-                    } else {
-                        // No comment, use the ref as-is, no SHA stored
-                        (ref_or_sha, None)
-                    };
-
-                    actions.push(ExtractedAction {
-                        name,
-                        version,
-                        sha,
-                        file: workflow_path.to_path_buf(),
-                        location: ActionLocation {
-                            workflow: workflow_name.clone(),
-                            job: job_name.clone(),
-                            step_index,
-                        },
-                    });
-                }
-            }
-        }
-
-        Ok(actions)
-    }
-
-    /// Extract all actions from all workflow files.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if any workflow file cannot be processed.
-    pub fn extract_all(&self) -> Result<Vec<ExtractedAction>, WorkflowError> {
-        let workflows = self.find_workflows()?;
-        let mut all_actions = Vec::new();
-
-        for workflow in workflows {
-            let actions = self.extract_actions(&workflow)?;
-            all_actions.extend(actions);
-        }
-
-        Ok(all_actions)
     }
 }
 
@@ -323,8 +404,8 @@ mod tests {
         create_test_workflow(temp_dir.path(), "ci.yml", "name: CI");
         create_test_workflow(temp_dir.path(), "deploy.yaml", "name: Deploy");
 
-        let updater = WorkflowUpdater::new(temp_dir.path());
-        let workflows = updater.find_workflows().unwrap();
+        let parser = WorkflowParser::new(temp_dir.path());
+        let workflows = parser.find_workflows().unwrap();
 
         assert_eq!(workflows.len(), 2);
     }
@@ -343,13 +424,11 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let workflow_updater = WorkflowUpdater::new(temp_dir.path());
+        let writer = WorkflowWriter::new(temp_dir.path());
         let mut actions = HashMap::new();
-        actions.insert("actions/checkout".to_string(), "v4".to_string());
+        actions.insert(ActionId::from("actions/checkout"), "v4".to_string());
 
-        let result = workflow_updater
-            .update_workflow(&workflow_path, &actions)
-            .unwrap();
+        let result = writer.update_workflow(&workflow_path, &actions).unwrap();
 
         assert_eq!(result.changes.len(), 1);
         assert!(result.changes[0].contains("actions/checkout@v4"));
@@ -374,13 +453,13 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let updater = WorkflowUpdater::new(temp_dir.path());
-        let actions = updater.extract_actions(&workflow_path).unwrap();
+        let parser = WorkflowParser::new(temp_dir.path());
+        let actions = parser.extract_actions(&workflow_path).unwrap();
 
         assert_eq!(actions.len(), 3);
 
         // Check that all actions were found (order may vary due to HashMap)
-        let action_names: Vec<_> = actions.iter().map(|a| a.name.as_str()).collect();
+        let action_names: Vec<_> = actions.iter().map(|a| a.id.as_str()).collect();
         assert!(action_names.contains(&"actions/checkout"));
         assert!(action_names.contains(&"actions/setup-node"));
         assert!(action_names.contains(&"docker/build-push-action"));
@@ -405,11 +484,11 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let updater = WorkflowUpdater::new(temp_dir.path());
-        let actions = updater.extract_actions(&workflow_path).unwrap();
+        let parser = WorkflowParser::new(temp_dir.path());
+        let actions = parser.extract_actions(&workflow_path).unwrap();
 
         assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].name, "actions/checkout");
+        assert_eq!(actions[0].id.as_str(), "actions/checkout");
     }
 
     #[test]
@@ -427,8 +506,8 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let updater = WorkflowUpdater::new(temp_dir.path());
-        let actions = updater.extract_actions(&workflow_path).unwrap();
+        let parser = WorkflowParser::new(temp_dir.path());
+        let actions = parser.extract_actions(&workflow_path).unwrap();
 
         assert_eq!(actions.len(), 3);
 
@@ -460,8 +539,8 @@ jobs:
             "jobs:\n  deploy:\n    steps:\n      - uses: docker/build-push-action@v5",
         );
 
-        let updater = WorkflowUpdater::new(temp_dir.path());
-        let actions = updater.extract_all().unwrap();
+        let parser = WorkflowParser::new(temp_dir.path());
+        let actions = parser.extract_all().unwrap();
 
         assert_eq!(actions.len(), 2);
     }
@@ -478,22 +557,22 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let updater = WorkflowUpdater::new(temp_dir.path());
-        let actions = updater.extract_actions(&workflow_path).unwrap();
+        let parser = WorkflowParser::new(temp_dir.path());
+        let actions = parser.extract_actions(&workflow_path).unwrap();
 
         assert_eq!(actions.len(), 2);
 
         let checkout = actions
             .iter()
-            .find(|a| a.name == "actions/checkout")
+            .find(|a| a.id.as_str() == "actions/checkout")
             .unwrap();
-        assert_eq!(checkout.version, "v4");
+        assert_eq!(checkout.version.as_str(), "v4");
 
         let setup_node = actions
             .iter()
-            .find(|a| a.name == "actions/setup-node")
+            .find(|a| a.id.as_str() == "actions/setup-node")
             .unwrap();
-        assert_eq!(setup_node.version, "v3");
+        assert_eq!(setup_node.version.as_str(), "v3");
     }
 
     #[test]
@@ -507,12 +586,12 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let updater = WorkflowUpdater::new(temp_dir.path());
-        let actions = updater.extract_actions(&workflow_path).unwrap();
+        let parser = WorkflowParser::new(temp_dir.path());
+        let actions = parser.extract_actions(&workflow_path).unwrap();
 
         assert_eq!(actions.len(), 1);
         // Should normalize to v4
-        assert_eq!(actions[0].version, "v4");
+        assert_eq!(actions[0].version.as_str(), "v4");
     }
 
     #[test]
@@ -526,11 +605,11 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let updater = WorkflowUpdater::new(temp_dir.path());
-        let actions = updater.extract_actions(&workflow_path).unwrap();
+        let parser = WorkflowParser::new(temp_dir.path());
+        let actions = parser.extract_actions(&workflow_path).unwrap();
 
         assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].version, "v4");
+        assert_eq!(actions[0].version.as_str(), "v4");
     }
 
     #[test]
@@ -544,12 +623,12 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let updater = WorkflowUpdater::new(temp_dir.path());
-        let actions = updater.extract_actions(&workflow_path).unwrap();
+        let parser = WorkflowParser::new(temp_dir.path());
+        let actions = parser.extract_actions(&workflow_path).unwrap();
 
         assert_eq!(actions.len(), 1);
         // Should use SHA as version when no comment
-        assert_eq!(actions[0].version, "abc123def456");
+        assert_eq!(actions[0].version.as_str(), "abc123def456");
     }
 
     #[test]
@@ -570,28 +649,28 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "test.yml", content);
 
-        let updater = WorkflowUpdater::new(temp_dir.path());
-        let actions = updater.extract_actions(&workflow_path).unwrap();
+        let parser = WorkflowParser::new(temp_dir.path());
+        let actions = parser.extract_actions(&workflow_path).unwrap();
 
         assert_eq!(actions.len(), 2);
 
         let checkout = actions
             .iter()
-            .find(|a| a.name == "actions/checkout")
+            .find(|a| a.id.as_str() == "actions/checkout")
             .unwrap();
-        assert_eq!(checkout.version, "v6.0.1");
+        assert_eq!(checkout.version.as_str(), "v6.0.1");
         assert_eq!(
-            checkout.sha.as_deref(),
+            checkout.sha.as_ref().map(CommitSha::as_str),
             Some("8e8c483db84b4bee98b60c0593521ed34d9990e8")
         );
 
         let login = actions
             .iter()
-            .find(|a| a.name == "docker/login-action")
+            .find(|a| a.id.as_str() == "docker/login-action")
             .unwrap();
-        assert_eq!(login.version, "v3.6.0");
+        assert_eq!(login.version.as_str(), "v3.6.0");
         assert_eq!(
-            login.sha.as_deref(),
+            login.sha.as_ref().map(CommitSha::as_str),
             Some("5e57cd118135c172c3672efd75eb46360885c0ef")
         );
     }
@@ -607,11 +686,11 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let updater = WorkflowUpdater::new(temp_dir.path());
-        let actions = updater.extract_actions(&workflow_path).unwrap();
+        let parser = WorkflowParser::new(temp_dir.path());
+        let actions = parser.extract_actions(&workflow_path).unwrap();
 
         assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].version, "v4");
+        assert_eq!(actions[0].version.as_str(), "v4");
         // No SHA when using a tag without comment
         assert!(actions[0].sha.is_none());
     }
@@ -628,11 +707,11 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let updater = WorkflowUpdater::new(temp_dir.path());
-        let actions = updater.extract_actions(&workflow_path).unwrap();
+        let parser = WorkflowParser::new(temp_dir.path());
+        let actions = parser.extract_actions(&workflow_path).unwrap();
 
         assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].version, "v4");
+        assert_eq!(actions[0].version.as_str(), "v4");
         // Short refs are not treated as SHAs
         assert!(actions[0].sha.is_none());
     }
@@ -650,17 +729,15 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let workflow_updater = WorkflowUpdater::new(temp_dir.path());
+        let writer = WorkflowWriter::new(temp_dir.path());
         let mut actions = HashMap::new();
         // Simulate the format from lock.build_update_map(): "SHA # version"
         actions.insert(
-            "actions/checkout".to_string(),
+            ActionId::from("actions/checkout"),
             "abc123def456 # v4".to_string(),
         );
 
-        let result = workflow_updater
-            .update_workflow(&workflow_path, &actions)
-            .unwrap();
+        let result = writer.update_workflow(&workflow_path, &actions).unwrap();
 
         assert_eq!(result.changes.len(), 1);
 
@@ -691,21 +768,19 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let workflow_updater = WorkflowUpdater::new(temp_dir.path());
+        let writer = WorkflowWriter::new(temp_dir.path());
         let mut actions = HashMap::new();
         // Update both actions with new SHAs
         actions.insert(
-            "actions/checkout".to_string(),
+            ActionId::from("actions/checkout"),
             "abc123def456 # v4".to_string(),
         );
         actions.insert(
-            "actions/setup-node".to_string(),
+            ActionId::from("actions/setup-node"),
             "xyz789012345 # v3".to_string(),
         );
 
-        let result = workflow_updater
-            .update_workflow(&workflow_path, &actions)
-            .unwrap();
+        let result = writer.update_workflow(&workflow_path, &actions).unwrap();
 
         assert_eq!(result.changes.len(), 2);
 
