@@ -1,5 +1,5 @@
 use glob::glob;
-use log::warn;
+use log::{debug, info, warn};
 use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -7,7 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-use crate::domain::{ActionId, CommitSha, RawUsesRef, Version};
+use crate::domain::{ActionId, UsesRef};
 
 /// Errors that can occur when working with workflow files
 #[derive(Debug, Error)]
@@ -40,50 +40,11 @@ pub enum WorkflowError {
     Regex(#[from] regex::Error),
 }
 
-/// Location of an action within a workflow file
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ActionLocation {
-    pub workflow: String,
-    pub job: String,
-    pub step_index: usize,
-}
-
-/// An action extracted from a workflow file with full location info
+/// Action data extracted from a workflow file.
+/// Call `uses_ref.interpret()` to get domain types.
 #[derive(Debug, Clone)]
-pub struct ExtractedAction {
-    pub id: ActionId,
-    pub version: Version,
-    /// The commit SHA if present in the workflow (when format is `SHA # version`)
-    pub sha: Option<CommitSha>,
-    pub file: PathBuf,
-    pub location: ActionLocation,
-}
-
-impl ExtractedAction {
-    /// Create an `ExtractedAction` from raw extraction data by interpreting it.
-    #[must_use]
-    pub fn from_raw(raw: &RawExtractedAction) -> Self {
-        let interpreted = raw.raw_ref.interpret();
-        Self {
-            id: interpreted.id,
-            version: interpreted.version,
-            sha: interpreted.sha,
-            file: raw.file.clone(),
-            location: raw.location.clone(),
-        }
-    }
-}
-
-/// Raw action data extracted from a workflow file (no interpretation applied).
-/// Use `ExtractedAction::from_raw()` to interpret this into domain types.
-#[derive(Debug, Clone)]
-pub struct RawExtractedAction {
-    /// Raw uses reference data (action name, ref, optional comment)
-    pub raw_ref: RawUsesRef,
-    /// File path of the workflow
-    pub file: PathBuf,
-    /// Location within the workflow
-    pub location: ActionLocation,
+struct ExtractedAction {
+    uses_ref: UsesRef,
 }
 
 /// Result of updating a workflow file
@@ -149,31 +110,22 @@ impl WorkflowParser {
         Ok(workflows)
     }
 
-    /// Extract all actions from a single workflow file as raw data.
+    /// Extract all actions from a single workflow file as data.
     ///
-    /// Returns raw extraction without any interpretation. Use `ExtractedAction::from_raw()`
-    /// to interpret the raw data into domain types.
+    /// Returns extraction without any interpretation.
     ///
     /// # Errors
     ///
     /// Returns an error if the file cannot be read, parsed as YAML, or the regex pattern is invalid.
-    pub fn extract_actions_raw(
-        &self,
-        workflow_path: &Path,
-    ) -> Result<Vec<RawExtractedAction>, WorkflowError> {
+    fn extract_actions(workflow_path: &Path) -> Result<Vec<ExtractedAction>, WorkflowError> {
         let content = fs::read_to_string(workflow_path).map_err(|source| WorkflowError::Read {
             path: workflow_path.to_path_buf(),
             source,
         })?;
 
-        let workflow_name = workflow_path
-            .file_name()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_default();
-
         let mut actions = Vec::new();
 
-        // Build a map of uses line -> raw comment text from raw content
+        // Build a map of uses line -> comment text from content
         // Note: We capture the comment as-is without normalization
         let mut comments = HashMap::new();
         let uses_with_comment_re = Regex::new(r"uses:\s*([^#\n]+)#\s*(\S+)")?;
@@ -196,8 +148,8 @@ impl WorkflowParser {
         // Pattern to parse uses: owner/repo@ref
         let uses_re = Regex::new(r"^([^@\s]+)@([^\s#]+)")?;
 
-        for (job_name, job) in &workflow.jobs {
-            for (step_index, step) in job.steps.iter().enumerate() {
+        for job in workflow.jobs.values() {
+            for step in &job.steps {
                 if let Some(uses) = &step.uses
                     && let Some(cap) = uses_re.captures(uses)
                 {
@@ -212,14 +164,8 @@ impl WorkflowParser {
                     // Get comment if present (raw, no normalization)
                     let comment = comments.get(uses).cloned();
 
-                    actions.push(RawExtractedAction {
-                        raw_ref: RawUsesRef::new(action_name, uses_ref, comment),
-                        file: workflow_path.to_path_buf(),
-                        location: ActionLocation {
-                            workflow: workflow_name.clone(),
-                            job: job_name.clone(),
-                            step_index,
-                        },
+                    actions.push(ExtractedAction {
+                        uses_ref: UsesRef::new(action_name, uses_ref, comment),
                     });
                 }
             }
@@ -228,48 +174,48 @@ impl WorkflowParser {
         Ok(actions)
     }
 
-    /// Extract all actions from a single workflow file.
-    ///
-    /// This is a convenience method that extracts raw data and interprets it.
+    /// Scan a single workflow and aggregate actions into a `WorkflowActionSet`.
     ///
     /// # Errors
     ///
-    /// Returns an error if the file cannot be read, parsed as YAML, or the regex pattern is invalid.
-    pub fn extract_actions(
+    /// Returns an error if the workflow file cannot be processed.
+    pub fn scan(
         &self,
         workflow_path: &Path,
-    ) -> Result<Vec<ExtractedAction>, WorkflowError> {
-        let raw_actions = self.extract_actions_raw(workflow_path)?;
-        Ok(raw_actions.iter().map(ExtractedAction::from_raw).collect())
+    ) -> Result<crate::domain::WorkflowActionSet, WorkflowError> {
+        let actions = Self::extract_actions(workflow_path)?;
+        let mut action_set = crate::domain::WorkflowActionSet::new();
+        for action in &actions {
+            action_set.add(&action.uses_ref.interpret());
+        }
+        Ok(action_set)
     }
 
-    /// Extract all actions from all workflow files as raw data.
+    /// Scan all workflows and aggregate actions into a `WorkflowActionSet`.
     ///
     /// # Errors
     ///
     /// Returns an error if any workflow file cannot be processed.
-    pub fn extract_all_raw(&self) -> Result<Vec<RawExtractedAction>, WorkflowError> {
+    pub fn scan_all(&self) -> Result<crate::domain::WorkflowActionSet, WorkflowError> {
         let workflows = self.find_workflows()?;
-        let mut all_actions = Vec::new();
-
-        for workflow in workflows {
-            let actions = self.extract_actions_raw(&workflow)?;
-            all_actions.extend(actions);
+        if workflows.is_empty() {
+            info!("No workflows found in .github/workflows/");
+            return Ok(crate::domain::WorkflowActionSet::new());
         }
 
-        Ok(all_actions)
-    }
+        debug!("Scanning workflows...");
+        for workflow in &workflows {
+            debug!("{}", workflow.display());
+        }
 
-    /// Extract all actions from all workflow files.
-    ///
-    /// This is a convenience method that extracts raw data and interprets it.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if any workflow file cannot be processed.
-    pub fn extract_all(&self) -> Result<Vec<ExtractedAction>, WorkflowError> {
-        let raw_actions = self.extract_all_raw()?;
-        Ok(raw_actions.iter().map(ExtractedAction::from_raw).collect())
+        let mut action_set = crate::domain::WorkflowActionSet::new();
+        for workflow in &workflows {
+            let actions = Self::extract_actions(workflow)?;
+            for action in &actions {
+                action_set.add(&action.uses_ref.interpret());
+            }
+        }
+        Ok(action_set)
     }
 }
 
@@ -386,6 +332,7 @@ impl WorkflowWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::CommitSha;
     use std::io::Write;
     use tempfile::TempDir;
 
@@ -439,7 +386,7 @@ jobs:
     }
 
     #[test]
-    fn test_extract_actions() {
+    fn test_scan_single_workflow() {
         let temp_dir = TempDir::new().unwrap();
         let content = "name: CI
 on: push
@@ -454,25 +401,17 @@ jobs:
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
         let parser = WorkflowParser::new(temp_dir.path());
-        let actions = parser.extract_actions(&workflow_path).unwrap();
+        let action_set = parser.scan(&workflow_path).unwrap();
 
-        assert_eq!(actions.len(), 3);
-
-        // Check that all actions were found (order may vary due to HashMap)
-        let action_names: Vec<_> = actions.iter().map(|a| a.id.as_str()).collect();
-        assert!(action_names.contains(&"actions/checkout"));
-        assert!(action_names.contains(&"actions/setup-node"));
-        assert!(action_names.contains(&"docker/build-push-action"));
-
-        // Check location info
-        for action in &actions {
-            assert_eq!(action.location.workflow, "ci.yml");
-            assert_eq!(action.location.job, "build");
-        }
+        let ids = action_set.action_ids();
+        assert_eq!(ids.len(), 3);
+        assert!(ids.contains(&ActionId::from("actions/checkout")));
+        assert!(ids.contains(&ActionId::from("actions/setup-node")));
+        assert!(ids.contains(&ActionId::from("docker/build-push-action")));
     }
 
     #[test]
-    fn test_extract_actions_skips_local() {
+    fn test_scan_skips_local() {
         let temp_dir = TempDir::new().unwrap();
         let content = "name: CI
 jobs:
@@ -485,14 +424,15 @@ jobs:
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
         let parser = WorkflowParser::new(temp_dir.path());
-        let actions = parser.extract_actions(&workflow_path).unwrap();
+        let action_set = parser.scan(&workflow_path).unwrap();
 
-        assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].id.as_str(), "actions/checkout");
+        let ids = action_set.action_ids();
+        assert_eq!(ids.len(), 1);
+        assert!(ids.contains(&ActionId::from("actions/checkout")));
     }
 
     #[test]
-    fn test_extract_actions_multiple_jobs() {
+    fn test_scan_multiple_jobs() {
         let temp_dir = TempDir::new().unwrap();
         let content = "name: CI
 jobs:
@@ -507,26 +447,17 @@ jobs:
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
         let parser = WorkflowParser::new(temp_dir.path());
-        let actions = parser.extract_actions(&workflow_path).unwrap();
+        let action_set = parser.scan(&workflow_path).unwrap();
 
-        assert_eq!(actions.len(), 3);
+        // Two unique actions (checkout appears in both jobs with different versions)
+        assert_eq!(action_set.action_ids().len(), 2);
 
-        // Find actions by job
-        let build_actions: Vec<_> = actions
-            .iter()
-            .filter(|a| a.location.job == "build")
-            .collect();
-        let test_actions: Vec<_> = actions
-            .iter()
-            .filter(|a| a.location.job == "test")
-            .collect();
-
-        assert_eq!(build_actions.len(), 1);
-        assert_eq!(test_actions.len(), 2);
+        let checkout_versions = action_set.versions_for(&ActionId::from("actions/checkout"));
+        assert_eq!(checkout_versions.len(), 2);
     }
 
     #[test]
-    fn test_extract_all() {
+    fn test_scan_all() {
         let temp_dir = TempDir::new().unwrap();
         create_test_workflow(
             temp_dir.path(),
@@ -540,13 +471,13 @@ jobs:
         );
 
         let parser = WorkflowParser::new(temp_dir.path());
-        let actions = parser.extract_all().unwrap();
+        let action_set = parser.scan_all().unwrap();
 
-        assert_eq!(actions.len(), 2);
+        assert_eq!(action_set.action_ids().len(), 2);
     }
 
     #[test]
-    fn test_extract_actions_with_sha_and_comment() {
+    fn test_scan_with_sha_and_comment() {
         let temp_dir = TempDir::new().unwrap();
         let content = "name: CI
 jobs:
@@ -558,25 +489,17 @@ jobs:
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
         let parser = WorkflowParser::new(temp_dir.path());
-        let actions = parser.extract_actions(&workflow_path).unwrap();
+        let action_set = parser.scan(&workflow_path).unwrap();
 
-        assert_eq!(actions.len(), 2);
+        let checkout_versions = action_set.versions_for(&ActionId::from("actions/checkout"));
+        assert_eq!(checkout_versions[0].as_str(), "v4");
 
-        let checkout = actions
-            .iter()
-            .find(|a| a.id.as_str() == "actions/checkout")
-            .unwrap();
-        assert_eq!(checkout.version.as_str(), "v4");
-
-        let setup_node = actions
-            .iter()
-            .find(|a| a.id.as_str() == "actions/setup-node")
-            .unwrap();
-        assert_eq!(setup_node.version.as_str(), "v3");
+        let node_versions = action_set.versions_for(&ActionId::from("actions/setup-node"));
+        assert_eq!(node_versions[0].as_str(), "v3");
     }
 
     #[test]
-    fn test_extract_actions_comment_without_v_prefix() {
+    fn test_scan_comment_without_v_prefix() {
         let temp_dir = TempDir::new().unwrap();
         let content = "name: CI
 jobs:
@@ -587,15 +510,15 @@ jobs:
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
         let parser = WorkflowParser::new(temp_dir.path());
-        let actions = parser.extract_actions(&workflow_path).unwrap();
+        let action_set = parser.scan(&workflow_path).unwrap();
 
-        assert_eq!(actions.len(), 1);
+        let versions = action_set.versions_for(&ActionId::from("actions/checkout"));
         // Should normalize to v4
-        assert_eq!(actions[0].version.as_str(), "v4");
+        assert_eq!(versions[0].as_str(), "v4");
     }
 
     #[test]
-    fn test_extract_actions_tag_without_comment() {
+    fn test_scan_tag_without_comment() {
         let temp_dir = TempDir::new().unwrap();
         let content = "name: CI
 jobs:
@@ -606,14 +529,14 @@ jobs:
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
         let parser = WorkflowParser::new(temp_dir.path());
-        let actions = parser.extract_actions(&workflow_path).unwrap();
+        let action_set = parser.scan(&workflow_path).unwrap();
 
-        assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].version.as_str(), "v4");
+        let versions = action_set.versions_for(&ActionId::from("actions/checkout"));
+        assert_eq!(versions[0].as_str(), "v4");
     }
 
     #[test]
-    fn test_extract_actions_sha_without_comment() {
+    fn test_scan_sha_without_comment() {
         let temp_dir = TempDir::new().unwrap();
         let content = "name: CI
 jobs:
@@ -624,15 +547,15 @@ jobs:
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
         let parser = WorkflowParser::new(temp_dir.path());
-        let actions = parser.extract_actions(&workflow_path).unwrap();
+        let action_set = parser.scan(&workflow_path).unwrap();
 
-        assert_eq!(actions.len(), 1);
+        let versions = action_set.versions_for(&ActionId::from("actions/checkout"));
         // Should use SHA as version when no comment
-        assert_eq!(actions[0].version.as_str(), "abc123def456");
+        assert_eq!(versions[0].as_str(), "abc123def456");
     }
 
     #[test]
-    fn test_extract_actions_real_world_format() {
+    fn test_scan_real_world_format() {
         let temp_dir = TempDir::new().unwrap();
         let content = "on:
   pull_request:
@@ -650,33 +573,27 @@ jobs:
         let workflow_path = create_test_workflow(temp_dir.path(), "test.yml", content);
 
         let parser = WorkflowParser::new(temp_dir.path());
-        let actions = parser.extract_actions(&workflow_path).unwrap();
+        let action_set = parser.scan(&workflow_path).unwrap();
 
-        assert_eq!(actions.len(), 2);
-
-        let checkout = actions
-            .iter()
-            .find(|a| a.id.as_str() == "actions/checkout")
-            .unwrap();
-        assert_eq!(checkout.version.as_str(), "v6.0.1");
+        let checkout_id = ActionId::from("actions/checkout");
+        let versions = action_set.versions_for(&checkout_id);
+        assert_eq!(versions[0].as_str(), "v6.0.1");
         assert_eq!(
-            checkout.sha.as_ref().map(CommitSha::as_str),
+            action_set.sha_for(&checkout_id).map(CommitSha::as_str),
             Some("8e8c483db84b4bee98b60c0593521ed34d9990e8")
         );
 
-        let login = actions
-            .iter()
-            .find(|a| a.id.as_str() == "docker/login-action")
-            .unwrap();
-        assert_eq!(login.version.as_str(), "v3.6.0");
+        let login_id = ActionId::from("docker/login-action");
+        let versions = action_set.versions_for(&login_id);
+        assert_eq!(versions[0].as_str(), "v3.6.0");
         assert_eq!(
-            login.sha.as_ref().map(CommitSha::as_str),
+            action_set.sha_for(&login_id).map(CommitSha::as_str),
             Some("5e57cd118135c172c3672efd75eb46360885c0ef")
         );
     }
 
     #[test]
-    fn test_extract_actions_sha_field_none_for_tag() {
+    fn test_scan_sha_none_for_tag() {
         let temp_dir = TempDir::new().unwrap();
         let content = "name: CI
 jobs:
@@ -687,16 +604,20 @@ jobs:
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
         let parser = WorkflowParser::new(temp_dir.path());
-        let actions = parser.extract_actions(&workflow_path).unwrap();
+        let action_set = parser.scan(&workflow_path).unwrap();
 
-        assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].version.as_str(), "v4");
+        let versions = action_set.versions_for(&ActionId::from("actions/checkout"));
+        assert_eq!(versions[0].as_str(), "v4");
         // No SHA when using a tag without comment
-        assert!(actions[0].sha.is_none());
+        assert!(
+            action_set
+                .sha_for(&ActionId::from("actions/checkout"))
+                .is_none()
+        );
     }
 
     #[test]
-    fn test_extract_actions_sha_field_none_for_short_ref() {
+    fn test_scan_sha_none_for_short_ref() {
         let temp_dir = TempDir::new().unwrap();
         // Short SHA (not 40 chars) with comment
         let content = "name: CI
@@ -708,12 +629,16 @@ jobs:
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
         let parser = WorkflowParser::new(temp_dir.path());
-        let actions = parser.extract_actions(&workflow_path).unwrap();
+        let action_set = parser.scan(&workflow_path).unwrap();
 
-        assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].version.as_str(), "v4");
+        let versions = action_set.versions_for(&ActionId::from("actions/checkout"));
+        assert_eq!(versions[0].as_str(), "v4");
         // Short refs are not treated as SHAs
-        assert!(actions[0].sha.is_none());
+        assert!(
+            action_set
+                .sha_for(&ActionId::from("actions/checkout"))
+                .is_none()
+        );
     }
 
     #[test]

@@ -4,7 +4,7 @@ pub mod version;
 pub mod workflow_actions;
 
 pub use action::{
-    ActionId, ActionSpec, CommitSha, InterpretedRef, LockKey, RawUsesRef, ResolvedAction, Version,
+    ActionId, ActionSpec, CommitSha, InterpretedRef, LockKey, ResolvedAction, UsesRef, Version,
     VersionCorrection,
 };
 pub use resolution::{

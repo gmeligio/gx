@@ -4,8 +4,8 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::domain::{
-    ActionId, ActionSpec, InterpretedRef, LockKey, ResolutionResult, ResolutionService, Version,
-    VersionCorrection, WorkflowActionSet, select_highest_version, should_update_manifest,
+    ActionId, ActionSpec, LockKey, ResolutionResult, ResolutionService, Version, VersionCorrection,
+    WorkflowActionSet, select_highest_version, should_update_manifest,
 };
 use crate::infrastructure::{
     GitHubClient, LockStore, ManifestStore, UpdateResult, WorkflowParser, WorkflowWriter,
@@ -27,30 +27,9 @@ pub fn run<M: ManifestStore, L: LockStore>(
     mut lock: L,
 ) -> Result<()> {
     let parser = WorkflowParser::new(repo_root);
-    let writer = WorkflowWriter::new(repo_root);
-
-    let workflows = parser.find_workflows()?;
-    if workflows.is_empty() {
-        info!("No workflows found in .github/workflows/");
+    let action_set = parser.scan_all()?;
+    if action_set.is_empty() {
         return Ok(());
-    }
-
-    debug!("Scanning workflows...");
-    for workflow in &workflows {
-        debug!("{}", workflow.display());
-    }
-
-    let extracted = parser.extract_all()?;
-
-    // Collect versions for each action using domain type
-    let mut action_set = WorkflowActionSet::new();
-    for action in &extracted {
-        let interpreted = InterpretedRef {
-            id: action.id.clone(),
-            version: action.version.clone(),
-            sha: action.sha.clone(),
-        };
-        action_set.add(&interpreted);
     }
 
     let workflow_actions: HashSet<ActionId> = action_set.action_ids().into_iter().collect();
@@ -135,6 +114,7 @@ pub fn run<M: ManifestStore, L: LockStore>(
     // Build update map with SHAs from lock file and version comments from manifest
     let update_map = lock.build_update_map(&keys_to_retain);
 
+    let writer = WorkflowWriter::new(repo_root);
     let results = writer.update_all(&update_map)?;
     print_update_results(&results);
 

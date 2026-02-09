@@ -10,7 +10,4 @@ pub use manifest::{
     FileManifest, MANIFEST_FILE_NAME, ManifestError, ManifestStore, MemoryManifest,
 };
 pub use repo::{RepoError, find_root};
-pub use workflow::{
-    ActionLocation, ExtractedAction, RawExtractedAction, UpdateResult, WorkflowError,
-    WorkflowParser, WorkflowWriter,
-};
+pub use workflow::{UpdateResult, WorkflowError, WorkflowParser, WorkflowWriter};

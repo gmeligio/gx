@@ -179,10 +179,10 @@ impl From<&ResolvedAction> for LockKey {
     }
 }
 
-/// Raw data from a `uses:` line in a workflow file.
+/// Data from a `uses:` line in a workflow file.
 /// Contains no interpretation - just the exact strings parsed from YAML.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RawUsesRef {
+pub struct UsesRef {
     /// The action name (e.g., "actions/checkout")
     pub action_name: String,
     /// The ref portion after @ (could be tag, SHA, or branch)
@@ -191,7 +191,7 @@ pub struct RawUsesRef {
     pub comment: Option<String>,
 }
 
-impl RawUsesRef {
+impl UsesRef {
     #[must_use]
     pub fn new(action_name: String, uses_ref: String, comment: Option<String>) -> Self {
         Self {
@@ -201,7 +201,7 @@ impl RawUsesRef {
         }
     }
 
-    /// Interpret this raw reference into domain types.
+    /// Interpret this reference into domain types.
     ///
     /// Rules applied:
     /// - If comment exists, normalize it (add 'v' prefix if missing) and use as version
@@ -232,7 +232,7 @@ impl RawUsesRef {
     }
 }
 
-/// Result of interpreting a raw workflow reference.
+/// Result of interpreting a workflow reference.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InterpretedRef {
     pub id: ActionId,
@@ -319,9 +319,9 @@ mod tests {
     }
 
     #[test]
-    fn test_raw_uses_ref_interpret_tag_only() {
-        let raw = RawUsesRef::new("actions/checkout".to_string(), "v4".to_string(), None);
-        let interpreted = raw.interpret();
+    fn test_uses_ref_interpret_tag_only() {
+        let uses_ref = UsesRef::new("actions/checkout".to_string(), "v4".to_string(), None);
+        let interpreted = uses_ref.interpret();
 
         assert_eq!(interpreted.id.as_str(), "actions/checkout");
         assert_eq!(interpreted.version.as_str(), "v4");
@@ -329,13 +329,13 @@ mod tests {
     }
 
     #[test]
-    fn test_raw_uses_ref_interpret_sha_with_comment() {
-        let raw = RawUsesRef::new(
+    fn test_uses_ref_interpret_sha_with_comment() {
+        let uses_ref = UsesRef::new(
             "actions/checkout".to_string(),
             "abc123def456789012345678901234567890abcd".to_string(),
             Some("v4".to_string()),
         );
-        let interpreted = raw.interpret();
+        let interpreted = uses_ref.interpret();
 
         assert_eq!(interpreted.id.as_str(), "actions/checkout");
         assert_eq!(interpreted.version.as_str(), "v4");
@@ -346,25 +346,25 @@ mod tests {
     }
 
     #[test]
-    fn test_raw_uses_ref_interpret_normalizes_version() {
-        let raw = RawUsesRef::new(
+    fn test_uses_ref_interpret_normalizes_version() {
+        let uses_ref = UsesRef::new(
             "actions/checkout".to_string(),
             "abc123def456789012345678901234567890abcd".to_string(),
             Some("4".to_string()), // No 'v' prefix
         );
-        let interpreted = raw.interpret();
+        let interpreted = uses_ref.interpret();
 
         assert_eq!(interpreted.version.as_str(), "v4"); // Should be normalized
     }
 
     #[test]
-    fn test_raw_uses_ref_interpret_sha_without_comment() {
-        let raw = RawUsesRef::new(
+    fn test_uses_ref_interpret_sha_without_comment() {
+        let uses_ref = UsesRef::new(
             "actions/checkout".to_string(),
             "abc123def456789012345678901234567890abcd".to_string(),
             None,
         );
-        let interpreted = raw.interpret();
+        let interpreted = uses_ref.interpret();
 
         // Without comment, the SHA becomes the version
         assert_eq!(
@@ -375,14 +375,14 @@ mod tests {
     }
 
     #[test]
-    fn test_raw_uses_ref_interpret_short_ref_with_comment() {
+    fn test_uses_ref_interpret_short_ref_with_comment() {
         // Short ref (not 40 chars) with comment - ref is NOT a SHA
-        let raw = RawUsesRef::new(
+        let uses_ref = UsesRef::new(
             "actions/checkout".to_string(),
             "abc123".to_string(),
             Some("v4".to_string()),
         );
-        let interpreted = raw.interpret();
+        let interpreted = uses_ref.interpret();
 
         assert_eq!(interpreted.version.as_str(), "v4");
         assert!(interpreted.sha.is_none()); // Short ref is not stored as SHA
