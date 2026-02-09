@@ -110,6 +110,12 @@ impl ActionSpec {
     }
 }
 
+impl fmt::Display for ActionSpec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}@{}", self.id, self.version)
+    }
+}
+
 /// A fully resolved action with its commit SHA
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedAction {
@@ -144,12 +150,6 @@ impl LockKey {
         Self { id, version }
     }
 
-    /// Format as "action@version" for TOML serialization
-    #[must_use]
-    pub fn to_key_string(&self) -> String {
-        format!("{}@{}", self.id, self.version)
-    }
-
     /// Parse from "action@version" format
     #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
@@ -158,6 +158,12 @@ impl LockKey {
             id: ActionId(action.to_string()),
             version: Version(version.to_string()),
         })
+    }
+}
+
+impl fmt::Display for LockKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}@{}", self.id, self.version)
     }
 }
 
@@ -234,6 +240,25 @@ pub struct InterpretedRef {
     pub sha: Option<CommitSha>,
 }
 
+/// Tracks a version correction when SHA doesn't match the version comment
+#[derive(Debug)]
+pub struct VersionCorrection {
+    pub action: ActionId,
+    pub old_version: Version,
+    pub new_version: Version,
+    pub sha: CommitSha,
+}
+
+impl fmt::Display for VersionCorrection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} {} -> {} (SHA {} points to {})",
+            self.action, self.old_version, self.new_version, self.sha, self.new_version
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,9 +273,9 @@ mod tests {
     }
 
     #[test]
-    fn test_lock_key_to_key_string() {
+    fn test_lock_key_display() {
         let key = LockKey::new(ActionId::from("actions/checkout"), Version::from("v4"));
-        assert_eq!(key.to_key_string(), "actions/checkout@v4");
+        assert_eq!(key.to_string(), "actions/checkout@v4");
     }
 
     #[test]

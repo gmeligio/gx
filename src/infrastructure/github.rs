@@ -4,7 +4,7 @@ use std::time::Duration;
 use thiserror::Error;
 
 use crate::domain::{
-    ActionId, CommitSha, ResolutionError, Version, VersionResolver, is_commit_sha,
+    ActionId, ActionSpec, CommitSha, ResolutionError, Version, VersionResolver, is_commit_sha,
 };
 
 const GITHUB_API_BASE: &str = "https://api.github.com";
@@ -276,8 +276,7 @@ impl VersionResolver for GitHubClient {
             .map_err(|e| match e {
                 GitHubError::TokenRequired => ResolutionError::TokenRequired,
                 _ => ResolutionError::ResolveFailed {
-                    action: id.to_string(),
-                    version: version.to_string(),
+                    spec: ActionSpec::new(id.clone(), version.clone()),
                     reason: e.to_string(),
                 },
             })
@@ -292,10 +291,9 @@ impl VersionResolver for GitHubClient {
             .map(|tags| tags.into_iter().map(Version::from).collect())
             .map_err(|e| match e {
                 GitHubError::TokenRequired => ResolutionError::TokenRequired,
-                _ => ResolutionError::ResolveFailed {
-                    action: id.to_string(),
-                    version: String::new(),
-                    reason: e.to_string(),
+                _ => ResolutionError::NoTagsForSha {
+                    action: id.clone(),
+                    sha: sha.clone(),
                 },
             })
     }

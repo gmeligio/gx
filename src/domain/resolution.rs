@@ -7,15 +7,11 @@ use super::{ActionId, ActionSpec, CommitSha, ResolvedAction, Version, find_highe
 /// Errors that can occur during version resolution
 #[derive(Debug, Clone, Error)]
 pub enum ResolutionError {
-    #[error("failed to resolve {action}@{version}: {reason}")]
-    ResolveFailed {
-        action: String,
-        version: String,
-        reason: String,
-    },
+    #[error("failed to resolve {spec}: {reason}")]
+    ResolveFailed { spec: ActionSpec, reason: String },
 
     #[error("no tags found for {action} at SHA {sha}")]
-    NoTagsForSha { action: String, sha: String },
+    NoTagsForSha { action: ActionId, sha: CommitSha },
 
     #[error("token required for resolution")]
     TokenRequired,
@@ -66,7 +62,7 @@ impl<R: VersionResolver> ResolutionService<R> {
 
     /// Resolve an action spec to a commit SHA
     pub fn resolve(&self, spec: &ActionSpec) -> ResolutionResult {
-        debug!("Resolving {}@{}", spec.id, spec.version);
+        debug!("Resolving {spec}");
 
         match self.resolver.resolve(&spec.id, &spec.version) {
             Ok(sha) => {
@@ -100,8 +96,7 @@ impl<R: VersionResolver> ResolutionService<R> {
                 } else if let Some(correct_version) = select_best_tag(&tags) {
                     // Version comment doesn't match SHA - use the correct version
                     info!(
-                        "Corrected {} version: {} -> {} (SHA {} points to {})",
-                        spec.id, spec.version, correct_version, workflow_sha, correct_version
+                        "Corrected {spec} version to {correct_version} (SHA {workflow_sha} points to {correct_version})",
                     );
 
                     let corrected =
@@ -111,10 +106,7 @@ impl<R: VersionResolver> ResolutionService<R> {
                         corrected,
                     }
                 } else {
-                    warn!(
-                        "No tags found for {} SHA {}, keeping version {}",
-                        spec.id, workflow_sha, spec.version
-                    );
+                    warn!("No tags found for {spec} SHA {workflow_sha}, keeping version");
                     // No tags found, keep original version
                     let resolved = ResolvedAction::new(
                         spec.id.clone(),
@@ -128,14 +120,10 @@ impl<R: VersionResolver> ResolutionService<R> {
                 // Log warning and continue
                 if matches!(e, ResolutionError::TokenRequired) {
                     warn!(
-                        "GITHUB_TOKEN not set. Without it, cannot validate for {} that {} commit SHA matches the {} version.",
-                        spec.id, workflow_sha, spec.version
+                        "GITHUB_TOKEN not set. Without it, cannot validate for {spec} that {workflow_sha} commit SHA matches the version.",
                     );
                 } else {
-                    warn!(
-                        "For {} action could not validate {} commit SHA: {}",
-                        spec.id, workflow_sha, e
-                    );
+                    warn!("For {spec} could not validate {workflow_sha} commit SHA: {e}");
                 }
                 // Return as resolved with original version
                 let resolved = ResolvedAction::new(
@@ -251,8 +239,7 @@ mod tests {
     fn test_resolve_failure() {
         let resolver = MockResolver {
             resolve_result: Err(ResolutionError::ResolveFailed {
-                action: "actions/checkout".to_string(),
-                version: "v4".to_string(),
+                spec: ActionSpec::new(ActionId::from("actions/checkout"), Version::from("v4")),
                 reason: "not found".to_string(),
             }),
             tags_result: Ok(vec![]),

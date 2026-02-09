@@ -128,7 +128,7 @@ impl FileLock {
         let actions = data
             .actions
             .into_iter()
-            .filter_map(|(k, v)| LockKey::parse(&k).map(|key| (key, CommitSha(v))))
+            .filter_map(|(k, v)| LockKey::parse(&k).map(|key| (key, CommitSha::from(v))))
             .collect();
 
         // Mark as dirty if version differs, triggering an update on save
@@ -166,7 +166,7 @@ impl FileLock {
             actions: self
                 .actions
                 .iter()
-                .map(|(k, v)| (k.to_key_string(), v.0.clone()))
+                .map(|(k, v)| (k.to_string(), v.as_str().to_owned()))
                 .collect(),
         };
 
@@ -220,7 +220,7 @@ impl LockStore for FileLock {
                 update_map.insert(key.id.clone(), resolved.to_workflow_ref());
             } else {
                 // Fallback to version if SHA not found in lock file
-                update_map.insert(key.id.clone(), key.version.0.clone());
+                update_map.insert(key.id.clone(), key.version.to_string());
             }
         }
 
@@ -271,7 +271,7 @@ impl LockStore for MemoryLock {
                     ResolvedAction::new(key.id.clone(), key.version.clone(), sha.clone());
                 update_map.insert(key.id.clone(), resolved.to_workflow_ref());
             } else {
-                update_map.insert(key.id.clone(), key.version.0.clone());
+                update_map.insert(key.id.clone(), key.version.to_string());
             }
         }
 

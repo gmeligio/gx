@@ -5,6 +5,7 @@ pub mod workflow_actions;
 
 pub use action::{
     ActionId, ActionSpec, CommitSha, InterpretedRef, LockKey, RawUsesRef, ResolvedAction, Version,
+    VersionCorrection,
 };
 pub use resolution::{
     ResolutionError, ResolutionResult, ResolutionService, VersionResolver, select_highest_version,
