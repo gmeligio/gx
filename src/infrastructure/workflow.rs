@@ -26,7 +26,7 @@ pub enum WorkflowError {
     Parse {
         path: PathBuf,
         #[source]
-        source: serde_yaml_ng::Error,
+        source: Box<serde_saphyr::Error>,
     },
 
     #[error("failed to write workflow: {}", path.display())]
@@ -188,9 +188,9 @@ impl WorkflowParser {
 
         // Parse YAML to get structured job/step info
         let workflow: Workflow =
-            serde_yaml_ng::from_str(&content).map_err(|source| WorkflowError::Parse {
+            serde_saphyr::from_str(&content).map_err(|source| WorkflowError::Parse {
                 path: workflow_path.to_path_buf(),
-                source,
+                source: Box::new(source),
             })?;
 
         // Pattern to parse uses: owner/repo@ref

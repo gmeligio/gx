@@ -1,6 +1,6 @@
 # gx
 
-CLI to manage GitHub Actions dependencies.
+Package manager for GitHub Actions.
 
 ## Usage
 
