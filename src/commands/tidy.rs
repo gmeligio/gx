@@ -5,7 +5,7 @@ use std::path::Path;
 
 use crate::domain::{
     ActionId, ActionSpec, LockKey, ResolutionResult, ResolutionService, Version, VersionCorrection,
-    WorkflowActionSet, select_highest_version, should_update_manifest,
+    WorkflowActionSet,
 };
 use crate::infrastructure::{
     GitHubClient, LockStore, ManifestStore, UpdateResult, WorkflowParser, WorkflowWriter,
@@ -76,7 +76,7 @@ pub fn run<M: ManifestStore, L: LockStore>(
                 let manifest_version = manifest.get(action_id).unwrap().clone();
 
                 // Use domain policy to check if manifest should be updated
-                if should_update_manifest(&manifest_version, workflow_version) {
+                if manifest_version.should_be_replaced_by(workflow_version) {
                     manifest.set((*action_id).clone(), workflow_version.clone());
                     let spec = ActionSpec::new((*action_id).clone(), workflow_version.clone());
                     updated_actions.push(format!("{spec} (was {manifest_version})"));
@@ -132,7 +132,7 @@ pub fn run<M: ManifestStore, L: LockStore>(
 /// Select the best version from a list of versions.
 /// Prefers the highest semantic version if available.
 fn select_version(versions: &[Version]) -> Version {
-    select_highest_version(versions).unwrap_or_else(|| versions[0].clone())
+    Version::highest(versions).unwrap_or_else(|| versions[0].clone())
 }
 
 fn update_lock_file<M: ManifestStore, L: LockStore>(

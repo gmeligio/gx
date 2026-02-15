@@ -3,9 +3,7 @@ use std::env;
 use std::time::Duration;
 use thiserror::Error;
 
-use crate::domain::{
-    ActionId, ActionSpec, CommitSha, ResolutionError, Version, VersionResolver, is_commit_sha,
-};
+use crate::domain::{ActionId, ActionSpec, CommitSha, ResolutionError, Version, VersionResolver};
 
 const GITHUB_API_BASE: &str = "https://api.github.com";
 const USER_AGENT: &str = "gx-cli";
@@ -121,7 +119,7 @@ impl GitHubClient {
     /// Return `GitHubError::TokenRequired` if the client does not have a token.
     pub fn resolve_ref(&self, owner_repo: &str, ref_name: &str) -> Result<String, GitHubError> {
         // If it already looks like a full SHA (40 hex chars), return it
-        if is_commit_sha(ref_name) {
+        if CommitSha::is_valid(ref_name) {
             return Ok(ref_name.to_string());
         }
 

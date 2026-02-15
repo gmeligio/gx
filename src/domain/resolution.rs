@@ -1,8 +1,7 @@
 use log::{debug, info, warn};
 use thiserror::Error;
 
-use super::version::{is_commit_sha, is_semver_like};
-use super::{ActionId, ActionSpec, CommitSha, ResolvedAction, Version, find_highest_version};
+use super::{ActionId, ActionSpec, CommitSha, ResolvedAction, Version};
 
 /// Errors that can occur during version resolution
 #[derive(Debug, Clone, Error)]
@@ -165,25 +164,6 @@ fn select_best_tag(tags: &[Version]) -> Option<Version> {
     sorted_tags.first().map(|s| Version::from(*s))
 }
 
-/// Select the best version from a list of versions.
-/// Prefers the highest semantic version if available.
-#[must_use]
-pub fn select_highest_version(versions: &[Version]) -> Option<Version> {
-    let version_refs: Vec<&str> = versions.iter().map(Version::as_str).collect();
-    find_highest_version(&version_refs).map(Version::from)
-}
-
-/// Determines if a manifest version should be updated based on workflow version.
-///
-/// Rule: Only update if manifest has a SHA and workflow has a semantic version tag.
-/// This handles the case where someone upgraded from SHA to semver via comment.
-#[must_use]
-pub fn should_update_manifest(manifest_version: &Version, workflow_version: &Version) -> bool {
-    manifest_version != workflow_version
-        && is_commit_sha(manifest_version.as_str())
-        && is_semver_like(workflow_version.as_str())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -299,61 +279,5 @@ mod tests {
             }
             _ => panic!("Expected Corrected result"),
         }
-    }
-
-    #[test]
-    fn test_select_highest_version() {
-        let versions = vec![
-            Version::from("v3"),
-            Version::from("v4"),
-            Version::from("v2"),
-        ];
-        let result = select_highest_version(&versions);
-        assert_eq!(result.map(|v| v.0), Some("v4".to_string()));
-    }
-
-    #[test]
-    fn test_select_highest_version_empty() {
-        let versions: Vec<Version> = vec![];
-        let result = select_highest_version(&versions);
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_should_update_manifest_sha_to_semver() {
-        let manifest = Version::from("abc123def456789012345678901234567890abcd");
-        let workflow = Version::from("v4");
-        assert!(should_update_manifest(&manifest, &workflow));
-    }
-
-    #[test]
-    fn test_should_update_manifest_same_version() {
-        let manifest = Version::from("v4");
-        let workflow = Version::from("v4");
-        assert!(!should_update_manifest(&manifest, &workflow));
-    }
-
-    #[test]
-    fn test_should_update_manifest_semver_to_semver() {
-        let manifest = Version::from("v3");
-        let workflow = Version::from("v4");
-        // Don't update if manifest already has semver
-        assert!(!should_update_manifest(&manifest, &workflow));
-    }
-
-    #[test]
-    fn test_should_update_manifest_sha_to_sha() {
-        let manifest = Version::from("abc123def456789012345678901234567890abcd");
-        let workflow = Version::from("def456789012345678901234567890abcd1234");
-        // Don't update if workflow also has SHA (not semver)
-        assert!(!should_update_manifest(&manifest, &workflow));
-    }
-
-    #[test]
-    fn test_should_update_manifest_sha_to_branch() {
-        let manifest = Version::from("abc123def456789012345678901234567890abcd");
-        let workflow = Version::from("main");
-        // Don't update if workflow has branch name (not semver)
-        assert!(!should_update_manifest(&manifest, &workflow));
     }
 }
