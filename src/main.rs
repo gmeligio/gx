@@ -34,7 +34,8 @@ fn main() -> Result<()> {
 
     init_logging(&cli);
 
-    let repo_root = match repo::find_root() {
+    let cwd = std::env::current_dir()?;
+    let repo_root = match repo::find_root(&cwd) {
         Ok(root) => root,
         Err(RepoError::GithubFolder) => {
             info!(".github folder not found. gx didn't modify any file.");
