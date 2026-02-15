@@ -11,7 +11,7 @@ use crate::infrastructure::{
     GitHubClient, LockStore, ManifestStore, UpdateResult, WorkflowParser, WorkflowWriter,
 };
 
-/// Run the tidy command to synchronize workflow actions with the manifest.
+/// Run the tidy command to synchronize workflow actions with the manifest. Adds missing actions and removes unused ones from the manifest.
 ///
 /// # Errors
 ///
