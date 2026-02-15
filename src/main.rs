@@ -26,7 +26,7 @@ enum Commands {
     /// Ensure the manifest and lock matches the workflow code: add missing actions, remove unused, update workflows
     Tidy,
     /// Create manifest and lock files from current workflows
-    Freeze,
+    Init,
 }
 
 fn main() -> Result<()> {
@@ -53,11 +53,11 @@ fn main() -> Result<()> {
                 run_memory_only(&repo_root)
             }
         }
-        Commands::Freeze => {
+        Commands::Init => {
             if manifest_path.exists() {
-                anyhow::bail!("Already frozen. Use `gx tidy` to update.");
+                anyhow::bail!("Already initialized. Use `gx tidy` to update.");
             }
-            info!("Freezing actions to manifest...");
+            info!("Reading actions from workflows into the manifest...");
             run_file_backed(&repo_root, &manifest_path, &lock_path)
         }
     }

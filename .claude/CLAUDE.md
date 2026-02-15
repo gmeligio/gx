@@ -10,7 +10,7 @@ gx is a Rust CLI that manages GitHub Actions dependencies across workflows, simi
 cargo build                    # Build
 cargo clippy                   # Lint
 cargo test                     # Run all tests
-cargo run -- freeze            # Create manifest and lock from workflows
+cargo run -- init            # Create manifest and lock from workflows
 cargo run -- tidy              # Sync manifest/lock with workflows
 ```
 
@@ -52,9 +52,9 @@ src/
 - **File-backed** (manifest exists): Uses `FileManifest`/`FileLock`, persists to disk
 - **Memory-only** (no manifest): Uses `MemoryManifest`/`MemoryLock`, updates workflows only
 
-### Freeze Command
+### Init Command
 
-`freeze` creates manifest and lock files from current workflows. Errors if manifest already exists (use `tidy` to update instead).
+`init` creates manifest and lock files from current workflows. Errors if manifest already exists (use `tidy` to update instead).
 
 ### Tidy Data Flow
 
