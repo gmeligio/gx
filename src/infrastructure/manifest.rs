@@ -113,7 +113,7 @@ impl FileManifest {
         let actions = data
             .actions
             .into_iter()
-            .map(|(k, v)| (ActionId(k), Version(v)))
+            .map(|(k, v)| (ActionId::from(k), Version::from(v)))
             .collect();
 
         Ok(Self {
@@ -147,7 +147,7 @@ impl FileManifest {
             actions: self
                 .actions
                 .iter()
-                .map(|(k, v)| (k.0.clone(), v.0.clone()))
+                .map(|(k, v)| (k.as_str().to_owned(), v.as_str().to_owned()))
                 .collect(),
         };
 

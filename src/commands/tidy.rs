@@ -4,23 +4,14 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::domain::{
-    ActionId, CommitSha, InterpretedRef, LockKey, ResolutionResult, ResolutionService, Version,
-    WorkflowActionSet, select_highest_version, should_update_manifest,
+    ActionId, ActionSpec, LockKey, ResolutionResult, ResolutionService, Version, VersionCorrection,
+    WorkflowActionSet,
 };
 use crate::infrastructure::{
     GitHubClient, LockStore, ManifestStore, UpdateResult, WorkflowParser, WorkflowWriter,
 };
 
-/// Tracks a version correction when SHA doesn't match the version comment
-#[derive(Debug)]
-struct VersionCorrection {
-    action: ActionId,
-    old_version: Version,
-    new_version: Version,
-    sha: CommitSha,
-}
-
-/// Run the tidy command to synchronize workflow actions with the manifest.
+/// Run the tidy command to synchronize workflow actions with the manifest. Adds missing actions and removes unused ones from the manifest.
 ///
 /// # Errors
 ///
@@ -36,30 +27,9 @@ pub fn run<M: ManifestStore, L: LockStore>(
     mut lock: L,
 ) -> Result<()> {
     let parser = WorkflowParser::new(repo_root);
-    let writer = WorkflowWriter::new(repo_root);
-
-    let workflows = parser.find_workflows()?;
-    if workflows.is_empty() {
-        info!("No workflows found in .github/workflows/");
+    let action_set = parser.scan_all()?;
+    if action_set.is_empty() {
         return Ok(());
-    }
-
-    debug!("Scanning workflows...");
-    for workflow in &workflows {
-        debug!("{}", workflow.display());
-    }
-
-    let extracted = parser.extract_all()?;
-
-    // Collect versions for each action using domain type
-    let mut action_set = WorkflowActionSet::new();
-    for action in &extracted {
-        let interpreted = InterpretedRef {
-            id: action.id.clone(),
-            version: action.version.clone(),
-            sha: action.sha.clone(),
-        };
-        action_set.add(&interpreted);
     }
 
     let workflow_actions: HashSet<ActionId> = action_set.action_ids().into_iter().collect();
@@ -87,7 +57,8 @@ pub fn run<M: ManifestStore, L: LockStore>(
             let versions = action_set.versions_for(action_id);
             let version = select_version(&versions);
             manifest.set((*action_id).clone(), version.clone());
-            info!("+ {action_id}@{version}");
+            let spec = ActionSpec::new((*action_id).clone(), version.clone());
+            info!("+ {spec}");
         }
     }
 
@@ -105,11 +76,10 @@ pub fn run<M: ManifestStore, L: LockStore>(
                 let manifest_version = manifest.get(action_id).unwrap().clone();
 
                 // Use domain policy to check if manifest should be updated
-                if should_update_manifest(&manifest_version, workflow_version) {
+                if manifest_version.should_be_replaced_by(workflow_version) {
                     manifest.set((*action_id).clone(), workflow_version.clone());
-                    updated_actions.push(format!(
-                        "{action_id}@{workflow_version} (was {manifest_version})"
-                    ));
+                    let spec = ActionSpec::new((*action_id).clone(), workflow_version.clone());
+                    updated_actions.push(format!("{spec} (was {manifest_version})"));
                 }
             }
         }
@@ -144,6 +114,7 @@ pub fn run<M: ManifestStore, L: LockStore>(
     // Build update map with SHAs from lock file and version comments from manifest
     let update_map = lock.build_update_map(&keys_to_retain);
 
+    let writer = WorkflowWriter::new(repo_root);
     let results = writer.update_all(&update_map)?;
     print_update_results(&results);
 
@@ -151,10 +122,7 @@ pub fn run<M: ManifestStore, L: LockStore>(
     if !corrections.is_empty() {
         info!("Version corrections:");
         for c in &corrections {
-            info!(
-                "{} {} -> {} (SHA {} points to {})",
-                c.action, c.old_version, c.new_version, c.sha, c.new_version
-            );
+            info!("{c}");
         }
     }
 
@@ -164,7 +132,7 @@ pub fn run<M: ManifestStore, L: LockStore>(
 /// Select the best version from a list of versions.
 /// Prefers the highest semantic version if available.
 fn select_version(versions: &[Version]) -> Version {
-    select_highest_version(versions).unwrap_or_else(|| versions[0].clone())
+    Version::highest(versions).unwrap_or_else(|| versions[0].clone())
 }
 
 fn update_lock_file<M: ManifestStore, L: LockStore>(
@@ -218,14 +186,14 @@ fn update_lock_file<M: ManifestStore, L: LockStore>(
                     lock.set(&corrected);
                 }
                 ResolutionResult::Unresolved { spec: s, reason } => {
-                    debug!("Could not resolve {}@{}: {}", s.id, s.version, reason);
+                    debug!("Could not resolve {s}: {reason}");
                 }
             }
         } else {
             let key = LockKey::from(spec);
             if !lock.has(&key) {
                 // Resolve via GitHub API when there is no workflow SHA
-                debug!("Resolving {}@{}", spec.id, spec.version);
+                debug!("Resolving {spec}");
                 let result = resolution_service.resolve(spec);
 
                 match result {
@@ -233,7 +201,7 @@ fn update_lock_file<M: ManifestStore, L: LockStore>(
                         lock.set(&resolved);
                     }
                     ResolutionResult::Unresolved { spec: s, reason } => {
-                        debug!("Could not resolve {}@{}: {}", s.id, s.version, reason);
+                        debug!("Could not resolve {s}: {reason}");
                     }
                     ResolutionResult::Corrected { corrected, .. } => {
                         lock.set(&corrected);

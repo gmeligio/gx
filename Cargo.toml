@@ -1,6 +1,6 @@
 [package]
 name = "gx"
-version = "0.2.0"
+version = "0.3.0"
 description = "CLI to manage GitHub Actions dependencies"
 license = "MIT"
 documentation = "https://docs.rs/gx"

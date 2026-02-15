@@ -6,7 +6,7 @@ The lock file stores resolved commit SHAs for GitHub Actions, ensuring reproduci
 
 The lock file is located at `.github/gx.lock` in your repository root.
 
-It is automatically managed by `gx tidy` and `gx freeze` commands.
+It is automatically managed by `gx tidy` and `gx init` commands.
 
 ## Format
 
@@ -42,7 +42,7 @@ version = "1.0"
 
 ## How it works
 
-When you run `gx tidy` or `gx freeze`:
+When you run `gx tidy` or `gx init`:
 
 1. Actions are extracted from workflow files
 2. Version tags are resolved to commit SHAs via the GitHub API

@@ -34,6 +34,12 @@ impl WorkflowActionSet {
         }
     }
 
+    /// Returns true if no actions have been added.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.versions.is_empty()
+    }
+
     /// Get all unique versions found for an action.
     #[must_use]
     pub fn versions_for(&self, id: &ActionId) -> Vec<Version> {
