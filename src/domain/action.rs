@@ -95,6 +95,90 @@ impl Version {
             .reduce(|a, b| if higher_version(a, b) == a { a } else { b })
             .cloned()
     }
+
+    /// Detect the precision of this version string.
+    /// "v4" → Major, "v4.1" → Minor, "v4.1.0" → Patch.
+    /// Returns None for non-semver versions (SHAs, branches).
+    #[must_use]
+    pub fn precision(&self) -> Option<VersionPrecision> {
+        let stripped = self
+            .0
+            .strip_prefix('v')
+            .or_else(|| self.0.strip_prefix('V'))
+            .unwrap_or(&self.0);
+
+        let parts: Vec<&str> = stripped.split('.').collect();
+        if parts.is_empty() || !parts[0].chars().all(|c| c.is_ascii_digit()) || parts[0].is_empty()
+        {
+            return None;
+        }
+
+        match parts.len() {
+            1 => Some(VersionPrecision::Major),
+            2 if parts[1].chars().all(|c| c.is_ascii_digit()) && !parts[1].is_empty() => {
+                Some(VersionPrecision::Minor)
+            }
+            3 if parts[1].chars().all(|c| c.is_ascii_digit())
+                && parts[2].chars().all(|c| c.is_ascii_digit())
+                && !parts[1].is_empty()
+                && !parts[2].is_empty() =>
+            {
+                Some(VersionPrecision::Patch)
+            }
+            _ => None,
+        }
+    }
+
+    /// Find the highest compatible upgrade from candidates, respecting precision.
+    ///
+    /// - Major: v4 can upgrade to v5 (highest major, returned as "vN")
+    /// - Minor: v4.1 can upgrade to v4.2 (same major, highest minor, returned as "vN.M")
+    /// - Patch: v4.1.0 can upgrade to v4.1.1 (same major.minor, highest patch, returned as "vN.M.P")
+    ///
+    /// Returns None if already at latest or no compatible upgrade exists.
+    #[must_use]
+    pub fn find_upgrade(&self, candidates: &[Version]) -> Option<Version> {
+        let precision = self.precision()?;
+        let current = parse_semver(self.as_str())?;
+
+        let best = candidates
+            .iter()
+            .filter_map(|c| {
+                let parsed = parse_semver(c.as_str())?;
+                // Must be strictly higher
+                if parsed <= current {
+                    return None;
+                }
+                match precision {
+                    VersionPrecision::Major => Some(parsed),
+                    VersionPrecision::Minor => (parsed.major == current.major).then_some(parsed),
+                    VersionPrecision::Patch => (parsed.major == current.major
+                        && parsed.minor == current.minor)
+                        .then_some(parsed),
+                }
+            })
+            .max()?;
+
+        // Format output to match the original precision
+        let formatted = match precision {
+            VersionPrecision::Major => format!("v{}", best.major),
+            VersionPrecision::Minor => format!("v{}.{}", best.major, best.minor),
+            VersionPrecision::Patch => format!("v{}.{}.{}", best.major, best.minor, best.patch),
+        };
+
+        Some(Version::from(formatted))
+    }
+}
+
+/// How precisely a version is pinned, following semver component conventions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VersionPrecision {
+    /// Only major version specified (e.g., "v4")
+    Major,
+    /// Major and minor specified (e.g., "v4.1")
+    Minor,
+    /// Full major.minor.patch specified (e.g., "v4.1.0")
+    Patch,
 }
 
 /// Compares two versions and returns the higher one.
@@ -363,6 +447,20 @@ impl fmt::Display for VersionCorrection {
     }
 }
 
+/// An available upgrade for an action
+#[derive(Debug)]
+pub struct UpgradeCandidate {
+    pub id: ActionId,
+    pub current: Version,
+    pub upgraded: Version,
+}
+
+impl fmt::Display for UpgradeCandidate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {} -> {}", self.id, self.current, self.upgraded)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -621,6 +719,154 @@ mod tests {
     #[test]
     fn test_parse_semver_sha_returns_none() {
         assert!(parse_semver("a1b2c3d4e5f6").is_none());
+    }
+
+    // --- VersionPrecision tests ---
+
+    #[test]
+    fn test_precision_major() {
+        assert_eq!(
+            Version::from("v4").precision(),
+            Some(VersionPrecision::Major)
+        );
+        assert_eq!(
+            Version::from("v12").precision(),
+            Some(VersionPrecision::Major)
+        );
+    }
+
+    #[test]
+    fn test_precision_minor() {
+        assert_eq!(
+            Version::from("v4.1").precision(),
+            Some(VersionPrecision::Minor)
+        );
+        assert_eq!(
+            Version::from("v4.0").precision(),
+            Some(VersionPrecision::Minor)
+        );
+    }
+
+    #[test]
+    fn test_precision_patch() {
+        assert_eq!(
+            Version::from("v4.1.0").precision(),
+            Some(VersionPrecision::Patch)
+        );
+        assert_eq!(
+            Version::from("v4.1.2").precision(),
+            Some(VersionPrecision::Patch)
+        );
+    }
+
+    #[test]
+    fn test_precision_non_semver() {
+        assert!(Version::from("main").precision().is_none());
+        assert!(
+            Version::from("abc123def456789012345678901234567890abcd")
+                .precision()
+                .is_none()
+        );
+        assert!(Version::from("").precision().is_none());
+    }
+
+    // --- find_upgrade tests ---
+
+    #[test]
+    fn test_find_upgrade_major() {
+        let current = Version::from("v4");
+        let candidates = vec![
+            Version::from("v3"),
+            Version::from("v4"),
+            Version::from("v4.1.0"),
+            Version::from("v5"),
+            Version::from("v5.0.0"),
+            Version::from("v6"),
+        ];
+        assert_eq!(current.find_upgrade(&candidates), Some(Version::from("v6")));
+    }
+
+    #[test]
+    fn test_find_upgrade_minor() {
+        let current = Version::from("v4.1");
+        let candidates = vec![
+            Version::from("v4.0"),
+            Version::from("v4.1"),
+            Version::from("v4.1.0"),
+            Version::from("v4.2"),
+            Version::from("v4.3.0"),
+            Version::from("v5.0"),
+        ];
+        // v5.0 is excluded (different major), v4.3.0 parses as 4.3.0 which is same major
+        assert_eq!(
+            current.find_upgrade(&candidates),
+            Some(Version::from("v4.3"))
+        );
+    }
+
+    #[test]
+    fn test_find_upgrade_patch() {
+        let current = Version::from("v4.1.0");
+        let candidates = vec![
+            Version::from("v4.1.0"),
+            Version::from("v4.1.1"),
+            Version::from("v4.1.3"),
+            Version::from("v4.2.0"),
+            Version::from("v5.0.0"),
+        ];
+        assert_eq!(
+            current.find_upgrade(&candidates),
+            Some(Version::from("v4.1.3"))
+        );
+    }
+
+    #[test]
+    fn test_find_upgrade_already_latest() {
+        let current = Version::from("v4");
+        let candidates = vec![Version::from("v3"), Version::from("v4")];
+        assert!(current.find_upgrade(&candidates).is_none());
+    }
+
+    #[test]
+    fn test_find_upgrade_no_candidates() {
+        let current = Version::from("v4");
+        let candidates: Vec<Version> = vec![];
+        assert!(current.find_upgrade(&candidates).is_none());
+    }
+
+    #[test]
+    fn test_find_upgrade_non_semver_current() {
+        let current = Version::from("main");
+        let candidates = vec![Version::from("v5")];
+        assert!(current.find_upgrade(&candidates).is_none());
+    }
+
+    #[test]
+    fn test_find_upgrade_minor_stays_within_major() {
+        let current = Version::from("v4.1");
+        let candidates = vec![Version::from("v5.0"), Version::from("v5.1")];
+        // No upgrade within major v4
+        assert!(current.find_upgrade(&candidates).is_none());
+    }
+
+    #[test]
+    fn test_find_upgrade_patch_stays_within_minor() {
+        let current = Version::from("v4.1.0");
+        let candidates = vec![Version::from("v4.2.0"), Version::from("v5.0.0")];
+        // No upgrade within v4.1.x
+        assert!(current.find_upgrade(&candidates).is_none());
+    }
+
+    // --- UpgradeCandidate tests ---
+
+    #[test]
+    fn test_upgrade_candidate_display() {
+        let candidate = UpgradeCandidate {
+            id: ActionId::from("actions/checkout"),
+            current: Version::from("v4"),
+            upgraded: Version::from("v5"),
+        };
+        assert_eq!(candidate.to_string(), "actions/checkout v4 -> v5");
     }
 
     // --- UsesRef tests ---

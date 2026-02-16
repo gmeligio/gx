@@ -17,7 +17,7 @@ src/commands/tidy.rs      # Command entry point and orchestration
 src/workflow.rs           # YAML parsing, action extraction, and workflow updates
 src/manifest.rs           # Hierarchical manifest structure (gx.toml)
 src/lock.rs               # Lock file structure (gx.lock)
-src/github.rs             # GitHub API client for resolving refs to SHAs
+src/github.rs             # Github API client for resolving refs to SHAs
 src/version.rs            # Semver parsing and comparison
 ```
 
@@ -92,7 +92,7 @@ For each missing action:
 
 For each action@version in the manifest (including all overrides):
 - Skip if already in lock file
-- Resolve ref to commit SHA via GitHub API
+- Resolve ref to commit SHA via Github API
 - Store in lock file as `"action@version" = "sha"`
 
 ### 7. Clean up lock file
@@ -251,16 +251,16 @@ Running `gx tidy` multiple times produces the same result. After the first run, 
 - Hierarchical version overrides
 - Idempotency
 
-## GitHub API integration
+## Github API integration
 
 The `github` module resolves version refs to commit SHAs:
 
 ```rust
-pub struct GitHubClient {
+pub struct GithubClient {
     client: reqwest::blocking::Client,
 }
 
-impl GitHubClient {
+impl GithubClient {
     pub fn resolve_ref(&self, owner_repo: &str, ref_name: &str) -> Result<String>;
 }
 ```

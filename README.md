@@ -1,6 +1,6 @@
 # gx
 
-Package manager for GitHub Actions.
+Package manager for Github Actions.
 
 ## Usage
 
@@ -18,7 +18,7 @@ gx tidy
 
 You should run `gx init` when you want to have reproducible runs of gx commands. That reproducibility is very helpful when multiple people are working on the same project.
 
-Pin all GitHub Actions in your workflows to their current SHA. Create `gx.toml` and `gx.lock` files if they don't exist.
+Pin all Github Actions in your workflows to their current SHA. Create `gx.toml` and `gx.lock` files if they don't exist.
 
 ```bash
 gx init

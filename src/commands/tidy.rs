@@ -4,11 +4,11 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::domain::{
-    ActionId, ActionSpec, LockKey, ResolutionResult, ResolutionService, Version, VersionCorrection,
+    ActionId, ActionResolver, ActionSpec, LockKey, ResolutionResult, Version, VersionCorrection,
     WorkflowActionSet,
 };
 use crate::infrastructure::{
-    GitHubClient, LockStore, ManifestStore, UpdateResult, WorkflowParser, WorkflowWriter,
+    GithubRegistry, LockStore, ManifestStore, UpdateResult, WorkflowParser, WorkflowWriter,
 };
 
 /// Run the tidy command to synchronize workflow actions with the manifest. Adds missing actions and removes unused ones from the manifest.
@@ -156,8 +156,8 @@ fn update_lock_file<M: ManifestStore, L: LockStore>(
         return Ok(corrections);
     }
 
-    let github = GitHubClient::from_env()?;
-    let resolution_service = ResolutionService::new(github);
+    let github = GithubRegistry::from_env()?;
+    let resolution_service = ActionResolver::new(github);
 
     // Process each action in manifest
     for spec in &specs {
@@ -192,7 +192,7 @@ fn update_lock_file<M: ManifestStore, L: LockStore>(
         } else {
             let key = LockKey::from(spec);
             if !lock.has(&key) {
-                // Resolve via GitHub API when there is no workflow SHA
+                // Resolve via Github API when there is no workflow SHA
                 debug!("Resolving {spec}");
                 let result = resolution_service.resolve(spec);
 

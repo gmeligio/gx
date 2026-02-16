@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-gx is a Rust CLI that manages GitHub Actions dependencies across workflows, similar to `go mod tidy`. It can maintain `.github/gx.toml` (manifest) and `.github/gx.lock` (resolved SHAs), or run in memory-only mode.
+gx is a Rust CLI that manages Github Actions dependencies across workflows, similar to `go mod tidy`. It can maintain `.github/gx.toml` (manifest) and `.github/gx.lock` (resolved SHAs), or run in memory-only mode.
 
 ## Commands
 
@@ -22,7 +22,7 @@ main.rs (Composition Root)
 commands/tidy.rs (Application Layer)
     ↓ Uses ResolutionService + ManifestStore/LockStore traits
 domain/ (Business Types + Resolution Logic)
-infrastructure/ (File I/O + GitHub API)
+infrastructure/ (File I/O + Github API)
 ```
 
 ```
@@ -40,7 +40,7 @@ src/
 │   └── workflow_actions.rs # WorkflowActionSet (aggregates actions across workflows)
 └── infrastructure/
     ├── mod.rs           # Public re-exports for infrastructure types
-    ├── github.rs        # GitHubClient (implements VersionResolver)
+    ├── github.rs        # GithubClient (implements VersionResolver)
     ├── lock.rs          # LockStore trait, FileLock, MemoryLock
     ├── manifest.rs      # ManifestStore trait, FileManifest, MemoryManifest
     ├── repo.rs          # Repository discovery (gix-discover)
@@ -78,7 +78,7 @@ src/
 ### Dependency Injection
 - `main.rs` checks if `gx.toml` exists and injects appropriate implementations
 - `tidy::run<M: ManifestStore, L: LockStore>()` works with trait abstractions
-- `GitHubClient` implements `VersionResolver` for testable resolution
+- `GithubClient` implements `VersionResolver` for testable resolution
 
 ### Error Handling
 - Module-specific error enums with `thiserror` (e.g., `ManifestError`, `LockFileError`, `WorkflowError`)
@@ -102,4 +102,4 @@ Two-phase approach (YAML parsers strip comments):
 
 ## Environment
 
-- `GITHUB_TOKEN`: Optional, needed for GitHub API when resolving SHAs
+- `GITHUB_TOKEN`: Optional, needed for Github API when resolving SHAs

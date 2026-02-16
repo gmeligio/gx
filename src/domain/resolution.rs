@@ -30,14 +30,14 @@ pub enum ResolutionResult {
     Unresolved { spec: ActionSpec, reason: String },
 }
 
-/// Trait for resolving version references to commit SHAs
-pub trait VersionResolver {
-    /// Resolve a version reference to a commit SHA
+/// Trait for querying available versions and commit SHAs from a remote registry
+pub trait VersionRegistry {
+    /// Look up the commit SHA for a version reference
     ///
     /// # Errors
     ///
-    /// Returns an error if resolution fails
-    fn resolve(&self, id: &ActionId, version: &Version) -> Result<CommitSha, ResolutionError>;
+    /// Returns an error if the lookup fails
+    fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<CommitSha, ResolutionError>;
 
     /// Get all tags that point to a specific SHA
     ///
@@ -46,24 +46,37 @@ pub trait VersionResolver {
     /// Returns an error if the lookup fails
     fn tags_for_sha(&self, id: &ActionId, sha: &CommitSha)
     -> Result<Vec<Version>, ResolutionError>;
+
+    /// Get all available version tags for an action's repository
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the lookup fails
+    fn all_tags(&self, id: &ActionId) -> Result<Vec<Version>, ResolutionError>;
 }
 
-/// Service for resolving action versions to commit SHAs
-pub struct ResolutionService<R: VersionResolver> {
-    resolver: R,
+/// Resolves actions to their correct version and commit SHA
+pub struct ActionResolver<R: VersionRegistry> {
+    registry: R,
 }
 
-impl<R: VersionResolver> ResolutionService<R> {
+impl<R: VersionRegistry> ActionResolver<R> {
     #[must_use]
-    pub fn new(resolver: R) -> Self {
-        Self { resolver }
+    pub fn new(registry: R) -> Self {
+        Self { registry }
+    }
+
+    /// Access the underlying version registry
+    #[must_use]
+    pub fn registry(&self) -> &R {
+        &self.registry
     }
 
     /// Resolve an action spec to a commit SHA
     pub fn resolve(&self, spec: &ActionSpec) -> ResolutionResult {
         debug!("Resolving {spec}");
 
-        match self.resolver.resolve(&spec.id, &spec.version) {
+        match self.registry.lookup_sha(&spec.id, &spec.version) {
             Ok(sha) => {
                 let resolved = ResolvedAction::new(spec.id.clone(), spec.version.clone(), sha);
                 ResolutionResult::Resolved(resolved)
@@ -81,7 +94,7 @@ impl<R: VersionResolver> ResolutionService<R> {
         spec: &ActionSpec,
         workflow_sha: &CommitSha,
     ) -> ResolutionResult {
-        match self.resolver.tags_for_sha(&spec.id, workflow_sha) {
+        match self.registry.tags_for_sha(&spec.id, workflow_sha) {
             Ok(tags) => {
                 // Check if the version matches any tag
                 if tags.iter().any(|t| t == &spec.version) {
@@ -168,13 +181,13 @@ fn select_best_tag(tags: &[Version]) -> Option<Version> {
 mod tests {
     use super::*;
 
-    struct MockResolver {
+    struct MockRegistry {
         resolve_result: Result<CommitSha, ResolutionError>,
         tags_result: Result<Vec<Version>, ResolutionError>,
     }
 
-    impl VersionResolver for MockResolver {
-        fn resolve(
+    impl VersionRegistry for MockRegistry {
+        fn lookup_sha(
             &self,
             _id: &ActionId,
             _version: &Version,
@@ -189,15 +202,19 @@ mod tests {
         ) -> Result<Vec<Version>, ResolutionError> {
             self.tags_result.clone()
         }
+
+        fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
+            self.tags_result.clone()
+        }
     }
 
     #[test]
     fn test_resolve_success() {
-        let mock_resolver = MockResolver {
+        let mock_registry = MockRegistry {
             resolve_result: Ok(CommitSha::from("abc123def456789012345678901234567890abcd")),
             tags_result: Ok(vec![]),
         };
-        let service = ResolutionService::new(mock_resolver);
+        let service = ActionResolver::new(mock_registry);
 
         let spec = ActionSpec::new(ActionId::from("actions/checkout"), Version::from("v4"));
         let result = service.resolve(&spec);
@@ -217,14 +234,14 @@ mod tests {
 
     #[test]
     fn test_resolve_failure() {
-        let resolver = MockResolver {
+        let registry = MockRegistry {
             resolve_result: Err(ResolutionError::ResolveFailed {
                 spec: ActionSpec::new(ActionId::from("actions/checkout"), Version::from("v4")),
                 reason: "not found".to_string(),
             }),
             tags_result: Ok(vec![]),
         };
-        let service = ResolutionService::new(resolver);
+        let service = ActionResolver::new(registry);
 
         let spec = ActionSpec::new(ActionId::from("actions/checkout"), Version::from("v4"));
         let result = service.resolve(&spec);
@@ -239,11 +256,11 @@ mod tests {
 
     #[test]
     fn test_validate_version_matches() {
-        let mock_resolver = MockResolver {
+        let mock_registry = MockRegistry {
             resolve_result: Ok(CommitSha::from("abc123")),
             tags_result: Ok(vec![Version::from("v4"), Version::from("v4.0.0")]),
         };
-        let service = ResolutionService::new(mock_resolver);
+        let service = ActionResolver::new(mock_registry);
 
         let spec = ActionSpec::new(ActionId::from("actions/checkout"), Version::from("v4"));
         let sha = CommitSha::from("abc123def456789012345678901234567890abcd");
@@ -259,11 +276,11 @@ mod tests {
 
     #[test]
     fn test_validate_version_corrected() {
-        let resolver = MockResolver {
+        let registry = MockRegistry {
             resolve_result: Ok(CommitSha::from("abc123")),
             tags_result: Ok(vec![Version::from("v5"), Version::from("v5.0.0")]),
         };
-        let service = ResolutionService::new(resolver);
+        let service = ActionResolver::new(registry);
 
         let spec = ActionSpec::new(ActionId::from("actions/checkout"), Version::from("v4"));
         let sha = CommitSha::from("abc123def456789012345678901234567890abcd");
