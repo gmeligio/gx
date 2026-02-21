@@ -1,16 +1,16 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use gx::commands;
-use gx::infrastructure::{FileLock, LOCK_FILE_NAME, MemoryLock};
+use gx::infrastructure::{FileLock, GithubRegistry, LOCK_FILE_NAME, MemoryLock};
 use gx::infrastructure::{FileManifest, MANIFEST_FILE_NAME, MemoryManifest};
-use gx::infrastructure::{repo, repo::RepoError};
+use gx::infrastructure::{WorkflowParser, repo, repo::RepoError};
 use log::{LevelFilter, info};
 use std::io::Write;
 use std::path::Path;
 
 #[derive(Parser)]
 #[command(name = "gx")]
-#[command(about = "CLI to manage GitHub Actions dependencies", long_about = None)]
+#[command(about = "CLI to manage Github Actions dependencies", long_about = None)]
 #[command(version)]
 struct Cli {
     /// Enable verbose output
@@ -27,6 +27,8 @@ enum Commands {
     Tidy,
     /// Create manifest and lock files from current workflows
     Init,
+    /// Upgrade actions to newer versions
+    Upgrade,
 }
 
 fn main() -> Result<()> {
@@ -48,10 +50,17 @@ fn main() -> Result<()> {
     let lock_path = repo_root.join(".github").join(LOCK_FILE_NAME);
     match cli.command {
         Commands::Tidy => {
+            let registry = GithubRegistry::from_env()?;
             if manifest_path.exists() {
-                run_file_backed(&repo_root, &manifest_path, &lock_path)
+                let manifest = FileManifest::load_or_default(&manifest_path)?;
+                let lock = FileLock::load_or_default(&lock_path)?;
+                commands::tidy::run(&repo_root, manifest, lock, registry)
             } else {
-                run_memory_only(&repo_root)
+                let parser = WorkflowParser::new(&repo_root);
+                let action_set = parser.scan_all()?;
+                let manifest = MemoryManifest::from_workflows(&action_set);
+                let lock = MemoryLock::default();
+                commands::tidy::run(&repo_root, manifest, lock, registry)
             }
         }
         Commands::Init => {
@@ -59,23 +68,33 @@ fn main() -> Result<()> {
                 anyhow::bail!("Already initialized. Use `gx tidy` to update.");
             }
             info!("Reading actions from workflows into the manifest...");
-            run_file_backed(&repo_root, &manifest_path, &lock_path)
+            let registry = GithubRegistry::from_env()?;
+            let manifest = FileManifest::load_or_default(&manifest_path)?;
+            let lock = FileLock::load_or_default(&lock_path)?;
+            commands::tidy::run(&repo_root, manifest, lock, registry)
+        }
+        Commands::Upgrade => {
+            if manifest_path.exists() {
+                let manifest = FileManifest::load_or_default(&manifest_path)?;
+                let lock = FileLock::load_or_default(&lock_path)?;
+                commands::upgrade::run(&repo_root, manifest, lock)
+            } else {
+                run_memory_only(&repo_root, commands::upgrade::run)
+            }
         }
     }
 }
 
-/// Run tidy with file-backed manifest and lock (persists to disk)
-fn run_file_backed(repo_root: &Path, manifest_path: &Path, lock_path: &Path) -> Result<()> {
-    let manifest = FileManifest::load_or_default(manifest_path)?;
-    let lock = FileLock::load_or_default(lock_path)?;
-    commands::tidy::run(repo_root, manifest, lock)
-}
-
-/// Run tidy with in-memory manifest and lock (no persistence)
-fn run_memory_only(repo_root: &Path) -> Result<()> {
-    let manifest = MemoryManifest::default();
+/// Run a command with in-memory manifest (pre-populated from workflows) and lock
+fn run_memory_only<F>(repo_root: &Path, command: F) -> Result<()>
+where
+    F: FnOnce(&Path, MemoryManifest, MemoryLock) -> Result<()>,
+{
+    let parser = WorkflowParser::new(repo_root);
+    let action_set = parser.scan_all()?;
+    let manifest = MemoryManifest::from_workflows(&action_set);
     let lock = MemoryLock::default();
-    commands::tidy::run(repo_root, manifest, lock)
+    command(repo_root, manifest, lock)
 }
 
 /// Initialize logging based on the verbosity level specified in the CLI

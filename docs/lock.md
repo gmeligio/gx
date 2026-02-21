@@ -1,6 +1,6 @@
 # Lock file
 
-The lock file stores resolved commit SHAs for GitHub Actions, ensuring reproducible builds across environments.
+The lock file stores resolved commit SHAs for Github Actions, ensuring reproducible builds across environments.
 
 ## Location
 
@@ -45,7 +45,7 @@ version = "1.0"
 When you run `gx tidy` or `gx init`:
 
 1. Actions are extracted from workflow files
-2. Version tags are resolved to commit SHAs via the GitHub API
+2. Version tags are resolved to commit SHAs via the Github API
 3. The lock file is updated with the resolved SHAs
 4. Workflow files are updated to use `SHA # version` format
 
@@ -53,7 +53,7 @@ This ensures that workflows always use the exact same code, even if a version ta
 
 ## Why commit SHAs?
 
-Version tags in GitHub can be updated to point to different commits. Using commit SHAs:
+Version tags in Github can be updated to point to different commits. Using commit SHAs:
 
 - Guarantees reproducible builds
 - Protects against supply chain attacks via tag manipulation

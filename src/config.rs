@@ -3,7 +3,7 @@ use std::env;
 /// Application configuration loaded from environment variables
 #[derive(Debug, Clone, Default)]
 pub struct Config {
-    /// GitHub API token for authenticated requests
+    /// Github API token for authenticated requests
     pub github_token: Option<String>,
 }
 

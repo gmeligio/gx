@@ -3,8 +3,8 @@ pub mod resolution;
 pub mod workflow_actions;
 
 pub use action::{
-    ActionId, ActionSpec, CommitSha, InterpretedRef, LockKey, ResolvedAction, UsesRef, Version,
-    VersionCorrection,
+    ActionId, ActionSpec, CommitSha, InterpretedRef, LockKey, ResolvedAction, UpgradeCandidate,
+    UsesRef, Version, VersionCorrection, VersionPrecision,
 };
-pub use resolution::{ResolutionError, ResolutionResult, ResolutionService, VersionResolver};
+pub use resolution::{ActionResolver, ResolutionError, ResolutionResult, VersionRegistry};
 pub use workflow_actions::WorkflowActionSet;

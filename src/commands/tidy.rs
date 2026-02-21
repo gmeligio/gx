@@ -4,11 +4,11 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::domain::{
-    ActionId, ActionSpec, LockKey, ResolutionResult, ResolutionService, Version, VersionCorrection,
-    WorkflowActionSet,
+    ActionId, ActionResolver, ActionSpec, LockKey, ResolutionResult, Version, VersionCorrection,
+    VersionRegistry, WorkflowActionSet,
 };
 use crate::infrastructure::{
-    GitHubClient, LockStore, ManifestStore, UpdateResult, WorkflowParser, WorkflowWriter,
+    LockStore, ManifestStore, UpdateResult, WorkflowParser, WorkflowWriter,
 };
 
 /// Run the tidy command to synchronize workflow actions with the manifest. Adds missing actions and removes unused ones from the manifest.
@@ -21,10 +21,11 @@ use crate::infrastructure::{
 ///
 /// Panics if an action in the intersection of workflow and manifest actions is not found
 /// in the manifest (this should never happen due to the intersection logic).
-pub fn run<M: ManifestStore, L: LockStore>(
+pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry>(
     repo_root: &Path,
     mut manifest: M,
     mut lock: L,
+    registry: R,
 ) -> Result<()> {
     let parser = WorkflowParser::new(repo_root);
     let action_set = parser.scan_all()?;
@@ -93,7 +94,7 @@ pub fn run<M: ManifestStore, L: LockStore>(
     }
 
     // Update lock file with resolved commit SHAs and validate version comments
-    let corrections = update_lock_file(&mut lock, &mut manifest, &action_set)?;
+    let corrections = update_lock_file(&mut lock, &mut manifest, &action_set, registry)?;
 
     // Save manifest if dirty, including corrections
     manifest.save()?;
@@ -135,12 +136,14 @@ fn select_version(versions: &[Version]) -> Version {
     Version::highest(versions).unwrap_or_else(|| versions[0].clone())
 }
 
-fn update_lock_file<M: ManifestStore, L: LockStore>(
+fn update_lock_file<M: ManifestStore, L: LockStore, R: VersionRegistry>(
     lock: &mut L,
     manifest: &mut M,
     action_set: &WorkflowActionSet,
+    registry: R,
 ) -> Result<Vec<VersionCorrection>> {
     let mut corrections = Vec::new();
+    let mut unresolved = Vec::new();
 
     let specs = manifest.specs();
 
@@ -156,8 +159,7 @@ fn update_lock_file<M: ManifestStore, L: LockStore>(
         return Ok(corrections);
     }
 
-    let github = GitHubClient::from_env()?;
-    let resolution_service = ResolutionService::new(github);
+    let resolution_service = ActionResolver::new(registry);
 
     // Process each action in manifest
     for spec in &specs {
@@ -187,12 +189,13 @@ fn update_lock_file<M: ManifestStore, L: LockStore>(
                 }
                 ResolutionResult::Unresolved { spec: s, reason } => {
                     debug!("Could not resolve {s}: {reason}");
+                    unresolved.push(format!("{s}: {reason}"));
                 }
             }
         } else {
             let key = LockKey::from(spec);
             if !lock.has(&key) {
-                // Resolve via GitHub API when there is no workflow SHA
+                // Resolve via Github API when there is no workflow SHA
                 debug!("Resolving {spec}");
                 let result = resolution_service.resolve(spec);
 
@@ -202,6 +205,7 @@ fn update_lock_file<M: ManifestStore, L: LockStore>(
                     }
                     ResolutionResult::Unresolved { spec: s, reason } => {
                         debug!("Could not resolve {s}: {reason}");
+                        unresolved.push(format!("{s}: {reason}"));
                     }
                     ResolutionResult::Corrected { corrected, .. } => {
                         lock.set(&corrected);
@@ -209,6 +213,14 @@ fn update_lock_file<M: ManifestStore, L: LockStore>(
                 }
             }
         }
+    }
+
+    if !unresolved.is_empty() {
+        anyhow::bail!(
+            "failed to resolve {} action(s):\n  {}",
+            unresolved.len(),
+            unresolved.join("\n  ")
+        );
     }
 
     Ok(corrections)

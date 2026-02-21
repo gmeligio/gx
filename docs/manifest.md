@@ -1,6 +1,6 @@
 # Manifest file
 
-The manifest file defines which versions of GitHub Actions to use across all your workflows, with support for hierarchical overrides.
+The manifest file defines which versions of Github Actions to use across all your workflows, with support for hierarchical overrides.
 
 ## Location
 
@@ -73,7 +73,7 @@ Versions are resolved from most specific to least specific:
 ## Action names
 
 Action names must match the format used in workflow files:
-- `owner/repo` for GitHub actions (e.g., `actions/checkout`)
+- `owner/repo` for Github actions (e.g., `actions/checkout`)
 - Full format with owner and repository name
 
 ## Versions
@@ -83,7 +83,7 @@ Versions can be:
 - Branch names: `"main"`, `"develop"`
 - Commit SHAs: `"a1b2c3d"`
 
-The version format must match what GitHub Actions accepts in the `uses:` field.
+The version format must match what Github Actions accepts in the `uses:` field.
 
 ## Empty manifest
 

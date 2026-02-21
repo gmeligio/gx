@@ -1,0 +1,43 @@
+name: Build
+
+on:
+    pull_request:
+        branches: [main]
+
+# Read-only permissions by default
+permissions:
+    contents: read
+
+jobs:
+    check:
+        name: Check
+        runs-on: ubuntu-24.04
+        steps:
+            - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+            - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1
+            - run: cargo check
+
+    fmt:
+        name: Format
+        runs-on: ubuntu-24.04
+        steps:
+            - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+            - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1
+            - name: Rustfmt Check
+              uses: actions-rust-lang/rustfmt@4066006ec54a31931b9b1fddfd38f2fdf2d27143 # v1
+
+    clippy:
+        name: Clippy
+        runs-on: ubuntu-24.04
+        steps:
+            - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+            - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1
+            - run: cargo clippy
+
+    test:
+        name: Test
+        runs-on: ubuntu-24.04
+        steps:
+            - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+            - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1
+            - run: cargo test

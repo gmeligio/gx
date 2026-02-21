@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-use crate::domain::{ActionId, ActionSpec, Version};
+use crate::domain::{ActionId, ActionSpec, Version, WorkflowActionSet};
 
 pub const MANIFEST_FILE_NAME: &str = "gx.toml";
 
@@ -216,6 +216,21 @@ impl ManifestStore for FileManifest {
 #[derive(Debug, Default)]
 pub struct MemoryManifest {
     actions: HashMap<ActionId, Version>,
+}
+
+impl MemoryManifest {
+    /// Create a manifest pre-populated from workflow actions.
+    /// For each action, picks the highest semantic version found across workflows.
+    #[must_use]
+    pub fn from_workflows(action_set: &WorkflowActionSet) -> Self {
+        let mut manifest = Self::default();
+        for action_id in action_set.action_ids() {
+            let versions = action_set.versions_for(&action_id);
+            let version = Version::highest(&versions).unwrap_or_else(|| versions[0].clone());
+            manifest.actions.insert(action_id, version);
+        }
+        manifest
+    }
 }
 
 impl ManifestStore for MemoryManifest {

@@ -1,0 +1,6 @@
+version = "1.0"
+
+[actions]
+"actions-rust-lang/rustfmt@v1" = "4066006ec54a31931b9b1fddfd38f2fdf2d27143"
+"actions/checkout@v4" = "34e114876b0b11c390a56381ad16ebd13914f8d5"
+"actions-rust-lang/setup-rust-toolchain@v1" = "1780873c7b576612439a134613cc4cc74ce5538c"

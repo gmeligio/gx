@@ -4,7 +4,7 @@ pub mod manifest;
 pub mod repo;
 pub mod workflow;
 
-pub use github::GitHubClient;
+pub use github::GithubRegistry;
 pub use lock::{FileLock, LOCK_FILE_NAME, LOCK_FILE_VERSION, LockFileError, LockStore, MemoryLock};
 pub use manifest::{
     FileManifest, MANIFEST_FILE_NAME, ManifestError, ManifestStore, MemoryManifest,
