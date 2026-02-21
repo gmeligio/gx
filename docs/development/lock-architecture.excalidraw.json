@@ -314,7 +314,7 @@
       "y": 745,
       "width": 240,
       "height": 105,
-      "text": "id: ActionId\nversion: Version\n\n+ to_key_string() -> \"action@version\"\n+ parse(s) -> Option<Self>",
+      "text": "id: ActionId\nversion: Version\n\nDisplay: \"action@version\"\n+ parse(s) -> Option<Self>",
       "fontSize": 13,
       "fontFamily": 3,
       "textAlign": "left",

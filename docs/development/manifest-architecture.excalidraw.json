@@ -175,7 +175,7 @@
       "y": 495,
       "width": 280,
       "height": 160,
-      "text": "Fields:\n- actions: HashMap<ActionId, Version>\n\nBehavior:\n- No file persistence\n- save() is a no-op\n- path() returns \"in-memory\"\n- Used when no gx.toml exists",
+      "text": "Fields:\n- actions: HashMap<ActionId, Version>\n\nMethods:\n+ from_workflows(action_set) -> Self\n\nBehavior:\n- No file persistence\n- save() is a no-op\n- path() returns Ok(\"in-memory\")\n- Used when no gx.toml exists",
       "fontSize": 13,
       "fontFamily": 3,
       "textAlign": "left",

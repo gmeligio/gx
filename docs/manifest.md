@@ -93,4 +93,4 @@ An empty `[actions]` section is valid:
 [actions]
 ```
 
-Running `gx pin` with an empty manifest will not modify any workflows.
+Running `gx tidy` with an empty manifest will not modify any workflows.
