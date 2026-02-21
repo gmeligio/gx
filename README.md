@@ -27,6 +27,16 @@ Pin all Github Actions in your workflows to their current SHA. Create `gx.toml` 
 gx init
 ```
 
+### upgrade
+
+Check for newer versions of actions in your manifest and upgrade them. It resolves the upgraded versions to their commit SHAs. It updates the workflows based on the upgraded versions. It updates the `gx.toml` and `gx.lock` files if they exist.
+
+Skips actions that are not semver-versioned (e.g., pinned to a commit SHA).
+
+```bash
+gx upgrade
+```
+
 ## Options
 
 - `-v, --verbose` - Enable verbose output
