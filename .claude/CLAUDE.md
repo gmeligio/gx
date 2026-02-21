@@ -10,8 +10,9 @@ gx is a Rust CLI that manages Github Actions dependencies across workflows, simi
 cargo build                    # Build
 cargo clippy                   # Lint
 cargo test                     # Run all tests
-cargo run -- init            # Create manifest and lock from workflows
+cargo run -- init              # Create manifest and lock from workflows
 cargo run -- tidy              # Sync manifest/lock with workflows
+cargo run -- upgrade           # Check for newer versions and upgrade
 ```
 
 ## Architecture
@@ -31,16 +32,16 @@ src/
 ├── lib.rs               # Library root (re-exports commands, domain, infrastructure, config)
 ├── commands.rs          # Commands module (re-exports tidy)
 ├── commands/tidy.rs     # Generic run<M: ManifestStore, L: LockStore>()
+├── commands/upgrade.rs  # Upgrade actions to newer versions
 ├── config.rs            # Environment configuration
 ├── domain/
 │   ├── mod.rs           # Public re-exports for domain types
 │   ├── action.rs        # ActionId, Version, CommitSha, ActionSpec, ResolvedAction, LockKey, UsesRef, InterpretedRef, VersionCorrection
-│   ├── resolution.rs    # VersionResolver trait, ResolutionService, ResolutionResult, select_highest_version, should_update_manifest
-│   ├── version.rs       # Semver parsing: is_commit_sha, is_semver_like, normalize_version, find_highest_version
+│   ├── resolution.rs    # VersionRegistry trait, ActionResolver, ResolutionResult, select_best_tag
 │   └── workflow_actions.rs # WorkflowActionSet (aggregates actions across workflows)
 └── infrastructure/
     ├── mod.rs           # Public re-exports for infrastructure types
-    ├── github.rs        # GithubClient (implements VersionResolver)
+    ├── github.rs        # GithubRegistry (implements VersionRegistry)
     ├── lock.rs          # LockStore trait, FileLock, MemoryLock
     ├── manifest.rs      # ManifestStore trait, FileManifest, MemoryManifest
     ├── repo.rs          # Repository discovery (gix-discover)
@@ -103,3 +104,11 @@ Two-phase approach (YAML parsers strip comments):
 ## Environment
 
 - `GITHUB_TOKEN`: Optional, needed for Github API when resolving SHAs
+
+## Documentation
+
+When modifying code, update the corresponding documentation:
+- `docs/` contains user-facing documentation (one file per command, plus manifest.md and lock.md)
+- `docs/development/` contains contributor documentation (implementation details per command, plus architecture.md)
+- Update both when changing command behavior, adding types, or modifying algorithms
+- Keep excalidraw diagrams in `docs/` in sync with architectural changes
