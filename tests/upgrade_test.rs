@@ -1,4 +1,5 @@
 use gx::commands::upgrade;
+use gx::commands::upgrade::UpgradeMode;
 use gx::domain::{
     ActionId, CommitSha, LockKey, ResolutionError, ResolvedAction, Version, VersionRegistry,
 };
@@ -87,6 +88,7 @@ fn run_upgrade_file_backed(repo_root: &Path) -> anyhow::Result<()> {
         lock,
         MockUpgradeRegistry::new(),
         &updater,
+        &UpgradeMode::Safe,
     )
 }
 
@@ -107,7 +109,14 @@ fn test_upgrade_empty_manifest_is_noop() {
     let manifest = MemoryManifest::default();
     let lock = MemoryLock::default();
     let updater = FileWorkflowUpdater::new(&root);
-    let result = upgrade::run(&root, manifest, lock, MockUpgradeRegistry::new(), &updater);
+    let result = upgrade::run(
+        &root,
+        manifest,
+        lock,
+        MockUpgradeRegistry::new(),
+        &updater,
+        &UpgradeMode::Safe,
+    );
     assert!(result.is_ok());
 }
 
@@ -144,7 +153,14 @@ fn test_upgrade_non_semver_versions_skipped() {
     let lock = MemoryLock::default();
 
     let updater = FileWorkflowUpdater::new(&root);
-    let result = upgrade::run(&root, manifest, lock, MockUpgradeRegistry::new(), &updater);
+    let result = upgrade::run(
+        &root,
+        manifest,
+        lock,
+        MockUpgradeRegistry::new(),
+        &updater,
+        &UpgradeMode::Safe,
+    );
     assert!(result.is_ok());
 }
 
@@ -229,7 +245,14 @@ fn test_upgrade_memory_stores_no_side_effects() {
     let lock = MemoryLock::default();
 
     let updater = FileWorkflowUpdater::new(&root);
-    let result = upgrade::run(&root, manifest, lock, MockUpgradeRegistry::new(), &updater);
+    let result = upgrade::run(
+        &root,
+        manifest,
+        lock,
+        MockUpgradeRegistry::new(),
+        &updater,
+        &UpgradeMode::Safe,
+    );
     assert!(result.is_ok());
 
     // No files should be created
