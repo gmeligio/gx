@@ -416,11 +416,11 @@ fn test_upgrade_repins_branch_ref() {
     // Verify workflow was updated with the new SHA from MockUpgradeRegistry
     // MockUpgradeRegistry.lookup_sha generates: "my-orgmy-actionmain" zero-padded to 40 chars
     let expected_sha = format!("{:0<40}", "my-orgmy-actionmain");
-    let updated =
+    let updated_workflow =
         fs::read_to_string(root.join(".github").join("workflows").join("ci.yml")).unwrap();
     assert!(
-        updated.contains(&format!("my-org/my-action@{expected_sha} # main")),
-        "Expected branch ref to be re-pinned with new SHA. Got:\n{updated}"
+        updated_workflow.contains(&format!("my-org/my-action@{expected_sha} # main")),
+        "Expected branch ref to be re-pinned with new SHA. Got:\n{updated_workflow}"
     );
 }
 
@@ -458,11 +458,11 @@ fn test_upgrade_latest_also_repins_branch_ref() {
     assert!(result.is_ok());
 
     let expected_sha = format!("{:0<40}", "my-orgmy-actionmain");
-    let updated =
+    let updated_workflow =
         fs::read_to_string(root.join(".github").join("workflows").join("ci.yml")).unwrap();
     assert!(
-        updated.contains(&format!("my-org/my-action@{expected_sha} # main")),
-        "Expected branch ref to be re-pinned in --latest mode. Got:\n{updated}"
+        updated_workflow.contains(&format!("my-org/my-action@{expected_sha} # main")),
+        "Expected branch ref to be re-pinned in --latest mode. Got:\n{updated_workflow}"
     );
 }
 
@@ -497,9 +497,10 @@ fn test_upgrade_targeted_does_not_repin_branch_ref() {
 
     // Registry returns v5 as a valid tag for checkout
     let mut registry = MockUpgradeRegistry::new();
-    registry
-        .tags
-        .insert("actions/checkout".to_string(), vec!["v4".to_string(), "v5".to_string()]);
+    registry.tags.insert(
+        "actions/checkout".to_string(),
+        vec!["v4".to_string(), "v5".to_string()],
+    );
 
     let updater = FileWorkflowUpdater::new(&root);
     let result = upgrade::run(
@@ -512,13 +513,13 @@ fn test_upgrade_targeted_does_not_repin_branch_ref() {
     );
     assert!(result.is_ok());
 
-    let updated =
+    let updated_workflow =
         fs::read_to_string(root.join(".github").join("workflows").join("ci.yml")).unwrap();
 
     // Branch ref should be UNCHANGED
     assert!(
-        updated.contains(&format!("my-org/my-action@{branch_sha} # main")),
-        "Branch ref should not be re-pinned in targeted mode. Got:\n{updated}"
+        updated_workflow.contains(&format!("my-org/my-action@{branch_sha} # main")),
+        "Branch ref should not be re-pinned in targeted mode. Got:\n{updated_workflow}"
     );
 }
 
@@ -569,21 +570,21 @@ fn test_upgrade_mixed_semver_and_branch() {
     );
     assert!(result.is_ok());
 
-    let updated =
+    let updated_workflow =
         fs::read_to_string(root.join(".github").join("workflows").join("ci.yml")).unwrap();
 
     // Branch ref should be re-pinned with new SHA
     let expected_branch_sha = format!("{:0<40}", "my-orgmy-actionmain");
     assert!(
-        updated.contains(&format!("my-org/my-action@{expected_branch_sha} # main")),
-        "Branch ref should be re-pinned. Got:\n{updated}"
+        updated_workflow.contains(&format!("my-org/my-action@{expected_branch_sha} # main")),
+        "Branch ref should be re-pinned. Got:\n{updated_workflow}"
     );
 
     // Checkout should be upgraded to v5 with new SHA
     let expected_checkout_sha = format!("{:0<40}", "actionscheckoutv5");
     assert!(
-        updated.contains(&format!("actions/checkout@{expected_checkout_sha} # v5")),
-        "Checkout should be upgraded to v5. Got:\n{updated}"
+        updated_workflow.contains(&format!("actions/checkout@{expected_checkout_sha} # v5")),
+        "Checkout should be upgraded to v5. Got:\n{updated_workflow}"
     );
 }
 
@@ -600,10 +601,7 @@ fn test_upgrade_skips_bare_sha() {
     create_workflow(&root, "ci.yml", &workflow_content);
 
     let mut manifest = MemoryManifest::default();
-    manifest.set(
-        ActionId::from("my-org/my-action"),
-        Version::from(bare_sha),
-    );
+    manifest.set(ActionId::from("my-org/my-action"), Version::from(bare_sha));
 
     let lock = MemoryLock::default();
 
@@ -619,10 +617,10 @@ fn test_upgrade_skips_bare_sha() {
     assert!(result.is_ok());
 
     // Workflow should be unchanged — bare SHA has nothing to re-pin
-    let updated =
+    let updated_workflow =
         fs::read_to_string(root.join(".github").join("workflows").join("ci.yml")).unwrap();
     assert!(
-        updated.contains(&format!("my-org/my-action@{bare_sha}")),
-        "Bare SHA should remain unchanged. Got:\n{updated}"
+        updated_workflow.contains(&format!("my-org/my-action@{bare_sha}")),
+        "Bare SHA should remain unchanged. Got:\n{updated_workflow}"
     );
 }

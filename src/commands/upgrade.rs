@@ -33,14 +33,61 @@ pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, W: WorkflowUpdate
 ) -> Result<()> {
     let service = ActionResolver::new(registry);
 
-    let (upgrades, repins) = match mode {
+    let Some((upgrades, repins)) = determine_upgrades(&manifest, &service, mode)? else {
+        return Ok(());
+    };
+
+    // Apply upgrades to manifest
+    info!("Upgrading actions:");
+    for upgrade in &upgrades {
+        info!("+ {upgrade}");
+        manifest.set(upgrade.id.clone(), upgrade.upgraded.clone());
+    }
+
+    // Resolve new versions to SHAs
+    for upgrade in &upgrades {
+        let spec = ActionSpec::new(upgrade.id.clone(), upgrade.upgraded.clone());
+        resolve_and_store(&service, &spec, &mut lock, "Could not resolve");
+    }
+
+    // Re-pin non-semver refs to current SHA
+    for spec in &repins {
+        resolve_and_store(&service, spec, &mut lock, "Could not re-pin");
+    }
+
+    // Save manifest and lock
+    manifest.save()?;
+    let keys_to_retain: Vec<LockKey> = manifest.specs().iter().map(|s| LockKey::from(*s)).collect();
+    lock.retain(&keys_to_retain);
+    lock.save()?;
+
+    // Update workflows only for upgraded actions and re-pinned refs
+    let mut update_keys: Vec<LockKey> = upgrades
+        .iter()
+        .map(|u| LockKey::new(u.id.clone(), u.upgraded.clone()))
+        .collect();
+    for spec in &repins {
+        update_keys.push(LockKey::from(spec));
+    }
+    let update_map = lock.build_update_map(&update_keys);
+    let results = writer.update_all(&update_map)?;
+    print_update_results(&results);
+
+    Ok(())
+}
+
+fn determine_upgrades<M: ManifestStore, R: VersionRegistry>(
+    manifest: &M,
+    service: &ActionResolver<R>,
+    mode: &UpgradeMode,
+) -> Result<Option<(Vec<UpgradeCandidate>, Vec<ActionSpec>)>> {
+    match mode {
         UpgradeMode::Safe | UpgradeMode::Latest => {
             let specs = manifest.specs();
             if specs.is_empty() {
-                return Ok(());
+                return Ok(None);
             }
 
-            // Find available upgrades
             info!("Checking for upgrades...");
             let mut upgrades = Vec::new();
             let mut repins: Vec<ActionSpec> = Vec::new();
@@ -78,10 +125,10 @@ pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, W: WorkflowUpdate
 
             if upgrades.is_empty() && repins.is_empty() {
                 info!("All actions are up to date.");
-                return Ok(());
+                return Ok(None);
             }
 
-            (upgrades, repins)
+            Ok(Some((upgrades, repins)))
         }
         UpgradeMode::Targeted(id, version) => {
             let current = manifest
@@ -103,74 +150,35 @@ pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, W: WorkflowUpdate
                 }
             }
 
-            (vec![UpgradeCandidate {
-                id: id.clone(),
-                current: current.clone(),
-                upgraded: version.clone(),
-            }], vec![])
-        }
-    };
-
-    // Apply upgrades
-    info!("Upgrading actions:");
-    for upgrade in &upgrades {
-        info!("+ {upgrade}");
-        manifest.set(upgrade.id.clone(), upgrade.upgraded.clone());
-    }
-
-    // Resolve new versions to SHAs
-    for upgrade in &upgrades {
-        let spec = ActionSpec::new(upgrade.id.clone(), upgrade.upgraded.clone());
-        let result = service.resolve(&spec);
-        match result {
-            ResolutionResult::Resolved(resolved) => {
-                lock.set(&resolved);
-            }
-            ResolutionResult::Corrected { corrected, .. } => {
-                lock.set(&corrected);
-            }
-            ResolutionResult::Unresolved { spec: s, reason } => {
-                warn!("Could not resolve {s}: {reason}");
-            }
+            Ok(Some((
+                vec![UpgradeCandidate {
+                    id: id.clone(),
+                    current: current.clone(),
+                    upgraded: version.clone(),
+                }],
+                vec![],
+            )))
         }
     }
+}
 
-    // Re-pin non-semver refs to current SHA
-    for spec in &repins {
-        let result = service.resolve(spec);
-        match result {
-            ResolutionResult::Resolved(resolved) => {
-                lock.set(&resolved);
-            }
-            ResolutionResult::Corrected { corrected, .. } => {
-                lock.set(&corrected);
-            }
-            ResolutionResult::Unresolved { spec: s, reason } => {
-                warn!("Could not re-pin {s}: {reason}");
-            }
+fn resolve_and_store<R: VersionRegistry, L: LockStore>(
+    service: &ActionResolver<R>,
+    spec: &ActionSpec,
+    lock: &mut L,
+    unresolved_msg: &str,
+) {
+    match service.resolve(spec) {
+        ResolutionResult::Resolved(resolved) => {
+            lock.set(&resolved);
+        }
+        ResolutionResult::Corrected { corrected, .. } => {
+            lock.set(&corrected);
+        }
+        ResolutionResult::Unresolved { spec: s, reason } => {
+            warn!("{unresolved_msg} {s}: {reason}");
         }
     }
-
-    // Save manifest and lock
-    manifest.save()?;
-
-    let keys_to_retain: Vec<LockKey> = manifest.specs().iter().map(|s| LockKey::from(*s)).collect();
-    lock.retain(&keys_to_retain);
-    lock.save()?;
-
-    // Update workflows only for upgraded actions and re-pinned refs
-    let mut update_keys: Vec<LockKey> = upgrades
-        .iter()
-        .map(|u| LockKey::new(u.id.clone(), u.upgraded.clone()))
-        .collect();
-    for spec in &repins {
-        update_keys.push(LockKey::from(spec));
-    }
-    let update_map = lock.build_update_map(&update_keys);
-    let results = writer.update_all(&update_map)?;
-    print_update_results(&results);
-
-    Ok(())
 }
 
 fn print_update_results(results: &[UpdateResult]) {
