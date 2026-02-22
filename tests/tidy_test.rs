@@ -1,6 +1,6 @@
 use gx::commands::tidy;
 use gx::domain::{ActionId, CommitSha, ResolutionError, Version, VersionRegistry};
-use gx::infrastructure::{FileLock, FileManifest, MemoryLock, MemoryManifest};
+use gx::infrastructure::{FileLock, FileManifest, FileWorkflowScanner, FileWorkflowUpdater, MemoryLock, MemoryManifest};
 use std::fs;
 use std::io::Write;
 use std::path::Path;
@@ -102,15 +102,17 @@ fn create_test_repo(temp_dir: &TempDir) -> std::path::PathBuf {
 fn run_tidy(repo_root: &Path) -> anyhow::Result<()> {
     let manifest_path = repo_root.join(".github").join("gx.toml");
     let lock_path = repo_root.join(".github").join("gx.lock");
+    let scanner = FileWorkflowScanner::new(repo_root);
+    let updater = FileWorkflowUpdater::new(repo_root);
 
     if manifest_path.exists() {
         let manifest = FileManifest::load_or_default(&manifest_path)?;
         let lock = FileLock::load_or_default(&lock_path)?;
-        tidy::run(repo_root, manifest, lock, MockRegistry::new())
+        tidy::run(repo_root, manifest, lock, MockRegistry::new(), &scanner, &updater)
     } else {
         let manifest = MemoryManifest::default();
         let lock = MemoryLock::default();
-        tidy::run(repo_root, manifest, lock, MockRegistry::new())
+        tidy::run(repo_root, manifest, lock, MockRegistry::new(), &scanner, &updater)
     }
 }
 
