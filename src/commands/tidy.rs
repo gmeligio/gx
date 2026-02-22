@@ -79,7 +79,10 @@ pub fn run<
 
             if versions.len() == 1 {
                 let workflow_version = &versions[0];
-                let manifest_version = manifest.get(action_id).unwrap().clone();
+                let manifest_version = manifest
+                    .get(action_id)
+                    .expect("action_id is from intersection with manifest_actions, so it must be present")
+                    .clone();
 
                 // Use domain policy to check if manifest should be updated
                 if manifest_version.should_be_replaced_by(workflow_version) {
@@ -105,7 +108,7 @@ pub fn run<
     manifest.save()?;
 
     // Remove unused entries from lock file
-    let keys_to_retain: Vec<LockKey> = manifest.specs().iter().map(LockKey::from).collect();
+    let keys_to_retain: Vec<LockKey> = manifest.specs().iter().map(|s| LockKey::from(*s)).collect();
     lock.retain(&keys_to_retain);
 
     // Save lock file only if dirty
@@ -149,7 +152,7 @@ fn update_lock_file<M: ManifestStore, L: LockStore, R: VersionRegistry>(
     let mut corrections = Vec::new();
     let mut unresolved = Vec::new();
 
-    let specs = manifest.specs();
+    let specs: Vec<ActionSpec> = manifest.specs().iter().map(|s| (*s).clone()).collect();
 
     // Check if there are any actions that need resolving
     let needs_resolving = specs.iter().any(|spec| !lock.has(&LockKey::from(spec)));

@@ -111,4 +111,4 @@ When modifying code, update the corresponding documentation:
 - `docs/` contains user-facing documentation (one file per command, plus manifest.md and lock.md)
 - `docs/development/` contains contributor documentation (implementation details per command, plus architecture.md)
 - Update both when changing command behavior, adding types, or modifying algorithms
-- Keep excalidraw diagrams in `docs/` in sync with architectural changes
+- Keep excalidraw diagrams in `docs/development` in sync with architectural changes

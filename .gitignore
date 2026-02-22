@@ -4,5 +4,8 @@
 .claude/*
 !.claude/CLAUDE.md
 
+# Git worktrees
+.worktrees
+
 # Test
 docs/brainstorming

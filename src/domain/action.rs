@@ -357,13 +357,19 @@ impl fmt::Display for LockKey {
 
 impl From<&ActionSpec> for LockKey {
     fn from(spec: &ActionSpec) -> Self {
-        Self::new(spec.id.clone(), spec.version.clone())
+        Self::new(
+            ActionId::from(spec.id.as_str()),
+            Version::from(spec.version.as_str()),
+        )
     }
 }
 
 impl From<&ResolvedAction> for LockKey {
     fn from(resolved: &ResolvedAction) -> Self {
-        Self::new(resolved.id.clone(), resolved.version.clone())
+        Self::new(
+            ActionId::from(resolved.id.as_str()),
+            Version::from(resolved.version.as_str()),
+        )
     }
 }
 
@@ -402,18 +408,18 @@ impl UsesRef {
             let version = Version::normalized(comment);
             // If ref is a SHA, store it
             let sha = if CommitSha::is_valid(&self.uses_ref) {
-                Some(CommitSha::from(self.uses_ref.clone()))
+                Some(CommitSha::from(self.uses_ref.as_str()))
             } else {
                 None
             };
             (version, sha)
         } else {
             // No comment, use the ref as-is, no SHA stored
-            (Version::from(self.uses_ref.clone()), None)
+            (Version::from(self.uses_ref.as_str()), None)
         };
 
         InterpretedRef {
-            id: ActionId::from(self.action_name.clone()),
+            id: ActionId::from(self.action_name.as_str()),
             version,
             sha,
         }
