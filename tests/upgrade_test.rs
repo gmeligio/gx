@@ -267,7 +267,7 @@ jobs:
     ));
 
     // Retain only current manifest keys (this is what upgrade::run does)
-    let keys_to_retain: Vec<LockKey> = manifest.specs().iter().map(LockKey::from).collect();
+    let keys_to_retain: Vec<LockKey> = manifest.specs().iter().map(|s| LockKey::from(*s)).collect();
     lock.retain(&keys_to_retain);
 
     // Build update map only for upgraded actions (the fix)
