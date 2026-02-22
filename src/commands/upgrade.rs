@@ -25,6 +25,7 @@ pub enum UpgradeMode {
 /// # Errors
 ///
 /// Returns an error if drift is detected, if workflows cannot be read, or if files cannot be saved.
+#[allow(clippy::too_many_arguments, clippy::needless_pass_by_value)]
 pub fn run<M, L, R, P, W>(
     _repo_root: &Path,
     mut manifest: Manifest,

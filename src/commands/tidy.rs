@@ -18,6 +18,7 @@ use crate::infrastructure::{LockStore, ManifestStore};
 /// # Panics
 ///
 /// Panics if an action in the intersection of workflow and manifest is not found in the manifest.
+#[allow(clippy::too_many_arguments, clippy::needless_pass_by_value)]
 pub fn run<M, L, R, P, W>(
     _repo_root: &Path,
     mut manifest: Manifest,
@@ -152,8 +153,8 @@ fn update_lock<R: VersionRegistry>(
     for spec in &specs {
         if let Some(workflow_sha) = action_set.sha_for(&spec.id) {
             match resolver.validate_and_correct(spec, workflow_sha) {
-                ResolutionResult::Resolved(resolved) => {
-                    lock.set(&resolved);
+                ResolutionResult::Resolved(action) => {
+                    lock.set(&action);
                 }
                 ResolutionResult::Corrected { original, corrected } => {
                     corrections.push(VersionCorrection {
@@ -175,8 +176,8 @@ fn update_lock<R: VersionRegistry>(
             if !lock.has(&key) {
                 debug!("Resolving {spec}");
                 match resolver.resolve(spec) {
-                    ResolutionResult::Resolved(resolved) => {
-                        lock.set(&resolved);
+                    ResolutionResult::Resolved(action) => {
+                        lock.set(&action);
                     }
                     ResolutionResult::Unresolved { spec: s, reason } => {
                         debug!("Could not resolve {s}: {reason}");

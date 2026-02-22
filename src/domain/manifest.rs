@@ -61,6 +61,11 @@ impl Manifest {
     /// - Action in workflow but absent from manifest
     /// - Action in manifest but absent from all workflows
     /// - Action present in both but with differing versions
+    ///
+    /// # Panics
+    ///
+    /// Panics if an action is found in both workflow and manifest but `get` returns `None`
+    /// (this cannot happen; the `has` check ensures the entry exists).
     #[must_use]
     pub fn detect_drift(
         &self,
@@ -75,14 +80,12 @@ impl Manifest {
 
         // Check actions in workflow not in manifest (or just the filtered one)
         for id in &workflow_ids {
-            if let Some(f) = filter {
-                if id != f {
-                    continue;
-                }
+            if let Some(f) = filter
+                && id != f
+            {
+                continue;
             }
-            if !self.has(id) {
-                drift.push(DriftItem::MissingFromManifest { id: id.clone() });
-            } else {
+            if self.has(id) {
                 // Both sides have it — compare versions
                 let manifest_version = self.get(id).expect("checked with has()");
                 let workflow_versions = action_set.versions_for(id);
@@ -95,15 +98,17 @@ impl Manifest {
                         workflow_version,
                     });
                 }
+            } else {
+                drift.push(DriftItem::MissingFromManifest { id: id.clone() });
             }
         }
 
         // Check actions in manifest not in workflow (or just the filtered one)
         for id in &manifest_ids {
-            if let Some(f) = filter {
-                if *id != f {
-                    continue;
-                }
+            if let Some(f) = filter
+                && *id != f
+            {
+                continue;
             }
             if action_set.versions_for(id).is_empty() {
                 drift.push(DriftItem::MissingFromWorkflow { id: (*id).clone() });
