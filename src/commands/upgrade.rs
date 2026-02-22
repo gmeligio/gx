@@ -3,29 +3,29 @@ use log::{debug, info, warn};
 use std::path::Path;
 
 use crate::domain::{
-    ActionResolver, ActionSpec, LockKey, ResolutionResult, UpgradeCandidate, VersionRegistry,
+    ActionResolver, ActionSpec, LockKey, ResolutionResult, UpdateResult, UpgradeCandidate,
+    VersionRegistry, WorkflowUpdater,
 };
-use crate::infrastructure::{
-    GithubRegistry, LockStore, ManifestStore, UpdateResult, WorkflowWriter,
-};
+use crate::infrastructure::{LockStore, ManifestStore};
 
 /// Run the upgrade command to find and apply available upgrades for actions.
 ///
 /// # Errors
 ///
 /// Returns an error if workflows cannot be read or files cannot be saved.
-pub fn run<M: ManifestStore, L: LockStore>(
-    repo_root: &Path,
+pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, W: WorkflowUpdater>(
+    _repo_root: &Path,
     mut manifest: M,
     mut lock: L,
+    registry: R,
+    writer: W,
 ) -> Result<()> {
     let specs = manifest.specs();
     if specs.is_empty() {
         return Ok(());
     }
 
-    let github = GithubRegistry::from_env()?;
-    let service = ActionResolver::new(github);
+    let service = ActionResolver::new(registry);
 
     // Find available upgrades
     info!("Checking for upgrades...");
@@ -95,7 +95,6 @@ pub fn run<M: ManifestStore, L: LockStore>(
         .map(|u| LockKey::new(u.id.clone(), u.upgraded.clone()))
         .collect();
     let update_map = lock.build_update_map(&upgraded_keys);
-    let writer = WorkflowWriter::new(repo_root);
     let results = writer.update_all(&update_map)?;
     print_update_results(&results);
 
