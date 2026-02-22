@@ -391,9 +391,15 @@ mod tests {
     fn test_manifest_actions_saved_sorted_by_id() {
         let mut manifest = FileManifest::default();
         // Add actions in non-alphabetical order
-        manifest.set(ActionId::from("docker/build-push-action"), Version::from("v5"));
+        manifest.set(
+            ActionId::from("docker/build-push-action"),
+            Version::from("v5"),
+        );
         manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
-        manifest.set(ActionId::from("actions-rust-lang/rustfmt"), Version::from("v1"));
+        manifest.set(
+            ActionId::from("actions-rust-lang/rustfmt"),
+            Version::from("v1"),
+        );
 
         let file = NamedTempFile::new().unwrap();
         manifest.path = Some(file.path().to_path_buf());
