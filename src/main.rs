@@ -84,12 +84,12 @@ fn main() -> Result<()> {
             if manifest_path.exists() {
                 let manifest = FileManifest::load_or_default(&manifest_path)?;
                 let lock = FileLock::load_or_default(&lock_path)?;
-                commands::upgrade::run(&repo_root, manifest, lock, registry, &updater)
+                commands::upgrade::run(&repo_root, manifest, lock, registry, &updater, commands::upgrade::UpgradeMode::Safe)
             } else {
                 let action_set = FileWorkflowScanner::new(&repo_root).scan_all()?;
                 let manifest = MemoryManifest::from_workflows(&action_set);
                 let lock = MemoryLock::default();
-                commands::upgrade::run(&repo_root, manifest, lock, registry, &updater)
+                commands::upgrade::run(&repo_root, manifest, lock, registry, &updater, commands::upgrade::UpgradeMode::Safe)
             }
         }
     }

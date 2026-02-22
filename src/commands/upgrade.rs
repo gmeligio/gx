@@ -3,10 +3,20 @@ use log::{debug, info, warn};
 use std::path::Path;
 
 use crate::domain::{
-    ActionResolver, ActionSpec, LockKey, ResolutionResult, UpdateResult, UpgradeCandidate,
-    VersionRegistry, WorkflowUpdater,
+    ActionId, ActionResolver, ActionSpec, LockKey, ResolutionResult, UpdateResult, UpgradeCandidate,
+    Version, VersionRegistry, WorkflowUpdater,
 };
 use crate::infrastructure::{LockStore, ManifestStore};
+
+/// How the upgrade command should find new versions.
+pub enum UpgradeMode {
+    /// Default: upgrade all actions within their current major version.
+    Safe,
+    /// Upgrade all actions to the absolute latest version, crossing major boundaries.
+    Latest,
+    /// Upgrade a single action to a specific version.
+    Targeted(ActionId, Version),
+}
 
 /// Run the upgrade command to find and apply available upgrades for actions.
 ///
@@ -19,44 +29,81 @@ pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, W: WorkflowUpdate
     mut lock: L,
     registry: R,
     writer: &W,
+    mode: UpgradeMode,
 ) -> Result<()> {
-    let specs = manifest.specs();
-    if specs.is_empty() {
-        return Ok(());
-    }
-
     let service = ActionResolver::new(registry);
 
-    // Find available upgrades
-    info!("Checking for upgrades...");
-    let mut upgrades = Vec::new();
+    let upgrades = match mode {
+        UpgradeMode::Safe | UpgradeMode::Latest => {
+            let specs = manifest.specs();
+            if specs.is_empty() {
+                return Ok(());
+            }
 
-    for spec in &specs {
-        if spec.version.precision().is_none() {
-            debug!("Skipping {spec} (not a semver version)");
-            continue;
-        }
+            // Find available upgrades
+            info!("Checking for upgrades...");
+            let mut upgrades = Vec::new();
 
-        match service.registry().all_tags(&spec.id) {
-            Ok(tags) => {
-                if let Some(upgraded) = spec.version.find_upgrade(&tags) {
-                    upgrades.push(UpgradeCandidate {
-                        id: spec.id.clone(),
-                        current: spec.version.clone(),
-                        upgraded,
-                    });
+            for spec in &specs {
+                if spec.version.precision().is_none() {
+                    debug!("Skipping {spec} (not a semver version)");
+                    continue;
+                }
+
+                match service.registry().all_tags(&spec.id) {
+                    Ok(tags) => {
+                        let upgraded = match mode {
+                            UpgradeMode::Latest => spec.version.find_latest_upgrade(&tags),
+                            _ => spec.version.find_upgrade(&tags),
+                        };
+                        if let Some(upgraded) = upgraded {
+                            upgrades.push(UpgradeCandidate {
+                                id: spec.id.clone(),
+                                current: spec.version.clone(),
+                                upgraded,
+                            });
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Could not check upgrades for {spec}: {e}");
+                    }
                 }
             }
-            Err(e) => {
-                warn!("Could not check upgrades for {spec}: {e}");
-            }
-        }
-    }
 
-    if upgrades.is_empty() {
-        info!("All actions are up to date.");
-        return Ok(());
-    }
+            if upgrades.is_empty() {
+                info!("All actions are up to date.");
+                return Ok(());
+            }
+
+            upgrades
+        }
+        UpgradeMode::Targeted(ref id, ref version) => {
+            let current = manifest.get(id).ok_or_else(|| {
+                anyhow::anyhow!("{id} not found in manifest")
+            })?;
+
+            match service.registry().all_tags(id) {
+                Ok(tags) => {
+                    let tag_exists = tags.iter().any(|t| {
+                        // Compare by parsing both to semver to handle v5 matching v5.0.0
+                        t.as_str() == version.as_str()
+                    });
+                    if !tag_exists {
+                        anyhow::bail!("{version} not found in registry for {id}");
+                    }
+                }
+                Err(e) => {
+                    anyhow::bail!("Could not fetch tags for {id}: {e}");
+                }
+            }
+
+            vec![UpgradeCandidate {
+                id: id.clone(),
+                current: current.clone(),
+                upgraded: version.clone(),
+            }]
+        }
+    };
 
     // Apply upgrades
     info!("Upgrading actions:");
@@ -197,7 +244,70 @@ mod tests {
         let lock = MemoryLock::default();
 
         // Empty manifest should return Ok immediately without calling GitHub
-        let result = run(root, manifest, lock, DummyRegistry, &DummyUpdater);
+        let result = run(root, manifest, lock, DummyRegistry, &DummyUpdater, UpgradeMode::Safe);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_run_targeted_action_not_in_manifest() {
+        use crate::domain::{ActionId, Version, VersionRegistry, WorkflowError, WorkflowUpdater};
+        use crate::infrastructure::{MemoryLock, MemoryManifest};
+        use std::collections::HashMap;
+        use tempfile::TempDir;
+
+        struct DummyRegistry;
+        impl VersionRegistry for DummyRegistry {
+            fn lookup_sha(
+                &self,
+                _id: &crate::domain::ActionId,
+                _version: &crate::domain::Version,
+            ) -> std::result::Result<crate::domain::CommitSha, crate::domain::ResolutionError>
+            {
+                Err(crate::domain::ResolutionError::TokenRequired)
+            }
+            fn tags_for_sha(
+                &self,
+                _id: &crate::domain::ActionId,
+                _sha: &crate::domain::CommitSha,
+            ) -> std::result::Result<Vec<crate::domain::Version>, crate::domain::ResolutionError>
+            {
+                Err(crate::domain::ResolutionError::TokenRequired)
+            }
+            fn all_tags(
+                &self,
+                _id: &crate::domain::ActionId,
+            ) -> std::result::Result<Vec<crate::domain::Version>, crate::domain::ResolutionError>
+            {
+                Err(crate::domain::ResolutionError::TokenRequired)
+            }
+        }
+
+        struct DummyUpdater;
+        impl WorkflowUpdater for DummyUpdater {
+            fn update_all(
+                &self,
+                _actions: &HashMap<crate::domain::ActionId, String>,
+            ) -> std::result::Result<Vec<UpdateResult>, WorkflowError> {
+                Ok(vec![])
+            }
+        }
+
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path();
+        std::fs::create_dir_all(root.join(".github").join("workflows")).unwrap();
+
+        let manifest = MemoryManifest::default();
+        let lock = MemoryLock::default();
+
+        let mode = UpgradeMode::Targeted(
+            ActionId::from("actions/checkout"),
+            Version::from("v5"),
+        );
+        let result = run(root, manifest, lock, DummyRegistry, &DummyUpdater, mode);
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().to_string().contains("not found"),
+            "Should error when action is not in manifest"
+        );
     }
 }
