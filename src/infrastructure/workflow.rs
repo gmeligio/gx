@@ -238,18 +238,23 @@ impl FileWorkflowUpdater {
         let mut updated_content = content.clone();
         let mut changes = Vec::new();
 
-        for (action, version) in actions {
-            let escaped_action = regex::escape(action.as_str());
-            // Match "uses: action@ref" and optionally capture any existing comment
-            let pattern = format!(r"(uses:\s*{escaped_action})@[^\s#]+(\s*#[^\n]*)?");
-            let re = Regex::new(&pattern)?;
-
-            if re.is_match(&updated_content) {
+        // Compile all regexes upfront before modifying content
+        let compiled: Vec<(Regex, String, String)> = actions
+            .iter()
+            .map(|(action, version)| {
+                let escaped = regex::escape(action.as_str());
+                let pattern = format!(r"(uses:\s*{escaped})@[^\s#]+(\s*#[^\n]*)?");
                 let replacement = format!("${{1}}@{version}");
-                let new_content = re.replace_all(&updated_content, replacement.as_str());
+                let change_label = format!("{action}@{version}");
+                Regex::new(&pattern).map(|re| (re, replacement, change_label))
+            })
+            .collect::<Result<_, _>>()?;
 
+        for (re, replacement, change_label) in &compiled {
+            if re.is_match(&updated_content) {
+                let new_content = re.replace_all(&updated_content, replacement.as_str());
                 if new_content != updated_content {
-                    changes.push(format!("{action}@{version}"));
+                    changes.push(change_label.clone());
                     updated_content = new_content.to_string();
                 }
             }
