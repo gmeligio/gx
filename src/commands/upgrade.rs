@@ -18,7 +18,7 @@ pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, W: WorkflowUpdate
     mut manifest: M,
     mut lock: L,
     registry: R,
-    writer: W,
+    writer: &W,
 ) -> Result<()> {
     let specs = manifest.specs();
     if specs.is_empty() {

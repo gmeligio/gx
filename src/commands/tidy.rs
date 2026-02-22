@@ -30,8 +30,8 @@ pub fn run<
     mut manifest: M,
     mut lock: L,
     registry: R,
-    parser: P,
-    writer: W,
+    parser: &P,
+    writer: &W,
 ) -> Result<()> {
     let action_set = parser.scan_all()?;
     if action_set.is_empty() {
