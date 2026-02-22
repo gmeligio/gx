@@ -5,52 +5,14 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use thiserror::Error;
 
-use crate::domain::{ActionId, UsesRef};
-
-/// Errors that can occur when working with workflow files
-#[derive(Debug, Error)]
-pub enum WorkflowError {
-    #[error("failed to read glob pattern")]
-    Glob(#[from] glob::PatternError),
-
-    #[error("failed to read workflow: {}", path.display())]
-    Read {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-
-    #[error("failed to parse YAML in workflow: {}", path.display())]
-    Parse {
-        path: PathBuf,
-        #[source]
-        source: Box<serde_saphyr::Error>,
-    },
-
-    #[error("failed to write workflow: {}", path.display())]
-    Write {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-
-    #[error("invalid regex pattern")]
-    Regex(#[from] regex::Error),
-}
+use crate::domain::{ActionId, UpdateResult, UsesRef, WorkflowError};
 
 /// Action data extracted from a workflow file.
 /// Call `uses_ref.interpret()` to get domain types.
 #[derive(Debug, Clone)]
 struct ExtractedAction {
     uses_ref: UsesRef,
-}
-
-/// Result of updating a workflow file
-pub struct UpdateResult {
-    pub file: PathBuf,
-    pub changes: Vec<String>,
 }
 
 /// Minimal workflow structure for YAML parsing
@@ -72,11 +34,11 @@ struct Step {
 }
 
 /// Parser for extracting action information from workflow files
-pub struct WorkflowParser {
+pub struct FileWorkflowScanner {
     workflows_dir: PathBuf,
 }
 
-impl WorkflowParser {
+impl FileWorkflowScanner {
     #[must_use]
     pub fn new(repo_root: &Path) -> Self {
         Self {
@@ -220,11 +182,11 @@ impl WorkflowParser {
 }
 
 /// Writer for updating action versions in workflow files
-pub struct WorkflowWriter {
+pub struct FileWorkflowUpdater {
     workflows_dir: PathBuf,
 }
 
-impl WorkflowWriter {
+impl FileWorkflowUpdater {
     #[must_use]
     pub fn new(repo_root: &Path) -> Self {
         Self {
@@ -329,6 +291,21 @@ impl WorkflowWriter {
     }
 }
 
+impl crate::domain::WorkflowScanner for FileWorkflowScanner {
+    fn scan_all(&self) -> Result<crate::domain::WorkflowActionSet, WorkflowError> {
+        self.scan_all()
+    }
+}
+
+impl crate::domain::WorkflowUpdater for FileWorkflowUpdater {
+    fn update_all(
+        &self,
+        actions: &HashMap<ActionId, String>,
+    ) -> Result<Vec<UpdateResult>, WorkflowError> {
+        self.update_all(actions)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -351,7 +328,7 @@ mod tests {
         create_test_workflow(temp_dir.path(), "ci.yml", "name: CI");
         create_test_workflow(temp_dir.path(), "deploy.yaml", "name: Deploy");
 
-        let parser = WorkflowParser::new(temp_dir.path());
+        let parser = FileWorkflowScanner::new(temp_dir.path());
         let workflows = parser.find_workflows().unwrap();
 
         assert_eq!(workflows.len(), 2);
@@ -371,7 +348,7 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let writer = WorkflowWriter::new(temp_dir.path());
+        let writer = FileWorkflowUpdater::new(temp_dir.path());
         let mut actions = HashMap::new();
         actions.insert(ActionId::from("actions/checkout"), "v4".to_string());
 
@@ -400,7 +377,7 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let parser = WorkflowParser::new(temp_dir.path());
+        let parser = FileWorkflowScanner::new(temp_dir.path());
         let action_set = parser.scan(&workflow_path).unwrap();
 
         let ids = action_set.action_ids();
@@ -423,7 +400,7 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let parser = WorkflowParser::new(temp_dir.path());
+        let parser = FileWorkflowScanner::new(temp_dir.path());
         let action_set = parser.scan(&workflow_path).unwrap();
 
         let ids = action_set.action_ids();
@@ -446,7 +423,7 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let parser = WorkflowParser::new(temp_dir.path());
+        let parser = FileWorkflowScanner::new(temp_dir.path());
         let action_set = parser.scan(&workflow_path).unwrap();
 
         // Two unique actions (checkout appears in both jobs with different versions)
@@ -470,7 +447,7 @@ jobs:
             "jobs:\n  deploy:\n    steps:\n      - uses: docker/build-push-action@v5",
         );
 
-        let parser = WorkflowParser::new(temp_dir.path());
+        let parser = FileWorkflowScanner::new(temp_dir.path());
         let action_set = parser.scan_all().unwrap();
 
         assert_eq!(action_set.action_ids().len(), 2);
@@ -488,7 +465,7 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let parser = WorkflowParser::new(temp_dir.path());
+        let parser = FileWorkflowScanner::new(temp_dir.path());
         let action_set = parser.scan(&workflow_path).unwrap();
 
         let checkout_versions = action_set.versions_for(&ActionId::from("actions/checkout"));
@@ -509,7 +486,7 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let parser = WorkflowParser::new(temp_dir.path());
+        let parser = FileWorkflowScanner::new(temp_dir.path());
         let action_set = parser.scan(&workflow_path).unwrap();
 
         let versions = action_set.versions_for(&ActionId::from("actions/checkout"));
@@ -528,7 +505,7 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let parser = WorkflowParser::new(temp_dir.path());
+        let parser = FileWorkflowScanner::new(temp_dir.path());
         let action_set = parser.scan(&workflow_path).unwrap();
 
         let versions = action_set.versions_for(&ActionId::from("actions/checkout"));
@@ -546,7 +523,7 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let parser = WorkflowParser::new(temp_dir.path());
+        let parser = FileWorkflowScanner::new(temp_dir.path());
         let action_set = parser.scan(&workflow_path).unwrap();
 
         let versions = action_set.versions_for(&ActionId::from("actions/checkout"));
@@ -572,7 +549,7 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "test.yml", content);
 
-        let parser = WorkflowParser::new(temp_dir.path());
+        let parser = FileWorkflowScanner::new(temp_dir.path());
         let action_set = parser.scan(&workflow_path).unwrap();
 
         let checkout_id = ActionId::from("actions/checkout");
@@ -603,7 +580,7 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let parser = WorkflowParser::new(temp_dir.path());
+        let parser = FileWorkflowScanner::new(temp_dir.path());
         let action_set = parser.scan(&workflow_path).unwrap();
 
         let versions = action_set.versions_for(&ActionId::from("actions/checkout"));
@@ -628,7 +605,7 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let parser = WorkflowParser::new(temp_dir.path());
+        let parser = FileWorkflowScanner::new(temp_dir.path());
         let action_set = parser.scan(&workflow_path).unwrap();
 
         let versions = action_set.versions_for(&ActionId::from("actions/checkout"));
@@ -654,7 +631,7 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let writer = WorkflowWriter::new(temp_dir.path());
+        let writer = FileWorkflowUpdater::new(temp_dir.path());
         let mut actions = HashMap::new();
         // Simulate the format from lock.build_update_map(): "SHA # version"
         actions.insert(
@@ -693,7 +670,7 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let writer = WorkflowWriter::new(temp_dir.path());
+        let writer = FileWorkflowUpdater::new(temp_dir.path());
         let mut actions = HashMap::new();
         // Update both actions with new SHAs
         actions.insert(
