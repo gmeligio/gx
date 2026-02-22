@@ -41,6 +41,19 @@ if let Some(upgraded) = spec.version.find_upgrade(&tags) {
 - **Minor** (`v4.1`): upgrades within same major (`v4.2`, `v4.3`)
 - **Patch** (`v4.1.0`): upgrades within same major.minor (`v4.1.1`, `v4.1.3`)
 
+### 2b. Collect non-semver re-pins
+
+Non-semver specs (branches, text tags) are collected for re-pinning. Bare SHAs are skipped:
+
+```rust
+if spec.version.precision().is_none() {
+    if !spec.version.is_sha() {
+        repins.push(spec.clone());
+    }
+    continue;
+}
+```
+
 ### 3. Apply upgrades to manifest
 
 ```rust
@@ -63,6 +76,19 @@ match result {
 }
 ```
 
+### 4b. Re-resolve re-pinned refs
+
+After resolving upgraded SHAs, re-pin non-semver refs unconditionally:
+
+```rust
+for spec in &repins {
+    let result = service.resolve(spec);
+    // ... same match arms as upgrades
+}
+```
+
+The lock entry (e.g. `action@main`) is overwritten with the fresh SHA from the registry.
+
 ### 5. Save and update workflows
 
 ```rust
@@ -71,13 +97,16 @@ lock.retain(&keys_to_retain);
 lock.save()?;
 ```
 
-Only upgraded actions are included in the workflow update map (not all specs):
+Both upgraded actions and re-pinned refs are included in the workflow update map:
 
 ```rust
-let upgraded_keys: Vec<LockKey> = upgrades.iter()
+let mut update_keys: Vec<LockKey> = upgrades.iter()
     .map(|u| LockKey::new(u.id.clone(), u.upgraded.clone()))
     .collect();
-let update_map = lock.build_update_map(&upgraded_keys);
+for spec in &repins {
+    update_keys.push(LockKey::from(spec));
+}
+let update_map = lock.build_update_map(&update_keys);
 writer.update_all(&update_map)?;
 ```
 
