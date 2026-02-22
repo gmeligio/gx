@@ -47,11 +47,8 @@ impl Lock {
         keys.iter()
             .map(|key| {
                 let value = if let Some(sha) = self.get(key) {
-                    let resolved = ResolvedAction::new(
-                        key.id.clone(),
-                        key.version.clone(),
-                        sha.clone(),
-                    );
+                    let resolved =
+                        ResolvedAction::new(key.id.clone(), key.version.clone(), sha.clone());
                     resolved.to_workflow_ref()
                 } else {
                     key.version.to_string()
@@ -93,7 +90,11 @@ mod tests {
     #[test]
     fn test_set_and_get() {
         let mut lock = Lock::default();
-        lock.set(&make_resolved("actions/checkout", "v4", "abc123def456789012345678901234567890abcd"));
+        lock.set(&make_resolved(
+            "actions/checkout",
+            "v4",
+            "abc123def456789012345678901234567890abcd",
+        ));
         assert_eq!(
             lock.get(&make_key("actions/checkout", "v4")),
             Some(&CommitSha::from("abc123def456789012345678901234567890abcd"))
@@ -104,7 +105,11 @@ mod tests {
     #[test]
     fn test_has() {
         let mut lock = Lock::default();
-        lock.set(&make_resolved("actions/checkout", "v4", "abc123def456789012345678901234567890abcd"));
+        lock.set(&make_resolved(
+            "actions/checkout",
+            "v4",
+            "abc123def456789012345678901234567890abcd",
+        ));
         assert!(lock.has(&make_key("actions/checkout", "v4")));
         assert!(!lock.has(&make_key("actions/checkout", "v3")));
     }
@@ -112,9 +117,21 @@ mod tests {
     #[test]
     fn test_retain() {
         let mut lock = Lock::default();
-        lock.set(&make_resolved("actions/checkout", "v4", "abc123def456789012345678901234567890abcd"));
-        lock.set(&make_resolved("actions/setup-node", "v3", "def456789012345678901234567890abcd123456"));
-        lock.set(&make_resolved("actions/old-action", "v1", "xyz789012345678901234567890abcd12345678a"));
+        lock.set(&make_resolved(
+            "actions/checkout",
+            "v4",
+            "abc123def456789012345678901234567890abcd",
+        ));
+        lock.set(&make_resolved(
+            "actions/setup-node",
+            "v3",
+            "def456789012345678901234567890abcd123456",
+        ));
+        lock.set(&make_resolved(
+            "actions/old-action",
+            "v1",
+            "xyz789012345678901234567890abcd12345678a",
+        ));
 
         let keep = vec![
             make_key("actions/checkout", "v4"),
@@ -130,8 +147,16 @@ mod tests {
     #[test]
     fn test_build_update_map() {
         let mut lock = Lock::default();
-        lock.set(&make_resolved("actions/checkout", "v4", "abc123def456789012345678901234567890abcd"));
-        lock.set(&make_resolved("actions/setup-node", "v3", "def456789012345678901234567890abcd123456"));
+        lock.set(&make_resolved(
+            "actions/checkout",
+            "v4",
+            "abc123def456789012345678901234567890abcd",
+        ));
+        lock.set(&make_resolved(
+            "actions/setup-node",
+            "v3",
+            "def456789012345678901234567890abcd123456",
+        ));
 
         let keys = vec![
             make_key("actions/checkout", "v4"),
@@ -163,8 +188,16 @@ mod tests {
     #[test]
     fn test_update_existing_sha() {
         let mut lock = Lock::default();
-        lock.set(&make_resolved("actions/checkout", "v4", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
-        lock.set(&make_resolved("actions/checkout", "v4", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
+        lock.set(&make_resolved(
+            "actions/checkout",
+            "v4",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        ));
+        lock.set(&make_resolved(
+            "actions/checkout",
+            "v4",
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        ));
         assert_eq!(
             lock.get(&make_key("actions/checkout", "v4")),
             Some(&CommitSha::from("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"))

@@ -229,38 +229,52 @@ mod tests {
 
     #[test]
     fn test_print_update_results_with_changes() {
-        let results = vec![
-            UpdateResult {
-                file: PathBuf::from("ci.yml"),
-                changes: vec!["actions/checkout v4 -> v5".to_string()],
-            },
-        ];
+        let results = vec![UpdateResult {
+            file: PathBuf::from("ci.yml"),
+            changes: vec!["actions/checkout v4 -> v5".to_string()],
+        }];
         print_update_results(&results);
     }
 
     #[test]
     fn test_run_errors_on_drift_with_version_mismatch() {
-        use crate::domain::{InterpretedRef, WorkflowActionSet, WorkflowError, WorkflowScanner, WorkflowUpdater};
+        use crate::domain::{
+            InterpretedRef, WorkflowActionSet, WorkflowError, WorkflowScanner, WorkflowUpdater,
+        };
         use crate::infrastructure::{MemoryLock, MemoryManifest};
         use std::collections::HashMap;
         use tempfile::TempDir;
 
         struct DummyRegistry;
         impl crate::domain::VersionRegistry for DummyRegistry {
-            fn lookup_sha(&self, _: &ActionId, _: &Version) -> Result<crate::domain::CommitSha, crate::domain::ResolutionError> {
+            fn lookup_sha(
+                &self,
+                _: &ActionId,
+                _: &Version,
+            ) -> Result<crate::domain::CommitSha, crate::domain::ResolutionError> {
                 Err(crate::domain::ResolutionError::TokenRequired)
             }
-            fn tags_for_sha(&self, _: &ActionId, _: &crate::domain::CommitSha) -> Result<Vec<Version>, crate::domain::ResolutionError> {
+            fn tags_for_sha(
+                &self,
+                _: &ActionId,
+                _: &crate::domain::CommitSha,
+            ) -> Result<Vec<Version>, crate::domain::ResolutionError> {
                 Err(crate::domain::ResolutionError::TokenRequired)
             }
-            fn all_tags(&self, _: &ActionId) -> Result<Vec<Version>, crate::domain::ResolutionError> {
+            fn all_tags(
+                &self,
+                _: &ActionId,
+            ) -> Result<Vec<Version>, crate::domain::ResolutionError> {
                 Err(crate::domain::ResolutionError::TokenRequired)
             }
         }
 
         struct DummyUpdater;
         impl WorkflowUpdater for DummyUpdater {
-            fn update_all(&self, _: &HashMap<ActionId, String>) -> Result<Vec<UpdateResult>, WorkflowError> {
+            fn update_all(
+                &self,
+                _: &HashMap<ActionId, String>,
+            ) -> Result<Vec<UpdateResult>, WorkflowError> {
                 Ok(vec![])
             }
         }
@@ -302,26 +316,45 @@ mod tests {
 
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("gx tidy"), "error should mention gx tidy, got: {msg}");
-        assert!(msg.contains("actions/checkout"), "error should name the drifted action, got: {msg}");
+        assert!(
+            msg.contains("gx tidy"),
+            "error should mention gx tidy, got: {msg}"
+        );
+        assert!(
+            msg.contains("actions/checkout"),
+            "error should name the drifted action, got: {msg}"
+        );
     }
 
     #[test]
     fn test_run_targeted_ignores_drift_on_other_actions() {
-        use crate::domain::{InterpretedRef, WorkflowActionSet, WorkflowError, WorkflowScanner, WorkflowUpdater};
+        use crate::domain::{
+            InterpretedRef, WorkflowActionSet, WorkflowError, WorkflowScanner, WorkflowUpdater,
+        };
         use crate::infrastructure::{MemoryLock, MemoryManifest};
         use std::collections::HashMap;
         use tempfile::TempDir;
 
         struct DummyRegistry;
         impl crate::domain::VersionRegistry for DummyRegistry {
-            fn lookup_sha(&self, _: &ActionId, _: &Version) -> Result<crate::domain::CommitSha, crate::domain::ResolutionError> {
+            fn lookup_sha(
+                &self,
+                _: &ActionId,
+                _: &Version,
+            ) -> Result<crate::domain::CommitSha, crate::domain::ResolutionError> {
                 Err(crate::domain::ResolutionError::TokenRequired)
             }
-            fn tags_for_sha(&self, _: &ActionId, _: &crate::domain::CommitSha) -> Result<Vec<Version>, crate::domain::ResolutionError> {
+            fn tags_for_sha(
+                &self,
+                _: &ActionId,
+                _: &crate::domain::CommitSha,
+            ) -> Result<Vec<Version>, crate::domain::ResolutionError> {
                 Err(crate::domain::ResolutionError::TokenRequired)
             }
-            fn all_tags(&self, _: &ActionId) -> Result<Vec<Version>, crate::domain::ResolutionError> {
+            fn all_tags(
+                &self,
+                _: &ActionId,
+            ) -> Result<Vec<Version>, crate::domain::ResolutionError> {
                 // Return v5 as a valid tag for checkout so targeted upgrade can verify it
                 Ok(vec![Version::from("v5")])
             }
@@ -329,7 +362,10 @@ mod tests {
 
         struct DummyUpdater;
         impl WorkflowUpdater for DummyUpdater {
-            fn update_all(&self, _: &HashMap<ActionId, String>) -> Result<Vec<UpdateResult>, WorkflowError> {
+            fn update_all(
+                &self,
+                _: &HashMap<ActionId, String>,
+            ) -> Result<Vec<UpdateResult>, WorkflowError> {
                 Ok(vec![])
             }
         }
@@ -346,7 +382,7 @@ mod tests {
                 });
                 set.add(&InterpretedRef {
                     id: ActionId::from("actions/setup-node"),
-                    version: Version::from("v99"),  // drifted, but not the target
+                    version: Version::from("v99"), // drifted, but not the target
                     sha: None,
                 });
                 Ok(set)
@@ -379,7 +415,10 @@ mod tests {
 
         // Should not error on drift (only checked checkout, which has no drift)
         if let Err(e) = &result {
-            assert!(!e.to_string().contains("gx tidy"), "should not error on drift for other actions: {e}");
+            assert!(
+                !e.to_string().contains("gx tidy"),
+                "should not error on drift for other actions: {e}"
+            );
         }
     }
 }

@@ -70,8 +70,14 @@ fn main() -> Result<()> {
                 let lock_store = FileLock::new(&lock_path);
                 let lock = lock_store.load()?;
                 commands::tidy::run(
-                    &repo_root, manifest, manifest_store, lock, lock_store,
-                    registry, &scanner, &updater,
+                    &repo_root,
+                    manifest,
+                    manifest_store,
+                    lock,
+                    lock_store,
+                    registry,
+                    &scanner,
+                    &updater,
                 )
             } else {
                 let action_set = FileWorkflowScanner::new(&repo_root).scan_all()?;
@@ -80,8 +86,14 @@ fn main() -> Result<()> {
                 let lock_store = MemoryLock;
                 let lock = Lock::default();
                 commands::tidy::run(
-                    &repo_root, manifest, manifest_store, lock, lock_store,
-                    registry, &scanner, &updater,
+                    &repo_root,
+                    manifest,
+                    manifest_store,
+                    lock,
+                    lock_store,
+                    registry,
+                    &scanner,
+                    &updater,
                 )
             }
         }
@@ -98,8 +110,14 @@ fn main() -> Result<()> {
             let scanner = FileWorkflowScanner::new(&repo_root);
             let updater = FileWorkflowUpdater::new(&repo_root);
             commands::tidy::run(
-                &repo_root, manifest, manifest_store, lock, lock_store,
-                registry, &scanner, &updater,
+                &repo_root,
+                manifest,
+                manifest_store,
+                lock,
+                lock_store,
+                registry,
+                &scanner,
+                &updater,
             )
         }
         Commands::Upgrade { action, latest } => {
@@ -126,8 +144,15 @@ fn main() -> Result<()> {
                 let lock_store = FileLock::new(&lock_path);
                 let lock = lock_store.load()?;
                 commands::upgrade::run(
-                    &repo_root, manifest, manifest_store, lock, lock_store,
-                    registry, &scanner, &updater, &mode,
+                    &repo_root,
+                    manifest,
+                    manifest_store,
+                    lock,
+                    lock_store,
+                    registry,
+                    &scanner,
+                    &updater,
+                    &mode,
                 )
             } else {
                 let action_set = FileWorkflowScanner::new(&repo_root).scan_all()?;
@@ -136,8 +161,15 @@ fn main() -> Result<()> {
                 let lock_store = MemoryLock;
                 let lock = Lock::default();
                 commands::upgrade::run(
-                    &repo_root, manifest, manifest_store, lock, lock_store,
-                    registry, &scanner, &updater, &mode,
+                    &repo_root,
+                    manifest,
+                    manifest_store,
+                    lock,
+                    lock_store,
+                    registry,
+                    &scanner,
+                    &updater,
+                    &mode,
                 )
             }
         }

@@ -89,8 +89,8 @@ impl Manifest {
                 // Both sides have it — compare versions
                 let manifest_version = self.get(id).expect("checked with has()");
                 let workflow_versions = action_set.versions_for(id);
-                let workflow_version =
-                    Version::highest(&workflow_versions).unwrap_or_else(|| workflow_versions[0].clone());
+                let workflow_version = Version::highest(&workflow_versions)
+                    .unwrap_or_else(|| workflow_versions[0].clone());
                 if &workflow_version != manifest_version {
                     drift.push(DriftItem::VersionMismatch {
                         id: id.clone(),
@@ -148,7 +148,10 @@ impl fmt::Display for DriftItem {
                 manifest_version,
                 workflow_version,
             } => {
-                write!(f, "{id}: workflow has {workflow_version}, gx.toml has {manifest_version}")
+                write!(
+                    f,
+                    "{id}: workflow has {workflow_version}, gx.toml has {manifest_version}"
+                )
             }
         }
     }
@@ -185,7 +188,10 @@ mod tests {
     fn test_set_and_get() {
         let mut m = Manifest::default();
         m.set(ActionId::from("actions/checkout"), Version::from("v4"));
-        assert_eq!(m.get(&ActionId::from("actions/checkout")), Some(&Version::from("v4")));
+        assert_eq!(
+            m.get(&ActionId::from("actions/checkout")),
+            Some(&Version::from("v4"))
+        );
     }
 
     #[test]
@@ -265,10 +271,8 @@ mod tests {
     fn test_filter_only_checks_target_action() {
         // actions/checkout has drift (v3 vs v4), actions/setup-node is missing from manifest
         let manifest = make_manifest(&[("actions/checkout", "v3")]);
-        let action_set = make_action_set(&[
-            ("actions/checkout", "v4"),
-            ("actions/setup-node", "v4"),
-        ]);
+        let action_set =
+            make_action_set(&[("actions/checkout", "v4"), ("actions/setup-node", "v4")]);
         let filter = ActionId::from("actions/checkout");
         let drift = manifest.detect_drift(&action_set, Some(&filter));
         // Only checkout is checked — setup-node MissingFromManifest is ignored
@@ -280,10 +284,8 @@ mod tests {
     fn test_filter_no_drift_on_target_returns_empty() {
         // actions/checkout is fine; actions/setup-node missing from manifest — but filter is checkout
         let manifest = make_manifest(&[("actions/checkout", "v4")]);
-        let action_set = make_action_set(&[
-            ("actions/checkout", "v4"),
-            ("actions/setup-node", "v4"),
-        ]);
+        let action_set =
+            make_action_set(&[("actions/checkout", "v4"), ("actions/setup-node", "v4")]);
         let filter = ActionId::from("actions/checkout");
         let drift = manifest.detect_drift(&action_set, Some(&filter));
         assert!(drift.is_empty());
@@ -293,14 +295,24 @@ mod tests {
 
     #[test]
     fn test_drift_item_display_missing_from_manifest() {
-        let item = DriftItem::MissingFromManifest { id: ActionId::from("actions/checkout") };
-        assert_eq!(item.to_string(), "actions/checkout: in workflow but not in gx.toml");
+        let item = DriftItem::MissingFromManifest {
+            id: ActionId::from("actions/checkout"),
+        };
+        assert_eq!(
+            item.to_string(),
+            "actions/checkout: in workflow but not in gx.toml"
+        );
     }
 
     #[test]
     fn test_drift_item_display_missing_from_workflow() {
-        let item = DriftItem::MissingFromWorkflow { id: ActionId::from("actions/checkout") };
-        assert_eq!(item.to_string(), "actions/checkout: in gx.toml but not in any workflow");
+        let item = DriftItem::MissingFromWorkflow {
+            id: ActionId::from("actions/checkout"),
+        };
+        assert_eq!(
+            item.to_string(),
+            "actions/checkout: in gx.toml but not in any workflow"
+        );
     }
 
     #[test]
@@ -310,6 +322,9 @@ mod tests {
             manifest_version: Version::from("v3"),
             workflow_version: Version::from("v4"),
         };
-        assert_eq!(item.to_string(), "actions/checkout: workflow has v4, gx.toml has v3");
+        assert_eq!(
+            item.to_string(),
+            "actions/checkout: workflow has v4, gx.toml has v3"
+        );
     }
 }

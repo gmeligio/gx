@@ -747,7 +747,16 @@ jobs:
         );
     let scanner = FileWorkflowScanner::new(&root);
     let updater = FileWorkflowUpdater::new(&root);
-    let result = tidy::run(&root, manifest, manifest_store, lock, lock_store, registry, &scanner, &updater);
+    let result = tidy::run(
+        &root,
+        manifest,
+        manifest_store,
+        lock,
+        lock_store,
+        registry,
+        &scanner,
+        &updater,
+    );
     assert!(result.is_ok());
 
     // Verify manifest contains version tags from comments, not SHAs
@@ -799,7 +808,16 @@ jobs:
     let lock = lock_store.load().unwrap();
     let scanner = FileWorkflowScanner::new(&root);
     let updater = FileWorkflowUpdater::new(&root);
-    let result = tidy::run(&root, manifest, manifest_store, lock, lock_store, NoopRegistry, &scanner, &updater);
+    let result = tidy::run(
+        &root,
+        manifest,
+        manifest_store,
+        lock,
+        lock_store,
+        NoopRegistry,
+        &scanner,
+        &updater,
+    );
 
     // The command should fail when it cannot resolve actions
     assert!(

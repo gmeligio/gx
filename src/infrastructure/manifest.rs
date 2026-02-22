@@ -83,7 +83,12 @@ fn manifest_to_data(manifest: &Manifest) -> ManifestData {
     let actions = manifest
         .specs()
         .into_iter()
-        .map(|spec| (spec.id.as_str().to_owned(), spec.version.as_str().to_owned()))
+        .map(|spec| {
+            (
+                spec.id.as_str().to_owned(),
+                spec.version.as_str().to_owned(),
+            )
+        })
         .collect();
     ManifestData { actions }
 }
@@ -96,7 +101,9 @@ pub struct FileManifest {
 impl FileManifest {
     #[must_use]
     pub fn new(path: &Path) -> Self {
-        Self { path: path.to_path_buf() }
+        Self {
+            path: path.to_path_buf(),
+        }
     }
 }
 
@@ -111,10 +118,11 @@ impl ManifestStore for FileManifest {
             source,
         })?;
 
-        let data: ManifestData = toml::from_str(&content).map_err(|source| ManifestError::Parse {
-            path: self.path.clone(),
-            source: Box::new(source),
-        })?;
+        let data: ManifestData =
+            toml::from_str(&content).map_err(|source| ManifestError::Parse {
+                path: self.path.clone(),
+                source: Box::new(source),
+            })?;
 
         Ok(manifest_from_data(data))
     }
@@ -152,7 +160,9 @@ impl MemoryManifest {
             let version = Version::highest(&versions).unwrap_or_else(|| versions[0].clone());
             manifest.set(action_id, version);
         }
-        Self { initial: Some(manifest) }
+        Self {
+            initial: Some(manifest),
+        }
     }
 }
 
@@ -203,8 +213,14 @@ mod tests {
         store.save(&manifest).unwrap();
 
         let loaded = store.load().unwrap();
-        assert_eq!(loaded.get(&ActionId::from("actions/checkout")), Some(&Version::from("v4")));
-        assert_eq!(loaded.get(&ActionId::from("actions/setup-node")), Some(&Version::from("v3")));
+        assert_eq!(
+            loaded.get(&ActionId::from("actions/checkout")),
+            Some(&Version::from("v4"))
+        );
+        assert_eq!(
+            loaded.get(&ActionId::from("actions/setup-node")),
+            Some(&Version::from("v3"))
+        );
     }
 
     #[test]
@@ -219,7 +235,10 @@ mod tests {
 
         let store = FileManifest::new(file.path());
         let manifest = store.load().unwrap();
-        assert_eq!(manifest.get(&ActionId::from("actions/checkout")), Some(&Version::from("v4")));
+        assert_eq!(
+            manifest.get(&ActionId::from("actions/checkout")),
+            Some(&Version::from("v4"))
+        );
     }
 
     #[test]
@@ -228,14 +247,21 @@ mod tests {
         let store = FileManifest::new(file.path());
 
         let mut manifest = Manifest::default();
-        manifest.set(ActionId::from("docker/build-push-action"), Version::from("v5"));
+        manifest.set(
+            ActionId::from("docker/build-push-action"),
+            Version::from("v5"),
+        );
         manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
-        manifest.set(ActionId::from("actions-rust-lang/rustfmt"), Version::from("v1"));
+        manifest.set(
+            ActionId::from("actions-rust-lang/rustfmt"),
+            Version::from("v1"),
+        );
 
         store.save(&manifest).unwrap();
 
         let content = fs::read_to_string(file.path()).unwrap();
-        let action_lines: Vec<&str> = content.lines()
+        let action_lines: Vec<&str> = content
+            .lines()
             .filter(|l| l.trim().starts_with('"'))
             .collect();
 
@@ -266,7 +292,10 @@ mod tests {
 
         let store = MemoryManifest::from_workflows(&action_set);
         let manifest = store.load().unwrap();
-        assert_eq!(manifest.get(&ActionId::from("actions/checkout")), Some(&Version::from("v4")));
+        assert_eq!(
+            manifest.get(&ActionId::from("actions/checkout")),
+            Some(&Version::from("v4"))
+        );
     }
 
     #[test]

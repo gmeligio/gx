@@ -105,7 +105,9 @@ pub struct FileLock {
 impl FileLock {
     #[must_use]
     pub fn new(path: &Path) -> Self {
-        Self { path: path.to_path_buf() }
+        Self {
+            path: path.to_path_buf(),
+        }
     }
 }
 
@@ -202,7 +204,11 @@ mod tests {
         let store = FileLock::new(file.path());
 
         let mut lock = Lock::default();
-        lock.set(&make_resolved("actions/checkout", "v4", "abc123def456789012345678901234567890abcd"));
+        lock.set(&make_resolved(
+            "actions/checkout",
+            "v4",
+            "abc123def456789012345678901234567890abcd",
+        ));
 
         store.save(&lock).unwrap();
 

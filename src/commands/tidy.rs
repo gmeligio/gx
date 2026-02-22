@@ -5,7 +5,8 @@ use std::path::Path;
 
 use crate::domain::{
     ActionId, ActionResolver, ActionSpec, Lock, LockKey, Manifest, ResolutionResult, UpdateResult,
-    Version, VersionCorrection, VersionRegistry, WorkflowActionSet, WorkflowScanner, WorkflowUpdater,
+    Version, VersionCorrection, VersionRegistry, WorkflowActionSet, WorkflowScanner,
+    WorkflowUpdater,
 };
 use crate::infrastructure::{LockStore, ManifestStore};
 
@@ -142,7 +143,9 @@ fn update_lock<R: VersionRegistry>(
     let specs: Vec<ActionSpec> = manifest.specs().iter().map(|s| (*s).clone()).collect();
 
     let needs_resolving = specs.iter().any(|spec| !lock.has(&LockKey::from(spec)));
-    let has_workflow_shas = specs.iter().any(|spec| action_set.sha_for(&spec.id).is_some());
+    let has_workflow_shas = specs
+        .iter()
+        .any(|spec| action_set.sha_for(&spec.id).is_some());
 
     if !needs_resolving && !has_workflow_shas {
         return Ok(corrections);
@@ -156,7 +159,10 @@ fn update_lock<R: VersionRegistry>(
                 ResolutionResult::Resolved(action) => {
                     lock.set(&action);
                 }
-                ResolutionResult::Corrected { original, corrected } => {
+                ResolutionResult::Corrected {
+                    original,
+                    corrected,
+                } => {
                     corrections.push(VersionCorrection {
                         action: original.id.clone(),
                         old_version: original.version.clone(),
@@ -229,7 +235,11 @@ mod tests {
 
     #[test]
     fn test_select_version_picks_highest() {
-        let versions = vec![Version::from("v3"), Version::from("v4"), Version::from("v2")];
+        let versions = vec![
+            Version::from("v3"),
+            Version::from("v4"),
+            Version::from("v2"),
+        ];
         assert_eq!(select_version(&versions), Version::from("v4"));
     }
 }
