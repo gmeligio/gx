@@ -29,7 +29,15 @@ enum Commands {
     /// Create manifest and lock files from current workflows
     Init,
     /// Upgrade actions to newer versions
-    Upgrade,
+    Upgrade {
+        /// Upgrade a specific action to a specific version (e.g., actions/checkout@v5)
+        #[arg(value_name = "ACTION@VERSION")]
+        action: Option<String>,
+
+        /// Upgrade all actions to the absolute latest version, including major versions
+        #[arg(long, conflicts_with = "action")]
+        latest: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -78,18 +86,31 @@ fn main() -> Result<()> {
             let updater = FileWorkflowUpdater::new(&repo_root);
             commands::tidy::run(&repo_root, manifest, lock, registry, &scanner, &updater)
         }
-        Commands::Upgrade => {
+        Commands::Upgrade { action, latest } => {
+            let mode = if latest {
+                commands::upgrade::UpgradeMode::Latest
+            } else if let Some(ref action_str) = action {
+                let key = gx::domain::LockKey::parse(action_str).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Invalid format: expected ACTION@VERSION (e.g., actions/checkout@v5), got: {action_str}"
+                    )
+                })?;
+                commands::upgrade::UpgradeMode::Targeted(key.id, key.version)
+            } else {
+                commands::upgrade::UpgradeMode::Safe
+            };
+
             let registry = GithubRegistry::from_env()?;
             let updater = FileWorkflowUpdater::new(&repo_root);
             if manifest_path.exists() {
                 let manifest = FileManifest::load_or_default(&manifest_path)?;
                 let lock = FileLock::load_or_default(&lock_path)?;
-                commands::upgrade::run(&repo_root, manifest, lock, registry, &updater)
+                commands::upgrade::run(&repo_root, manifest, lock, registry, &updater, &mode)
             } else {
                 let action_set = FileWorkflowScanner::new(&repo_root).scan_all()?;
                 let manifest = MemoryManifest::from_workflows(&action_set);
                 let lock = MemoryLock::default();
-                commands::upgrade::run(&repo_root, manifest, lock, registry, &updater)
+                commands::upgrade::run(&repo_root, manifest, lock, registry, &updater, &mode)
             }
         }
     }
