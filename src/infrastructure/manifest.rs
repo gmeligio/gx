@@ -86,8 +86,8 @@ struct ManifestData {
 /// The main manifest structure mapping actions to versions
 #[derive(Debug, Default)]
 pub struct FileManifest {
-    /// Maps `ActionId` to `Version`
-    actions: HashMap<ActionId, Version>,
+    /// Maps `ActionId` to `ActionSpec`
+    actions: HashMap<ActionId, ActionSpec>,
     path: Option<PathBuf>,
     dirty: bool,
 }
@@ -113,7 +113,12 @@ impl FileManifest {
         let actions = data
             .actions
             .into_iter()
-            .map(|(k, v)| (ActionId::from(k), Version::from(v)))
+            .map(|(k, v)| {
+                let id = ActionId::from(k);
+                let version = Version::from(v);
+                let spec = ActionSpec::new(id.clone(), version);
+                (id, spec)
+            })
             .collect();
 
         Ok(Self {
@@ -146,8 +151,13 @@ impl FileManifest {
         let data = ManifestData {
             actions: self
                 .actions
-                .iter()
-                .map(|(k, v)| (k.as_str().to_owned(), v.as_str().to_owned()))
+                .values()
+                .map(|spec| {
+                    (
+                        spec.id.as_str().to_owned(),
+                        spec.version.as_str().to_owned(),
+                    )
+                })
                 .collect(),
         };
 
@@ -165,16 +175,14 @@ impl FileManifest {
 
 impl ManifestStore for FileManifest {
     fn specs(&self) -> Vec<ActionSpec> {
-        self.actions
-            .iter()
-            .map(|(id, version)| ActionSpec::new(id.clone(), version.clone()))
-            .collect()
+        self.actions.values().cloned().collect()
     }
 
     fn set(&mut self, id: ActionId, version: Version) {
-        let existing = self.actions.get(&id);
-        if existing != Some(&version) {
-            self.actions.insert(id, version);
+        let needs_update = self.actions.get(&id).map(|s| &s.version) != Some(&version);
+        if needs_update {
+            let spec = ActionSpec::new(id.clone(), version);
+            self.actions.insert(id, spec);
             self.dirty = true;
         }
     }
@@ -190,7 +198,7 @@ impl ManifestStore for FileManifest {
     }
 
     fn get(&self, id: &ActionId) -> Option<&Version> {
-        self.actions.get(id)
+        self.actions.get(id).map(|s| &s.version)
     }
 
     fn save(&mut self) -> Result<(), ManifestError> {
@@ -215,7 +223,7 @@ impl ManifestStore for FileManifest {
 /// In-memory manifest that doesn't persist to disk
 #[derive(Debug, Default)]
 pub struct MemoryManifest {
-    actions: HashMap<ActionId, Version>,
+    actions: HashMap<ActionId, ActionSpec>,
 }
 
 impl MemoryManifest {
@@ -227,7 +235,9 @@ impl MemoryManifest {
         for action_id in action_set.action_ids() {
             let versions = action_set.versions_for(&action_id);
             let version = Version::highest(&versions).unwrap_or_else(|| versions[0].clone());
-            manifest.actions.insert(action_id, version);
+            manifest
+                .actions
+                .insert(action_id.clone(), ActionSpec::new(action_id, version));
         }
         manifest
     }
@@ -235,14 +245,12 @@ impl MemoryManifest {
 
 impl ManifestStore for MemoryManifest {
     fn specs(&self) -> Vec<ActionSpec> {
-        self.actions
-            .iter()
-            .map(|(id, version)| ActionSpec::new(id.clone(), version.clone()))
-            .collect()
+        self.actions.values().cloned().collect()
     }
 
     fn set(&mut self, id: ActionId, version: Version) {
-        self.actions.insert(id, version);
+        let spec = ActionSpec::new(id.clone(), version);
+        self.actions.insert(id, spec);
     }
 
     fn remove(&mut self, id: &ActionId) {
@@ -254,7 +262,7 @@ impl ManifestStore for MemoryManifest {
     }
 
     fn get(&self, id: &ActionId) -> Option<&Version> {
-        self.actions.get(id)
+        self.actions.get(id).map(|s| &s.version)
     }
 
     fn save(&mut self) -> Result<(), ManifestError> {
