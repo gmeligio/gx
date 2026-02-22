@@ -47,11 +47,11 @@ pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, W: WorkflowUpdate
 
             for spec in &specs {
                 if spec.version.precision().is_none() {
-                    if !spec.version.is_sha() {
+                    if spec.version.is_sha() {
+                        info!("Skipping {spec} (bare SHA)");
+                    } else {
                         info!("Re-pinning {spec} (non-semver ref)");
                         repins.push((*spec).clone());
-                    } else {
-                        info!("Skipping {spec} (bare SHA)");
                     }
                     continue;
                 }
