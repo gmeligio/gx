@@ -716,7 +716,9 @@ jobs:
             "5e57cd118135c172c3672efd75eb46360885c0ef",
             &["v3", "v3.6.0"],
         );
-    let result = tidy::run(&root, manifest, lock, registry);
+    let scanner = FileWorkflowScanner::new(&root);
+    let updater = FileWorkflowUpdater::new(&root);
+    let result = tidy::run(&root, manifest, lock, registry, &scanner, &updater);
     assert!(result.is_ok());
 
     // Verify manifest contains version tags from comments, not SHAs
@@ -764,7 +766,9 @@ jobs:
     let lock_path = root.join(".github").join("gx.lock");
     let manifest = FileManifest::load_or_default(&manifest_path).unwrap();
     let lock = FileLock::load_or_default(&lock_path).unwrap();
-    let result = tidy::run(&root, manifest, lock, NoopRegistry);
+    let scanner = FileWorkflowScanner::new(&root);
+    let updater = FileWorkflowUpdater::new(&root);
+    let result = tidy::run(&root, manifest, lock, NoopRegistry, &scanner, &updater);
 
     // The command should fail when it cannot resolve actions
     assert!(
@@ -802,7 +806,9 @@ jobs:
     let lock_path = root.join(".github").join("gx.lock");
     let manifest = FileManifest::load_or_default(&manifest_path).unwrap();
     let lock = FileLock::load_or_default(&lock_path).unwrap();
-    let result = tidy::run(&root, manifest, lock, MockRegistry::new());
+    let scanner = FileWorkflowScanner::new(&root);
+    let updater = FileWorkflowUpdater::new(&root);
+    let result = tidy::run(&root, manifest, lock, MockRegistry::new(), &scanner, &updater);
     assert!(result.is_ok());
 
     // Verify the workflow was updated: tags should be replaced with SHAs + version comments

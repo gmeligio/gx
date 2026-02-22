@@ -328,7 +328,7 @@ jobs:
         Version::from("v6.0.2"),
     )];
     let update_map = lock.build_update_map(&upgraded_keys);
-    let writer = WorkflowWriter::new(&root);
+    let writer = FileWorkflowUpdater::new(&root);
     let _results = writer.update_all(&update_map).unwrap();
 
     // Verify the workflow
