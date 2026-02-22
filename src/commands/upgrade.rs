@@ -1,5 +1,5 @@
 use anyhow::Result;
-use log::{debug, info, warn};
+use log::{info, warn};
 use std::path::Path;
 
 use crate::domain::{
@@ -33,7 +33,7 @@ pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, W: WorkflowUpdate
 ) -> Result<()> {
     let service = ActionResolver::new(registry);
 
-    let upgrades = match mode {
+    let (upgrades, repins) = match mode {
         UpgradeMode::Safe | UpgradeMode::Latest => {
             let specs = manifest.specs();
             if specs.is_empty() {
@@ -43,10 +43,16 @@ pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, W: WorkflowUpdate
             // Find available upgrades
             info!("Checking for upgrades...");
             let mut upgrades = Vec::new();
+            let mut repins: Vec<ActionSpec> = Vec::new();
 
             for spec in &specs {
                 if spec.version.precision().is_none() {
-                    debug!("Skipping {spec} (not a semver version)");
+                    if !spec.version.is_sha() {
+                        info!("Re-pinning {spec} (non-semver ref)");
+                        repins.push((*spec).clone());
+                    } else {
+                        info!("Skipping {spec} (bare SHA)");
+                    }
                     continue;
                 }
 
@@ -70,12 +76,12 @@ pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, W: WorkflowUpdate
                 }
             }
 
-            if upgrades.is_empty() {
+            if upgrades.is_empty() && repins.is_empty() {
                 info!("All actions are up to date.");
                 return Ok(());
             }
 
-            upgrades
+            (upgrades, repins)
         }
         UpgradeMode::Targeted(id, version) => {
             let current = manifest
@@ -97,11 +103,11 @@ pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, W: WorkflowUpdate
                 }
             }
 
-            vec![UpgradeCandidate {
+            (vec![UpgradeCandidate {
                 id: id.clone(),
                 current: current.clone(),
                 upgraded: version.clone(),
-            }]
+            }], vec![])
         }
     };
 
@@ -129,6 +135,22 @@ pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, W: WorkflowUpdate
         }
     }
 
+    // Re-pin non-semver refs to current SHA
+    for spec in &repins {
+        let result = service.resolve(spec);
+        match result {
+            ResolutionResult::Resolved(resolved) => {
+                lock.set(&resolved);
+            }
+            ResolutionResult::Corrected { corrected, .. } => {
+                lock.set(&corrected);
+            }
+            ResolutionResult::Unresolved { spec: s, reason } => {
+                warn!("Could not re-pin {s}: {reason}");
+            }
+        }
+    }
+
     // Save manifest and lock
     manifest.save()?;
 
@@ -136,12 +158,15 @@ pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, W: WorkflowUpdate
     lock.retain(&keys_to_retain);
     lock.save()?;
 
-    // Update workflows only for upgraded actions (not all manifest specs)
-    let upgraded_keys: Vec<LockKey> = upgrades
+    // Update workflows only for upgraded actions and re-pinned refs
+    let mut update_keys: Vec<LockKey> = upgrades
         .iter()
         .map(|u| LockKey::new(u.id.clone(), u.upgraded.clone()))
         .collect();
-    let update_map = lock.build_update_map(&upgraded_keys);
+    for spec in &repins {
+        update_keys.push(LockKey::from(spec));
+    }
+    let update_map = lock.build_update_map(&update_keys);
     let results = writer.update_all(&update_map)?;
     print_update_results(&results);
 
