@@ -120,7 +120,7 @@ Two-phase approach (YAML parsers strip comments):
 | `src/infrastructure/lock.rs` | `docs/lock.md` |
 | `src/domain/action.rs`, `src/domain/resolution.rs`, `src/domain/workflow_actions.rs` | `docs/development/architecture.md` |
 | Any architectural change (new types, new traits, new data flow) | `docs/development/architecture.md` and relevant excalidraw diagrams |
-| CLI flags, command behavior, output format | User-facing doc in `docs/<command>.md` |
+| CLI flags, command behavior, output format | User-facing doc in README.md and `docs/<command>.md` |
 | Internal algorithm, data flow, type changes | Developer doc in `docs/development/<command>.md` |
 
 ### Rules
