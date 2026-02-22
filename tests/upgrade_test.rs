@@ -521,3 +521,108 @@ fn test_upgrade_targeted_does_not_repin_branch_ref() {
         "Branch ref should not be re-pinned in targeted mode. Got:\n{updated}"
     );
 }
+
+#[test]
+fn test_upgrade_mixed_semver_and_branch() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = create_test_repo(&temp_dir);
+
+    let old_branch_sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let old_checkout_sha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+    let workflow_content = format!(
+        "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: my-org/my-action@{old_branch_sha} # main\n      - uses: actions/checkout@{old_checkout_sha} # v4\n"
+    );
+    create_workflow(&root, "ci.yml", &workflow_content);
+
+    let mut manifest = MemoryManifest::default();
+    manifest.set(ActionId::from("my-org/my-action"), Version::from("main"));
+    manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
+
+    let mut lock = MemoryLock::default();
+    lock.set(&ResolvedAction::new(
+        ActionId::from("my-org/my-action"),
+        Version::from("main"),
+        CommitSha::from(old_branch_sha),
+    ));
+    lock.set(&ResolvedAction::new(
+        ActionId::from("actions/checkout"),
+        Version::from("v4"),
+        CommitSha::from(old_checkout_sha),
+    ));
+
+    // Registry has both v4 and v5 available for checkout
+    let mut registry = MockUpgradeRegistry::new();
+    registry.tags.insert(
+        "actions/checkout".to_string(),
+        vec!["v4".to_string(), "v5".to_string()],
+    );
+
+    let updater = FileWorkflowUpdater::new(&root);
+    let result = upgrade::run(
+        &root,
+        manifest,
+        lock,
+        registry,
+        &updater,
+        &UpgradeMode::Latest,
+    );
+    assert!(result.is_ok());
+
+    let updated =
+        fs::read_to_string(root.join(".github").join("workflows").join("ci.yml")).unwrap();
+
+    // Branch ref should be re-pinned with new SHA
+    let expected_branch_sha = format!("{:0<40}", "my-orgmy-actionmain");
+    assert!(
+        updated.contains(&format!("my-org/my-action@{expected_branch_sha} # main")),
+        "Branch ref should be re-pinned. Got:\n{updated}"
+    );
+
+    // Checkout should be upgraded to v5 with new SHA
+    let expected_checkout_sha = format!("{:0<40}", "actionscheckoutv5");
+    assert!(
+        updated.contains(&format!("actions/checkout@{expected_checkout_sha} # v5")),
+        "Checkout should be upgraded to v5. Got:\n{updated}"
+    );
+}
+
+#[test]
+fn test_upgrade_skips_bare_sha() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = create_test_repo(&temp_dir);
+
+    let bare_sha = "cccccccccccccccccccccccccccccccccccccccc";
+
+    let workflow_content = format!(
+        "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: my-org/my-action@{bare_sha}\n"
+    );
+    create_workflow(&root, "ci.yml", &workflow_content);
+
+    let mut manifest = MemoryManifest::default();
+    manifest.set(
+        ActionId::from("my-org/my-action"),
+        Version::from(bare_sha),
+    );
+
+    let lock = MemoryLock::default();
+
+    let updater = FileWorkflowUpdater::new(&root);
+    let result = upgrade::run(
+        &root,
+        manifest,
+        lock,
+        MockUpgradeRegistry::new(),
+        &updater,
+        &UpgradeMode::Safe,
+    );
+    assert!(result.is_ok());
+
+    // Workflow should be unchanged — bare SHA has nothing to re-pin
+    let updated =
+        fs::read_to_string(root.join(".github").join("workflows").join("ci.yml")).unwrap();
+    assert!(
+        updated.contains(&format!("my-org/my-action@{bare_sha}")),
+        "Bare SHA should remain unchanged. Got:\n{updated}"
+    );
+}
