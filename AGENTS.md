@@ -107,8 +107,26 @@ Two-phase approach (YAML parsers strip comments):
 
 ## Documentation
 
-When modifying code, update the corresponding documentation:
-- `docs/` contains user-facing documentation (one file per command, plus manifest.md and lock.md)
-- `docs/development/` contains contributor documentation (implementation details per command, plus architecture.md)
-- Update both when changing command behavior, adding types, or modifying algorithms
-- Keep excalidraw diagrams in `docs/development` in sync with architectural changes
+**Documentation updates are mandatory and part of the definition of done.** A task is not complete until the relevant docs are updated. Do not consider a task finished, do not commit, and do not summarize results until documentation is updated.
+
+### Doc file map
+
+| Changed code | Update these docs |
+|---|---|
+| `src/commands/tidy.rs` | `docs/tidy.md`, `docs/development/tidy.md` |
+| `src/commands/upgrade.rs` | `docs/upgrade.md`, `docs/development/upgrade.md` |
+| `src/commands/init.rs` or init logic in `main.rs` | `docs/init.md`, `docs/development/init.md` |
+| `src/infrastructure/manifest.rs` | `docs/manifest.md` |
+| `src/infrastructure/lock.rs` | `docs/lock.md` |
+| `src/domain/action.rs`, `src/domain/resolution.rs`, `src/domain/workflow_actions.rs` | `docs/development/architecture.md` |
+| Any architectural change (new types, new traits, new data flow) | `docs/development/architecture.md` and relevant excalidraw diagrams |
+| CLI flags, command behavior, output format | User-facing doc in `docs/<command>.md` |
+| Internal algorithm, data flow, type changes | Developer doc in `docs/development/<command>.md` |
+
+### Rules
+
+1. After every code change, identify which rows in the table above apply and update those files.
+2. If a new command is added, create both `docs/<command>.md` (user-facing) and `docs/development/<command>.md` (implementation).
+3. If a type, trait, or algorithm is renamed or restructured, update all references in `docs/development/architecture.md`.
+4. Keep excalidraw diagrams in `docs/development/` in sync with architectural changes (data flow, new layers, new types).
+5. Do not add placeholder text. Write accurate, concrete documentation reflecting the actual current behavior.
