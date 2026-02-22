@@ -170,6 +170,35 @@ impl Version {
         // Only return if it's actually different from current
         (result != *self).then_some(result)
     }
+
+    /// Find the absolute latest upgrade from candidates, crossing major boundaries.
+    ///
+    /// Unlike `find_upgrade()`, this does not constrain by major/minor — it returns
+    /// the highest version across all candidates that is strictly higher than self.
+    /// Output precision matches self (Major → "vN", Minor → "vN.M", Patch → "vN.M.P").
+    ///
+    /// Returns None if already at latest or no compatible upgrade exists.
+    #[must_use]
+    pub fn find_latest_upgrade(&self, candidates: &[Version]) -> Option<Version> {
+        let precision = self.precision()?;
+        let current = parse_semver(self.as_str())?;
+
+        let best = candidates
+            .iter()
+            .filter_map(|c| {
+                let parsed = parse_semver(c.as_str())?;
+                (parsed > current).then_some(parsed)
+            })
+            .max()?;
+
+        let formatted = match precision {
+            VersionPrecision::Major => format!("v{}", best.major),
+            VersionPrecision::Minor => format!("v{}.{}", best.major, best.minor),
+            VersionPrecision::Patch => format!("v{}.{}.{}", best.major, best.minor, best.patch),
+        };
+
+        Some(Version::from(formatted))
+    }
 }
 
 /// How precisely a version is pinned, following semver component conventions.
@@ -884,6 +913,65 @@ mod tests {
         let candidates = vec![Version::from("v4.2.0"), Version::from("v5.0.0")];
         // No upgrade within v4.1.x
         assert!(current.find_upgrade(&candidates).is_none());
+    }
+
+    // --- find_latest_upgrade tests ---
+
+    #[test]
+    fn test_find_latest_upgrade_crosses_major() {
+        let current = Version::from("v4");
+        let candidates = vec![
+            Version::from("v3"),
+            Version::from("v4"),
+            Version::from("v5"),
+            Version::from("v6"),
+        ];
+        assert_eq!(
+            current.find_latest_upgrade(&candidates),
+            Some(Version::from("v6"))
+        );
+    }
+
+    #[test]
+    fn test_find_latest_upgrade_minor_crosses_major() {
+        let current = Version::from("v4.1");
+        let candidates = vec![
+            Version::from("v4.2"),
+            Version::from("v5.0"),
+            Version::from("v5.1"),
+        ];
+        assert_eq!(
+            current.find_latest_upgrade(&candidates),
+            Some(Version::from("v5.1"))
+        );
+    }
+
+    #[test]
+    fn test_find_latest_upgrade_patch_crosses_major() {
+        let current = Version::from("v4.1.0");
+        let candidates = vec![
+            Version::from("v4.1.1"),
+            Version::from("v5.0.0"),
+            Version::from("v5.2.3"),
+        ];
+        assert_eq!(
+            current.find_latest_upgrade(&candidates),
+            Some(Version::from("v5.2.3"))
+        );
+    }
+
+    #[test]
+    fn test_find_latest_upgrade_already_latest() {
+        let current = Version::from("v6");
+        let candidates = vec![Version::from("v5"), Version::from("v6")];
+        assert!(current.find_latest_upgrade(&candidates).is_none());
+    }
+
+    #[test]
+    fn test_find_latest_upgrade_non_semver_returns_none() {
+        let current = Version::from("main");
+        let candidates = vec![Version::from("v5")];
+        assert!(current.find_latest_upgrade(&candidates).is_none());
     }
 
     // --- UpgradeCandidate tests ---
