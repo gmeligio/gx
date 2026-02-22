@@ -47,13 +47,15 @@ impl Version {
     }
 
     /// Create a normalized version with a 'v' prefix.
-    /// Examples: "4" -> "v4", "4.1.0" -> "v4.1.0", "v4" -> "v4"
+    /// Only adds a 'v' prefix when the string starts with a digit (semver without prefix).
+    /// Non-numeric refs like branch names ("main", "develop") are returned as-is.
+    /// Examples: "4" -> "v4", "4.1.0" -> "v4.1.0", "v4" -> "v4", "main" -> "main"
     #[must_use]
     pub fn normalized(s: &str) -> Self {
-        if s.starts_with('v') || s.starts_with('V') {
-            Self(s.to_string())
-        } else {
+        if s.starts_with(|c: char| c.is_ascii_digit()) {
             Self(format!("v{s}"))
+        } else {
+            Self(s.to_string())
         }
     }
 

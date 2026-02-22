@@ -1,7 +1,8 @@
 use gx::commands::tidy;
-use gx::domain::{ActionId, CommitSha, ResolutionError, Version, VersionRegistry};
+use gx::domain::{ActionId, CommitSha, Lock, Manifest, ResolutionError, Version, VersionRegistry};
 use gx::infrastructure::{
-    FileLock, FileManifest, FileWorkflowScanner, FileWorkflowUpdater, MemoryLock, MemoryManifest,
+    FileLock, FileManifest, FileWorkflowScanner, FileWorkflowUpdater, LockStore, ManifestStore,
+    MemoryLock, MemoryManifest,
 };
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
@@ -109,23 +110,32 @@ fn run_tidy(repo_root: &Path) -> anyhow::Result<()> {
     let updater = FileWorkflowUpdater::new(repo_root);
 
     if manifest_path.exists() {
-        let manifest = FileManifest::load_or_default(&manifest_path)?;
-        let lock = FileLock::load_or_default(&lock_path)?;
+        let manifest_store = FileManifest::new(&manifest_path);
+        let manifest = manifest_store.load()?;
+        let lock_store = FileLock::new(&lock_path);
+        let lock = lock_store.load()?;
         tidy::run(
             repo_root,
             manifest,
+            manifest_store,
             lock,
+            lock_store,
             MockRegistry::new(),
             &scanner,
             &updater,
         )
     } else {
-        let manifest = MemoryManifest::default();
-        let lock = MemoryLock::default();
+        let action_set = FileWorkflowScanner::new(repo_root).scan_all()?;
+        let manifest_store = MemoryManifest::from_workflows(&action_set);
+        let manifest = manifest_store.load()?;
+        let lock_store = MemoryLock;
+        let lock = Lock::default();
         tidy::run(
             repo_root,
             manifest,
+            manifest_store,
             lock,
+            lock_store,
             MockRegistry::new(),
             &scanner,
             &updater,
@@ -720,8 +730,10 @@ jobs:
     // Execute command with a mock registry that knows which tags map to these SHAs
     let manifest_path = root.join(".github").join("gx.toml");
     let lock_path = root.join(".github").join("gx.lock");
-    let manifest = FileManifest::load_or_default(&manifest_path).unwrap();
-    let lock = FileLock::load_or_default(&lock_path).unwrap();
+    let manifest_store = FileManifest::new(&manifest_path);
+    let manifest = manifest_store.load().unwrap();
+    let lock_store = FileLock::new(&lock_path);
+    let lock = lock_store.load().unwrap();
     let registry = MockRegistry::new()
         .with_tags(
             "actions/checkout",
@@ -735,7 +747,7 @@ jobs:
         );
     let scanner = FileWorkflowScanner::new(&root);
     let updater = FileWorkflowUpdater::new(&root);
-    let result = tidy::run(&root, manifest, lock, registry, &scanner, &updater);
+    let result = tidy::run(&root, manifest, manifest_store, lock, lock_store, registry, &scanner, &updater);
     assert!(result.is_ok());
 
     // Verify manifest contains version tags from comments, not SHAs
@@ -781,11 +793,13 @@ jobs:
     // Run tidy with NoopRegistry (simulates missing GITHUB_TOKEN)
     let manifest_path = root.join(".github").join("gx.toml");
     let lock_path = root.join(".github").join("gx.lock");
-    let manifest = FileManifest::load_or_default(&manifest_path).unwrap();
-    let lock = FileLock::load_or_default(&lock_path).unwrap();
+    let manifest_store = FileManifest::new(&manifest_path);
+    let manifest = manifest_store.load().unwrap();
+    let lock_store = FileLock::new(&lock_path);
+    let lock = lock_store.load().unwrap();
     let scanner = FileWorkflowScanner::new(&root);
     let updater = FileWorkflowUpdater::new(&root);
-    let result = tidy::run(&root, manifest, lock, NoopRegistry, &scanner, &updater);
+    let result = tidy::run(&root, manifest, manifest_store, lock, lock_store, NoopRegistry, &scanner, &updater);
 
     // The command should fail when it cannot resolve actions
     assert!(
@@ -821,14 +835,18 @@ jobs:
     // Run tidy with a mock registry that resolves versions to SHAs
     let manifest_path = root.join(".github").join("gx.toml");
     let lock_path = root.join(".github").join("gx.lock");
-    let manifest = FileManifest::load_or_default(&manifest_path).unwrap();
-    let lock = FileLock::load_or_default(&lock_path).unwrap();
+    let manifest_store = FileManifest::new(&manifest_path);
+    let manifest = manifest_store.load().unwrap();
+    let lock_store = FileLock::new(&lock_path);
+    let lock = lock_store.load().unwrap();
     let scanner = FileWorkflowScanner::new(&root);
     let updater = FileWorkflowUpdater::new(&root);
     let result = tidy::run(
         &root,
         manifest,
+        manifest_store,
         lock,
+        lock_store,
         MockRegistry::new(),
         &scanner,
         &updater,

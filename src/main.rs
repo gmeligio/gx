@@ -1,10 +1,11 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use gx::commands;
+use gx::domain::Lock;
 use gx::infrastructure::{
-    FileLock, FileWorkflowScanner, FileWorkflowUpdater, GithubRegistry, LOCK_FILE_NAME, MemoryLock,
+    FileLock, FileManifest, FileWorkflowScanner, FileWorkflowUpdater, GithubRegistry,
+    LOCK_FILE_NAME, LockStore, MANIFEST_FILE_NAME, ManifestStore, MemoryLock, MemoryManifest,
 };
-use gx::infrastructure::{FileManifest, MANIFEST_FILE_NAME, MemoryManifest};
 use gx::infrastructure::{repo, repo::RepoError};
 use log::{LevelFilter, info};
 use std::io::Write;
@@ -57,21 +58,31 @@ fn main() -> Result<()> {
 
     let manifest_path = repo_root.join(".github").join(MANIFEST_FILE_NAME);
     let lock_path = repo_root.join(".github").join(LOCK_FILE_NAME);
+
     match cli.command {
         Commands::Tidy => {
             let registry = GithubRegistry::from_env()?;
             let updater = FileWorkflowUpdater::new(&repo_root);
+            let scanner = FileWorkflowScanner::new(&repo_root);
             if manifest_path.exists() {
-                let manifest = FileManifest::load_or_default(&manifest_path)?;
-                let lock = FileLock::load_or_default(&lock_path)?;
-                let scanner = FileWorkflowScanner::new(&repo_root);
-                commands::tidy::run(&repo_root, manifest, lock, registry, &scanner, &updater)
+                let manifest_store = FileManifest::new(&manifest_path);
+                let manifest = manifest_store.load()?;
+                let lock_store = FileLock::new(&lock_path);
+                let lock = lock_store.load()?;
+                commands::tidy::run(
+                    &repo_root, manifest, manifest_store, lock, lock_store,
+                    registry, &scanner, &updater,
+                )
             } else {
                 let action_set = FileWorkflowScanner::new(&repo_root).scan_all()?;
-                let manifest = MemoryManifest::from_workflows(&action_set);
-                let lock = MemoryLock::default();
-                let scanner = FileWorkflowScanner::new(&repo_root);
-                commands::tidy::run(&repo_root, manifest, lock, registry, &scanner, &updater)
+                let manifest_store = MemoryManifest::from_workflows(&action_set);
+                let manifest = manifest_store.load()?;
+                let lock_store = MemoryLock;
+                let lock = Lock::default();
+                commands::tidy::run(
+                    &repo_root, manifest, manifest_store, lock, lock_store,
+                    registry, &scanner, &updater,
+                )
             }
         }
         Commands::Init => {
@@ -80,11 +91,16 @@ fn main() -> Result<()> {
             }
             info!("Reading actions from workflows into the manifest...");
             let registry = GithubRegistry::from_env()?;
-            let manifest = FileManifest::load_or_default(&manifest_path)?;
-            let lock = FileLock::load_or_default(&lock_path)?;
+            let manifest_store = FileManifest::new(&manifest_path);
+            let manifest = manifest_store.load()?;
+            let lock_store = FileLock::new(&lock_path);
+            let lock = lock_store.load()?;
             let scanner = FileWorkflowScanner::new(&repo_root);
             let updater = FileWorkflowUpdater::new(&repo_root);
-            commands::tidy::run(&repo_root, manifest, lock, registry, &scanner, &updater)
+            commands::tidy::run(
+                &repo_root, manifest, manifest_store, lock, lock_store,
+                registry, &scanner, &updater,
+            )
         }
         Commands::Upgrade { action, latest } => {
             let mode = if latest {
@@ -102,15 +118,27 @@ fn main() -> Result<()> {
 
             let registry = GithubRegistry::from_env()?;
             let updater = FileWorkflowUpdater::new(&repo_root);
+            let scanner = FileWorkflowScanner::new(&repo_root);
+
             if manifest_path.exists() {
-                let manifest = FileManifest::load_or_default(&manifest_path)?;
-                let lock = FileLock::load_or_default(&lock_path)?;
-                commands::upgrade::run(&repo_root, manifest, lock, registry, &updater, &mode)
+                let manifest_store = FileManifest::new(&manifest_path);
+                let manifest = manifest_store.load()?;
+                let lock_store = FileLock::new(&lock_path);
+                let lock = lock_store.load()?;
+                commands::upgrade::run(
+                    &repo_root, manifest, manifest_store, lock, lock_store,
+                    registry, &scanner, &updater, &mode,
+                )
             } else {
                 let action_set = FileWorkflowScanner::new(&repo_root).scan_all()?;
-                let manifest = MemoryManifest::from_workflows(&action_set);
-                let lock = MemoryLock::default();
-                commands::upgrade::run(&repo_root, manifest, lock, registry, &updater, &mode)
+                let manifest_store = MemoryManifest::from_workflows(&action_set);
+                let manifest = manifest_store.load()?;
+                let lock_store = MemoryLock;
+                let lock = Lock::default();
+                commands::upgrade::run(
+                    &repo_root, manifest, manifest_store, lock, lock_store,
+                    registry, &scanner, &updater, &mode,
+                )
             }
         }
     }
@@ -128,7 +156,6 @@ fn init_logging(cli: &Cli) {
         .format(|buf, record| {
             let level = record.level();
             let style = &buf.default_level_style(level);
-
             writeln!(buf, "[{style}{level}{style:#}] {}", record.args())
         });
 
