@@ -29,7 +29,7 @@ pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, W: WorkflowUpdate
     mut lock: L,
     registry: R,
     writer: &W,
-    mode: UpgradeMode,
+    mode: &UpgradeMode,
 ) -> Result<()> {
     let service = ActionResolver::new(registry);
 
@@ -52,11 +52,11 @@ pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, W: WorkflowUpdate
 
                 match service.registry().all_tags(&spec.id) {
                     Ok(tags) => {
-                        let upgraded = match mode {
+                        let new_version = match mode {
                             UpgradeMode::Latest => spec.version.find_latest_upgrade(&tags),
                             _ => spec.version.find_upgrade(&tags),
                         };
-                        if let Some(upgraded) = upgraded {
+                        if let Some(upgraded) = new_version {
                             upgrades.push(UpgradeCandidate {
                                 id: spec.id.clone(),
                                 current: spec.version.clone(),
@@ -77,7 +77,7 @@ pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, W: WorkflowUpdate
 
             upgrades
         }
-        UpgradeMode::Targeted(ref id, ref version) => {
+        UpgradeMode::Targeted(id, version) => {
             let current = manifest.get(id).ok_or_else(|| {
                 anyhow::anyhow!("{id} not found in manifest")
             })?;
@@ -244,7 +244,7 @@ mod tests {
         let lock = MemoryLock::default();
 
         // Empty manifest should return Ok immediately without calling GitHub
-        let result = run(root, manifest, lock, DummyRegistry, &DummyUpdater, UpgradeMode::Safe);
+        let result = run(root, manifest, lock, DummyRegistry, &DummyUpdater, &UpgradeMode::Safe);
         assert!(result.is_ok());
     }
 
@@ -303,7 +303,7 @@ mod tests {
             ActionId::from("actions/checkout"),
             Version::from("v5"),
         );
-        let result = run(root, manifest, lock, DummyRegistry, &DummyUpdater, mode);
+        let result = run(root, manifest, lock, DummyRegistry, &DummyUpdater, &mode);
         assert!(result.is_err());
         assert!(
             result.unwrap_err().to_string().contains("not found"),

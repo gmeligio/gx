@@ -150,8 +150,9 @@ impl Version {
                     return None;
                 }
                 match precision {
-                    VersionPrecision::Major => (parsed.major == current.major).then_some(parsed),
-                    VersionPrecision::Minor => (parsed.major == current.major).then_some(parsed),
+                    VersionPrecision::Major | VersionPrecision::Minor => {
+                        (parsed.major == current.major).then_some(parsed)
+                    }
                     VersionPrecision::Patch => (parsed.major == current.major
                         && parsed.minor == current.minor)
                         .then_some(parsed),
