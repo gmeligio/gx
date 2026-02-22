@@ -4,69 +4,100 @@
 
 | Diagram | Description |
 |---------|-------------|
-| [Domain module](domain-architecture.excalidraw.json) | All domain types in `action.rs`, `resolution.rs`, `workflow_actions.rs` and how they relate |
-| [Manifest system](manifest-architecture.excalidraw.json) | `ManifestStore` trait, `FileManifest`, `MemoryManifest`, and `gx.toml` format |
-| [Lock system](lock-architecture.excalidraw.json) | `LockStore` trait, `FileLock`, `MemoryLock`, and `gx.lock` format |
+| [Domain module](domain-architecture.excalidraw.json) | All domain types and how they relate |
+| [Manifest system](manifest-architecture.excalidraw.json) | `Manifest` domain entity, `ManifestStore` I/O trait, `FileManifest`, `MemoryManifest` |
+| [Lock system](lock-architecture.excalidraw.json) | `Lock` domain entity, `LockStore` I/O trait, `FileLock`, `MemoryLock` |
 
 ## Layer diagram
 
 ```
 main.rs (Composition Root)
     │ Checks if gx.toml exists
-    │ Injects FileManifest/FileLock or MemoryManifest/MemoryLock
+    │ Creates stores (FileManifest/FileLock or MemoryManifest/MemoryLock)
+    │ Loads domain entities (Manifest, Lock) via stores
     ▼
 commands/ (Application Layer)
     │ tidy.rs, upgrade.rs
-    │ Orchestrates domain + infrastructure via trait abstractions
+    │ Mutates Manifest + Lock domain entities, calls store.save() when done
     ▼
 domain/ (Business Types + Resolution Logic)
-    │ action.rs, resolution.rs, workflow_actions.rs
+    │ action.rs, manifest.rs, lock.rs, resolution.rs, workflow_actions.rs
     │ Pure domain types and algorithms, no I/O
     ▼
 infrastructure/ (File I/O + Github API)
     │ manifest.rs, lock.rs, github.rs, workflow.rs, repo.rs
-    │ Implements traits defined in domain
+    │ Pure I/O: load() → domain entity, save(entity)
 ```
 
 ## Dependency injection
 
-`main.rs` is the composition root. It checks whether `.github/gx.toml` exists and injects the appropriate implementations:
+`main.rs` is the composition root. It checks whether `.github/gx.toml` exists, creates the appropriate stores, loads domain entities, and injects them into commands:
 
 ```rust
-if manifest_path.exists() {
-    // File-backed mode: changes persist to disk
-    let manifest = FileManifest::load_or_default(&manifest_path)?;
-    let lock = FileLock::load_or_default(&lock_path)?;
-    commands::tidy::run(&repo_root, manifest, lock, registry)
-} else {
-    // Memory-only mode: only workflows are updated
-    let manifest = MemoryManifest::from_workflows(&action_set);
-    let lock = MemoryLock::default();
-    commands::tidy::run(&repo_root, manifest, lock, registry)
-}
+// File-backed mode: changes persist to disk
+let manifest_store = FileManifest::new(&manifest_path);
+let manifest = manifest_store.load()?;
+let lock_store = FileLock::new(&lock_path);
+let lock = lock_store.load()?;
+commands::tidy::run(&repo_root, manifest, manifest_store, lock, lock_store, registry, &scanner, &updater)
+
+// Memory-only mode: only workflows are updated
+let manifest_store = MemoryManifest::from_workflows(&action_set);
+let manifest = manifest_store.load()?;
+let lock_store = MemoryLock;
+let lock = Lock::default();
+commands::tidy::run(&repo_root, manifest, manifest_store, lock, lock_store, registry, &scanner, &updater)
 ```
 
-Commands accept trait abstractions, not concrete types:
+Commands accept domain entities and store trait abstractions:
 
 ```rust
-pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry>(
-    repo_root: &Path, mut manifest: M, mut lock: L, registry: R,
+pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, P: WorkflowScanner, W: WorkflowUpdater>(
+    repo_root: &Path,
+    mut manifest: Manifest,
+    manifest_store: M,
+    mut lock: Lock,
+    lock_store: L,
+    registry: R,
+    scanner: &P,
+    writer: &W,
 ) -> Result<()>
 ```
+
+## Domain entities
+
+### Manifest (`domain/manifest.rs`)
+
+Owns the `ActionId → ActionSpec` map and all domain behaviour:
+- `get`, `set`, `remove`, `has`, `is_empty`, `specs` — data access and mutation
+- `detect_drift(action_set, filter)` — compares manifest against scanned workflow actions; returns `Vec<DriftItem>`
+
+### Lock (`domain/lock.rs`)
+
+Owns the `LockKey → CommitSha` map and all domain behaviour:
+- `get`, `set`, `has`, `retain` — data access and mutation
+- `build_update_map(keys)` — formats entries as `"SHA # version"` strings for workflow updates
+
+### DriftItem (`domain/manifest.rs`)
+
+Returned by `Manifest::detect_drift`:
+- `MissingFromManifest { id }` — action in workflow but not in `gx.toml`
+- `MissingFromWorkflow { id }` — action in `gx.toml` but not in any workflow
+- `VersionMismatch { id, manifest_version, workflow_version }` — version differs between sides
 
 ## Trait abstractions
 
 ### ManifestStore (`infrastructure/manifest.rs`)
 
-Maps `ActionId` → `Version`. Implementations:
-- `FileManifest` — reads/writes `.github/gx.toml`, tracks `dirty: bool`
-- `MemoryManifest` — in-memory only, `save()` is a no-op
+Pure I/O trait. Implementations:
+- `FileManifest` — reads/writes `.github/gx.toml`
+- `MemoryManifest` — no-op `save()`, `load()` returns pre-seeded or empty `Manifest`
 
 ### LockStore (`infrastructure/lock.rs`)
 
-Maps `LockKey` (action@version) → `CommitSha`. Implementations:
-- `FileLock` — reads/writes `.github/gx.lock`, tracks `dirty: bool`
-- `MemoryLock` — in-memory only, `save()` is a no-op
+Pure I/O trait. Implementations:
+- `FileLock` — reads/writes `.github/gx.lock`; transparently migrates old format versions on load
+- `MemoryLock` — no-op `save()`, `load()` returns empty `Lock`
 
 ### VersionRegistry (`domain/resolution.rs`)
 
@@ -89,12 +120,12 @@ UsesRef { action_name, uses_ref, comment }
 InterpretedRef { id: ActionId, version: Version, sha: Option<CommitSha> }
     ▼ (aggregated across workflows)
 WorkflowActionSet { versions, shas }
-    ▼ (manifest sync)
-ActionSpec { id: ActionId, version: Version }
+    ▼ (manifest sync / drift detection)
+Manifest { actions: HashMap<ActionId, ActionSpec> }
     ▼ (resolved via VersionRegistry)
 ResolvedAction { id: ActionId, version: Version, sha: CommitSha }
     ▼ (stored in lock)
-LockKey { id: ActionId, version: Version } → CommitSha
+Lock { actions: HashMap<LockKey, CommitSha> }
 ```
 
 ### Strong types
@@ -112,8 +143,8 @@ LockKey { id: ActionId, version: Version } → CommitSha
 
 ## Adding a new command
 
-1. Create `src/commands/newcmd.rs` with a `pub fn run<M: ManifestStore, L: LockStore>(...) -> Result<()>`
-2. Add a variant to the `Commands` enum in `src/main.rs`
+1. Create `src/commands/newcmd.rs` with `pub fn run<M: ManifestStore, L: LockStore>(..., manifest: Manifest, manifest_store: M, lock: Lock, lock_store: L, ...) -> Result<()>`
+2. Add a variant to `Commands` in `src/main.rs`
 3. Add `pub mod newcmd;` to `src/commands.rs`
 4. Add the match arm in `main()` with appropriate DI (file-backed vs memory-only)
 5. Add user docs in `docs/newcmd.md`
