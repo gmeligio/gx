@@ -26,11 +26,23 @@ Upgrades respect the precision of your current version pin:
 | `v4.1` (minor) | Same major, newer minor | `v4.1` → `v4.2`, `v4.3` |
 | `v4.1.0` (patch) | Same major.minor, newer patch | `v4.1.0` → `v4.1.1`, `v4.1.3` |
 
+## Re-pinning dynamic refs
+
+Actions that use non-semver references (branches like `main`, text tags like `stable` or `next`) are automatically re-pinned to their current commit SHA on every `gx upgrade` run. This ensures the lock file stays current with the branch HEAD.
+
+The manifest is unchanged (the version stays `main`); only the lock file and workflows are updated with the fresh SHA.
+
+| Reference type | Upgrade behaviour |
+|---|---|
+| Semver (`v4`, `v4.1`, `v4.1.0`) | Upgraded to newer version within precision constraints |
+| Branch/tag (`main`, `stable`) | Re-pinned to current commit SHA |
+| Bare SHA (40 hex chars) | Skipped — nothing to resolve |
+
 ## Skipped actions
 
-The following are not upgraded:
+The following are not upgraded or re-pinned:
 
-- Actions without semver versions (branches like `main`, bare commit SHAs)
+- Bare commit SHAs without a version comment (no ref to re-resolve)
 - Actions where `GITHUB_TOKEN` is missing or the API call fails (logged as warnings)
 
 ## Two modes

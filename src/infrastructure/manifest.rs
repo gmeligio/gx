@@ -419,7 +419,7 @@ mod tests {
 
         // Verify they are in alphabetical order
         let mut sorted_lines = action_lines.clone();
-        sorted_lines.sort();
+        sorted_lines.sort_unstable();
         assert_eq!(
             action_lines, sorted_lines,
             "Actions should be sorted alphabetically by ID in the manifest file"

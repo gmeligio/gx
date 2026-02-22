@@ -10,76 +10,52 @@ The `upgrade` command finds newer versions of actions via the Github API, applie
 
 ## Algorithm
 
-### 1. Get specs from manifest
+`run` delegates to two private helpers and then applies results:
 
-```rust
-let specs = manifest.specs();
-```
+### `determine_upgrades` — find what to change
 
-If no specs exist (empty manifest), return immediately.
+Returns `Ok(None)` (nothing to do) or `Ok(Some((upgrades, repins)))`.
 
-### 2. Find available upgrades
+**For `Safe`/`Latest` modes:**
 
-For each spec, check if the version has semver precision:
+If the manifest is empty, returns `Ok(None)` immediately. Otherwise iterates specs:
 
-```rust
-if spec.version.precision().is_none() {
-    continue; // Skip non-semver (branches, bare SHAs)
-}
-```
-
-Fetch all tags for the action's repository via `registry.all_tags(&spec.id)`, then find the highest compatible upgrade:
-
-```rust
-if let Some(upgraded) = spec.version.find_upgrade(&tags) {
-    upgrades.push(UpgradeCandidate { id, current, upgraded });
-}
-```
+- Bare SHAs: skipped with a log message.
+- Non-semver refs (branches, text tags): collected into `repins` for re-pinning.
+- Semver specs: fetches all tags via `registry.all_tags(&spec.id)`, then calls `find_upgrade` (Safe) or `find_latest_upgrade` (Latest) to find a candidate. Returns `Ok(None)` if both `upgrades` and `repins` are empty.
 
 `Version::find_upgrade()` respects precision:
 - **Major** (`v4`): upgrades to any higher major (`v5`, `v6`)
 - **Minor** (`v4.1`): upgrades within same major (`v4.2`, `v4.3`)
 - **Patch** (`v4.1.0`): upgrades within same major.minor (`v4.1.1`, `v4.1.3`)
 
-### 3. Apply upgrades to manifest
+**For `Targeted` mode:**
+
+Verifies the action is in the manifest and the requested version exists in the registry, then returns a single-element `upgrades` list with an empty `repins`.
+
+### `resolve_and_store` — resolve a spec to SHA and write to lock
 
 ```rust
-for upgrade in &upgrades {
-    manifest.set(upgrade.id.clone(), upgrade.upgraded.clone());
-}
+fn resolve_and_store<R: VersionRegistry, L: LockStore>(
+    service: &ActionResolver<R>,
+    spec: &ActionSpec,
+    lock: &mut L,
+    unresolved_msg: &str,
+)
 ```
 
-### 4. Resolve new SHAs
+Calls `service.resolve(spec)` and matches on `ResolutionResult`:
+- `Resolved` / `Corrected` → writes the SHA to the lock store.
+- `Unresolved` → logs a warning with the provided `unresolved_msg` prefix.
 
-For each upgrade, create an `ActionSpec` with the new version and resolve via `ActionResolver::resolve()`:
+### `run` — orchestrate
 
-```rust
-let spec = ActionSpec::new(upgrade.id.clone(), upgrade.upgraded.clone());
-let result = service.resolve(&spec);
-match result {
-    ResolutionResult::Resolved(resolved) => lock.set(&resolved),
-    ResolutionResult::Corrected { corrected, .. } => lock.set(&corrected),
-    ResolutionResult::Unresolved { spec, reason } => warn!("..."),
-}
-```
-
-### 5. Save and update workflows
-
-```rust
-manifest.save()?;
-lock.retain(&keys_to_retain);
-lock.save()?;
-```
-
-Only upgraded actions are included in the workflow update map (not all specs):
-
-```rust
-let upgraded_keys: Vec<LockKey> = upgrades.iter()
-    .map(|u| LockKey::new(u.id.clone(), u.upgraded.clone()))
-    .collect();
-let update_map = lock.build_update_map(&upgraded_keys);
-writer.update_all(&update_map)?;
-```
+1. Calls `determine_upgrades`; returns early if `None`.
+2. Applies each upgrade to the manifest (`manifest.set`).
+3. Calls `resolve_and_store` for each upgraded spec ("Could not resolve").
+4. Calls `resolve_and_store` for each re-pinned spec ("Could not re-pin").
+5. Saves manifest and lock; retains only manifest entries in lock.
+6. Builds update map from upgraded + re-pinned keys and calls `writer.update_all()`.
 
 ## Key types
 
