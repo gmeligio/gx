@@ -150,7 +150,7 @@ impl Version {
                     return None;
                 }
                 match precision {
-                    VersionPrecision::Major => Some(parsed),
+                    VersionPrecision::Major => (parsed.major == current.major).then_some(parsed),
                     VersionPrecision::Minor => (parsed.major == current.major).then_some(parsed),
                     VersionPrecision::Patch => (parsed.major == current.major
                         && parsed.minor == current.minor)
@@ -166,7 +166,9 @@ impl Version {
             VersionPrecision::Patch => format!("v{}.{}.{}", best.major, best.minor, best.patch),
         };
 
-        Some(Version::from(formatted))
+        let result = Version::from(formatted);
+        // Only return if it's actually different from current
+        (result != *self).then_some(result)
     }
 }
 
@@ -789,7 +791,28 @@ mod tests {
             Version::from("v5.0.0"),
             Version::from("v6"),
         ];
-        assert_eq!(current.find_upgrade(&candidates), Some(Version::from("v6")));
+        // v4 should NOT cross to v5 or v6 — stays within major
+        assert!(current.find_upgrade(&candidates).is_none());
+    }
+
+    #[test]
+    fn test_find_upgrade_major_within_same_major() {
+        let current = Version::from("v4");
+        let candidates = vec![
+            Version::from("v3"),
+            Version::from("v4"),
+            Version::from("v4.1.0"),
+            Version::from("v4.2.0"),
+            Version::from("v5"),
+        ];
+        // v4 should find the highest v4.x.x tag — but output is major precision
+        // parse_semver("v4") = 4.0.0, parse_semver("v4.2.0") = 4.2.0 which is > 4.0.0
+        // but major must equal current.major (4), and 4.2.0 has major=4 ✓
+        // Formatted at Major precision: "v4" — same as current, so no upgrade
+        // Actually: the best candidate with major==4 and > 4.0.0 is 4.2.0
+        // Formatted as Major: "v4" — equals current, so this returns None
+        // This is correct: v4 means "latest v4", there's no higher v4 major tag
+        assert!(current.find_upgrade(&candidates).is_none());
     }
 
     #[test]
