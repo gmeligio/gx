@@ -3,8 +3,8 @@ use log::{debug, info, warn};
 use std::path::Path;
 
 use crate::domain::{
-    ActionId, ActionResolver, ActionSpec, LockKey, ResolutionResult, UpdateResult, UpgradeCandidate,
-    Version, VersionRegistry, WorkflowUpdater,
+    ActionId, ActionResolver, ActionSpec, LockKey, ResolutionResult, UpdateResult,
+    UpgradeCandidate, Version, VersionRegistry, WorkflowUpdater,
 };
 use crate::infrastructure::{LockStore, ManifestStore};
 
@@ -12,7 +12,7 @@ use crate::infrastructure::{LockStore, ManifestStore};
 pub enum UpgradeMode {
     /// Default: upgrade all actions within their current major version.
     Safe,
-    /// Upgrade all actions to the absolute latest version, crossing major boundaries.
+    /// Upgrade all actions to the absolute latest version, including major versions.
     Latest,
     /// Upgrade a single action to a specific version.
     Targeted(ActionId, Version),
@@ -78,9 +78,9 @@ pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, W: WorkflowUpdate
             upgrades
         }
         UpgradeMode::Targeted(id, version) => {
-            let current = manifest.get(id).ok_or_else(|| {
-                anyhow::anyhow!("{id} not found in manifest")
-            })?;
+            let current = manifest
+                .get(id)
+                .ok_or_else(|| anyhow::anyhow!("{id} not found in manifest"))?;
 
             match service.registry().all_tags(id) {
                 Ok(tags) => {
@@ -244,7 +244,14 @@ mod tests {
         let lock = MemoryLock::default();
 
         // Empty manifest should return Ok immediately without calling GitHub
-        let result = run(root, manifest, lock, DummyRegistry, &DummyUpdater, &UpgradeMode::Safe);
+        let result = run(
+            root,
+            manifest,
+            lock,
+            DummyRegistry,
+            &DummyUpdater,
+            &UpgradeMode::Safe,
+        );
         assert!(result.is_ok());
     }
 
@@ -299,10 +306,7 @@ mod tests {
         let manifest = MemoryManifest::default();
         let lock = MemoryLock::default();
 
-        let mode = UpgradeMode::Targeted(
-            ActionId::from("actions/checkout"),
-            Version::from("v5"),
-        );
+        let mode = UpgradeMode::Targeted(ActionId::from("actions/checkout"), Version::from("v5"));
         let result = run(root, manifest, lock, DummyRegistry, &DummyUpdater, &mode);
         assert!(result.is_err());
         assert!(

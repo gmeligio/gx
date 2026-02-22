@@ -172,7 +172,7 @@ impl Version {
         (result != *self).then_some(result)
     }
 
-    /// Find the absolute latest upgrade from candidates, crossing major boundaries.
+    /// Find the absolute latest upgrade from candidates, including major versions.
     ///
     /// Unlike `find_upgrade()`, this does not constrain by major/minor — it returns
     /// the highest version across all candidates that is strictly higher than self.

@@ -34,7 +34,7 @@ enum Commands {
         #[arg(value_name = "ACTION@VERSION")]
         action: Option<String>,
 
-        /// Upgrade all actions to the absolute latest version, crossing major boundaries
+        /// Upgrade all actions to the absolute latest version, including major versions
         #[arg(long, conflicts_with = "action")]
         latest: bool,
     },
