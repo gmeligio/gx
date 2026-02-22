@@ -74,7 +74,10 @@ pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry>(
 
             if versions.len() == 1 {
                 let workflow_version = &versions[0];
-                let manifest_version = manifest.get(action_id).unwrap().clone();
+                let manifest_version = manifest
+                    .get(action_id)
+                    .expect("action_id is from intersection with manifest_actions, so it must be present")
+                    .clone();
 
                 // Use domain policy to check if manifest should be updated
                 if manifest_version.should_be_replaced_by(workflow_version) {
