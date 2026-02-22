@@ -149,32 +149,37 @@ impl<R: VersionRegistry> ActionResolver<R> {
     }
 }
 
-/// Select the best tag from a list (prefers semver major version tags, then highest version)
+/// Parse a version string (with optional 'v' prefix) into numeric components.
+/// Returns `None` if any component is non-numeric.
+fn parse_version_components(s: &str) -> Option<Vec<u64>> {
+    let stripped = s.trim_start_matches('v');
+    stripped.split('.').map(|p| p.parse::<u64>().ok()).collect()
+}
+
+/// Select the best tag from a list (prefers semver-like tags with fewer components,
+/// then highest version value among equal component counts, non-semver tags last).
 fn select_best_tag(tags: &[Version]) -> Option<Version> {
     if tags.is_empty() {
         return None;
     }
 
-    let mut indexed: Vec<(&Version, Option<semver::Version>)> = tags
+    let mut indexed: Vec<(&Version, Option<Vec<u64>>)> = tags
         .iter()
-        .map(|t| {
-            let s = t.as_str().trim_start_matches('v');
-            (t, semver::Version::parse(s).ok())
-        })
+        .map(|t| (t, parse_version_components(t.as_str())))
         .collect();
 
-    // Sort: semver tags first, then fewest dot-components wins (v4 < v4.1 < v4.1.0),
-    // then highest semver value wins among equal component counts.
-    indexed.sort_by(|(at, av), (bt, bv)| match (av, bv) {
+    // Sort: semver-like tags first (fewer components preferred: v4 < v4.1 < v4.1.0),
+    // then highest version value wins among equal component counts, non-semver tags last.
+    indexed.sort_by(|(_, av), (_, bv)| match (av, bv) {
         (None, None) => std::cmp::Ordering::Equal,
         (Some(_), None) => std::cmp::Ordering::Less,
         (None, Some(_)) => std::cmp::Ordering::Greater,
         (Some(av), Some(bv)) => {
-            let a_dots = at.as_str().matches('.').count();
-            let b_dots = bt.as_str().matches('.').count();
-            match a_dots.cmp(&b_dots) {
-                std::cmp::Ordering::Equal => bv.cmp(av), // higher version wins
-                other => other,
+            let a_len = av.len();
+            let b_len = bv.len();
+            match a_len.cmp(&b_len) {
+                std::cmp::Ordering::Equal => bv.cmp(av), // higher version wins (descending)
+                other => other,                          // fewer components wins (ascending)
             }
         }
     });
