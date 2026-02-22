@@ -1,5 +1,7 @@
 use gx::commands::upgrade;
-use gx::domain::{ActionId, CommitSha, LockKey, ResolvedAction, ResolutionError, Version, VersionRegistry};
+use gx::domain::{
+    ActionId, CommitSha, LockKey, ResolutionError, ResolvedAction, Version, VersionRegistry,
+};
 use gx::infrastructure::{
     FileLock, FileManifest, FileWorkflowUpdater, LockStore, ManifestStore, MemoryLock,
     MemoryManifest,
@@ -18,14 +20,6 @@ impl MockUpgradeRegistry {
         Self {
             tags: std::collections::HashMap::new(),
         }
-    }
-
-    fn with_tags(mut self, id: &str, tags: &[&str]) -> Self {
-        self.tags.insert(
-            id.to_string(),
-            tags.iter().map(|t| t.to_string()).collect(),
-        );
-        self
     }
 }
 
@@ -87,7 +81,13 @@ fn run_upgrade_file_backed(repo_root: &Path) -> anyhow::Result<()> {
     let manifest = FileManifest::load_or_default(&manifest_path)?;
     let lock = FileLock::load_or_default(&lock_path)?;
     let updater = FileWorkflowUpdater::new(repo_root);
-    upgrade::run(repo_root, manifest, lock, MockUpgradeRegistry::new(), &updater)
+    upgrade::run(
+        repo_root,
+        manifest,
+        lock,
+        MockUpgradeRegistry::new(),
+        &updater,
+    )
 }
 
 // --- Tests that don't require GitHub API ---

@@ -149,25 +149,42 @@ mod tests {
     fn test_run_empty_manifest_returns_ok() {
         use crate::domain::{VersionRegistry, WorkflowError, WorkflowUpdater};
         use crate::infrastructure::{MemoryLock, MemoryManifest};
-        use tempfile::TempDir;
         use std::collections::HashMap;
+        use tempfile::TempDir;
 
         struct DummyRegistry;
         impl VersionRegistry for DummyRegistry {
-            fn lookup_sha(&self, _id: &crate::domain::ActionId, _version: &crate::domain::Version) -> std::result::Result<crate::domain::CommitSha, crate::domain::ResolutionError> {
+            fn lookup_sha(
+                &self,
+                _id: &crate::domain::ActionId,
+                _version: &crate::domain::Version,
+            ) -> std::result::Result<crate::domain::CommitSha, crate::domain::ResolutionError>
+            {
                 Err(crate::domain::ResolutionError::TokenRequired)
             }
-            fn tags_for_sha(&self, _id: &crate::domain::ActionId, _sha: &crate::domain::CommitSha) -> std::result::Result<Vec<crate::domain::Version>, crate::domain::ResolutionError> {
+            fn tags_for_sha(
+                &self,
+                _id: &crate::domain::ActionId,
+                _sha: &crate::domain::CommitSha,
+            ) -> std::result::Result<Vec<crate::domain::Version>, crate::domain::ResolutionError>
+            {
                 Err(crate::domain::ResolutionError::TokenRequired)
             }
-            fn all_tags(&self, _id: &crate::domain::ActionId) -> std::result::Result<Vec<crate::domain::Version>, crate::domain::ResolutionError> {
+            fn all_tags(
+                &self,
+                _id: &crate::domain::ActionId,
+            ) -> std::result::Result<Vec<crate::domain::Version>, crate::domain::ResolutionError>
+            {
                 Err(crate::domain::ResolutionError::TokenRequired)
             }
         }
 
         struct DummyUpdater;
         impl WorkflowUpdater for DummyUpdater {
-            fn update_all(&self, _actions: &HashMap<crate::domain::ActionId, String>) -> std::result::Result<Vec<UpdateResult>, WorkflowError> {
+            fn update_all(
+                &self,
+                _actions: &HashMap<crate::domain::ActionId, String>,
+            ) -> std::result::Result<Vec<UpdateResult>, WorkflowError> {
                 Ok(vec![])
             }
         }

@@ -1,7 +1,9 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use gx::commands;
-use gx::infrastructure::{FileLock, FileWorkflowScanner, FileWorkflowUpdater, GithubRegistry, LOCK_FILE_NAME, MemoryLock};
+use gx::infrastructure::{
+    FileLock, FileWorkflowScanner, FileWorkflowUpdater, GithubRegistry, LOCK_FILE_NAME, MemoryLock,
+};
 use gx::infrastructure::{FileManifest, MANIFEST_FILE_NAME, MemoryManifest};
 use gx::infrastructure::{repo, repo::RepoError};
 use log::{LevelFilter, info};

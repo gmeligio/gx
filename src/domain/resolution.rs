@@ -341,7 +341,11 @@ mod tests {
 
     #[test]
     fn test_select_best_tag_higher_major_wins_among_same_precision() {
-        let tags = vec![Version::from("v3"), Version::from("v4"), Version::from("v5")];
+        let tags = vec![
+            Version::from("v3"),
+            Version::from("v4"),
+            Version::from("v5"),
+        ];
         assert_eq!(select_best_tag(&tags), Some(Version::from("v5")));
     }
 }
