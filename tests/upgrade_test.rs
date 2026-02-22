@@ -1,12 +1,54 @@
 use gx::commands::upgrade;
-use gx::domain::{ActionId, CommitSha, LockKey, ResolvedAction, Version};
+use gx::domain::{
+    ActionId, CommitSha, LockKey, ResolutionError, ResolvedAction, Version, VersionRegistry,
+};
 use gx::infrastructure::{
-    FileLock, FileManifest, LockStore, ManifestStore, MemoryLock, MemoryManifest, WorkflowWriter,
+    FileLock, FileManifest, FileWorkflowUpdater, LockStore, ManifestStore, MemoryLock,
+    MemoryManifest,
 };
 use std::fs;
 use std::io::Write;
 use std::path::Path;
 use tempfile::TempDir;
+
+struct MockUpgradeRegistry {
+    tags: std::collections::HashMap<String, Vec<String>>,
+}
+
+impl MockUpgradeRegistry {
+    fn new() -> Self {
+        Self {
+            tags: std::collections::HashMap::new(),
+        }
+    }
+}
+
+impl VersionRegistry for MockUpgradeRegistry {
+    fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<CommitSha, ResolutionError> {
+        let sha = format!("{}{}", id.as_str(), version.as_str()).replace('/', "");
+        let padded = format!("{:0<40}", &sha[..sha.len().min(40)]);
+        Ok(CommitSha::from(padded))
+    }
+
+    fn tags_for_sha(
+        &self,
+        _id: &ActionId,
+        _sha: &CommitSha,
+    ) -> Result<Vec<Version>, ResolutionError> {
+        Ok(vec![])
+    }
+
+    fn all_tags(&self, id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
+        Ok(self
+            .tags
+            .get(id.as_str())
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(Version::from)
+            .collect())
+    }
+}
 
 fn create_test_repo(temp_dir: &TempDir) -> std::path::PathBuf {
     let root = temp_dir.path();
@@ -38,7 +80,14 @@ fn run_upgrade_file_backed(repo_root: &Path) -> anyhow::Result<()> {
     let lock_path = repo_root.join(".github").join("gx.lock");
     let manifest = FileManifest::load_or_default(&manifest_path)?;
     let lock = FileLock::load_or_default(&lock_path)?;
-    upgrade::run(repo_root, manifest, lock)
+    let updater = FileWorkflowUpdater::new(repo_root);
+    upgrade::run(
+        repo_root,
+        manifest,
+        lock,
+        MockUpgradeRegistry::new(),
+        &updater,
+    )
 }
 
 // --- Tests that don't require GitHub API ---
@@ -57,7 +106,8 @@ fn test_upgrade_empty_manifest_is_noop() {
     // Empty MemoryManifest should return Ok immediately
     let manifest = MemoryManifest::default();
     let lock = MemoryLock::default();
-    let result = upgrade::run(&root, manifest, lock);
+    let updater = FileWorkflowUpdater::new(&root);
+    let result = upgrade::run(&root, manifest, lock, MockUpgradeRegistry::new(), &updater);
     assert!(result.is_ok());
 }
 
@@ -93,7 +143,8 @@ fn test_upgrade_non_semver_versions_skipped() {
     let manifest = MemoryManifest::default();
     let lock = MemoryLock::default();
 
-    let result = upgrade::run(&root, manifest, lock);
+    let updater = FileWorkflowUpdater::new(&root);
+    let result = upgrade::run(&root, manifest, lock, MockUpgradeRegistry::new(), &updater);
     assert!(result.is_ok());
 }
 
@@ -177,7 +228,8 @@ fn test_upgrade_memory_stores_no_side_effects() {
     let manifest = MemoryManifest::default();
     let lock = MemoryLock::default();
 
-    let result = upgrade::run(&root, manifest, lock);
+    let updater = FileWorkflowUpdater::new(&root);
+    let result = upgrade::run(&root, manifest, lock, MockUpgradeRegistry::new(), &updater);
     assert!(result.is_ok());
 
     // No files should be created
@@ -276,7 +328,7 @@ jobs:
         Version::from("v6.0.2"),
     )];
     let update_map = lock.build_update_map(&upgraded_keys);
-    let writer = WorkflowWriter::new(&root);
+    let writer = FileWorkflowUpdater::new(&root);
     let _results = writer.update_all(&update_map).unwrap();
 
     // Verify the workflow

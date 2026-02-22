@@ -3,29 +3,29 @@ use log::{debug, info, warn};
 use std::path::Path;
 
 use crate::domain::{
-    ActionResolver, ActionSpec, LockKey, ResolutionResult, UpgradeCandidate, VersionRegistry,
+    ActionResolver, ActionSpec, LockKey, ResolutionResult, UpdateResult, UpgradeCandidate,
+    VersionRegistry, WorkflowUpdater,
 };
-use crate::infrastructure::{
-    GithubRegistry, LockStore, ManifestStore, UpdateResult, WorkflowWriter,
-};
+use crate::infrastructure::{LockStore, ManifestStore};
 
 /// Run the upgrade command to find and apply available upgrades for actions.
 ///
 /// # Errors
 ///
 /// Returns an error if workflows cannot be read or files cannot be saved.
-pub fn run<M: ManifestStore, L: LockStore>(
-    repo_root: &Path,
+pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, W: WorkflowUpdater>(
+    _repo_root: &Path,
     mut manifest: M,
     mut lock: L,
+    registry: R,
+    writer: &W,
 ) -> Result<()> {
     let specs = manifest.specs();
     if specs.is_empty() {
         return Ok(());
     }
 
-    let github = GithubRegistry::from_env()?;
-    let service = ActionResolver::new(github);
+    let service = ActionResolver::new(registry);
 
     // Find available upgrades
     info!("Checking for upgrades...");
@@ -95,7 +95,6 @@ pub fn run<M: ManifestStore, L: LockStore>(
         .map(|u| LockKey::new(u.id.clone(), u.upgraded.clone()))
         .collect();
     let update_map = lock.build_update_map(&upgraded_keys);
-    let writer = WorkflowWriter::new(repo_root);
     let results = writer.update_all(&update_map)?;
     print_update_results(&results);
 
@@ -148,8 +147,47 @@ mod tests {
 
     #[test]
     fn test_run_empty_manifest_returns_ok() {
+        use crate::domain::{VersionRegistry, WorkflowError, WorkflowUpdater};
         use crate::infrastructure::{MemoryLock, MemoryManifest};
+        use std::collections::HashMap;
         use tempfile::TempDir;
+
+        struct DummyRegistry;
+        impl VersionRegistry for DummyRegistry {
+            fn lookup_sha(
+                &self,
+                _id: &crate::domain::ActionId,
+                _version: &crate::domain::Version,
+            ) -> std::result::Result<crate::domain::CommitSha, crate::domain::ResolutionError>
+            {
+                Err(crate::domain::ResolutionError::TokenRequired)
+            }
+            fn tags_for_sha(
+                &self,
+                _id: &crate::domain::ActionId,
+                _sha: &crate::domain::CommitSha,
+            ) -> std::result::Result<Vec<crate::domain::Version>, crate::domain::ResolutionError>
+            {
+                Err(crate::domain::ResolutionError::TokenRequired)
+            }
+            fn all_tags(
+                &self,
+                _id: &crate::domain::ActionId,
+            ) -> std::result::Result<Vec<crate::domain::Version>, crate::domain::ResolutionError>
+            {
+                Err(crate::domain::ResolutionError::TokenRequired)
+            }
+        }
+
+        struct DummyUpdater;
+        impl WorkflowUpdater for DummyUpdater {
+            fn update_all(
+                &self,
+                _actions: &HashMap<crate::domain::ActionId, String>,
+            ) -> std::result::Result<Vec<UpdateResult>, WorkflowError> {
+                Ok(vec![])
+            }
+        }
 
         let temp_dir = TempDir::new().unwrap();
         let root = temp_dir.path();
@@ -159,7 +197,7 @@ mod tests {
         let lock = MemoryLock::default();
 
         // Empty manifest should return Ok immediately without calling GitHub
-        let result = run(root, manifest, lock);
+        let result = run(root, manifest, lock, DummyRegistry, &DummyUpdater);
         assert!(result.is_ok());
     }
 }
