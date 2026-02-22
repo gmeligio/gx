@@ -1,12 +1,17 @@
 use gx::commands::tidy;
 use gx::domain::{ActionId, CommitSha, ResolutionError, Version, VersionRegistry};
-use gx::infrastructure::{FileLock, FileManifest, MemoryLock, MemoryManifest};
+use gx::infrastructure::{
+    FileLock, FileManifest, FileWorkflowScanner, FileWorkflowUpdater, MemoryLock, MemoryManifest,
+};
+use std::collections::hash_map::DefaultHasher;
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::path::Path;
+use std::string::ToString;
 use tempfile::TempDir;
 
-/// A no-op registry that always fails resolution (simulates missing GITHUB_TOKEN).
+/// A no-op registry that always fails resolution (simulates missing `GITHUB_TOKEN`).
 struct NoopRegistry;
 
 impl VersionRegistry for NoopRegistry {
@@ -44,15 +49,13 @@ impl MockRegistry {
     fn with_tags(mut self, id: &str, sha: &str, tags: &[&str]) -> Self {
         self.sha_tags.insert(
             (id.to_string(), sha.to_string()),
-            tags.iter().map(|t| t.to_string()).collect(),
+            tags.iter().map(ToString::to_string).collect(),
         );
         self
     }
 
     /// Generate a deterministic fake SHA from action id and version.
     fn fake_sha(id: &str, version: &str) -> String {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
         let mut hasher = DefaultHasher::new();
         id.hash(&mut hasher);
         version.hash(&mut hasher);
@@ -102,15 +105,31 @@ fn create_test_repo(temp_dir: &TempDir) -> std::path::PathBuf {
 fn run_tidy(repo_root: &Path) -> anyhow::Result<()> {
     let manifest_path = repo_root.join(".github").join("gx.toml");
     let lock_path = repo_root.join(".github").join("gx.lock");
+    let scanner = FileWorkflowScanner::new(repo_root);
+    let updater = FileWorkflowUpdater::new(repo_root);
 
     if manifest_path.exists() {
         let manifest = FileManifest::load_or_default(&manifest_path)?;
         let lock = FileLock::load_or_default(&lock_path)?;
-        tidy::run(repo_root, manifest, lock, MockRegistry::new())
+        tidy::run(
+            repo_root,
+            manifest,
+            lock,
+            MockRegistry::new(),
+            &scanner,
+            &updater,
+        )
     } else {
         let manifest = MemoryManifest::default();
         let lock = MemoryLock::default();
-        tidy::run(repo_root, manifest, lock, MockRegistry::new())
+        tidy::run(
+            repo_root,
+            manifest,
+            lock,
+            MockRegistry::new(),
+            &scanner,
+            &updater,
+        )
     }
 }
 
@@ -714,7 +733,9 @@ jobs:
             "5e57cd118135c172c3672efd75eb46360885c0ef",
             &["v3", "v3.6.0"],
         );
-    let result = tidy::run(&root, manifest, lock, registry);
+    let scanner = FileWorkflowScanner::new(&root);
+    let updater = FileWorkflowUpdater::new(&root);
+    let result = tidy::run(&root, manifest, lock, registry, &scanner, &updater);
     assert!(result.is_ok());
 
     // Verify manifest contains version tags from comments, not SHAs
@@ -762,7 +783,9 @@ jobs:
     let lock_path = root.join(".github").join("gx.lock");
     let manifest = FileManifest::load_or_default(&manifest_path).unwrap();
     let lock = FileLock::load_or_default(&lock_path).unwrap();
-    let result = tidy::run(&root, manifest, lock, NoopRegistry);
+    let scanner = FileWorkflowScanner::new(&root);
+    let updater = FileWorkflowUpdater::new(&root);
+    let result = tidy::run(&root, manifest, lock, NoopRegistry, &scanner, &updater);
 
     // The command should fail when it cannot resolve actions
     assert!(
@@ -800,24 +823,33 @@ jobs:
     let lock_path = root.join(".github").join("gx.lock");
     let manifest = FileManifest::load_or_default(&manifest_path).unwrap();
     let lock = FileLock::load_or_default(&lock_path).unwrap();
-    let result = tidy::run(&root, manifest, lock, MockRegistry::new());
+    let scanner = FileWorkflowScanner::new(&root);
+    let updater = FileWorkflowUpdater::new(&root);
+    let result = tidy::run(
+        &root,
+        manifest,
+        lock,
+        MockRegistry::new(),
+        &scanner,
+        &updater,
+    );
     assert!(result.is_ok());
 
     // Verify the workflow was updated: tags should be replaced with SHAs + version comments
-    let updated = fs::read_to_string(&workflow_path).unwrap();
+    let updated_workflow = fs::read_to_string(&workflow_path).unwrap();
 
     let checkout_sha = MockRegistry::fake_sha("actions/checkout", "v4");
     let expected_checkout = format!("actions/checkout@{checkout_sha} # v4");
     assert!(
-        updated.contains(&expected_checkout),
-        "Expected workflow to contain '{expected_checkout}', got:\n{updated}"
+        updated_workflow.contains(&expected_checkout),
+        "Expected workflow to contain '{expected_checkout}', got:\n{updated_workflow}"
     );
 
     let toolchain_sha = MockRegistry::fake_sha("dtolnay/rust-toolchain", "stable");
     let expected_toolchain = format!("dtolnay/rust-toolchain@{toolchain_sha} # stable");
     assert!(
-        updated.contains(&expected_toolchain),
-        "Expected workflow to contain '{expected_toolchain}', got:\n{updated}"
+        updated_workflow.contains(&expected_toolchain),
+        "Expected workflow to contain '{expected_toolchain}', got:\n{updated_workflow}"
     );
 
     // Verify lock file was created with the SHAs

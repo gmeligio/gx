@@ -4,12 +4,10 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::domain::{
-    ActionId, ActionResolver, ActionSpec, LockKey, ResolutionResult, Version, VersionCorrection,
-    VersionRegistry, WorkflowActionSet,
+    ActionId, ActionResolver, ActionSpec, LockKey, ResolutionResult, UpdateResult, Version,
+    VersionCorrection, VersionRegistry, WorkflowActionSet, WorkflowScanner, WorkflowUpdater,
 };
-use crate::infrastructure::{
-    LockStore, ManifestStore, UpdateResult, WorkflowParser, WorkflowWriter,
-};
+use crate::infrastructure::{LockStore, ManifestStore};
 
 /// Run the tidy command to synchronize workflow actions with the manifest. Adds missing actions and removes unused ones from the manifest.
 ///
@@ -21,13 +19,20 @@ use crate::infrastructure::{
 ///
 /// Panics if an action in the intersection of workflow and manifest actions is not found
 /// in the manifest (this should never happen due to the intersection logic).
-pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry>(
-    repo_root: &Path,
+pub fn run<
+    M: ManifestStore,
+    L: LockStore,
+    R: VersionRegistry,
+    P: WorkflowScanner,
+    W: WorkflowUpdater,
+>(
+    _repo_root: &Path,
     mut manifest: M,
     mut lock: L,
     registry: R,
+    parser: &P,
+    writer: &W,
 ) -> Result<()> {
-    let parser = WorkflowParser::new(repo_root);
     let action_set = parser.scan_all()?;
     if action_set.is_empty() {
         return Ok(());
@@ -115,7 +120,6 @@ pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry>(
     // Build update map with SHAs from lock file and version comments from manifest
     let update_map = lock.build_update_map(&keys_to_retain);
 
-    let writer = WorkflowWriter::new(repo_root);
     let results = writer.update_all(&update_map)?;
     print_update_results(&results);
 

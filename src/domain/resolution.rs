@@ -149,32 +149,42 @@ impl<R: VersionRegistry> ActionResolver<R> {
     }
 }
 
-/// Select the best tag from a list (prefers shorter semver-like tags)
+/// Parse a version string (with optional 'v' prefix) into numeric components.
+/// Returns `None` if any component is non-numeric.
+fn parse_version_components(s: &str) -> Option<Vec<u64>> {
+    let stripped = s.trim_start_matches('v');
+    stripped.split('.').map(|p| p.parse::<u64>().ok()).collect()
+}
+
+/// Select the best tag from a list (prefers semver-like tags with fewer components,
+/// then highest version value among equal component counts, non-semver tags last).
 fn select_best_tag(tags: &[Version]) -> Option<Version> {
     if tags.is_empty() {
         return None;
     }
 
-    // Convert to string refs for sorting
-    let tag_strs: Vec<&str> = tags.iter().map(Version::as_str).collect();
+    let mut indexed: Vec<(&Version, Option<Vec<u64>>)> = tags
+        .iter()
+        .map(|t| (t, parse_version_components(t.as_str())))
+        .collect();
 
-    // Prefer tags that look like semver (v1, v1.2, v1.2.3)
-    // Sort by: semver-like first, then by length (shorter is better for major version tags)
-    let mut sorted_tags: Vec<&str> = tag_strs;
-    sorted_tags.sort_by(|a, b| {
-        let a_is_semver =
-            a.starts_with('v') && a.chars().nth(1).is_some_and(|c| c.is_ascii_digit());
-        let b_is_semver =
-            b.starts_with('v') && b.chars().nth(1).is_some_and(|c| c.is_ascii_digit());
-
-        match (a_is_semver, b_is_semver) {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            _ => a.len().cmp(&b.len()),
+    // Sort: semver-like tags first (fewer components preferred: v4 < v4.1 < v4.1.0),
+    // then highest version value wins among equal component counts, non-semver tags last.
+    indexed.sort_by(|(_, av), (_, bv)| match (av, bv) {
+        (None, None) => std::cmp::Ordering::Equal,
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (Some(av), Some(bv)) => {
+            let a_len = av.len();
+            let b_len = bv.len();
+            match a_len.cmp(&b_len) {
+                std::cmp::Ordering::Equal => bv.cmp(av), // higher version wins (descending)
+                other => other,                          // fewer components wins (ascending)
+            }
         }
     });
 
-    sorted_tags.first().map(|s| Version::from(*s))
+    indexed.first().map(|(t, _)| (*t).clone())
 }
 
 #[cfg(test)]
@@ -296,5 +306,51 @@ mod tests {
             }
             _ => panic!("Expected Corrected result"),
         }
+    }
+
+    #[test]
+    fn test_select_best_tag_empty() {
+        assert_eq!(select_best_tag(&[]), None);
+    }
+
+    #[test]
+    fn test_select_best_tag_single() {
+        let tags = vec![Version::from("v4")];
+        assert_eq!(select_best_tag(&tags), Some(Version::from("v4")));
+    }
+
+    #[test]
+    fn test_select_best_tag_prefers_major_over_patch() {
+        let tags = vec![Version::from("v4.1.0"), Version::from("v4")];
+        assert_eq!(select_best_tag(&tags), Some(Version::from("v4")));
+    }
+
+    #[test]
+    fn test_select_best_tag_prefers_major_over_minor() {
+        let tags = vec![Version::from("v4.1"), Version::from("v4")];
+        assert_eq!(select_best_tag(&tags), Some(Version::from("v4")));
+    }
+
+    #[test]
+    fn test_select_best_tag_non_semver_sorted_last() {
+        let tags = vec![Version::from("latest"), Version::from("v4")];
+        assert_eq!(select_best_tag(&tags), Some(Version::from("v4")));
+    }
+
+    #[test]
+    fn test_select_best_tag_all_non_semver_returns_first() {
+        let tags = vec![Version::from("latest"), Version::from("stable")];
+        // No semver tags — returns the first one
+        assert!(select_best_tag(&tags).is_some());
+    }
+
+    #[test]
+    fn test_select_best_tag_higher_major_wins_among_same_precision() {
+        let tags = vec![
+            Version::from("v3"),
+            Version::from("v4"),
+            Version::from("v5"),
+        ];
+        assert_eq!(select_best_tag(&tags), Some(Version::from("v5")));
     }
 }

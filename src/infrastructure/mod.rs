@@ -10,4 +10,6 @@ pub use manifest::{
     FileManifest, MANIFEST_FILE_NAME, ManifestError, ManifestStore, MemoryManifest,
 };
 pub use repo::{RepoError, find_root};
-pub use workflow::{UpdateResult, WorkflowError, WorkflowParser, WorkflowWriter};
+pub use workflow::{FileWorkflowScanner, FileWorkflowUpdater};
+// WorkflowError and UpdateResult are now in domain; re-export from there for convenience
+pub use crate::domain::{UpdateResult, WorkflowError};
