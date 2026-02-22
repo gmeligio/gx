@@ -85,7 +85,7 @@ pub fn run<M: ManifestStore, L: LockStore>(
     // Save manifest and lock
     manifest.save()?;
 
-    let keys_to_retain: Vec<LockKey> = manifest.specs().iter().map(LockKey::from).collect();
+    let keys_to_retain: Vec<LockKey> = manifest.specs().iter().map(|s| LockKey::from(*s)).collect();
     lock.retain(&keys_to_retain);
     lock.save()?;
 

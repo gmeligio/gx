@@ -103,7 +103,7 @@ pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry>(
     manifest.save()?;
 
     // Remove unused entries from lock file
-    let keys_to_retain: Vec<LockKey> = manifest.specs().iter().map(LockKey::from).collect();
+    let keys_to_retain: Vec<LockKey> = manifest.specs().iter().map(|s| LockKey::from(*s)).collect();
     lock.retain(&keys_to_retain);
 
     // Save lock file only if dirty
@@ -148,7 +148,7 @@ fn update_lock_file<M: ManifestStore, L: LockStore, R: VersionRegistry>(
     let mut corrections = Vec::new();
     let mut unresolved = Vec::new();
 
-    let specs = manifest.specs();
+    let specs: Vec<ActionSpec> = manifest.specs().iter().map(|s| (*s).clone()).collect();
 
     // Check if there are any actions that need resolving
     let needs_resolving = specs.iter().any(|spec| !lock.has(&LockKey::from(spec)));

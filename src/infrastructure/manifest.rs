@@ -28,7 +28,7 @@ pub trait ManifestStore {
     fn save(&mut self) -> Result<(), ManifestError>;
 
     /// Get all action specs from the manifest
-    fn specs(&self) -> Vec<ActionSpec>;
+    fn specs(&self) -> Vec<&ActionSpec>;
 
     /// Remove an action
     fn remove(&mut self, id: &ActionId);
@@ -174,8 +174,8 @@ impl FileManifest {
 }
 
 impl ManifestStore for FileManifest {
-    fn specs(&self) -> Vec<ActionSpec> {
-        self.actions.values().cloned().collect()
+    fn specs(&self) -> Vec<&ActionSpec> {
+        self.actions.values().collect()
     }
 
     fn set(&mut self, id: ActionId, version: Version) {
@@ -244,8 +244,8 @@ impl MemoryManifest {
 }
 
 impl ManifestStore for MemoryManifest {
-    fn specs(&self) -> Vec<ActionSpec> {
-        self.actions.values().cloned().collect()
+    fn specs(&self) -> Vec<&ActionSpec> {
+        self.actions.values().collect()
     }
 
     fn set(&mut self, id: ActionId, version: Version) {
