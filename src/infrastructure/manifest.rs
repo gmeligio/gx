@@ -1,6 +1,6 @@
 use log::info;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -79,8 +79,8 @@ pub enum ManifestError {
 /// Internal structure for TOML serialization
 #[derive(Debug, Default, Deserialize, Serialize)]
 struct ManifestData {
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    actions: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    actions: BTreeMap<String, String>,
 }
 
 /// The main manifest structure mapping actions to versions
@@ -385,6 +385,45 @@ mod tests {
 
         let specs = manifest.specs();
         assert_eq!(specs.len(), 2);
+    }
+
+    #[test]
+    fn test_manifest_actions_saved_sorted_by_id() {
+        let mut manifest = FileManifest::default();
+        // Add actions in non-alphabetical order
+        manifest.set(ActionId::from("docker/build-push-action"), Version::from("v5"));
+        manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
+        manifest.set(ActionId::from("actions-rust-lang/rustfmt"), Version::from("v1"));
+
+        let file = NamedTempFile::new().unwrap();
+        manifest.path = Some(file.path().to_path_buf());
+        manifest.dirty = true;
+        manifest.save().unwrap();
+
+        // Read the saved file and verify actions are sorted
+        let content = fs::read_to_string(file.path()).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+
+        // Extract action lines (they start with a quote)
+        let action_lines: Vec<&str> = lines
+            .iter()
+            .filter(|line| line.trim().starts_with('"'))
+            .copied()
+            .collect();
+
+        // Verify they are in alphabetical order
+        let mut sorted_lines = action_lines.clone();
+        sorted_lines.sort();
+        assert_eq!(
+            action_lines, sorted_lines,
+            "Actions should be sorted alphabetically by ID in the manifest file"
+        );
+
+        // Verify the expected order: '-' (45) sorts before '/' (47), so
+        // "actions-rust-lang/rustfmt" < "actions/checkout" < "docker/build-push-action"
+        assert!(action_lines[0].contains("actions-rust-lang/rustfmt"));
+        assert!(action_lines[1].contains("actions/checkout"));
+        assert!(action_lines[2].contains("docker/build-push-action"));
     }
 
     #[test]
