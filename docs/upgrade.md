@@ -45,24 +45,6 @@ The following are not upgraded or re-pinned:
 - Bare commit SHAs without a version comment (no ref to re-resolve)
 - Actions where `GITHUB_TOKEN` is missing or the API call fails (logged as warnings)
 
-## Pre-flight drift check
-
-Before checking for upgrades, `gx upgrade` verifies that your workflows are in sync with `gx.toml`. If drift is detected, it errors with a description of each discrepancy and instructs you to run `gx tidy` first:
-
-```
-[ERROR] Workflows are out of sync with gx.toml:
-  - actions/checkout: workflow has v4, gx.toml has v3
-  - actions/setup-python: in workflow but not in gx.toml
-Run `gx tidy` first.
-```
-
-Drift is any of:
-- An action present in a workflow but missing from `gx.toml`
-- An action in `gx.toml` but not referenced in any workflow
-- An action in both, but with different versions
-
-For targeted upgrades (`gx upgrade actions/checkout@v5`), only the targeted action is checked for drift. Drift on other actions does not block a targeted upgrade.
-
 ## Two modes
 
 Like other gx commands, `upgrade` works in two modes:
