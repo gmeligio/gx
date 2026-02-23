@@ -10,7 +10,7 @@ use crate::domain::{ActionId, ActionSpec, Manifest, Version, WorkflowActionSet};
 pub const MANIFEST_FILE_NAME: &str = "gx.toml";
 
 /// Pure I/O trait for loading and saving the manifest.
-/// Domain operations (get, set, remove, `detect_drift`, etc.) live on `Manifest`.
+/// Domain operations (get, set, remove, etc.) live on `Manifest`.
 pub trait ManifestStore {
     /// Load the manifest from storage, returning a `Manifest` domain entity.
     ///
