@@ -57,6 +57,7 @@ mod tests {
     use super::*;
     use crate::domain::{ActionId, Version};
 
+    #[allow(dead_code)]
     fn make_manifest(entries: &[(&str, &str)]) -> Manifest {
         let mut m = Manifest::default();
         for (id, ver) in entries {
