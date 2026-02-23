@@ -59,25 +59,28 @@ fn main() -> Result<()> {
         Commands::Tidy => commands::app::tidy(&repo_root, &manifest_path, &lock_path),
         Commands::Init => commands::app::init(&repo_root, &manifest_path, &lock_path),
         Commands::Upgrade { action, latest } => {
-            let mode = resolve_upgrade_mode(action, latest)?;
+            let mode = resolve_upgrade_mode(action.as_deref(), latest)?;
             commands::app::upgrade(&repo_root, &manifest_path, &lock_path, &mode)
         }
     }
 }
 
 fn resolve_upgrade_mode(
-    action: Option<String>,
+    action: Option<&str>,
     latest: bool,
 ) -> Result<commands::upgrade::UpgradeMode> {
     if latest {
         Ok(commands::upgrade::UpgradeMode::Latest)
-    } else if let Some(ref action_str) = action {
+    } else if let Some(action_str) = action {
         let key = gx::domain::LockKey::parse(action_str).ok_or_else(|| {
             anyhow::anyhow!(
                 "Invalid format: expected ACTION@VERSION (e.g., actions/checkout@v5), got: {action_str}"
             )
         })?;
-        Ok(commands::upgrade::UpgradeMode::Targeted(key.id, key.version))
+        Ok(commands::upgrade::UpgradeMode::Targeted(
+            key.id,
+            key.version,
+        ))
     } else {
         Ok(commands::upgrade::UpgradeMode::Safe)
     }
