@@ -2,7 +2,7 @@
 
 This document describes how the `tidy` command works and the assumptions made during implementation.
 
-**Diagram:** [tidy command flow](tidy-command.excalidraw.json)
+**Diagrams:** [System overview](overview-architecture.excalidraw) · [tidy command flow](tidy-command.excalidraw.json)
 
 ## Overview
 

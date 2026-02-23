@@ -1,5 +1,7 @@
 # upgrade command - Implementation
 
+**Diagram:** [System overview](overview-architecture.excalidraw)
+
 ## Overview
 
 The `upgrade` command finds newer versions of actions via the Github API, applies upgrades to the manifest, resolves new SHAs, and updates workflows.
