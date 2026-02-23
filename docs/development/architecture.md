@@ -4,6 +4,7 @@
 
 | Diagram | Description |
 |---------|-------------|
+| [**System overview**](overview-architecture.excalidraw) | High-level overview: commands, data flow, files, GitHub API |
 | [Domain module](domain-architecture.excalidraw.json) | All domain types and how they relate |
 | [Manifest system](manifest-architecture.excalidraw.json) | `Manifest` domain entity, `ManifestStore` I/O trait, `FileManifest`, `MemoryManifest` |
 | [Lock system](lock-architecture.excalidraw.json) | `Lock` domain entity, `LockStore` I/O trait, `FileLock`, `MemoryLock` |

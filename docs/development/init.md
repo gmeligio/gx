@@ -1,5 +1,7 @@
 # init command - Implementation
 
+**Diagram:** [System overview](overview-architecture.excalidraw)
+
 ## Overview
 
 The `init` command is a thin wrapper that validates preconditions, then delegates to `tidy::run` with file-backed stores.
