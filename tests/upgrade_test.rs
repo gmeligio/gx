@@ -5,7 +5,7 @@ use gx::domain::{
     VersionRegistry,
 };
 use gx::infrastructure::{
-    FileLock, FileManifest, FileWorkflowScanner, FileWorkflowUpdater, LockStore, ManifestStore,
+    FileLock, FileManifest, FileWorkflowUpdater, LockStore, ManifestStore,
     MemoryLock, MemoryManifest,
 };
 use std::fs;
@@ -84,7 +84,6 @@ fn run_upgrade_file_backed(repo_root: &Path) -> anyhow::Result<()> {
     let manifest = manifest_store.load()?;
     let lock_store = FileLock::new(&lock_path);
     let lock = lock_store.load()?;
-    let scanner = FileWorkflowScanner::new(repo_root);
     let updater = FileWorkflowUpdater::new(repo_root);
     upgrade::run(
         repo_root,
@@ -93,7 +92,6 @@ fn run_upgrade_file_backed(repo_root: &Path) -> anyhow::Result<()> {
         lock,
         lock_store,
         MockUpgradeRegistry::new(),
-        &scanner,
         &updater,
         &UpgradeMode::Safe,
     )
@@ -112,11 +110,10 @@ fn test_upgrade_empty_manifest_is_noop() {
         "name: CI\njobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n",
     );
 
-    // Manifest matches workflow — no drift — but MockRegistry returns no tags → no upgrade (noop)
+    // MockRegistry returns no tags → no upgrade (noop)
     let mut manifest = Manifest::default();
     manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
     let lock = Lock::default();
-    let scanner = FileWorkflowScanner::new(&root);
     let updater = FileWorkflowUpdater::new(&root);
     let result = upgrade::run(
         &root,
@@ -125,7 +122,6 @@ fn test_upgrade_empty_manifest_is_noop() {
         lock,
         MemoryLock,
         MockUpgradeRegistry::new(),
-        &scanner,
         &updater,
         &UpgradeMode::Safe,
     );
@@ -137,7 +133,7 @@ fn test_upgrade_empty_file_manifest_is_noop() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
-    // Manifest matches the workflow — no drift. MockRegistry returns no tags → noop.
+    // MockRegistry returns no tags → noop.
     create_manifest(&root, "[actions]\n\"actions/checkout\" = \"v4\"\n");
     create_workflow(
         &root,
@@ -156,13 +152,12 @@ fn test_upgrade_empty_file_manifest_is_noop() {
 
 #[test]
 fn test_upgrade_non_semver_versions_skipped() {
-    // No workflow files → scanner returns empty → no drift. Empty manifest → early return.
+    // Empty manifest → early return.
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
     let manifest = Manifest::default();
     let lock = Lock::default();
-    let scanner = FileWorkflowScanner::new(&root);
     let updater = FileWorkflowUpdater::new(&root);
     let result = upgrade::run(
         &root,
@@ -171,7 +166,6 @@ fn test_upgrade_non_semver_versions_skipped() {
         lock,
         MemoryLock,
         MockUpgradeRegistry::new(),
-        &scanner,
         &updater,
         &UpgradeMode::Safe,
     );
@@ -183,7 +177,7 @@ fn test_upgrade_preserves_workflow_structure() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
-    // Manifest matches the workflow — no drift. MockRegistry returns no tags → noop.
+    // MockRegistry returns no tags → noop.
     create_manifest(&root, "[actions]\n\"actions/checkout\" = \"v4\"\n");
 
     let workflow_content = "name: CI
@@ -210,7 +204,7 @@ fn test_upgrade_no_lock_file_created_when_empty_manifest() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
-    // Empty manifest, no workflow files → scanner finds nothing → no drift → early return
+    // Empty manifest → early return
     create_manifest(&root, "[actions]\n");
 
     let result = run_upgrade_file_backed(&root);
@@ -257,11 +251,9 @@ fn test_upgrade_memory_stores_no_side_effects() {
         "name: CI\njobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n",
     );
 
-    // Manifest matches workflow — no drift
     let mut manifest = Manifest::default();
     manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
     let lock = Lock::default();
-    let scanner = FileWorkflowScanner::new(&root);
     let updater = FileWorkflowUpdater::new(&root);
     let result = upgrade::run(
         &root,
@@ -270,7 +262,6 @@ fn test_upgrade_memory_stores_no_side_effects() {
         lock,
         MemoryLock,
         MockUpgradeRegistry::new(),
-        &scanner,
         &updater,
         &UpgradeMode::Safe,
     );
@@ -414,7 +405,6 @@ fn test_upgrade_repins_branch_ref() {
         CommitSha::from(old_sha),
     ));
 
-    let scanner = FileWorkflowScanner::new(&root);
     let updater = FileWorkflowUpdater::new(&root);
     let result = upgrade::run(
         &root,
@@ -423,7 +413,6 @@ fn test_upgrade_repins_branch_ref() {
         lock,
         MemoryLock,
         MockUpgradeRegistry::new(),
-        &scanner,
         &updater,
         &UpgradeMode::Safe,
     );
@@ -451,7 +440,6 @@ fn test_upgrade_latest_also_repins_branch_ref() {
     );
     create_workflow(&root, "ci.yml", &workflow_content);
 
-    // Manifest matches scanner → no drift
     let mut manifest = Manifest::default();
     manifest.set(ActionId::from("my-org/my-action"), Version::from("main"));
 
@@ -462,7 +450,6 @@ fn test_upgrade_latest_also_repins_branch_ref() {
         CommitSha::from(old_sha),
     ));
 
-    let scanner = FileWorkflowScanner::new(&root);
     let updater = FileWorkflowUpdater::new(&root);
     let result = upgrade::run(
         &root,
@@ -471,7 +458,6 @@ fn test_upgrade_latest_also_repins_branch_ref() {
         lock,
         MemoryLock,
         MockUpgradeRegistry::new(),
-        &scanner,
         &updater,
         &UpgradeMode::Latest,
     );
@@ -499,7 +485,6 @@ fn test_upgrade_targeted_does_not_repin_branch_ref() {
     );
     create_workflow(&root, "ci.yml", &workflow_content);
 
-    // Manifest matches scanner → targeted filter on checkout, no drift on checkout (v4 = v4)
     let mut manifest = Manifest::default();
     manifest.set(ActionId::from("my-org/my-action"), Version::from("main"));
     manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
@@ -523,7 +508,6 @@ fn test_upgrade_targeted_does_not_repin_branch_ref() {
         vec!["v4".to_string(), "v5".to_string()],
     );
 
-    let scanner = FileWorkflowScanner::new(&root);
     let updater = FileWorkflowUpdater::new(&root);
     let result = upgrade::run(
         &root,
@@ -532,7 +516,6 @@ fn test_upgrade_targeted_does_not_repin_branch_ref() {
         lock,
         MemoryLock,
         registry,
-        &scanner,
         &updater,
         &UpgradeMode::Targeted(ActionId::from("actions/checkout"), Version::from("v5")),
     );
@@ -561,7 +544,6 @@ fn test_upgrade_mixed_semver_and_branch() {
     );
     create_workflow(&root, "ci.yml", &workflow_content);
 
-    // Manifest matches scanner (main and v4) → no drift
     let mut manifest = Manifest::default();
     manifest.set(ActionId::from("my-org/my-action"), Version::from("main"));
     manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
@@ -585,7 +567,6 @@ fn test_upgrade_mixed_semver_and_branch() {
         vec!["v4".to_string(), "v5".to_string()],
     );
 
-    let scanner = FileWorkflowScanner::new(&root);
     let updater = FileWorkflowUpdater::new(&root);
     let result = upgrade::run(
         &root,
@@ -594,7 +575,6 @@ fn test_upgrade_mixed_semver_and_branch() {
         lock,
         MemoryLock,
         registry,
-        &scanner,
         &updater,
         &UpgradeMode::Latest,
     );
@@ -630,12 +610,10 @@ fn test_upgrade_skips_bare_sha() {
     );
     create_workflow(&root, "ci.yml", &workflow_content);
 
-    // Manifest matches scanner (bare_sha version) → no drift
     let mut manifest = Manifest::default();
     manifest.set(ActionId::from("my-org/my-action"), Version::from(bare_sha));
 
     let lock = Lock::default();
-    let scanner = FileWorkflowScanner::new(&root);
     let updater = FileWorkflowUpdater::new(&root);
     let result = upgrade::run(
         &root,
@@ -644,7 +622,6 @@ fn test_upgrade_skips_bare_sha() {
         lock,
         MemoryLock,
         MockUpgradeRegistry::new(),
-        &scanner,
         &updater,
         &UpgradeMode::Safe,
     );
