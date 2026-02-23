@@ -97,7 +97,6 @@ pub fn upgrade(
     mode: &UpgradeMode,
 ) -> Result<()> {
     let registry = GithubRegistry::from_env()?;
-    let scanner = FileWorkflowScanner::new(repo_root);
     let updater = FileWorkflowUpdater::new(repo_root);
 
     if manifest_path.exists() {
@@ -112,7 +111,6 @@ pub fn upgrade(
             lock,
             lock_store,
             registry,
-            &scanner,
             &updater,
             mode,
         )
@@ -129,7 +127,6 @@ pub fn upgrade(
             lock,
             lock_store,
             registry,
-            &scanner,
             &updater,
             mode,
         )
