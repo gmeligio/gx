@@ -59,19 +59,19 @@ let lock = lock_store.load()?;
 ...
 // Injects into command use case
 commands::tidy::run(&repo_root, manifest, manifest_store, lock, lock_store, registry, &scanner, &updater)
+// Note: some commands like tidy require scanner; others like upgrade do not
 ```
 
 Commands accept domain entities and store trait abstractions:
 
 ```rust
-pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, P: WorkflowScanner, W: WorkflowUpdater>(
+pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, W: WorkflowUpdater>(
     repo_root: &Path,
     mut manifest: Manifest,
     manifest_store: M,
     mut lock: Lock,
     lock_store: L,
     registry: R,
-    scanner: &P,
     writer: &W,
 ) -> Result<()>
 ```
@@ -82,20 +82,12 @@ pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, P: WorkflowScanne
 
 Owns the `ActionId → ActionSpec` map and all domain behaviour:
 - `get`, `set`, `remove`, `has`, `is_empty`, `specs` — data access and mutation
-- `detect_drift(action_set, filter)` — compares manifest against scanned workflow actions; returns `Vec<DriftItem>`
 
 ### Lock (`domain/lock.rs`)
 
 Owns the `LockKey → CommitSha` map and all domain behaviour:
 - `get`, `set`, `has`, `retain` — data access and mutation
 - `build_update_map(keys)` — formats entries as `"SHA # version"` strings for workflow updates
-
-### DriftItem (`domain/manifest.rs`)
-
-Returned by `Manifest::detect_drift`:
-- `MissingFromManifest { id }` — action in workflow but not in `gx.toml`
-- `MissingFromWorkflow { id }` — action in `gx.toml` but not in any workflow
-- `VersionMismatch { id, manifest_version, workflow_version }` — version differs between sides
 
 ## Trait abstractions
 
@@ -132,7 +124,7 @@ UsesRef { action_name, uses_ref, comment }
 InterpretedRef { id: ActionId, version: Version, sha: Option<CommitSha> }
     ▼ (aggregated across workflows)
 WorkflowActionSet { versions, shas }
-    ▼ (manifest sync / drift detection)
+    ▼
 Manifest { actions: HashMap<ActionId, ActionSpec> }
     ▼ (resolved via VersionRegistry)
 ResolvedAction { id: ActionId, version: Version, sha: CommitSha }
