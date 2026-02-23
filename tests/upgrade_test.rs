@@ -1,11 +1,12 @@
 use gx::commands::upgrade;
 use gx::commands::upgrade::UpgradeMode;
 use gx::domain::{
-    ActionId, CommitSha, LockKey, ResolutionError, ResolvedAction, Version, VersionRegistry,
+    ActionId, CommitSha, Lock, LockKey, Manifest, ResolutionError, ResolvedAction, Version,
+    VersionRegistry,
 };
 use gx::infrastructure::{
-    FileLock, FileManifest, FileWorkflowUpdater, LockStore, ManifestStore, MemoryLock,
-    MemoryManifest,
+    FileLock, FileManifest, FileWorkflowScanner, FileWorkflowUpdater, LockStore, ManifestStore,
+    MemoryLock, MemoryManifest,
 };
 use std::fs;
 use std::io::Write;
@@ -79,14 +80,20 @@ fn create_workflow(root: &Path, name: &str, content: &str) {
 fn run_upgrade_file_backed(repo_root: &Path) -> anyhow::Result<()> {
     let manifest_path = repo_root.join(".github").join("gx.toml");
     let lock_path = repo_root.join(".github").join("gx.lock");
-    let manifest = FileManifest::load_or_default(&manifest_path)?;
-    let lock = FileLock::load_or_default(&lock_path)?;
+    let manifest_store = FileManifest::new(&manifest_path);
+    let manifest = manifest_store.load()?;
+    let lock_store = FileLock::new(&lock_path);
+    let lock = lock_store.load()?;
+    let scanner = FileWorkflowScanner::new(repo_root);
     let updater = FileWorkflowUpdater::new(repo_root);
     upgrade::run(
         repo_root,
         manifest,
+        manifest_store,
         lock,
+        lock_store,
         MockUpgradeRegistry::new(),
+        &scanner,
         &updater,
         &UpgradeMode::Safe,
     )
@@ -105,15 +112,20 @@ fn test_upgrade_empty_manifest_is_noop() {
         "name: CI\njobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n",
     );
 
-    // Empty MemoryManifest should return Ok immediately
-    let manifest = MemoryManifest::default();
-    let lock = MemoryLock::default();
+    // Manifest matches workflow — no drift — but MockRegistry returns no tags → no upgrade (noop)
+    let mut manifest = Manifest::default();
+    manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
+    let lock = Lock::default();
+    let scanner = FileWorkflowScanner::new(&root);
     let updater = FileWorkflowUpdater::new(&root);
     let result = upgrade::run(
         &root,
         manifest,
+        MemoryManifest::default(),
         lock,
+        MemoryLock,
         MockUpgradeRegistry::new(),
+        &scanner,
         &updater,
         &UpgradeMode::Safe,
     );
@@ -125,7 +137,8 @@ fn test_upgrade_empty_file_manifest_is_noop() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
-    create_manifest(&root, "[actions]\n");
+    // Manifest matches the workflow — no drift. MockRegistry returns no tags → noop.
+    create_manifest(&root, "[actions]\n\"actions/checkout\" = \"v4\"\n");
     create_workflow(
         &root,
         "ci.yml",
@@ -135,29 +148,30 @@ fn test_upgrade_empty_file_manifest_is_noop() {
     let result = run_upgrade_file_backed(&root);
     assert!(result.is_ok());
 
-    // Manifest should remain unchanged (empty)
+    // Manifest should remain unchanged (early return before save, no upgrades)
     let manifest_content = fs::read_to_string(root.join(".github").join("gx.toml")).unwrap();
-    assert_eq!(manifest_content, "[actions]\n");
+    assert!(manifest_content.contains("actions/checkout"));
+    assert!(manifest_content.contains("v4"));
 }
 
 #[test]
 fn test_upgrade_non_semver_versions_skipped() {
-    // When manifest has non-semver versions (like SHAs or branches),
-    // they should be skipped during upgrade. The function still calls
-    // GithubRegistry::from_env() if there are specs, so this test
-    // only verifies the empty-manifest fast path.
+    // No workflow files → scanner returns empty → no drift. Empty manifest → early return.
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
-    let manifest = MemoryManifest::default();
-    let lock = MemoryLock::default();
-
+    let manifest = Manifest::default();
+    let lock = Lock::default();
+    let scanner = FileWorkflowScanner::new(&root);
     let updater = FileWorkflowUpdater::new(&root);
     let result = upgrade::run(
         &root,
         manifest,
+        MemoryManifest::default(),
         lock,
+        MemoryLock,
         MockUpgradeRegistry::new(),
+        &scanner,
         &updater,
         &UpgradeMode::Safe,
     );
@@ -169,8 +183,8 @@ fn test_upgrade_preserves_workflow_structure() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
-    // Create empty manifest - upgrade should early-return
-    create_manifest(&root, "[actions]\n");
+    // Manifest matches the workflow — no drift. MockRegistry returns no tags → noop.
+    create_manifest(&root, "[actions]\n\"actions/checkout\" = \"v4\"\n");
 
     let workflow_content = "name: CI
 on: push
@@ -186,7 +200,7 @@ jobs:
     let result = run_upgrade_file_backed(&root);
     assert!(result.is_ok());
 
-    // Workflow should be unchanged since manifest is empty
+    // Workflow should be unchanged since no upgrades are available
     let after = fs::read_to_string(root.join(".github").join("workflows").join("ci.yml")).unwrap();
     assert_eq!(after, workflow_content);
 }
@@ -196,6 +210,7 @@ fn test_upgrade_no_lock_file_created_when_empty_manifest() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
+    // Empty manifest, no workflow files → scanner finds nothing → no drift → early return
     create_manifest(&root, "[actions]\n");
 
     let result = run_upgrade_file_backed(&root);
@@ -214,7 +229,8 @@ fn test_upgrade_with_existing_lock_and_empty_manifest() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
-    create_manifest(&root, "[actions]\n");
+    // Manifest matches the workflow — no drift
+    create_manifest(&root, "[actions]\n\"actions/checkout\" = \"v4\"\n");
     create_lock(
         &root,
         "version = \"1.0\"\n\n[actions]\n\"actions/checkout@v4\" = \"abc123def456789012345678901234567890abcd\"\n",
@@ -241,15 +257,20 @@ fn test_upgrade_memory_stores_no_side_effects() {
         "name: CI\njobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n",
     );
 
-    let manifest = MemoryManifest::default();
-    let lock = MemoryLock::default();
-
+    // Manifest matches workflow — no drift
+    let mut manifest = Manifest::default();
+    manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
+    let lock = Lock::default();
+    let scanner = FileWorkflowScanner::new(&root);
     let updater = FileWorkflowUpdater::new(&root);
     let result = upgrade::run(
         &root,
         manifest,
+        MemoryManifest::default(),
         lock,
+        MemoryLock,
         MockUpgradeRegistry::new(),
+        &scanner,
         &updater,
         &UpgradeMode::Safe,
     );
@@ -265,7 +286,11 @@ fn test_upgrade_multiple_workflows_empty_manifest() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
-    create_manifest(&root, "[actions]\n");
+    // Manifest matches both workflow actions — no drift. MockRegistry returns no tags → noop.
+    create_manifest(
+        &root,
+        "[actions]\n\"actions/checkout\" = \"v4\"\n\"docker/build-push-action\" = \"v5\"\n",
+    );
 
     create_workflow(
         &root,
@@ -278,25 +303,12 @@ fn test_upgrade_multiple_workflows_empty_manifest() {
         "name: Deploy\njobs:\n  deploy:\n    steps:\n      - uses: docker/build-push-action@v5\n",
     );
 
-    // Empty manifest means early return, no GitHub calls
     let result = run_upgrade_file_backed(&root);
     assert!(result.is_ok());
 }
 
 /// Reproduces the bug where `upgrade` replaces SHAs with bare version tags
 /// for actions that have no available upgrade.
-///
-/// In `upgrade::run`, only upgraded actions get their SHAs resolved. Non-upgraded
-/// actions are never resolved, so the lock has no entry for them. The code then
-/// calls `build_update_map` for ALL manifest specs, and `build_update_map` falls
-/// back to the bare version string when no SHA is in the lock. Finally,
-/// `update_all` rewrites the workflow, changing:
-///   uses: docker/login-action@5e57cd...ef # v3.6.0
-/// to:
-///   uses: docker/login-action@v3.6.0
-///
-/// The upgrade command should only update workflows for actions that were
-/// actually upgraded, leaving non-upgraded actions untouched.
 #[test]
 fn test_upgrade_preserves_sha_for_non_upgraded_actions() {
     let temp_dir = TempDir::new().unwrap();
@@ -320,7 +332,7 @@ jobs:
     create_workflow(&root, "ci.yml", &workflow_content);
 
     // Manifest has both actions
-    let mut manifest = MemoryManifest::default();
+    let mut manifest = Manifest::default();
     manifest.set(
         ActionId::from("docker/login-action"),
         Version::from("v3.6.0"),
@@ -329,7 +341,7 @@ jobs:
 
     // Lock starts empty — upgrade::run only resolves SHAs for upgraded actions,
     // not for actions that stay at their current version.
-    let mut lock = MemoryLock::default();
+    let mut lock = Lock::default();
 
     // Simulate: only checkout gets upgraded to v6.0.2
     manifest.set(ActionId::from("actions/checkout"), Version::from("v6.0.2"));
@@ -390,31 +402,34 @@ fn test_upgrade_repins_branch_ref() {
     );
     create_workflow(&root, "ci.yml", &workflow_content);
 
-    // Manifest has the branch ref
-    let mut manifest = MemoryManifest::default();
+    // Manifest has the branch ref — matches scanner result (version="main") → no drift
+    let mut manifest = Manifest::default();
     manifest.set(ActionId::from("my-org/my-action"), Version::from("main"));
 
     // Lock has the old SHA
-    let mut lock = MemoryLock::default();
+    let mut lock = Lock::default();
     lock.set(&ResolvedAction::new(
         ActionId::from("my-org/my-action"),
         Version::from("main"),
         CommitSha::from(old_sha),
     ));
 
+    let scanner = FileWorkflowScanner::new(&root);
     let updater = FileWorkflowUpdater::new(&root);
     let result = upgrade::run(
         &root,
         manifest,
+        MemoryManifest::default(),
         lock,
+        MemoryLock,
         MockUpgradeRegistry::new(),
+        &scanner,
         &updater,
         &UpgradeMode::Safe,
     );
-    assert!(result.is_ok());
+    assert!(result.is_ok(), "upgrade failed: {:?}", result.unwrap_err());
 
     // Verify workflow was updated with the new SHA from MockUpgradeRegistry
-    // MockUpgradeRegistry.lookup_sha generates: "my-orgmy-actionmain" zero-padded to 40 chars
     let expected_sha = format!("{:0<40}", "my-orgmy-actionmain");
     let updated_workflow =
         fs::read_to_string(root.join(".github").join("workflows").join("ci.yml")).unwrap();
@@ -436,22 +451,27 @@ fn test_upgrade_latest_also_repins_branch_ref() {
     );
     create_workflow(&root, "ci.yml", &workflow_content);
 
-    let mut manifest = MemoryManifest::default();
+    // Manifest matches scanner → no drift
+    let mut manifest = Manifest::default();
     manifest.set(ActionId::from("my-org/my-action"), Version::from("main"));
 
-    let mut lock = MemoryLock::default();
+    let mut lock = Lock::default();
     lock.set(&ResolvedAction::new(
         ActionId::from("my-org/my-action"),
         Version::from("main"),
         CommitSha::from(old_sha),
     ));
 
+    let scanner = FileWorkflowScanner::new(&root);
     let updater = FileWorkflowUpdater::new(&root);
     let result = upgrade::run(
         &root,
         manifest,
+        MemoryManifest::default(),
         lock,
+        MemoryLock,
         MockUpgradeRegistry::new(),
+        &scanner,
         &updater,
         &UpgradeMode::Latest,
     );
@@ -479,11 +499,12 @@ fn test_upgrade_targeted_does_not_repin_branch_ref() {
     );
     create_workflow(&root, "ci.yml", &workflow_content);
 
-    let mut manifest = MemoryManifest::default();
+    // Manifest matches scanner → targeted filter on checkout, no drift on checkout (v4 = v4)
+    let mut manifest = Manifest::default();
     manifest.set(ActionId::from("my-org/my-action"), Version::from("main"));
     manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
 
-    let mut lock = MemoryLock::default();
+    let mut lock = Lock::default();
     lock.set(&ResolvedAction::new(
         ActionId::from("my-org/my-action"),
         Version::from("main"),
@@ -502,12 +523,16 @@ fn test_upgrade_targeted_does_not_repin_branch_ref() {
         vec!["v4".to_string(), "v5".to_string()],
     );
 
+    let scanner = FileWorkflowScanner::new(&root);
     let updater = FileWorkflowUpdater::new(&root);
     let result = upgrade::run(
         &root,
         manifest,
+        MemoryManifest::default(),
         lock,
+        MemoryLock,
         registry,
+        &scanner,
         &updater,
         &UpgradeMode::Targeted(ActionId::from("actions/checkout"), Version::from("v5")),
     );
@@ -536,11 +561,12 @@ fn test_upgrade_mixed_semver_and_branch() {
     );
     create_workflow(&root, "ci.yml", &workflow_content);
 
-    let mut manifest = MemoryManifest::default();
+    // Manifest matches scanner (main and v4) → no drift
+    let mut manifest = Manifest::default();
     manifest.set(ActionId::from("my-org/my-action"), Version::from("main"));
     manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
 
-    let mut lock = MemoryLock::default();
+    let mut lock = Lock::default();
     lock.set(&ResolvedAction::new(
         ActionId::from("my-org/my-action"),
         Version::from("main"),
@@ -559,12 +585,16 @@ fn test_upgrade_mixed_semver_and_branch() {
         vec!["v4".to_string(), "v5".to_string()],
     );
 
+    let scanner = FileWorkflowScanner::new(&root);
     let updater = FileWorkflowUpdater::new(&root);
     let result = upgrade::run(
         &root,
         manifest,
+        MemoryManifest::default(),
         lock,
+        MemoryLock,
         registry,
+        &scanner,
         &updater,
         &UpgradeMode::Latest,
     );
@@ -600,17 +630,21 @@ fn test_upgrade_skips_bare_sha() {
     );
     create_workflow(&root, "ci.yml", &workflow_content);
 
-    let mut manifest = MemoryManifest::default();
+    // Manifest matches scanner (bare_sha version) → no drift
+    let mut manifest = Manifest::default();
     manifest.set(ActionId::from("my-org/my-action"), Version::from(bare_sha));
 
-    let lock = MemoryLock::default();
-
+    let lock = Lock::default();
+    let scanner = FileWorkflowScanner::new(&root);
     let updater = FileWorkflowUpdater::new(&root);
     let result = upgrade::run(
         &root,
         manifest,
+        MemoryManifest::default(),
         lock,
+        MemoryLock,
         MockUpgradeRegistry::new(),
+        &scanner,
         &updater,
         &UpgradeMode::Safe,
     );

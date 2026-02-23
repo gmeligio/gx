@@ -1,10 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use gx::commands;
-use gx::infrastructure::{
-    FileLock, FileWorkflowScanner, FileWorkflowUpdater, GithubRegistry, LOCK_FILE_NAME, MemoryLock,
-};
-use gx::infrastructure::{FileManifest, MANIFEST_FILE_NAME, MemoryManifest};
+use gx::infrastructure::{LOCK_FILE_NAME, MANIFEST_FILE_NAME};
 use gx::infrastructure::{repo, repo::RepoError};
 use log::{LevelFilter, info};
 use std::io::Write;
@@ -57,62 +54,35 @@ fn main() -> Result<()> {
 
     let manifest_path = repo_root.join(".github").join(MANIFEST_FILE_NAME);
     let lock_path = repo_root.join(".github").join(LOCK_FILE_NAME);
-    match cli.command {
-        Commands::Tidy => {
-            let registry = GithubRegistry::from_env()?;
-            let updater = FileWorkflowUpdater::new(&repo_root);
-            if manifest_path.exists() {
-                let manifest = FileManifest::load_or_default(&manifest_path)?;
-                let lock = FileLock::load_or_default(&lock_path)?;
-                let scanner = FileWorkflowScanner::new(&repo_root);
-                commands::tidy::run(&repo_root, manifest, lock, registry, &scanner, &updater)
-            } else {
-                let action_set = FileWorkflowScanner::new(&repo_root).scan_all()?;
-                let manifest = MemoryManifest::from_workflows(&action_set);
-                let lock = MemoryLock::default();
-                let scanner = FileWorkflowScanner::new(&repo_root);
-                commands::tidy::run(&repo_root, manifest, lock, registry, &scanner, &updater)
-            }
-        }
-        Commands::Init => {
-            if manifest_path.exists() {
-                anyhow::bail!("Already initialized. Use `gx tidy` to update.");
-            }
-            info!("Reading actions from workflows into the manifest...");
-            let registry = GithubRegistry::from_env()?;
-            let manifest = FileManifest::load_or_default(&manifest_path)?;
-            let lock = FileLock::load_or_default(&lock_path)?;
-            let scanner = FileWorkflowScanner::new(&repo_root);
-            let updater = FileWorkflowUpdater::new(&repo_root);
-            commands::tidy::run(&repo_root, manifest, lock, registry, &scanner, &updater)
-        }
-        Commands::Upgrade { action, latest } => {
-            let mode = if latest {
-                commands::upgrade::UpgradeMode::Latest
-            } else if let Some(ref action_str) = action {
-                let key = gx::domain::LockKey::parse(action_str).ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "Invalid format: expected ACTION@VERSION (e.g., actions/checkout@v5), got: {action_str}"
-                    )
-                })?;
-                commands::upgrade::UpgradeMode::Targeted(key.id, key.version)
-            } else {
-                commands::upgrade::UpgradeMode::Safe
-            };
 
-            let registry = GithubRegistry::from_env()?;
-            let updater = FileWorkflowUpdater::new(&repo_root);
-            if manifest_path.exists() {
-                let manifest = FileManifest::load_or_default(&manifest_path)?;
-                let lock = FileLock::load_or_default(&lock_path)?;
-                commands::upgrade::run(&repo_root, manifest, lock, registry, &updater, &mode)
-            } else {
-                let action_set = FileWorkflowScanner::new(&repo_root).scan_all()?;
-                let manifest = MemoryManifest::from_workflows(&action_set);
-                let lock = MemoryLock::default();
-                commands::upgrade::run(&repo_root, manifest, lock, registry, &updater, &mode)
-            }
+    match cli.command {
+        Commands::Tidy => commands::app::tidy(&repo_root, &manifest_path, &lock_path),
+        Commands::Init => commands::app::init(&repo_root, &manifest_path, &lock_path),
+        Commands::Upgrade { action, latest } => {
+            let mode = resolve_upgrade_mode(action.as_deref(), latest)?;
+            commands::app::upgrade(&repo_root, &manifest_path, &lock_path, &mode)
         }
+    }
+}
+
+fn resolve_upgrade_mode(
+    action: Option<&str>,
+    latest: bool,
+) -> Result<commands::upgrade::UpgradeMode> {
+    if latest {
+        Ok(commands::upgrade::UpgradeMode::Latest)
+    } else if let Some(action_str) = action {
+        let key = gx::domain::LockKey::parse(action_str).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Invalid format: expected ACTION@VERSION (e.g., actions/checkout@v5), got: {action_str}"
+            )
+        })?;
+        Ok(commands::upgrade::UpgradeMode::Targeted(
+            key.id,
+            key.version,
+        ))
+    } else {
+        Ok(commands::upgrade::UpgradeMode::Safe)
     }
 }
 
@@ -128,7 +98,6 @@ fn init_logging(cli: &Cli) {
         .format(|buf, record| {
             let level = record.level();
             let style = &buf.default_level_style(level);
-
             writeln!(buf, "[{style}{level}{style:#}] {}", record.args())
         });
 

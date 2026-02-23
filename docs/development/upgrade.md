@@ -2,15 +2,38 @@
 
 ## Overview
 
-The `upgrade` command finds newer versions of actions via the Github API, applies upgrades to the manifest, resolves new SHAs, and updates workflows.
+The `upgrade` command checks for drift, finds newer versions of actions via the Github API, applies upgrades to the manifest, resolves new SHAs, and updates workflows.
 
 ## Code path
 
 `src/commands/upgrade.rs`
 
+## Signature
+
+```rust
+pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, P: WorkflowScanner, W: WorkflowUpdater>(
+    repo_root: &Path,
+    mut manifest: Manifest,
+    manifest_store: M,
+    mut lock: Lock,
+    lock_store: L,
+    registry: R,
+    scanner: &P,
+    writer: &W,
+    mode: &UpgradeMode,
+) -> Result<()>
+```
+
 ## Algorithm
 
-`run` delegates to two private helpers and then applies results:
+`run` first checks for drift, then delegates to two private helpers and applies results:
+
+### Drift detection (pre-flight)
+
+Before any upgrade work, `run` scans workflow files and calls `manifest.detect_drift(&action_set, filter)`:
+
+- `filter` is `Some(id)` in `Targeted` mode (only that action is checked), `None` otherwise (all actions checked).
+- If drift is detected, bails with a message listing each `DriftItem` and instructs the user to run `gx tidy` first.
 
 ### `determine_upgrades` — find what to change
 
@@ -36,28 +59,40 @@ Verifies the action is in the manifest and the requested version exists in the r
 ### `resolve_and_store` — resolve a spec to SHA and write to lock
 
 ```rust
-fn resolve_and_store<R: VersionRegistry, L: LockStore>(
+fn resolve_and_store<R: VersionRegistry>(
     service: &ActionResolver<R>,
     spec: &ActionSpec,
-    lock: &mut L,
+    lock: &mut Lock,
     unresolved_msg: &str,
 )
 ```
 
 Calls `service.resolve(spec)` and matches on `ResolutionResult`:
-- `Resolved` / `Corrected` → writes the SHA to the lock store.
+- `Resolved` / `Corrected` → writes the SHA to the lock via `lock.set(&resolved)`.
 - `Unresolved` → logs a warning with the provided `unresolved_msg` prefix.
 
 ### `run` — orchestrate
 
-1. Calls `determine_upgrades`; returns early if `None`.
-2. Applies each upgrade to the manifest (`manifest.set`).
-3. Calls `resolve_and_store` for each upgraded spec ("Could not resolve").
-4. Calls `resolve_and_store` for each re-pinned spec ("Could not re-pin").
-5. Saves manifest and lock; retains only manifest entries in lock.
-6. Builds update map from upgraded + re-pinned keys and calls `writer.update_all()`.
+1. Scans workflows via `scanner.scan_all()`.
+2. Detects drift via `manifest.detect_drift(&action_set, filter)`; bails if non-empty.
+3. Calls `determine_upgrades`; returns early if `None`.
+4. Applies each upgrade to the manifest (`manifest.set`).
+5. Calls `resolve_and_store` for each upgraded spec ("Could not resolve").
+6. Calls `resolve_and_store` for each re-pinned spec ("Could not re-pin").
+7. Saves manifest and lock; retains only manifest entries in lock.
+8. Builds update map from upgraded + re-pinned keys and calls `writer.update_all()`.
 
 ## Key types
+
+### UpgradeMode
+
+```rust
+pub enum UpgradeMode {
+    Safe,                        // default: upgrade within current major
+    Latest,                      // upgrade to absolute latest, crossing major versions
+    Targeted(ActionId, Version), // upgrade one specific action to a specific version
+}
+```
 
 ### UpgradeCandidate
 
@@ -81,12 +116,22 @@ pub enum VersionPrecision {
 
 ## Two modes
 
-In `main.rs`, the upgrade command branches like tidy:
+In `commands/app.rs::upgrade()`, the command branches based on manifest existence:
 
-- **File-backed**: `FileManifest`/`FileLock` when `gx.toml` exists
-- **Memory-only**: `MemoryManifest`/`MemoryLock` via `run_memory_only` helper when no manifest exists
+- **File-backed**: `FileManifest::new(&manifest_path).load()` + `FileLock::new(&lock_path).load()` when `gx.toml` exists
+- **Memory-only**: `MemoryManifest::from_workflows(&action_set).load()` + `Lock::default()` when no manifest exists
+
+Entry point is called from `main.rs` line ~57:
+```rust
+Commands::Upgrade { action, latest } => {
+    let mode = resolve_upgrade_mode(action, latest)?;
+    commands::app::upgrade(&repo_root, &manifest_path, &lock_path, &mode)
+}
+```
 
 ## Testing
 
 - `print_update_results` with empty and non-empty results
-- `run` with empty manifest returns Ok immediately (no Github API calls)
+- `run` errors with drift message and mentions `gx tidy` when workflow versions don't match manifest
+- `run` in targeted mode ignores drift on actions other than the target
+- Integration tests in `tests/upgrade_test.rs`

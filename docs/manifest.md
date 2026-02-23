@@ -94,3 +94,7 @@ An empty `[actions]` section is valid:
 ```
 
 Running `gx tidy` with an empty manifest will not modify any workflows.
+
+## Implementation
+
+`gx.toml` is managed through the `Manifest` domain entity (`src/domain/manifest.rs`), which owns all CRUD operations and drift detection logic. Persistence is handled by `ManifestStore` (`src/infrastructure/manifest.rs`): `FileManifest` reads/writes disk, `MemoryManifest` is used when no `gx.toml` exists.

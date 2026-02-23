@@ -18,19 +18,22 @@ cargo run -- upgrade           # Check for newer versions and upgrade
 ## Architecture
 
 ```
-main.rs (Composition Root)
-    ↓ Injects FileManifest/FileLock or MemoryManifest/MemoryLock
-commands/tidy.rs (Application Layer)
-    ↓ Uses ResolutionService + ManifestStore/LockStore traits
+main.rs (Presentation Layer)
+    ↓ CLI parsing and forwarding
+commands/app.rs (Application Dispatcher)
+    ↓ Store construction and command dispatch
+commands/tidy.rs, upgrade.rs (Application Layer)
+    ↓ Uses ManifestStore/LockStore/VersionRegistry traits
 domain/ (Business Types + Resolution Logic)
 infrastructure/ (File I/O + Github API)
 ```
 
 ```
 src/
-├── main.rs              # CLI entry, DI based on manifest existence
+├── main.rs              # Presentation layer: CLI parsing and arg forwarding
 ├── lib.rs               # Library root (re-exports commands, domain, infrastructure, config)
-├── commands.rs          # Commands module (re-exports tidy)
+├── commands.rs          # Commands module
+├── commands/app.rs      # Application dispatcher: store construction + command dispatch
 ├── commands/tidy.rs     # Generic run<M: ManifestStore, L: LockStore>()
 ├── commands/upgrade.rs  # Upgrade actions to newer versions
 ├── config.rs            # Environment configuration

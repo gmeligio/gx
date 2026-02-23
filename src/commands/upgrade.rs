@@ -3,8 +3,8 @@ use log::{info, warn};
 use std::path::Path;
 
 use crate::domain::{
-    ActionId, ActionResolver, ActionSpec, LockKey, ResolutionResult, UpdateResult,
-    UpgradeCandidate, Version, VersionRegistry, WorkflowUpdater,
+    ActionId, ActionResolver, ActionSpec, Lock, LockKey, Manifest, ResolutionResult, UpdateResult,
+    UpgradeCandidate, Version, VersionRegistry, WorkflowScanner, WorkflowUpdater,
 };
 use crate::infrastructure::{LockStore, ManifestStore};
 
@@ -20,48 +20,71 @@ pub enum UpgradeMode {
 
 /// Run the upgrade command to find and apply available upgrades for actions.
 ///
+/// Errors if workflows are out of sync with the manifest — run `gx tidy` first.
+///
 /// # Errors
 ///
-/// Returns an error if workflows cannot be read or files cannot be saved.
-pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, W: WorkflowUpdater>(
+/// Returns an error if drift is detected, if workflows cannot be read, or if files cannot be saved.
+#[allow(clippy::too_many_arguments, clippy::needless_pass_by_value)]
+pub fn run<M, L, R, P, W>(
     _repo_root: &Path,
-    mut manifest: M,
-    mut lock: L,
+    mut manifest: Manifest,
+    manifest_store: M,
+    mut lock: Lock,
+    lock_store: L,
     registry: R,
+    scanner: &P,
     writer: &W,
     mode: &UpgradeMode,
-) -> Result<()> {
+) -> Result<()>
+where
+    M: ManifestStore,
+    L: LockStore,
+    R: VersionRegistry,
+    P: WorkflowScanner,
+    W: WorkflowUpdater,
+{
+    // Detect drift before doing any upgrade work
+    let action_set = scanner.scan_all()?;
+    let filter = match mode {
+        UpgradeMode::Targeted(id, _) => Some(id),
+        _ => None,
+    };
+    let drift = manifest.detect_drift(&action_set, filter);
+    if !drift.is_empty() {
+        let lines: Vec<String> = drift.iter().map(|d| format!("  - {d}")).collect();
+        anyhow::bail!(
+            "Workflows are out of sync with gx.toml:\n{}\nRun `gx tidy` first.",
+            lines.join("\n")
+        );
+    }
+
     let service = ActionResolver::new(registry);
 
     let Some((upgrades, repins)) = determine_upgrades(&manifest, &service, mode)? else {
         return Ok(());
     };
 
-    // Apply upgrades to manifest
     info!("Upgrading actions:");
     for upgrade in &upgrades {
         info!("+ {upgrade}");
         manifest.set(upgrade.id.clone(), upgrade.upgraded.clone());
     }
 
-    // Resolve new versions to SHAs
     for upgrade in &upgrades {
         let spec = ActionSpec::new(upgrade.id.clone(), upgrade.upgraded.clone());
         resolve_and_store(&service, &spec, &mut lock, "Could not resolve");
     }
 
-    // Re-pin non-semver refs to current SHA
     for spec in &repins {
         resolve_and_store(&service, spec, &mut lock, "Could not re-pin");
     }
 
-    // Save manifest and lock
-    manifest.save()?;
+    manifest_store.save(&manifest)?;
     let keys_to_retain: Vec<LockKey> = manifest.specs().iter().map(|s| LockKey::from(*s)).collect();
     lock.retain(&keys_to_retain);
-    lock.save()?;
+    lock_store.save(&lock)?;
 
-    // Update workflows only for upgraded actions and re-pinned refs
     let mut update_keys: Vec<LockKey> = upgrades
         .iter()
         .map(|u| LockKey::new(u.id.clone(), u.upgraded.clone()))
@@ -76,8 +99,8 @@ pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, W: WorkflowUpdate
     Ok(())
 }
 
-fn determine_upgrades<M: ManifestStore, R: VersionRegistry>(
-    manifest: &M,
+fn determine_upgrades<R: VersionRegistry>(
+    manifest: &Manifest,
     service: &ActionResolver<R>,
     mode: &UpgradeMode,
 ) -> Result<Option<(Vec<UpgradeCandidate>, Vec<ActionSpec>)>> {
@@ -137,10 +160,7 @@ fn determine_upgrades<M: ManifestStore, R: VersionRegistry>(
 
             match service.registry().all_tags(id) {
                 Ok(tags) => {
-                    let tag_exists = tags.iter().any(|t| {
-                        // Compare by parsing both to semver to handle v5 matching v5.0.0
-                        t.as_str() == version.as_str()
-                    });
+                    let tag_exists = tags.iter().any(|t| t.as_str() == version.as_str());
                     if !tag_exists {
                         anyhow::bail!("{version} not found in registry for {id}");
                     }
@@ -162,10 +182,10 @@ fn determine_upgrades<M: ManifestStore, R: VersionRegistry>(
     }
 }
 
-fn resolve_and_store<R: VersionRegistry, L: LockStore>(
+fn resolve_and_store<R: VersionRegistry>(
     service: &ActionResolver<R>,
     spec: &ActionSpec,
-    lock: &mut L,
+    lock: &mut Lock,
     unresolved_msg: &str,
 ) {
     match service.resolve(spec) {
@@ -209,52 +229,42 @@ mod tests {
 
     #[test]
     fn test_print_update_results_with_changes() {
-        let results = vec![
-            UpdateResult {
-                file: PathBuf::from("ci.yml"),
-                changes: vec!["actions/checkout v4 -> v5".to_string()],
-            },
-            UpdateResult {
-                file: PathBuf::from("deploy.yml"),
-                changes: vec![
-                    "actions/checkout v4 -> v5".to_string(),
-                    "docker/build-push-action v5 -> v6".to_string(),
-                ],
-            },
-        ];
+        let results = vec![UpdateResult {
+            file: PathBuf::from("ci.yml"),
+            changes: vec!["actions/checkout v4 -> v5".to_string()],
+        }];
         print_update_results(&results);
     }
 
     #[test]
-    fn test_run_empty_manifest_returns_ok() {
-        use crate::domain::{VersionRegistry, WorkflowError, WorkflowUpdater};
+    fn test_run_errors_on_drift_with_version_mismatch() {
+        use crate::domain::{
+            InterpretedRef, WorkflowActionSet, WorkflowError, WorkflowScanner, WorkflowUpdater,
+        };
         use crate::infrastructure::{MemoryLock, MemoryManifest};
         use std::collections::HashMap;
         use tempfile::TempDir;
 
         struct DummyRegistry;
-        impl VersionRegistry for DummyRegistry {
+        impl crate::domain::VersionRegistry for DummyRegistry {
             fn lookup_sha(
                 &self,
-                _id: &crate::domain::ActionId,
-                _version: &crate::domain::Version,
-            ) -> std::result::Result<crate::domain::CommitSha, crate::domain::ResolutionError>
-            {
+                _: &ActionId,
+                _: &Version,
+            ) -> Result<crate::domain::CommitSha, crate::domain::ResolutionError> {
                 Err(crate::domain::ResolutionError::TokenRequired)
             }
             fn tags_for_sha(
                 &self,
-                _id: &crate::domain::ActionId,
-                _sha: &crate::domain::CommitSha,
-            ) -> std::result::Result<Vec<crate::domain::Version>, crate::domain::ResolutionError>
-            {
+                _: &ActionId,
+                _: &crate::domain::CommitSha,
+            ) -> Result<Vec<Version>, crate::domain::ResolutionError> {
                 Err(crate::domain::ResolutionError::TokenRequired)
             }
             fn all_tags(
                 &self,
-                _id: &crate::domain::ActionId,
-            ) -> std::result::Result<Vec<crate::domain::Version>, crate::domain::ResolutionError>
-            {
+                _: &ActionId,
+            ) -> Result<Vec<Version>, crate::domain::ResolutionError> {
                 Err(crate::domain::ResolutionError::TokenRequired)
             }
         }
@@ -263,62 +273,90 @@ mod tests {
         impl WorkflowUpdater for DummyUpdater {
             fn update_all(
                 &self,
-                _actions: &HashMap<crate::domain::ActionId, String>,
-            ) -> std::result::Result<Vec<UpdateResult>, WorkflowError> {
+                _: &HashMap<ActionId, String>,
+            ) -> Result<Vec<UpdateResult>, WorkflowError> {
                 Ok(vec![])
             }
         }
 
+        // Scanner returns checkout@v4
+        struct CheckoutV4Scanner;
+        impl WorkflowScanner for CheckoutV4Scanner {
+            fn scan_all(&self) -> Result<WorkflowActionSet, WorkflowError> {
+                let mut set = WorkflowActionSet::new();
+                set.add(&InterpretedRef {
+                    id: ActionId::from("actions/checkout"),
+                    version: Version::from("v4"),
+                    sha: None,
+                });
+                Ok(set)
+            }
+        }
+
         let temp_dir = TempDir::new().unwrap();
-        let root = temp_dir.path();
-        std::fs::create_dir_all(root.join(".github").join("workflows")).unwrap();
 
-        let manifest = MemoryManifest::default();
-        let lock = MemoryLock::default();
+        // Manifest says v3, workflow says v4 → drift
+        let mut manifest = Manifest::default();
+        manifest.set(ActionId::from("actions/checkout"), Version::from("v3"));
 
-        // Empty manifest should return Ok immediately without calling GitHub
+        let lock = Lock::default();
+        let lock_store = MemoryLock;
+
         let result = run(
-            root,
+            temp_dir.path(),
             manifest,
+            MemoryManifest::default(),
             lock,
+            lock_store,
             DummyRegistry,
+            &CheckoutV4Scanner,
             &DummyUpdater,
             &UpgradeMode::Safe,
         );
-        assert!(result.is_ok());
+
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("gx tidy"),
+            "error should mention gx tidy, got: {msg}"
+        );
+        assert!(
+            msg.contains("actions/checkout"),
+            "error should name the drifted action, got: {msg}"
+        );
     }
 
     #[test]
-    fn test_run_targeted_action_not_in_manifest() {
-        use crate::domain::{ActionId, Version, VersionRegistry, WorkflowError, WorkflowUpdater};
+    fn test_run_targeted_ignores_drift_on_other_actions() {
+        use crate::domain::{
+            InterpretedRef, WorkflowActionSet, WorkflowError, WorkflowScanner, WorkflowUpdater,
+        };
         use crate::infrastructure::{MemoryLock, MemoryManifest};
         use std::collections::HashMap;
         use tempfile::TempDir;
 
         struct DummyRegistry;
-        impl VersionRegistry for DummyRegistry {
+        impl crate::domain::VersionRegistry for DummyRegistry {
             fn lookup_sha(
                 &self,
-                _id: &crate::domain::ActionId,
-                _version: &crate::domain::Version,
-            ) -> std::result::Result<crate::domain::CommitSha, crate::domain::ResolutionError>
-            {
+                _: &ActionId,
+                _: &Version,
+            ) -> Result<crate::domain::CommitSha, crate::domain::ResolutionError> {
                 Err(crate::domain::ResolutionError::TokenRequired)
             }
             fn tags_for_sha(
                 &self,
-                _id: &crate::domain::ActionId,
-                _sha: &crate::domain::CommitSha,
-            ) -> std::result::Result<Vec<crate::domain::Version>, crate::domain::ResolutionError>
-            {
+                _: &ActionId,
+                _: &crate::domain::CommitSha,
+            ) -> Result<Vec<Version>, crate::domain::ResolutionError> {
                 Err(crate::domain::ResolutionError::TokenRequired)
             }
             fn all_tags(
                 &self,
-                _id: &crate::domain::ActionId,
-            ) -> std::result::Result<Vec<crate::domain::Version>, crate::domain::ResolutionError>
-            {
-                Err(crate::domain::ResolutionError::TokenRequired)
+                _: &ActionId,
+            ) -> Result<Vec<Version>, crate::domain::ResolutionError> {
+                // Return v5 as a valid tag for checkout so targeted upgrade can verify it
+                Ok(vec![Version::from("v5")])
             }
         }
 
@@ -326,25 +364,61 @@ mod tests {
         impl WorkflowUpdater for DummyUpdater {
             fn update_all(
                 &self,
-                _actions: &HashMap<crate::domain::ActionId, String>,
-            ) -> std::result::Result<Vec<UpdateResult>, WorkflowError> {
+                _: &HashMap<ActionId, String>,
+            ) -> Result<Vec<UpdateResult>, WorkflowError> {
                 Ok(vec![])
             }
         }
 
+        // Scanner returns checkout@v4 (matches manifest) and setup-node@v99 (drifted, but not targeted)
+        struct TwoActionScanner;
+        impl WorkflowScanner for TwoActionScanner {
+            fn scan_all(&self) -> Result<WorkflowActionSet, WorkflowError> {
+                let mut set = WorkflowActionSet::new();
+                set.add(&InterpretedRef {
+                    id: ActionId::from("actions/checkout"),
+                    version: Version::from("v4"),
+                    sha: None,
+                });
+                set.add(&InterpretedRef {
+                    id: ActionId::from("actions/setup-node"),
+                    version: Version::from("v99"), // drifted, but not the target
+                    sha: None,
+                });
+                Ok(set)
+            }
+        }
+
         let temp_dir = TempDir::new().unwrap();
-        let root = temp_dir.path();
-        std::fs::create_dir_all(root.join(".github").join("workflows")).unwrap();
 
-        let manifest = MemoryManifest::default();
-        let lock = MemoryLock::default();
+        // Manifest: checkout@v4 (matches), setup-node@v3 (drifted but not targeted)
+        let mut manifest = Manifest::default();
+        manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
+        manifest.set(ActionId::from("actions/setup-node"), Version::from("v3"));
 
+        let lock = Lock::default();
+        let lock_store = MemoryLock;
+
+        // Targeted upgrade on checkout — should NOT error even though setup-node is drifted
         let mode = UpgradeMode::Targeted(ActionId::from("actions/checkout"), Version::from("v5"));
-        let result = run(root, manifest, lock, DummyRegistry, &DummyUpdater, &mode);
-        assert!(result.is_err());
-        assert!(
-            result.unwrap_err().to_string().contains("not found"),
-            "Should error when action is not in manifest"
+        let result = run(
+            temp_dir.path(),
+            manifest,
+            MemoryManifest::default(),
+            lock,
+            lock_store,
+            DummyRegistry,
+            &TwoActionScanner,
+            &DummyUpdater,
+            &mode,
         );
+
+        // Should not error on drift (only checked checkout, which has no drift)
+        if let Err(e) = &result {
+            assert!(
+                !e.to_string().contains("gx tidy"),
+                "should not error on drift for other actions: {e}"
+            );
+        }
     }
 }

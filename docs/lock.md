@@ -58,3 +58,7 @@ Version tags in Github can be updated to point to different commits. Using commi
 - Guarantees reproducible builds
 - Protects against supply chain attacks via tag manipulation
 - Provides an audit trail of exact action versions used
+
+## Implementation
+
+`gx.lock` is managed through the `Lock` domain entity (`src/domain/lock.rs`), which owns all CRUD operations and the `build_update_map` logic. Persistence is handled by `LockStore` (`src/infrastructure/lock.rs`): `FileLock` reads/writes disk (transparently migrating old format versions on load), `MemoryLock` is used when no `gx.toml` exists.
