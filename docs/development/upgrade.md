@@ -2,7 +2,7 @@
 
 ## Overview
 
-The `upgrade` command checks for drift, finds newer versions of actions via the Github API, applies upgrades to the manifest, resolves new SHAs, and updates workflows.
+The `upgrade` command finds newer versions of actions via the Github API, applies upgrades to the manifest, resolves new SHAs, and updates workflows.
 
 ## Code path
 
@@ -11,14 +11,13 @@ The `upgrade` command checks for drift, finds newer versions of actions via the 
 ## Signature
 
 ```rust
-pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, P: WorkflowScanner, W: WorkflowUpdater>(
+pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, W: WorkflowUpdater>(
     repo_root: &Path,
     mut manifest: Manifest,
     manifest_store: M,
     mut lock: Lock,
     lock_store: L,
     registry: R,
-    scanner: &P,
     writer: &W,
     mode: &UpgradeMode,
 ) -> Result<()>
@@ -26,14 +25,7 @@ pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, P: WorkflowScanne
 
 ## Algorithm
 
-`run` first checks for drift, then delegates to two private helpers and applies results:
-
-### Drift detection (pre-flight)
-
-Before any upgrade work, `run` scans workflow files and calls `manifest.detect_drift(&action_set, filter)`:
-
-- `filter` is `Some(id)` in `Targeted` mode (only that action is checked), `None` otherwise (all actions checked).
-- If drift is detected, bails with a message listing each `DriftItem` and instructs the user to run `gx tidy` first.
+`run` delegates to two private helpers and applies results:
 
 ### `determine_upgrades` — find what to change
 
@@ -73,14 +65,12 @@ Calls `service.resolve(spec)` and matches on `ResolutionResult`:
 
 ### `run` — orchestrate
 
-1. Scans workflows via `scanner.scan_all()`.
-2. Detects drift via `manifest.detect_drift(&action_set, filter)`; bails if non-empty.
-3. Calls `determine_upgrades`; returns early if `None`.
-4. Applies each upgrade to the manifest (`manifest.set`).
-5. Calls `resolve_and_store` for each upgraded spec ("Could not resolve").
-6. Calls `resolve_and_store` for each re-pinned spec ("Could not re-pin").
-7. Saves manifest and lock; retains only manifest entries in lock.
-8. Builds update map from upgraded + re-pinned keys and calls `writer.update_all()`.
+1. Calls `determine_upgrades`; returns early if `None`.
+2. Applies each upgrade to the manifest (`manifest.set`).
+3. Calls `resolve_and_store` for each upgraded spec ("Could not resolve").
+4. Calls `resolve_and_store` for each re-pinned spec ("Could not re-pin").
+5. Saves manifest and lock; retains only manifest entries in lock.
+6. Builds update map from upgraded + re-pinned keys and calls `writer.update_all()`.
 
 ## Key types
 
@@ -132,6 +122,4 @@ Commands::Upgrade { action, latest } => {
 ## Testing
 
 - `print_update_results` with empty and non-empty results
-- `run` errors with drift message and mentions `gx tidy` when workflow versions don't match manifest
-- `run` in targeted mode ignores drift on actions other than the target
 - Integration tests in `tests/upgrade_test.rs`
