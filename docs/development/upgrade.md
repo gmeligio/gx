@@ -116,10 +116,18 @@ pub enum VersionPrecision {
 
 ## Two modes
 
-In `main.rs`, the upgrade command branches like tidy:
+In `commands/app.rs::upgrade()`, the command branches based on manifest existence:
 
 - **File-backed**: `FileManifest::new(&manifest_path).load()` + `FileLock::new(&lock_path).load()` when `gx.toml` exists
 - **Memory-only**: `MemoryManifest::from_workflows(&action_set).load()` + `Lock::default()` when no manifest exists
+
+Entry point is called from `main.rs` line ~57:
+```rust
+Commands::Upgrade { action, latest } => {
+    let mode = resolve_upgrade_mode(action, latest)?;
+    commands::app::upgrade(&repo_root, &manifest_path, &lock_path, &mode)
+}
+```
 
 ## Testing
 

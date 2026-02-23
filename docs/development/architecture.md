@@ -11,10 +11,16 @@
 ## Layer diagram
 
 ```
-main.rs (Composition Root)
+main.rs (Presentation Layer)
+    │ CLI parsing with clap
+    │ Repo discovery and path setup
+    │ Forwards to commands::app dispatcher
+    ▼
+commands/app.rs (Application Dispatcher)
     │ Checks if gx.toml exists
     │ Creates stores (FileManifest/FileLock or MemoryManifest/MemoryLock)
     │ Loads domain entities (Manifest, Lock) via stores
+    │ Dispatches to command use cases
     ▼
 commands/ (Application Layer)
     │ tidy.rs, upgrade.rs
@@ -31,21 +37,27 @@ infrastructure/ (File I/O + Github API)
 
 ## Dependency injection
 
-`main.rs` is the composition root. It checks whether `.github/gx.toml` exists, creates the appropriate stores, loads domain entities, and injects them into commands:
+`commands/app.rs` is now the composition root for each command. `main.rs` performs CLI parsing and forwards arguments to the dispatcher:
 
 ```rust
-// File-backed mode: changes persist to disk
+// main.rs (presentation)
+match cli.command {
+    Commands::Tidy => commands::app::tidy(&repo_root, &manifest_path, &lock_path),
+    Commands::Init => commands::app::init(&repo_root, &manifest_path, &lock_path),
+    Commands::Upgrade { action, latest } => {
+        let mode = resolve_upgrade_mode(action, latest)?;
+        commands::app::upgrade(&repo_root, &manifest_path, &lock_path, &mode)
+    }
+}
+
+// commands/app.rs (application dispatcher)
+// Checks manifest existence and creates appropriate stores
 let manifest_store = FileManifest::new(&manifest_path);
 let manifest = manifest_store.load()?;
 let lock_store = FileLock::new(&lock_path);
 let lock = lock_store.load()?;
-commands::tidy::run(&repo_root, manifest, manifest_store, lock, lock_store, registry, &scanner, &updater)
-
-// Memory-only mode: only workflows are updated
-let manifest_store = MemoryManifest::from_workflows(&action_set);
-let manifest = manifest_store.load()?;
-let lock_store = MemoryLock;
-let lock = Lock::default();
+...
+// Injects into command use case
 commands::tidy::run(&repo_root, manifest, manifest_store, lock, lock_store, registry, &scanner, &updater)
 ```
 
@@ -146,7 +158,11 @@ Lock { actions: HashMap<LockKey, CommitSha> }
 1. Create `src/commands/newcmd.rs` with `pub fn run<M: ManifestStore, L: LockStore>(..., manifest: Manifest, manifest_store: M, lock: Lock, lock_store: L, ...) -> Result<()>`
 2. Add a variant to `Commands` in `src/main.rs`
 3. Add `pub mod newcmd;` to `src/commands.rs`
-4. Add the match arm in `main()` with appropriate DI (file-backed vs memory-only)
-5. Add user docs in `docs/newcmd.md`
-6. Add implementation docs in `docs/development/newcmd.md`
-7. Update `CLAUDE.md` file tree and commands section
+4. Add a dispatcher function in `src/commands/app.rs` (newcmd) that:
+   - Takes repo_root, manifest_path, lock_path, and any command-specific args
+   - Checks manifest_path.exists() and creates file-backed or memory stores
+   - Calls your command's run() function
+5. Add a match arm in `main()` that forwards CLI args to `commands::app::newcmd()`
+6. Add user docs in `docs/newcmd.md`
+7. Add implementation docs in `docs/development/newcmd.md`
+8. Update `CLAUDE.md` file tree and commands section

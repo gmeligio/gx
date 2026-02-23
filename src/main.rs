@@ -1,11 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use gx::commands;
-use gx::domain::Lock;
-use gx::infrastructure::{
-    FileLock, FileManifest, FileWorkflowScanner, FileWorkflowUpdater, GithubRegistry,
-    LOCK_FILE_NAME, LockStore, MANIFEST_FILE_NAME, ManifestStore, MemoryLock, MemoryManifest,
-};
+use gx::infrastructure::{LOCK_FILE_NAME, MANIFEST_FILE_NAME};
 use gx::infrastructure::{repo, repo::RepoError};
 use log::{LevelFilter, info};
 use std::io::Write;
@@ -60,119 +56,30 @@ fn main() -> Result<()> {
     let lock_path = repo_root.join(".github").join(LOCK_FILE_NAME);
 
     match cli.command {
-        Commands::Tidy => {
-            let registry = GithubRegistry::from_env()?;
-            let updater = FileWorkflowUpdater::new(&repo_root);
-            let scanner = FileWorkflowScanner::new(&repo_root);
-            if manifest_path.exists() {
-                let manifest_store = FileManifest::new(&manifest_path);
-                let manifest = manifest_store.load()?;
-                let lock_store = FileLock::new(&lock_path);
-                let lock = lock_store.load()?;
-                commands::tidy::run(
-                    &repo_root,
-                    manifest,
-                    manifest_store,
-                    lock,
-                    lock_store,
-                    registry,
-                    &scanner,
-                    &updater,
-                )
-            } else {
-                let action_set = FileWorkflowScanner::new(&repo_root).scan_all()?;
-                let manifest_store = MemoryManifest::from_workflows(&action_set);
-                let manifest = manifest_store.load()?;
-                let lock_store = MemoryLock;
-                let lock = Lock::default();
-                commands::tidy::run(
-                    &repo_root,
-                    manifest,
-                    manifest_store,
-                    lock,
-                    lock_store,
-                    registry,
-                    &scanner,
-                    &updater,
-                )
-            }
-        }
-        Commands::Init => {
-            if manifest_path.exists() {
-                anyhow::bail!("Already initialized. Use `gx tidy` to update.");
-            }
-            info!("Reading actions from workflows into the manifest...");
-            let registry = GithubRegistry::from_env()?;
-            let manifest_store = FileManifest::new(&manifest_path);
-            let manifest = manifest_store.load()?;
-            let lock_store = FileLock::new(&lock_path);
-            let lock = lock_store.load()?;
-            let scanner = FileWorkflowScanner::new(&repo_root);
-            let updater = FileWorkflowUpdater::new(&repo_root);
-            commands::tidy::run(
-                &repo_root,
-                manifest,
-                manifest_store,
-                lock,
-                lock_store,
-                registry,
-                &scanner,
-                &updater,
-            )
-        }
+        Commands::Tidy => commands::app::tidy(&repo_root, &manifest_path, &lock_path),
+        Commands::Init => commands::app::init(&repo_root, &manifest_path, &lock_path),
         Commands::Upgrade { action, latest } => {
-            let mode = if latest {
-                commands::upgrade::UpgradeMode::Latest
-            } else if let Some(ref action_str) = action {
-                let key = gx::domain::LockKey::parse(action_str).ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "Invalid format: expected ACTION@VERSION (e.g., actions/checkout@v5), got: {action_str}"
-                    )
-                })?;
-                commands::upgrade::UpgradeMode::Targeted(key.id, key.version)
-            } else {
-                commands::upgrade::UpgradeMode::Safe
-            };
-
-            let registry = GithubRegistry::from_env()?;
-            let updater = FileWorkflowUpdater::new(&repo_root);
-            let scanner = FileWorkflowScanner::new(&repo_root);
-
-            if manifest_path.exists() {
-                let manifest_store = FileManifest::new(&manifest_path);
-                let manifest = manifest_store.load()?;
-                let lock_store = FileLock::new(&lock_path);
-                let lock = lock_store.load()?;
-                commands::upgrade::run(
-                    &repo_root,
-                    manifest,
-                    manifest_store,
-                    lock,
-                    lock_store,
-                    registry,
-                    &scanner,
-                    &updater,
-                    &mode,
-                )
-            } else {
-                let action_set = FileWorkflowScanner::new(&repo_root).scan_all()?;
-                let manifest_store = MemoryManifest::from_workflows(&action_set);
-                let manifest = manifest_store.load()?;
-                let lock_store = MemoryLock;
-                let lock = Lock::default();
-                commands::upgrade::run(
-                    &repo_root,
-                    manifest,
-                    manifest_store,
-                    lock,
-                    lock_store,
-                    registry,
-                    &scanner,
-                    &updater,
-                    &mode,
-                )
-            }
+            let mode = resolve_upgrade_mode(action, latest)?;
+            commands::app::upgrade(&repo_root, &manifest_path, &lock_path, &mode)
         }
+    }
+}
+
+fn resolve_upgrade_mode(
+    action: Option<String>,
+    latest: bool,
+) -> Result<commands::upgrade::UpgradeMode> {
+    if latest {
+        Ok(commands::upgrade::UpgradeMode::Latest)
+    } else if let Some(ref action_str) = action {
+        let key = gx::domain::LockKey::parse(action_str).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Invalid format: expected ACTION@VERSION (e.g., actions/checkout@v5), got: {action_str}"
+            )
+        })?;
+        Ok(commands::upgrade::UpgradeMode::Targeted(key.id, key.version))
+    } else {
+        Ok(commands::upgrade::UpgradeMode::Safe)
     }
 }
 

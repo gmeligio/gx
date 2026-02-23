@@ -6,18 +6,22 @@ The `init` command is a thin wrapper that validates preconditions, then delegate
 
 ## Code path
 
-`src/main.rs` lines 66-74:
+`src/commands/app.rs`:
+
+The `init()` function checks that the manifest doesn't exist, then delegates to `tidy::run()` with file-backed stores:
 
 ```rust
-Commands::Init => {
+pub fn init(repo_root: &Path, manifest_path: &Path, lock_path: &Path) -> Result<()> {
     if manifest_path.exists() {
         anyhow::bail!("Already initialized. Use `gx tidy` to update.");
     }
-    let registry = GithubRegistry::from_env()?;
-    let manifest = FileManifest::load_or_default(&manifest_path)?;
-    let lock = FileLock::load_or_default(&lock_path)?;
-    commands::tidy::run(&repo_root, manifest, lock, registry)
+    // ...creates FileManifest/FileLock and calls tidy::run()
 }
+```
+
+Invoked from `src/main.rs` line ~55:
+```rust
+Commands::Init => commands::app::init(&repo_root, &manifest_path, &lock_path),
 ```
 
 ## Key difference from tidy

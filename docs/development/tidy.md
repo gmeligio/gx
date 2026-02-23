@@ -16,6 +16,9 @@ The `tidy` command ensures that `gx.toml` matches the source code in the reposit
 
 ## Architecture
 
+**Entry point:** `src/commands/app.rs::tidy()` (dispatcher, handles store selection)
+↓ Calls ↓
+
 ```
 src/commands/tidy.rs              # Command entry point and orchestration
 src/infrastructure/workflow.rs    # YAML parsing, action extraction, and workflow updates
