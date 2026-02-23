@@ -10,7 +10,7 @@ pub use action::{
     UsesRef, Version, VersionCorrection, VersionPrecision,
 };
 pub use lock::Lock;
-pub use manifest::{DriftItem, Manifest};
+pub use manifest::Manifest;
 pub use resolution::{ActionResolver, ResolutionError, ResolutionResult, VersionRegistry};
 pub use workflow::{UpdateResult, WorkflowError, WorkflowScanner, WorkflowUpdater};
 pub use workflow_actions::WorkflowActionSet;
