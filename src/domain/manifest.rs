@@ -57,17 +57,6 @@ mod tests {
     use super::*;
     use crate::domain::{ActionId, Version};
 
-    #[allow(dead_code)]
-    fn make_manifest(entries: &[(&str, &str)]) -> Manifest {
-        let mut m = Manifest::default();
-        for (id, ver) in entries {
-            m.set(ActionId::from(*id), Version::from(*ver));
-        }
-        m
-    }
-
-    // --- Manifest CRUD ---
-
     #[test]
     fn test_set_and_get() {
         let mut m = Manifest::default();
@@ -102,5 +91,4 @@ mod tests {
         m.set(ActionId::from("actions/setup-node"), Version::from("v3"));
         assert_eq!(m.specs().len(), 2);
     }
-
 }
