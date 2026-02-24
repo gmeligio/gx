@@ -10,7 +10,7 @@
 
 name: Release
 permissions:
-    contents: "read"
+    contents: read
 
 # This task will run whenever you push a git tag that looks like a version
 # like "1.0.0", "v0.1.0-prerelease.1", "my-app/0.1.0", "releases/v1.0.0", etc.
@@ -44,7 +44,7 @@ jobs:
     plan:
         permissions:
             # Allow to write contents to create the Github release draft
-            contents: "write"
+            contents: write
         runs-on: "ubuntu-22.04"
         outputs:
             val: ${{ steps.plan.outputs.manifest }}
@@ -210,7 +210,7 @@ jobs:
     host:
         permissions:
             # Allow to write contents to create the Github release
-            contents: "write"
+            contents: write
         needs:
             - plan
             - build-local-artifacts
