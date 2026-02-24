@@ -2,3 +2,6 @@
 "actions-rust-lang/rustfmt" = "v1"
 "actions-rust-lang/setup-rust-toolchain" = "v1"
 "actions/checkout" = "v6"
+"actions/download-artifact" = "v7"
+"actions/upload-artifact" = "v6"
+"release-plz/action" = "v0.5"
