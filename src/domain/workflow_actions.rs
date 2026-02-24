@@ -62,6 +62,26 @@ impl WorkflowActionSet {
     }
 }
 
+/// The precise location of a `uses:` reference within the workflow tree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkflowLocation {
+    /// Relative path from repo root, e.g. ".github/workflows/ci.yml"
+    pub workflow: String,
+    /// Job id, e.g. "build"
+    pub job: Option<String>,
+    /// 0-based step index within the job
+    pub step: Option<usize>,
+}
+
+/// A single action reference with its full location context.
+#[derive(Debug, Clone)]
+pub struct LocatedAction {
+    pub id: ActionId,
+    pub version: Version,
+    pub sha: Option<CommitSha>,
+    pub location: WorkflowLocation,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -72,6 +92,38 @@ mod tests {
             version: Version::from(version),
             sha: sha.map(CommitSha::from),
         }
+    }
+
+    #[test]
+    fn test_workflow_location_equality() {
+        let loc1 = WorkflowLocation {
+            workflow: ".github/workflows/ci.yml".to_string(),
+            job: Some("build".to_string()),
+            step: Some(0),
+        };
+        let loc2 = WorkflowLocation {
+            workflow: ".github/workflows/ci.yml".to_string(),
+            job: Some("build".to_string()),
+            step: Some(0),
+        };
+        assert_eq!(loc1, loc2);
+    }
+
+    #[test]
+    fn test_located_action_stores_location() {
+        let loc = WorkflowLocation {
+            workflow: ".github/workflows/ci.yml".to_string(),
+            job: Some("build".to_string()),
+            step: Some(0),
+        };
+        let action = LocatedAction {
+            id: ActionId::from("actions/checkout"),
+            version: Version::from("v4"),
+            sha: None,
+            location: loc.clone(),
+        };
+        assert_eq!(action.location, loc);
+        assert_eq!(action.id.as_str(), "actions/checkout");
     }
 
     #[test]
