@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-use crate::domain::{ActionId, ActionSpec, Manifest, Version, WorkflowActionSet};
+use crate::domain::{ActionException, ActionId, ActionSpec, Manifest, Version, WorkflowActionSet};
 
 pub const MANIFEST_FILE_NAME: &str = "gx.toml";
 
@@ -56,18 +56,45 @@ pub enum ManifestError {
 
     #[error("failed to serialize manifest to TOML")]
     Serialize(#[source] toml::ser::Error),
+
+    #[error("invalid manifest: {0}")]
+    Validation(String),
 }
 
-/// Internal structure for TOML serialization
+// ---- TOML wire types ----
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+struct TomlException {
+    workflow: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    job: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    step: Option<usize>,
+    version: String,
+}
+
+/// The [actions] section: flat string entries + optional [actions.exceptions] sub-table.
+#[derive(Debug, Default, Deserialize, Serialize)]
+struct TomlActions {
+    #[serde(default, flatten)]
+    versions: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    exceptions: BTreeMap<String, Vec<TomlException>>,
+}
+
 #[derive(Debug, Default, Deserialize, Serialize)]
 struct ManifestData {
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    actions: BTreeMap<String, String>,
+    #[serde(default)]
+    actions: TomlActions,
 }
 
-fn manifest_from_data(data: ManifestData) -> Manifest {
+// ---- conversion ----
+
+fn manifest_from_data(data: ManifestData, _path: &Path) -> Result<Manifest, ManifestError> {
+    // Build global actions map
     let actions: HashMap<ActionId, ActionSpec> = data
         .actions
+        .versions
         .into_iter()
         .map(|(k, v)| {
             let id = ActionId::from(k);
@@ -76,24 +103,90 @@ fn manifest_from_data(data: ManifestData) -> Manifest {
             (id, spec)
         })
         .collect();
-    Manifest::new(actions)
+
+    // Validate and convert exceptions
+    let mut exceptions: HashMap<ActionId, Vec<ActionException>> = HashMap::new();
+
+    for (action_str, toml_exceptions) in data.actions.exceptions {
+        let id = ActionId::from(action_str.clone());
+
+        // Validation: exception without global default is an error
+        if !actions.contains_key(&id) {
+            return Err(ManifestError::Validation(format!(
+                "\"{}\" has exceptions but no global version — run 'gx tidy' to fix",
+                action_str
+            )));
+        }
+
+        let mut seen_scopes: Vec<(String, Option<String>, Option<usize>)> = Vec::new();
+
+        let mut converted = Vec::new();
+        for exc in toml_exceptions {
+            // Validation: step without job
+            if exc.step.is_some() && exc.job.is_none() {
+                return Err(ManifestError::Validation(format!(
+                    "exception for \"{}\" in \"{}\" has a step but no job",
+                    action_str, exc.workflow
+                )));
+            }
+
+            // Validation: duplicate scope
+            let scope = (exc.workflow.clone(), exc.job.clone(), exc.step);
+            if seen_scopes.contains(&scope) {
+                return Err(ManifestError::Validation(format!(
+                    "duplicate exception scope for \"{}\" in \"{}\"",
+                    action_str, exc.workflow
+                )));
+            }
+            seen_scopes.push(scope);
+
+            converted.push(ActionException {
+                workflow: exc.workflow,
+                job: exc.job,
+                step: exc.step,
+                version: Version::from(exc.version),
+            });
+        }
+        exceptions.insert(id, converted);
+    }
+
+    Ok(Manifest::with_exceptions(actions, exceptions))
 }
 
 fn manifest_to_data(manifest: &Manifest) -> ManifestData {
-    let actions = manifest
+    let versions: BTreeMap<String, String> = manifest
         .specs()
         .into_iter()
-        .map(|spec| {
-            (
-                spec.id.as_str().to_owned(),
-                spec.version.as_str().to_owned(),
-            )
-        })
+        .map(|spec| (spec.id.as_str().to_owned(), spec.version.as_str().to_owned()))
         .collect();
-    ManifestData { actions }
+
+    let exceptions: BTreeMap<String, Vec<TomlException>> = {
+        let mut map: BTreeMap<String, Vec<TomlException>> = BTreeMap::new();
+        for (id, excs) in manifest.all_exceptions() {
+            if excs.is_empty() {
+                continue;
+            }
+            let toml_excs: Vec<TomlException> = excs
+                .iter()
+                .map(|e| TomlException {
+                    workflow: e.workflow.clone(),
+                    job: e.job.clone(),
+                    step: e.step,
+                    version: e.version.as_str().to_owned(),
+                })
+                .collect();
+            map.insert(id.as_str().to_owned(), toml_excs);
+        }
+        map
+    };
+
+    ManifestData {
+        actions: TomlActions { versions, exceptions },
+    }
 }
 
-/// File-backed manifest store. Reads from and writes to `.github/gx.toml`.
+// ---- FileManifest ----
+
 pub struct FileManifest {
     path: PathBuf,
 }
@@ -124,7 +217,7 @@ impl ManifestStore for FileManifest {
                 source: Box::new(source),
             })?;
 
-        Ok(manifest_from_data(data))
+        manifest_from_data(data, &self.path)
     }
 
     fn save(&self, manifest: &Manifest) -> Result<(), ManifestError> {
@@ -143,7 +236,8 @@ impl ManifestStore for FileManifest {
     }
 }
 
-/// In-memory manifest store that doesn't persist to disk. Used when no `gx.toml` exists.
+// ---- MemoryManifest ----
+
 #[derive(Default)]
 pub struct MemoryManifest {
     initial: Option<Manifest>,
@@ -173,6 +267,12 @@ impl ManifestStore for MemoryManifest {
             let mut fresh = Manifest::default();
             for spec in m.specs() {
                 fresh.set(spec.id.clone(), spec.version.clone());
+            }
+            // Copy over exceptions
+            for (id, excs) in m.all_exceptions() {
+                for exc in excs {
+                    fresh.add_exception(id.clone(), exc.clone());
+                }
             }
             fresh
         }))
@@ -262,7 +362,7 @@ mod tests {
         let content = fs::read_to_string(file.path()).unwrap();
         let action_lines: Vec<&str> = content
             .lines()
-            .filter(|l| l.trim().starts_with('"'))
+            .filter(|l| l.trim().starts_with('"') && l.contains(" = ") && !l.contains('['))
             .collect();
 
         let mut sorted = action_lines.clone();
@@ -303,5 +403,152 @@ mod tests {
         let store = MemoryManifest::default();
         let manifest = Manifest::default();
         assert!(store.save(&manifest).is_ok());
+    }
+
+    // ---- new exception tests ----
+
+    #[test]
+    fn test_load_manifest_with_exceptions() {
+        let content = r#"
+[actions]
+"actions/checkout" = "v4"
+
+[actions.exceptions]
+"actions/checkout" = [
+  { workflow = ".github/workflows/deploy.yml", version = "v3" },
+  { workflow = ".github/workflows/ci.yml", job = "legacy-build", version = "v2" },
+]
+"#;
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+
+        let store = FileManifest::new(file.path());
+        let manifest = store.load().unwrap();
+
+        assert_eq!(
+            manifest.get(&ActionId::from("actions/checkout")),
+            Some(&Version::from("v4"))
+        );
+
+        let exceptions = manifest.exceptions_for(&ActionId::from("actions/checkout"));
+        assert_eq!(exceptions.len(), 2);
+        assert_eq!(exceptions[0].workflow, ".github/workflows/deploy.yml");
+        assert_eq!(exceptions[0].version.as_str(), "v3");
+        assert_eq!(exceptions[1].job.as_deref(), Some("legacy-build"));
+        assert_eq!(exceptions[1].version.as_str(), "v2");
+    }
+
+    #[test]
+    fn test_save_and_load_roundtrip_with_exceptions() {
+        let file = NamedTempFile::new().unwrap();
+        let store = FileManifest::new(file.path());
+
+        let mut manifest = Manifest::default();
+        manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
+        manifest.add_exception(
+            ActionId::from("actions/checkout"),
+            ActionException {
+                workflow: ".github/workflows/deploy.yml".to_string(),
+                job: None,
+                step: None,
+                version: Version::from("v3"),
+            },
+        );
+
+        store.save(&manifest).unwrap();
+        let content = fs::read_to_string(file.path()).unwrap();
+        assert!(
+            content.contains("actions.exceptions"),
+            "Expected exceptions section, got:\n{content}"
+        );
+
+        let loaded = store.load().unwrap();
+        let exceptions = loaded.exceptions_for(&ActionId::from("actions/checkout"));
+        assert_eq!(exceptions.len(), 1);
+        assert_eq!(exceptions[0].workflow, ".github/workflows/deploy.yml");
+        assert_eq!(exceptions[0].version.as_str(), "v3");
+    }
+
+    #[test]
+    fn test_load_exception_without_global_is_error() {
+        let content = r#"
+[actions]
+"actions/setup-node" = "v4"
+
+[actions.exceptions]
+"actions/checkout" = [
+  { workflow = ".github/workflows/deploy.yml", version = "v3" },
+]
+"#;
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+
+        let store = FileManifest::new(file.path());
+        let result = store.load();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("actions/checkout"),
+            "got: {err}"
+        );
+        assert!(
+            err.to_string().contains("gx tidy"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_load_exception_step_without_job_is_error() {
+        let content = r#"
+[actions]
+"actions/checkout" = "v4"
+
+[actions.exceptions]
+"actions/checkout" = [
+  { workflow = ".github/workflows/ci.yml", step = 0, version = "v3" },
+]
+"#;
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+
+        let store = FileManifest::new(file.path());
+        let result = store.load();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_load_duplicate_scope_is_error() {
+        let content = r#"
+[actions]
+"actions/checkout" = "v4"
+
+[actions.exceptions]
+"actions/checkout" = [
+  { workflow = ".github/workflows/deploy.yml", version = "v3" },
+  { workflow = ".github/workflows/deploy.yml", version = "v2" },
+]
+"#;
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+
+        let store = FileManifest::new(file.path());
+        let result = store.load();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_save_no_exceptions_section_when_empty() {
+        let file = NamedTempFile::new().unwrap();
+        let store = FileManifest::new(file.path());
+
+        let mut manifest = Manifest::default();
+        manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
+
+        store.save(&manifest).unwrap();
+        let content = fs::read_to_string(file.path()).unwrap();
+        assert!(
+            !content.contains("exceptions"),
+            "got:\n{content}"
+        );
     }
 }
