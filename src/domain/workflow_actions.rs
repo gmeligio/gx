@@ -11,6 +11,8 @@ pub struct WorkflowActionSet {
     versions: HashMap<ActionId, HashSet<Version>>,
     /// Maps action ID to SHA if present in workflow (first one wins)
     shas: HashMap<ActionId, CommitSha>,
+    /// Count of how many times each version appears for each action (across all steps)
+    counts: HashMap<ActionId, HashMap<Version, usize>>,
 }
 
 impl WorkflowActionSet {
@@ -26,12 +28,35 @@ impl WorkflowActionSet {
             .or_default()
             .insert(interpreted.version.clone());
 
+        // Track occurrence count for dominant_version selection
+        *self
+            .counts
+            .entry(interpreted.id.clone())
+            .or_default()
+            .entry(interpreted.version.clone())
+            .or_insert(0) += 1;
+
         // Store SHA if present (first one wins for consistency)
         if let Some(sha) = &interpreted.sha {
             self.shas
                 .entry(interpreted.id.clone())
                 .or_insert_with(|| sha.clone());
         }
+    }
+
+    /// Select the dominant version for an action:
+    /// 1. Most-used (highest occurrence count across all steps)
+    /// 2. Tiebreak: highest semver
+    #[must_use]
+    pub fn dominant_version(&self, id: &ActionId) -> Option<Version> {
+        let counts = self.counts.get(id)?;
+        let max_count = counts.values().max().copied()?;
+        let candidates: Vec<Version> = counts
+            .iter()
+            .filter(|(_, c)| **c == max_count)
+            .map(|(v, _)| v.clone())
+            .collect();
+        Some(Version::highest(&candidates).unwrap_or_else(|| candidates[0].clone()))
     }
 
     /// Returns true if no actions have been added.
@@ -92,6 +117,31 @@ mod tests {
             version: Version::from(version),
             sha: sha.map(CommitSha::from),
         }
+    }
+
+    #[test]
+    fn test_most_used_version_two_vs_one() {
+        let mut set = WorkflowActionSet::new();
+        // Add v3 twice (two different steps)
+        set.add(&make_interpreted("actions/checkout", "v3", None));
+        set.add(&make_interpreted("actions/checkout", "v3", None));
+        // Add v4 once
+        set.add(&make_interpreted("actions/checkout", "v4", None));
+
+        // v3 appears 2 times, v4 appears 1 time — v3 wins even though v4 is higher semver
+        let dominant = set.dominant_version(&ActionId::from("actions/checkout"));
+        assert_eq!(dominant, Some(Version::from("v3")));
+    }
+
+    #[test]
+    fn test_dominant_version_tiebreak_highest_semver() {
+        let mut set = WorkflowActionSet::new();
+        // Both versions appear once — tiebreak by highest semver
+        set.add(&make_interpreted("actions/checkout", "v3", None));
+        set.add(&make_interpreted("actions/checkout", "v4", None));
+
+        let dominant = set.dominant_version(&ActionId::from("actions/checkout"));
+        assert_eq!(dominant, Some(Version::from("v4")));
     }
 
     #[test]

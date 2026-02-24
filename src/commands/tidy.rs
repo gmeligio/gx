@@ -61,8 +61,7 @@ where
     if !missing.is_empty() {
         info!("Adding missing actions to manifest:");
         for action_id in &missing {
-            let versions = action_set.versions_for(action_id);
-            let version = select_version(&versions);
+            let version = select_dominant_version(action_id, &action_set);
             manifest.set((*action_id).clone(), version.clone());
             let spec = ActionSpec::new((*action_id).clone(), version.clone());
             info!("+ {spec}");
@@ -161,6 +160,13 @@ where
 
 fn select_version(versions: &[Version]) -> Version {
     Version::highest(versions).unwrap_or_else(|| versions[0].clone())
+}
+
+fn select_dominant_version(action_id: &ActionId, action_set: &WorkflowActionSet) -> Version {
+    action_set.dominant_version(action_id).unwrap_or_else(|| {
+        let versions = action_set.versions_for(action_id);
+        select_version(&versions)
+    })
 }
 
 /// Collect all LockKeys needed: one per (action, version) pair across globals and exceptions.

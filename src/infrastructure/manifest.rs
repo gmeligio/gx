@@ -245,13 +245,15 @@ pub struct MemoryManifest {
 
 impl MemoryManifest {
     /// Create a store pre-seeded with a manifest built from workflow actions.
-    /// For each action, picks the highest semantic version found across workflows.
+    /// For each action, picks the dominant version (most-used; tiebreak: highest semver).
     #[must_use]
     pub fn from_workflows(action_set: &WorkflowActionSet) -> Self {
         let mut manifest = Manifest::default();
         for action_id in action_set.action_ids() {
-            let versions = action_set.versions_for(&action_id);
-            let version = Version::highest(&versions).unwrap_or_else(|| versions[0].clone());
+            let version = action_set.dominant_version(&action_id).unwrap_or_else(|| {
+                let versions = action_set.versions_for(&action_id);
+                Version::highest(&versions).unwrap_or_else(|| versions[0].clone())
+            });
             manifest.set(action_id, version);
         }
         Self {
