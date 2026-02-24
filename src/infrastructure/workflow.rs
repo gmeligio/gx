@@ -13,6 +13,7 @@ use crate::domain::{ActionId, UpdateResult, UsesRef, WorkflowError};
 #[derive(Debug, Clone)]
 struct ExtractedAction {
     uses_ref: UsesRef,
+    location: crate::domain::WorkflowLocation,
 }
 
 /// Minimal workflow structure for YAML parsing
@@ -35,6 +36,7 @@ struct Step {
 
 /// Parser for extracting action information from workflow files
 pub struct FileWorkflowScanner {
+    repo_root: PathBuf,
     workflows_dir: PathBuf,
 }
 
@@ -42,8 +44,18 @@ impl FileWorkflowScanner {
     #[must_use]
     pub fn new(repo_root: &Path) -> Self {
         Self {
+            repo_root: repo_root.to_path_buf(),
             workflows_dir: repo_root.join(".github").join("workflows"),
         }
+    }
+
+    /// Compute the path relative to the repo root for use in `WorkflowLocation`.
+    fn rel_path(&self, workflow_path: &Path) -> String {
+        workflow_path
+            .strip_prefix(&self.repo_root)
+            .unwrap_or(workflow_path)
+            .to_string_lossy()
+            .replace('\\', "/")
     }
 
     /// Find all workflow files in the repository's `.github/workflows` folder.
@@ -79,7 +91,10 @@ impl FileWorkflowScanner {
     /// # Errors
     ///
     /// Returns an error if the file cannot be read, parsed as YAML, or the regex pattern is invalid.
-    fn extract_actions(workflow_path: &Path) -> Result<Vec<ExtractedAction>, WorkflowError> {
+    fn extract_actions(
+        workflow_path: &Path,
+        workflow_rel_path: &str,
+    ) -> Result<Vec<ExtractedAction>, WorkflowError> {
         let content = fs::read_to_string(workflow_path).map_err(|source| WorkflowError::Read {
             path: workflow_path.to_path_buf(),
             source,
@@ -110,8 +125,8 @@ impl FileWorkflowScanner {
         // Pattern to parse uses: owner/repo@ref
         let uses_re = Regex::new(r"^([^@\s]+)@([^\s#]+)")?;
 
-        for job in workflow.jobs.values() {
-            for step in &job.steps {
+        for (job_id, job) in &workflow.jobs {
+            for (step_idx, step) in job.steps.iter().enumerate() {
                 if let Some(uses) = &step.uses
                     && let Some(cap) = uses_re.captures(uses)
                 {
@@ -128,6 +143,11 @@ impl FileWorkflowScanner {
 
                     actions.push(ExtractedAction {
                         uses_ref: UsesRef::new(action_name, uses_ref, comment),
+                        location: crate::domain::WorkflowLocation {
+                            workflow: workflow_rel_path.to_string(),
+                            job: Some(job_id.clone()),
+                            step: Some(step_idx),
+                        },
                     });
                 }
             }
@@ -145,7 +165,8 @@ impl FileWorkflowScanner {
         &self,
         workflow_path: &Path,
     ) -> Result<crate::domain::WorkflowActionSet, WorkflowError> {
-        let actions = Self::extract_actions(workflow_path)?;
+        let rel = self.rel_path(workflow_path);
+        let actions = Self::extract_actions(workflow_path, &rel)?;
         let mut action_set = crate::domain::WorkflowActionSet::new();
         for action in &actions {
             action_set.add(&action.uses_ref.interpret());
@@ -172,12 +193,37 @@ impl FileWorkflowScanner {
 
         let mut action_set = crate::domain::WorkflowActionSet::new();
         for workflow in &workflows {
-            let actions = Self::extract_actions(workflow)?;
+            let rel = self.rel_path(workflow);
+            let actions = Self::extract_actions(workflow, &rel)?;
             for action in &actions {
                 action_set.add(&action.uses_ref.interpret());
             }
         }
         Ok(action_set)
+    }
+
+    /// Scan all workflows and return one `LocatedAction` per step.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any workflow file cannot be processed.
+    pub fn scan_all_located(&self) -> Result<Vec<crate::domain::LocatedAction>, WorkflowError> {
+        let workflows = self.find_workflows()?;
+        let mut result = Vec::new();
+        for workflow in &workflows {
+            let rel = self.rel_path(workflow);
+            let actions = Self::extract_actions(workflow, &rel)?;
+            for action in actions {
+                let interpreted = action.uses_ref.interpret();
+                result.push(crate::domain::LocatedAction {
+                    id: interpreted.id,
+                    version: interpreted.version,
+                    sha: interpreted.sha,
+                    location: action.location,
+                });
+            }
+        }
+        Ok(result)
     }
 }
 
@@ -309,12 +355,30 @@ impl crate::domain::WorkflowUpdater for FileWorkflowUpdater {
     ) -> Result<Vec<UpdateResult>, WorkflowError> {
         self.update_all(actions)
     }
+
+    fn update_file(
+        &self,
+        workflow_path: &Path,
+        actions: &HashMap<ActionId, String>,
+    ) -> Result<UpdateResult, WorkflowError> {
+        self.update_workflow(workflow_path, actions)
+    }
+}
+
+impl crate::domain::WorkflowScannerLocated for FileWorkflowScanner {
+    fn scan_all_located(&self) -> Result<Vec<crate::domain::LocatedAction>, WorkflowError> {
+        self.scan_all_located()
+    }
+
+    fn find_workflow_paths(&self) -> Result<Vec<PathBuf>, WorkflowError> {
+        self.find_workflows()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::CommitSha;
+    use crate::domain::{ActionId, CommitSha};
     use std::io::Write;
     use tempfile::TempDir;
 
@@ -325,6 +389,42 @@ mod tests {
         let mut file = fs::File::create(&file_path).unwrap();
         file.write_all(content.as_bytes()).unwrap();
         file_path
+    }
+
+    #[test]
+    fn test_scan_all_located_includes_location() {
+        let temp_dir = TempDir::new().unwrap();
+        let content = "name: CI
+jobs:
+  build:
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v3
+  test:
+    steps:
+      - uses: actions/checkout@v3
+";
+        create_test_workflow(temp_dir.path(), "ci.yml", content);
+
+        let scanner = FileWorkflowScanner::new(temp_dir.path());
+        let located = scanner.scan_all_located().unwrap();
+
+        assert_eq!(located.len(), 3);
+
+        // Find the build-job checkout entry
+        let build_checkout = located.iter().find(|a| {
+            a.id == ActionId::from("actions/checkout") && a.location.job.as_deref() == Some("build")
+        });
+        assert!(build_checkout.is_some());
+        let bc = build_checkout.unwrap();
+        assert_eq!(bc.version.as_str(), "v4");
+        assert_eq!(bc.location.step, Some(0));
+
+        let test_checkout = located.iter().find(|a| {
+            a.id == ActionId::from("actions/checkout") && a.location.job.as_deref() == Some("test")
+        });
+        assert!(test_checkout.is_some());
+        assert_eq!(test_checkout.unwrap().version.as_str(), "v3");
     }
 
     #[test]

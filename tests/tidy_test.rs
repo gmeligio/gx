@@ -895,3 +895,118 @@ jobs:
         "Expected lock to contain checkout SHA, got:\n{lock_content}"
     );
 }
+
+#[test]
+fn test_gx_tidy_respects_override_for_specific_workflow() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = create_test_repo(&temp_dir);
+
+    // Manifest: checkout = v4 globally, but deploy.yml should stay on v3
+    let manifest_content = r#"
+[actions]
+"actions/checkout" = "v4"
+
+[actions.overrides]
+"actions/checkout" = [
+  { workflow = ".github/workflows/deploy.yml", version = "v3" },
+]
+"#;
+    let manifest_path = root.join(".github").join("gx.toml");
+    fs::write(&manifest_path, manifest_content).unwrap();
+
+    // Two workflows
+    let ci_content = "name: CI\njobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n";
+    let deploy_content =
+        "name: Deploy\njobs:\n  deploy:\n    steps:\n      - uses: actions/checkout@v3\n";
+    fs::write(root.join(".github/workflows/ci.yml"), ci_content).unwrap();
+    fs::write(root.join(".github/workflows/deploy.yml"), deploy_content).unwrap();
+
+    let result = run_tidy(&root);
+    assert!(result.is_ok(), "tidy failed: {:?}", result.err());
+
+    // ci.yml should be updated to v4 SHA
+    let ci_updated = fs::read_to_string(root.join(".github/workflows/ci.yml")).unwrap();
+    let checkout_v4_sha = MockRegistry::fake_sha("actions/checkout", "v4");
+    assert!(
+        ci_updated.contains(&format!("actions/checkout@{checkout_v4_sha} # v4")),
+        "ci.yml should use v4 SHA, got:\n{ci_updated}"
+    );
+
+    // deploy.yml should use v3 SHA (override applies)
+    let deploy_updated = fs::read_to_string(root.join(".github/workflows/deploy.yml")).unwrap();
+    let checkout_v3_sha = MockRegistry::fake_sha("actions/checkout", "v3");
+    assert!(
+        deploy_updated.contains(&format!("actions/checkout@{checkout_v3_sha} # v3")),
+        "deploy.yml should use v3 SHA from override, got:\n{deploy_updated}"
+    );
+}
+
+#[test]
+fn test_gx_tidy_override_job_level() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = create_test_repo(&temp_dir);
+
+    let manifest_content = r#"
+[actions]
+"actions/checkout" = "v4"
+
+[actions.overrides]
+"actions/checkout" = [
+  { workflow = ".github/workflows/ci.yml", job = "legacy-build", version = "v3" },
+]
+"#;
+    fs::write(root.join(".github/gx.toml"), manifest_content).unwrap();
+
+    let ci_content = "name: CI
+jobs:
+  build:
+    steps:
+      - uses: actions/checkout@v4
+  legacy-build:
+    steps:
+      - uses: actions/checkout@v3
+";
+    fs::write(root.join(".github/workflows/ci.yml"), ci_content).unwrap();
+
+    let result = run_tidy(&root);
+    assert!(result.is_ok(), "{:?}", result.err());
+
+    // The lock should have both versions since both are in manifest (global + override)
+    let lock_content = fs::read_to_string(root.join(".github/gx.lock")).unwrap();
+    let v4_sha = MockRegistry::fake_sha("actions/checkout", "v4");
+    let v3_sha = MockRegistry::fake_sha("actions/checkout", "v3");
+    assert!(lock_content.contains(&v4_sha), "Lock should have v4 SHA");
+    assert!(lock_content.contains(&v3_sha), "Lock should have v3 SHA");
+}
+
+#[test]
+fn test_gx_tidy_removes_stale_override() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = create_test_repo(&temp_dir);
+
+    // Override references a workflow that no longer exists
+    let manifest_content = r#"
+[actions]
+"actions/checkout" = "v4"
+
+[actions.overrides]
+"actions/checkout" = [
+  { workflow = ".github/workflows/old-workflow.yml", version = "v3" },
+]
+"#;
+    fs::write(root.join(".github/gx.toml"), manifest_content).unwrap();
+    fs::write(
+        root.join(".github/workflows/ci.yml"),
+        "name: CI\njobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n",
+    )
+    .unwrap();
+
+    let result = run_tidy(&root);
+    assert!(result.is_ok(), "{:?}", result.err());
+
+    let manifest_content = fs::read_to_string(root.join(".github/gx.toml")).unwrap();
+    assert!(
+        !manifest_content.contains("old-workflow.yml"),
+        "Stale override should be removed, got:\n{manifest_content}"
+    );
+}

@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-use crate::domain::{ActionId, ActionSpec, Manifest, Version, WorkflowActionSet};
+use crate::domain::{ActionId, ActionOverride, ActionSpec, Manifest, Version, WorkflowActionSet};
 
 pub const MANIFEST_FILE_NAME: &str = "gx.toml";
 
@@ -56,18 +56,45 @@ pub enum ManifestError {
 
     #[error("failed to serialize manifest to TOML")]
     Serialize(#[source] toml::ser::Error),
+
+    #[error("invalid manifest: {0}")]
+    Validation(String),
 }
 
-/// Internal structure for TOML serialization
+// ---- TOML wire types ----
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+struct TomlOverride {
+    workflow: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    job: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    step: Option<usize>,
+    version: String,
+}
+
+/// The [actions] section: flat string entries + optional [actions.overrides] sub-table.
+#[derive(Debug, Default, Deserialize, Serialize)]
+struct TomlActions {
+    #[serde(default, flatten)]
+    versions: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    overrides: BTreeMap<String, Vec<TomlOverride>>,
+}
+
 #[derive(Debug, Default, Deserialize, Serialize)]
 struct ManifestData {
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    actions: BTreeMap<String, String>,
+    #[serde(default)]
+    actions: TomlActions,
 }
 
-fn manifest_from_data(data: ManifestData) -> Manifest {
+// ---- conversion ----
+
+fn manifest_from_data(data: ManifestData, _path: &Path) -> Result<Manifest, ManifestError> {
+    // Build global actions map
     let actions: HashMap<ActionId, ActionSpec> = data
         .actions
+        .versions
         .into_iter()
         .map(|(k, v)| {
             let id = ActionId::from(k);
@@ -76,11 +103,57 @@ fn manifest_from_data(data: ManifestData) -> Manifest {
             (id, spec)
         })
         .collect();
-    Manifest::new(actions)
+
+    // Validate and convert overrides
+    let mut overrides: HashMap<ActionId, Vec<ActionOverride>> = HashMap::new();
+
+    for (action_str, toml_overrides) in data.actions.overrides {
+        let id = ActionId::from(action_str.clone());
+
+        // Validation: override without global default is an error
+        if !actions.contains_key(&id) {
+            return Err(ManifestError::Validation(format!(
+                "\"{action_str}\" has overrides but no global version — run 'gx tidy' to fix"
+            )));
+        }
+
+        let mut seen_scopes: Vec<(String, Option<String>, Option<usize>)> = Vec::new();
+
+        let mut converted = Vec::new();
+        for exc in toml_overrides {
+            // Validation: step without job
+            if exc.step.is_some() && exc.job.is_none() {
+                return Err(ManifestError::Validation(format!(
+                    "override for \"{}\" in \"{}\" has a step but no job",
+                    action_str, exc.workflow
+                )));
+            }
+
+            // Validation: duplicate scope
+            let scope = (exc.workflow.clone(), exc.job.clone(), exc.step);
+            if seen_scopes.contains(&scope) {
+                return Err(ManifestError::Validation(format!(
+                    "duplicate override scope for \"{}\" in \"{}\"",
+                    action_str, exc.workflow
+                )));
+            }
+            seen_scopes.push(scope);
+
+            converted.push(ActionOverride {
+                workflow: exc.workflow,
+                job: exc.job,
+                step: exc.step,
+                version: Version::from(exc.version),
+            });
+        }
+        overrides.insert(id, converted);
+    }
+
+    Ok(Manifest::with_overrides(actions, overrides))
 }
 
 fn manifest_to_data(manifest: &Manifest) -> ManifestData {
-    let actions = manifest
+    let versions: BTreeMap<String, String> = manifest
         .specs()
         .into_iter()
         .map(|spec| {
@@ -90,10 +163,37 @@ fn manifest_to_data(manifest: &Manifest) -> ManifestData {
             )
         })
         .collect();
-    ManifestData { actions }
+
+    let overrides: BTreeMap<String, Vec<TomlOverride>> = {
+        let mut map: BTreeMap<String, Vec<TomlOverride>> = BTreeMap::new();
+        for (id, excs) in manifest.all_overrides() {
+            if excs.is_empty() {
+                continue;
+            }
+            let toml_excs: Vec<TomlOverride> = excs
+                .iter()
+                .map(|e| TomlOverride {
+                    workflow: e.workflow.clone(),
+                    job: e.job.clone(),
+                    step: e.step,
+                    version: e.version.as_str().to_owned(),
+                })
+                .collect();
+            map.insert(id.as_str().to_owned(), toml_excs);
+        }
+        map
+    };
+
+    ManifestData {
+        actions: TomlActions {
+            versions,
+            overrides,
+        },
+    }
 }
 
-/// File-backed manifest store. Reads from and writes to `.github/gx.toml`.
+// ---- FileManifest ----
+
 pub struct FileManifest {
     path: PathBuf,
 }
@@ -124,7 +224,7 @@ impl ManifestStore for FileManifest {
                 source: Box::new(source),
             })?;
 
-        Ok(manifest_from_data(data))
+        manifest_from_data(data, &self.path)
     }
 
     fn save(&self, manifest: &Manifest) -> Result<(), ManifestError> {
@@ -143,7 +243,8 @@ impl ManifestStore for FileManifest {
     }
 }
 
-/// In-memory manifest store that doesn't persist to disk. Used when no `gx.toml` exists.
+// ---- MemoryManifest ----
+
 #[derive(Default)]
 pub struct MemoryManifest {
     initial: Option<Manifest>,
@@ -151,13 +252,15 @@ pub struct MemoryManifest {
 
 impl MemoryManifest {
     /// Create a store pre-seeded with a manifest built from workflow actions.
-    /// For each action, picks the highest semantic version found across workflows.
+    /// For each action, picks the dominant version (most-used; tiebreak: highest semver).
     #[must_use]
     pub fn from_workflows(action_set: &WorkflowActionSet) -> Self {
         let mut manifest = Manifest::default();
         for action_id in action_set.action_ids() {
-            let versions = action_set.versions_for(&action_id);
-            let version = Version::highest(&versions).unwrap_or_else(|| versions[0].clone());
+            let version = action_set.dominant_version(&action_id).unwrap_or_else(|| {
+                let versions = action_set.versions_for(&action_id);
+                Version::highest(&versions).unwrap_or_else(|| versions[0].clone())
+            });
             manifest.set(action_id, version);
         }
         Self {
@@ -173,6 +276,12 @@ impl ManifestStore for MemoryManifest {
             let mut fresh = Manifest::default();
             for spec in m.specs() {
                 fresh.set(spec.id.clone(), spec.version.clone());
+            }
+            // Copy over overrides
+            for (id, excs) in m.all_overrides() {
+                for exc in excs {
+                    fresh.add_override(id.clone(), exc.clone());
+                }
             }
             fresh
         }))
@@ -262,7 +371,7 @@ mod tests {
         let content = fs::read_to_string(file.path()).unwrap();
         let action_lines: Vec<&str> = content
             .lines()
-            .filter(|l| l.trim().starts_with('"'))
+            .filter(|l| l.trim().starts_with('"') && l.contains(" = ") && !l.contains('['))
             .collect();
 
         let mut sorted = action_lines.clone();
@@ -303,5 +412,141 @@ mod tests {
         let store = MemoryManifest::default();
         let manifest = Manifest::default();
         assert!(store.save(&manifest).is_ok());
+    }
+
+    #[test]
+    fn test_load_manifest_with_overrides() {
+        let content = r#"
+[actions]
+"actions/checkout" = "v4"
+
+[actions.overrides]
+"actions/checkout" = [
+  { workflow = ".github/workflows/deploy.yml", version = "v3" },
+  { workflow = ".github/workflows/ci.yml", job = "legacy-build", version = "v2" },
+]
+"#;
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+
+        let store = FileManifest::new(file.path());
+        let manifest = store.load().unwrap();
+
+        assert_eq!(
+            manifest.get(&ActionId::from("actions/checkout")),
+            Some(&Version::from("v4"))
+        );
+
+        let overrides = manifest.overrides_for(&ActionId::from("actions/checkout"));
+        assert_eq!(overrides.len(), 2);
+        assert_eq!(overrides[0].workflow, ".github/workflows/deploy.yml");
+        assert_eq!(overrides[0].version.as_str(), "v3");
+        assert_eq!(overrides[1].job.as_deref(), Some("legacy-build"));
+        assert_eq!(overrides[1].version.as_str(), "v2");
+    }
+
+    #[test]
+    fn test_save_and_load_roundtrip_with_overrides() {
+        let file = NamedTempFile::new().unwrap();
+        let store = FileManifest::new(file.path());
+
+        let mut manifest = Manifest::default();
+        manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
+        manifest.add_override(
+            ActionId::from("actions/checkout"),
+            ActionOverride {
+                workflow: ".github/workflows/deploy.yml".to_string(),
+                job: None,
+                step: None,
+                version: Version::from("v3"),
+            },
+        );
+
+        store.save(&manifest).unwrap();
+        let content = fs::read_to_string(file.path()).unwrap();
+        assert!(
+            content.contains("actions.overrides"),
+            "Expected overrides section, got:\n{content}"
+        );
+
+        let loaded = store.load().unwrap();
+        let overrides = loaded.overrides_for(&ActionId::from("actions/checkout"));
+        assert_eq!(overrides.len(), 1);
+        assert_eq!(overrides[0].workflow, ".github/workflows/deploy.yml");
+        assert_eq!(overrides[0].version.as_str(), "v3");
+    }
+
+    #[test]
+    fn test_load_override_without_global_is_error() {
+        let content = r#"
+[actions]
+"actions/setup-node" = "v4"
+
+[actions.overrides]
+"actions/checkout" = [
+  { workflow = ".github/workflows/deploy.yml", version = "v3" },
+]
+"#;
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+
+        let store = FileManifest::new(file.path());
+        let result = store.load();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("actions/checkout"), "got: {err}");
+        assert!(err.to_string().contains("gx tidy"), "got: {err}");
+    }
+
+    #[test]
+    fn test_load_override_step_without_job_is_error() {
+        let content = r#"
+[actions]
+"actions/checkout" = "v4"
+
+[actions.overrides]
+"actions/checkout" = [
+  { workflow = ".github/workflows/ci.yml", step = 0, version = "v3" },
+]
+"#;
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+
+        let store = FileManifest::new(file.path());
+        let result = store.load();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_load_duplicate_scope_is_error() {
+        let content = r#"
+[actions]
+"actions/checkout" = "v4"
+
+[actions.overrides]
+"actions/checkout" = [
+  { workflow = ".github/workflows/deploy.yml", version = "v3" },
+  { workflow = ".github/workflows/deploy.yml", version = "v2" },
+]
+"#;
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+
+        let store = FileManifest::new(file.path());
+        let result = store.load();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_save_no_overrides_section_when_empty() {
+        let file = NamedTempFile::new().unwrap();
+        let store = FileManifest::new(file.path());
+
+        let mut manifest = Manifest::default();
+        manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
+
+        store.save(&manifest).unwrap();
+        let content = fs::read_to_string(file.path()).unwrap();
+        assert!(!content.contains("overrides"), "got:\n{content}");
     }
 }

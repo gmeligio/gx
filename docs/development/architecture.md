@@ -66,13 +66,14 @@ commands::tidy::run(&repo_root, manifest, manifest_store, lock, lock_store, regi
 Commands accept domain entities and store trait abstractions:
 
 ```rust
-pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, W: WorkflowUpdater>(
+pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, P: WorkflowScanner + WorkflowScannerLocated, W: WorkflowUpdater>(
     repo_root: &Path,
     mut manifest: Manifest,
     manifest_store: M,
     mut lock: Lock,
     lock_store: L,
     registry: R,
+    parser: &P,
     writer: &W,
 ) -> Result<()>
 ```
@@ -81,8 +82,10 @@ pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, W: WorkflowUpdate
 
 ### Manifest (`domain/manifest.rs`)
 
-Owns the `ActionId → ActionSpec` map and all domain behaviour:
-- `get`, `set`, `remove`, `has`, `is_empty`, `specs` — data access and mutation
+Owns the `ActionId → ActionSpec` map, the `ActionId → Vec<ActionOverride>` overrides map, and all domain behaviour:
+- `get`, `set`, `remove`, `has`, `is_empty`, `specs` — global default access and mutation
+- `add_override`, `overrides_for`, `all_overrides`, `replace_overrides` — override management
+- `resolve_version(id, location)` — resolves through step > job > workflow > global hierarchy
 
 ### Lock (`domain/lock.rs`)
 
@@ -95,14 +98,29 @@ Owns the `LockKey → CommitSha` map and all domain behaviour:
 ### ManifestStore (`infrastructure/manifest.rs`)
 
 Pure I/O trait. Implementations:
-- `FileManifest` — reads/writes `.github/gx.toml`
-- `MemoryManifest` — no-op `save()`, `load()` returns pre-seeded or empty `Manifest`
+- `FileManifest` — reads/writes `.github/gx.toml` (includes `[actions.overrides]`)
+- `MemoryManifest` — no-op `save()`, `load()` returns pre-seeded or empty `Manifest`; `from_workflows()` uses `dominant_version()`
 
 ### LockStore (`infrastructure/lock.rs`)
 
 Pure I/O trait. Implementations:
 - `FileLock` — reads/writes `.github/gx.lock`; transparently migrates old format versions on load
 - `MemoryLock` — no-op `save()`, `load()` returns empty `Lock`
+
+### WorkflowScanner / WorkflowScannerLocated (`domain/workflow.rs`)
+
+- `WorkflowScanner::scan_all()` — returns `WorkflowActionSet` (aggregated, no location context)
+- `WorkflowScannerLocated::scan_all_located()` — returns `Vec<LocatedAction>` (one per step, with location)
+- `WorkflowScannerLocated::find_workflow_paths()` — returns absolute paths to all workflow files
+
+Implementation: `FileWorkflowScanner` (`infrastructure/workflow.rs`)
+
+### WorkflowUpdater (`domain/workflow.rs`)
+
+- `update_all(map)` — applies `ActionId → "SHA # version"` map to every workflow file
+- `update_file(path, map)` — applies map to a single workflow file (used by tidy for per-file override resolution)
+
+Implementation: `FileWorkflowUpdater` (`infrastructure/workflow.rs`)
 
 ### VersionRegistry (`domain/resolution.rs`)
 
@@ -119,14 +137,17 @@ Implementation: `GithubRegistry` (`infrastructure/github.rs`)
 
 ```
 Workflow YAML
-    ▼ (WorkflowParser extracts raw data)
+    ▼ (FileWorkflowScanner extracts raw data)
 UsesRef { action_name, uses_ref, comment }
     ▼ (UsesRef::interpret() normalizes)
 InterpretedRef { id: ActionId, version: Version, sha: Option<CommitSha> }
     ▼ (aggregated across workflows)
-WorkflowActionSet { versions, shas }
+WorkflowActionSet { versions, shas, counts }
+    ▼ (also emitted with location context)
+LocatedAction { id, version, sha, location: WorkflowLocation }
     ▼
-Manifest { actions: HashMap<ActionId, ActionSpec> }
+Manifest { actions: HashMap<ActionId, ActionSpec>,
+           overrides: HashMap<ActionId, Vec<ActionOverride>> }
     ▼ (resolved via VersionRegistry)
 ResolvedAction { id: ActionId, version: Version, sha: CommitSha }
     ▼ (stored in lock)
@@ -139,6 +160,9 @@ Lock { actions: HashMap<LockKey, CommitSha> }
 - `Version` — version specifier with semver methods (e.g., `"v4"`, `"v4.1.0"`)
 - `CommitSha` — 40-character hex commit hash
 - `LockKey` — composite `action@version` key for the lock file
+- `WorkflowLocation` — `{ workflow: String, job: Option<String>, step: Option<usize> }`; identifies a step's position in the workflow tree
+- `LocatedAction` — `InterpretedRef` enriched with `WorkflowLocation`; one per `uses:` step
+- `ActionOverride` — location-specific version override in the manifest (`workflow`, `job`, `step`, `version`)
 
 ## Error handling
 

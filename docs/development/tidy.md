@@ -10,9 +10,10 @@ The `tidy` command ensures that `gx.toml` matches the source code in the reposit
 
 1. **Adds** any missing action requirements to `gx.toml` that are used in workflows
 2. **Removes** action requirements from `gx.toml` that aren't used in any workflow
-3. **Resolves** action versions to commit SHAs via the Github API
-4. **Validates** that existing SHAs match their version comments, correcting mismatches
-5. **Updates** all workflows to match the pinned versions in `gx.toml`
+3. **Prunes** stale override entries that reference removed workflows/jobs/steps
+4. **Resolves** action versions to commit SHAs via the Github API (global defaults and override versions)
+5. **Validates** that existing SHAs match their version comments, correcting mismatches
+6. **Updates** each workflow file using per-step override resolution
 
 ## Architecture
 
@@ -26,8 +27,9 @@ src/infrastructure/manifest.rs    # ManifestStore trait, FileManifest, MemoryMan
 src/infrastructure/lock.rs        # LockStore trait, FileLock, MemoryLock
 src/infrastructure/github.rs      # GithubRegistry (implements VersionRegistry)
 src/domain/action.rs              # Domain types: ActionId, Version, CommitSha, UsesRef, InterpretedRef, etc.
+src/domain/manifest.rs            # Manifest domain entity with ActionOverride and resolve_version()
 src/domain/resolution.rs          # ActionResolver, ResolutionResult, VersionRegistry trait
-src/domain/workflow_actions.rs    # WorkflowActionSet (aggregates actions across workflows)
+src/domain/workflow_actions.rs    # WorkflowActionSet, WorkflowLocation, LocatedAction
 ```
 
 ## Algorithm
@@ -57,12 +59,13 @@ pub struct InterpretedRef {
 
 ### 2. Aggregate into WorkflowActionSet
 
-`WorkflowActionSet` deduplicates versions across workflows:
+`WorkflowActionSet` deduplicates versions across workflows and tracks occurrence counts:
 
 ```rust
 pub struct WorkflowActionSet {
     versions: HashMap<ActionId, HashSet<Version>>,
-    shas: HashMap<ActionId, CommitSha>, // First SHA wins
+    shas: HashMap<ActionId, CommitSha>,                 // First SHA wins
+    counts: HashMap<ActionId, HashMap<Version, usize>>, // Occurrence counts per version
 }
 ```
 
@@ -70,6 +73,7 @@ Methods:
 - `versions_for(id)` - All unique versions found for an action
 - `action_ids()` - All action IDs discovered
 - `sha_for(id)` - SHA if present in workflow (first one wins)
+- `dominant_version(id)` - Most-used version; tiebreak: highest semver
 
 ### 3. Compare with manifest
 
@@ -89,9 +93,8 @@ For each unused action, `manifest.remove(id)` is called and the manifest is mark
 
 For each missing action:
 
-1. Get all versions from `WorkflowActionSet`
-2. Select highest semver version via `Version::highest()`
-3. Add to manifest via `manifest.set(id, version)`
+1. Call `action_set.dominant_version(id)` — most-used version across all steps; tiebreak: highest semver
+2. Add to manifest via `manifest.set(id, version)`
 
 ### 6. Update existing actions
 
@@ -105,12 +108,25 @@ if manifest_version.should_be_replaced_by(workflow_version) {
 
 `should_be_replaced_by` returns true when the current version is a SHA and the other is a semver tag.
 
-### 7. Update lock file
+### 7. Prune stale overrides
 
-The `update_lock_file` function processes each action in the manifest:
+`prune_stale_overrides()` scans `manifest.all_overrides()` and removes any override entry whose referenced `workflow`, `job`, or `step` no longer exists in the `LocatedAction` list:
 
-- **If workflow has a SHA**: `ActionResolver::validate_and_correct(spec, sha)` checks that the version comment matches the SHA. Returns `Resolved`, `Corrected`, or `Unresolved`.
-- **If no workflow SHA**: `ActionResolver::resolve(spec)` looks up the SHA via Github API.
+```rust
+fn prune_stale_overrides(manifest: &mut Manifest, located: &[LocatedAction]) {
+    // Build live set of workflows/jobs/steps from scan
+    // For each override: check workflow exists, then job, then step
+    // Replace override list with pruned version
+}
+```
+
+### 8. Update lock file
+
+`update_lock()` processes all action/version pairs — global defaults and override versions:
+
+- **Global specs with a workflow SHA**: `ActionResolver::validate_and_correct(spec, sha)` checks that the version comment matches the SHA. Returns `Resolved`, `Corrected`, or `Unresolved`.
+- **Global specs without a SHA**: `ActionResolver::resolve(spec)` looks up the SHA via Github API.
+- **Override versions**: Always resolved via `ActionResolver::resolve()` (no SHA correction).
 
 ```rust
 pub enum ResolutionResult {
@@ -122,18 +138,33 @@ pub enum ResolutionResult {
 
 Version corrections update both the manifest and lock.
 
-### 8. Clean up lock file
+### 9. Clean up lock file
 
-Remove entries from lock file that are no longer in the manifest:
+Retain only entries that correspond to a current (action, version) pair — including override versions:
 
 ```rust
-let keys_to_retain: Vec<LockKey> = manifest.specs().iter().map(LockKey::from).collect();
+fn build_keys_to_retain(manifest: &Manifest) -> Vec<LockKey> {
+    // Global specs → LockKey
+    // Override versions → LockKey (if not already present)
+}
 lock.retain(&keys_to_retain);
 ```
 
-### 9. Update workflows
+### 10. Update workflows (per-file, override-aware)
 
-Apply manifest versions to all workflows using regex replacement. The `lock.build_update_map()` builds a map of `ActionId` → `"SHA # version"` format, which `WorkflowWriter::update_all()` applies.
+Workflow files are updated one at a time. For each file, `build_file_update_map()` resolves each step's version through the override hierarchy (step > job > workflow > global), then looks up the corresponding SHA from the lock:
+
+```rust
+fn build_file_update_map(manifest: &Manifest, lock: &Lock, steps: &[&LocatedAction])
+    -> HashMap<ActionId, String>
+{
+    // For each step: manifest.resolve_version(id, location) → version
+    // lock.get(LockKey::new(id, version)) → sha
+    // Result: "sha # version"
+}
+```
+
+`WorkflowUpdater::update_file(path, map)` applies the map to the single file using regex replacement. The workflow path is matched against stored relative paths using suffix matching (`abs_str.ends_with(rel_path)`).
 
 ## Version logic
 
@@ -154,31 +185,53 @@ Handles formats: `v4`, `v4.1`, `v4.1.2`, `4.1.2`. Non-semver versions (branches,
 
 ## Manifest structure
 
-The manifest uses the `ManifestStore` trait with two implementations:
+The `Manifest` domain entity (in `src/domain/manifest.rs`) owns two maps:
 
 ```rust
-pub trait ManifestStore {
-    fn get(&self, id: &ActionId) -> Option<&Version>;
-    fn set(&mut self, id: ActionId, version: Version);
-    fn has(&self, id: &ActionId) -> bool;
-    fn save(&mut self) -> Result<(), ManifestError>;
-    fn specs(&self) -> Vec<ActionSpec>;
-    fn remove(&mut self, id: &ActionId);
-    fn path(&self) -> Result<&Path, ManifestError>;
-    fn is_empty(&self) -> bool;
+pub struct Manifest {
+    actions: HashMap<ActionId, ActionSpec>,               // global defaults
+    overrides: HashMap<ActionId, Vec<ActionOverride>>,  // location-specific overrides
+}
+
+pub struct ActionOverride {
+    pub workflow: String,       // relative path, e.g. ".github/workflows/deploy.yml"
+    pub job: Option<String>,    // job id
+    pub step: Option<usize>,    // 0-based step index (requires job)
+    pub version: Version,
 }
 ```
 
-- `FileManifest` — persists to `.github/gx.toml`, tracks `dirty: bool`
-- `MemoryManifest` — in-memory only, `save()` is a no-op
+Key methods:
+- `resolve_version(id, location)` — resolves through step > job > workflow > global hierarchy
+- `add_override(id, exc)`, `overrides_for(id)`, `all_overrides()`, `replace_overrides(id, list)`
+- `remove(id)` — removes both the global entry and all its overrides
 
-Internal TOML structure:
+The `ManifestStore` trait has two implementations:
+- `FileManifest` — reads/writes `.github/gx.toml`
+- `MemoryManifest` — in-memory only, `save()` is a no-op; `from_workflows()` uses `dominant_version()`
+
+Internal TOML wire types (in `src/infrastructure/manifest.rs`):
 
 ```rust
-struct ManifestData {
-    actions: HashMap<String, String>,  // "owner/repo" -> "version"
+struct TomlActions {
+    #[serde(flatten)]
+    versions: BTreeMap<String, String>,                    // "owner/repo" -> "version"
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    overrides: BTreeMap<String, Vec<TomlOverride>>,
+}
+
+struct TomlOverride {
+    workflow: String,
+    job: Option<String>,
+    step: Option<usize>,
+    version: String,
 }
 ```
+
+Validation in `manifest_from_data()`:
+- An override requires a global default for the same action
+- `step` requires `job` to be set
+- Duplicate scope entries (`workflow` + `job` + `step`) are rejected
 
 ## Lock file structure
 
@@ -228,9 +281,13 @@ The extraction handles two cases (two-phase approach because YAML parsers strip 
 
 ## Assumptions
 
-### Semver for global version
+### Dominant version for global default
 
-When multiple versions exist, `Version::highest()` selects the highest semver version as the global default. Non-semver versions (branches, SHAs) only become global if no semver versions exist.
+When adding a new action with multiple versions observed in workflows, `WorkflowActionSet::dominant_version()` selects the global default:
+1. Most-used version (highest occurrence count across all steps) wins
+2. Tiebreak: highest semver
+
+Non-semver versions (branches, SHAs) only become global if no semver versions exist.
 
 ### Skip local and docker actions
 
@@ -284,3 +341,7 @@ Uses `reqwest` blocking client with 30-second timeout.
 - Short ref handling
 - Workflow writing with SHA replacement
 - No duplicate comments after update
+- Override-aware per-file workflow updates (`test_gx_tidy_respects_override_for_specific_workflow`)
+- Job-level override resolution (`test_gx_tidy_override_job_level`)
+- Stale override pruning (`test_gx_tidy_removes_stale_override`)
+- Dominant version selection (most-used wins, tiebreak: highest semver)
