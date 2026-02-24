@@ -10,12 +10,13 @@ gx tidy
 
 ## What it does
 
-1. **Scans** all workflow files in `.github/workflows/`
+1. **Scans** all workflow files in `.github/workflows/` (with per-step location context)
 2. **Adds** missing actions to `.github/gx.toml` that are used in workflows
 3. **Removes** unused actions from `.github/gx.toml` that aren't in any workflow
-4. **Updates** `.github/gx.lock` with resolved commit SHAs for all action versions
-5. **Removes** unused entries from `.github/gx.lock`
-6. **Updates** all workflows to match the versions in the manifest
+4. **Prunes** stale exception entries that reference removed workflows/jobs/steps
+5. **Updates** `.github/gx.lock` with resolved commit SHAs for all action versions (both global defaults and exception versions)
+6. **Removes** unused entries from `.github/gx.lock`
+7. **Updates** each workflow file using per-step exception resolution
 
 This is similar to how `go mod tidy` works for Go modules.
 
@@ -195,24 +196,39 @@ Running `gx tidy` creates:
 "actions/checkout" = "v3"
 ```
 
+## Exception-aware resolution
+
+When the manifest contains `[actions.exceptions]` entries, `gx tidy` applies them per workflow file. Each step is resolved using the exception hierarchy (step > job > workflow > global), and workflow files are updated file-by-file with the correct version for each step.
+
+Example: given this manifest:
+
+```toml
+[actions]
+"actions/checkout" = "v4"
+
+[actions.exceptions]
+"actions/checkout" = [
+  { workflow = ".github/workflows/deploy.yml", version = "v3" },
+]
+```
+
+After `gx tidy`:
+- `.github/workflows/ci.yml` steps use `v4` SHA
+- `.github/workflows/deploy.yml` steps use `v3` SHA
+
+### Stale exception cleanup
+
+`gx tidy` automatically removes exception entries that reference workflows, jobs, or step indices that no longer exist in the scanned workflows.
+
 ## Behavior
 
 ### Version resolution for new actions
 
 When adding a new action that appears with different versions:
-1. The highest semver version is used as the global default
-2. Lower versions are added as overrides at the appropriate level
+- The **most-used** version becomes the global default (highest occurrence count across all steps)
+- Tiebreak: highest semver wins
 
-For non-semver versions (branches, SHAs), the first encountered version is used as global.
-
-### Override hierarchy
-
-Overrides are created at the most specific level needed:
-
-1. **Global** (`[actions]`): Default for all workflows
-2. **Workflow** (`[workflows."x.yml".actions]`): Override for entire workflow
-3. **Job** (`[workflows."x.yml".jobs."job".actions]`): Override for specific job
-4. **Step** (`[workflows."x.yml".jobs."job".steps."0".actions]`): Override for specific step
+For non-semver versions (branches, SHAs), the most-used version is selected; highest semver is the tiebreak.
 
 ### Existing manifest versions
 

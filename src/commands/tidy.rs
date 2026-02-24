@@ -133,11 +133,10 @@ where
     for workflow_path in &workflows {
         // Match absolute path against relative location paths (suffix match)
         let abs_str = workflow_path.to_string_lossy().replace('\\', "/");
-        let steps = by_location
+        let steps: &[&LocatedAction] = by_location
             .iter()
             .find(|(loc, _)| abs_str.ends_with(loc.as_str()))
-            .map(|(_, steps)| steps.as_slice())
-            .unwrap_or(&[]);
+            .map_or(&[], |(_, steps)| steps.as_slice());
         let file_map = build_file_update_map(&manifest, &lock, steps);
         if !file_map.is_empty() {
             let result = writer.update_file(workflow_path, &file_map)?;
@@ -169,7 +168,7 @@ fn select_dominant_version(action_id: &ActionId, action_set: &WorkflowActionSet)
     })
 }
 
-/// Collect all LockKeys needed: one per (action, version) pair across globals and exceptions.
+/// Collect all `LockKeys` needed: one per (action, version) pair across globals and exceptions.
 fn build_keys_to_retain(manifest: &Manifest) -> Vec<LockKey> {
     let mut keys: Vec<LockKey> = manifest.specs().iter().map(|s| LockKey::from(*s)).collect();
     for (id, exceptions) in manifest.all_exceptions() {
@@ -194,7 +193,7 @@ fn build_file_update_map(
         if let Some(version) = manifest.resolve_version(&action.id, &action.location) {
             let key = LockKey::new(action.id.clone(), version.clone());
             if let Some(sha) = lock.get(&key) {
-                let workflow_ref = format!("{} # {}", sha, version);
+                let workflow_ref = format!("{sha} # {version}");
                 map.insert(action.id.clone(), workflow_ref);
             }
         }

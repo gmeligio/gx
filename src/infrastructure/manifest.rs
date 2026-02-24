@@ -113,8 +113,7 @@ fn manifest_from_data(data: ManifestData, _path: &Path) -> Result<Manifest, Mani
         // Validation: exception without global default is an error
         if !actions.contains_key(&id) {
             return Err(ManifestError::Validation(format!(
-                "\"{}\" has exceptions but no global version — run 'gx tidy' to fix",
-                action_str
+                "\"{action_str}\" has exceptions but no global version — run 'gx tidy' to fix"
             )));
         }
 
