@@ -1,6 +1,6 @@
 # Manifest file
 
-The manifest file defines which versions of Github Actions to use across all your workflows, with support for location-specific exceptions.
+The manifest file defines which versions of Github Actions to use across all your workflows, with support for location-specific overrides.
 
 ## Location
 
@@ -27,56 +27,56 @@ The manifest uses TOML format with an `[actions]` section for global defaults:
 "docker/build-push-action" = "v5"
 ```
 
-## Action exceptions
+## Action overrides
 
-When a specific workflow, job, or step must use a different version than the global default, add an `[actions.exceptions]` sub-table.
+When a specific workflow, job, or step must use a different version than the global default, add an `[actions.overrides]` sub-table.
 
-Each exception entry is a list of objects under the action name:
+Each override entry is a list of objects under the action name:
 
 ```toml
 [actions]
 "actions/checkout" = "v4"
 
-[actions.exceptions]
+[actions.overrides]
 "actions/checkout" = [
   { workflow = ".github/workflows/deploy.yml", version = "v3" },
 ]
 ```
 
-### Workflow-level exception
+### Workflow-level override
 
 Applies to all steps in the named workflow:
 
 ```toml
-[actions.exceptions]
+[actions.overrides]
 "actions/checkout" = [
   { workflow = ".github/workflows/deploy.yml", version = "v3" },
 ]
 ```
 
-### Job-level exception
+### Job-level override
 
 Applies to all steps in the named job within the named workflow:
 
 ```toml
-[actions.exceptions]
+[actions.overrides]
 "actions/checkout" = [
   { workflow = ".github/workflows/ci.yml", job = "legacy-build", version = "v3" },
 ]
 ```
 
-### Step-level exception
+### Step-level override
 
 Applies to a single step (0-based index) within a job (requires `job`):
 
 ```toml
-[actions.exceptions]
+[actions.overrides]
 "actions/checkout" = [
   { workflow = ".github/workflows/ci.yml", job = "build", step = 0, version = "v3" },
 ]
 ```
 
-### Multiple exceptions
+### Multiple overrides
 
 Multiple entries can be combined:
 
@@ -84,14 +84,14 @@ Multiple entries can be combined:
 [actions]
 "actions/checkout" = "v4"
 
-[actions.exceptions]
+[actions.overrides]
 "actions/checkout" = [
   { workflow = ".github/workflows/deploy.yml", version = "v3" },
   { workflow = ".github/workflows/ci.yml", job = "legacy-build", version = "v2" },
 ]
 ```
 
-## Exception resolution order
+## Override resolution order
 
 Versions are resolved from most specific to least specific:
 
@@ -100,7 +100,7 @@ Versions are resolved from most specific to least specific:
 3. **Workflow-level** (`workflow` only, no `job` or `step`)
 4. **Global** (`[actions]` default)
 
-## Exception field reference
+## Override field reference
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -111,13 +111,13 @@ Versions are resolved from most specific to least specific:
 
 ## Validation rules
 
-- An exception entry requires a global default for the same action (`gx tidy` enforces this)
+- An override entry requires a global default for the same action (`gx tidy` enforces this)
 - `step` requires `job` to be set
 - Duplicate scope entries (same `workflow`+`job`+`step` combination) are rejected
 
-## Stale exceptions
+## Stale overrides
 
-`gx tidy` automatically removes exception entries whose referenced workflow, job, or step no longer exists.
+`gx tidy` automatically removes override entries whose referenced workflow, job, or step no longer exists.
 
 ## Action names
 
@@ -146,4 +146,4 @@ Running `gx tidy` with an empty manifest will not modify any workflows.
 
 ## Implementation
 
-`gx.toml` is managed through the `Manifest` domain entity (`src/domain/manifest.rs`), which owns all CRUD operations and exception resolution logic. Persistence is handled by `ManifestStore` (`src/infrastructure/manifest.rs`): `FileManifest` reads/writes disk, `MemoryManifest` is used when no `gx.toml` exists.
+`gx.toml` is managed through the `Manifest` domain entity (`src/domain/manifest.rs`), which owns all CRUD operations and override resolution logic. Persistence is handled by `ManifestStore` (`src/infrastructure/manifest.rs`): `FileManifest` reads/writes disk, `MemoryManifest` is used when no `gx.toml` exists.

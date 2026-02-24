@@ -10,10 +10,10 @@ The `tidy` command ensures that `gx.toml` matches the source code in the reposit
 
 1. **Adds** any missing action requirements to `gx.toml` that are used in workflows
 2. **Removes** action requirements from `gx.toml` that aren't used in any workflow
-3. **Prunes** stale exception entries that reference removed workflows/jobs/steps
-4. **Resolves** action versions to commit SHAs via the Github API (global defaults and exception versions)
+3. **Prunes** stale override entries that reference removed workflows/jobs/steps
+4. **Resolves** action versions to commit SHAs via the Github API (global defaults and override versions)
 5. **Validates** that existing SHAs match their version comments, correcting mismatches
-6. **Updates** each workflow file using per-step exception resolution
+6. **Updates** each workflow file using per-step override resolution
 
 ## Architecture
 
@@ -27,7 +27,7 @@ src/infrastructure/manifest.rs    # ManifestStore trait, FileManifest, MemoryMan
 src/infrastructure/lock.rs        # LockStore trait, FileLock, MemoryLock
 src/infrastructure/github.rs      # GithubRegistry (implements VersionRegistry)
 src/domain/action.rs              # Domain types: ActionId, Version, CommitSha, UsesRef, InterpretedRef, etc.
-src/domain/manifest.rs            # Manifest domain entity with ActionException and resolve_version()
+src/domain/manifest.rs            # Manifest domain entity with ActionOverride and resolve_version()
 src/domain/resolution.rs          # ActionResolver, ResolutionResult, VersionRegistry trait
 src/domain/workflow_actions.rs    # WorkflowActionSet, WorkflowLocation, LocatedAction
 ```
@@ -108,25 +108,25 @@ if manifest_version.should_be_replaced_by(workflow_version) {
 
 `should_be_replaced_by` returns true when the current version is a SHA and the other is a semver tag.
 
-### 7. Prune stale exceptions
+### 7. Prune stale overrides
 
-`prune_stale_exceptions()` scans `manifest.all_exceptions()` and removes any exception entry whose referenced `workflow`, `job`, or `step` no longer exists in the `LocatedAction` list:
+`prune_stale_overrides()` scans `manifest.all_overrides()` and removes any override entry whose referenced `workflow`, `job`, or `step` no longer exists in the `LocatedAction` list:
 
 ```rust
-fn prune_stale_exceptions(manifest: &mut Manifest, located: &[LocatedAction]) {
+fn prune_stale_overrides(manifest: &mut Manifest, located: &[LocatedAction]) {
     // Build live set of workflows/jobs/steps from scan
-    // For each exception: check workflow exists, then job, then step
-    // Replace exception list with pruned version
+    // For each override: check workflow exists, then job, then step
+    // Replace override list with pruned version
 }
 ```
 
 ### 8. Update lock file
 
-`update_lock()` processes all action/version pairs — global defaults and exception versions:
+`update_lock()` processes all action/version pairs — global defaults and override versions:
 
 - **Global specs with a workflow SHA**: `ActionResolver::validate_and_correct(spec, sha)` checks that the version comment matches the SHA. Returns `Resolved`, `Corrected`, or `Unresolved`.
 - **Global specs without a SHA**: `ActionResolver::resolve(spec)` looks up the SHA via Github API.
-- **Exception versions**: Always resolved via `ActionResolver::resolve()` (no SHA correction).
+- **Override versions**: Always resolved via `ActionResolver::resolve()` (no SHA correction).
 
 ```rust
 pub enum ResolutionResult {
@@ -140,19 +140,19 @@ Version corrections update both the manifest and lock.
 
 ### 9. Clean up lock file
 
-Retain only entries that correspond to a current (action, version) pair — including exception versions:
+Retain only entries that correspond to a current (action, version) pair — including override versions:
 
 ```rust
 fn build_keys_to_retain(manifest: &Manifest) -> Vec<LockKey> {
     // Global specs → LockKey
-    // Exception versions → LockKey (if not already present)
+    // Override versions → LockKey (if not already present)
 }
 lock.retain(&keys_to_retain);
 ```
 
-### 10. Update workflows (per-file, exception-aware)
+### 10. Update workflows (per-file, override-aware)
 
-Workflow files are updated one at a time. For each file, `build_file_update_map()` resolves each step's version through the exception hierarchy (step > job > workflow > global), then looks up the corresponding SHA from the lock:
+Workflow files are updated one at a time. For each file, `build_file_update_map()` resolves each step's version through the override hierarchy (step > job > workflow > global), then looks up the corresponding SHA from the lock:
 
 ```rust
 fn build_file_update_map(manifest: &Manifest, lock: &Lock, steps: &[&LocatedAction])
@@ -190,10 +190,10 @@ The `Manifest` domain entity (in `src/domain/manifest.rs`) owns two maps:
 ```rust
 pub struct Manifest {
     actions: HashMap<ActionId, ActionSpec>,               // global defaults
-    exceptions: HashMap<ActionId, Vec<ActionException>>,  // location-specific overrides
+    overrides: HashMap<ActionId, Vec<ActionOverride>>,  // location-specific overrides
 }
 
-pub struct ActionException {
+pub struct ActionOverride {
     pub workflow: String,       // relative path, e.g. ".github/workflows/deploy.yml"
     pub job: Option<String>,    // job id
     pub step: Option<usize>,    // 0-based step index (requires job)
@@ -203,8 +203,8 @@ pub struct ActionException {
 
 Key methods:
 - `resolve_version(id, location)` — resolves through step > job > workflow > global hierarchy
-- `add_exception(id, exc)`, `exceptions_for(id)`, `all_exceptions()`, `replace_exceptions(id, list)`
-- `remove(id)` — removes both the global entry and all its exceptions
+- `add_override(id, exc)`, `overrides_for(id)`, `all_overrides()`, `replace_overrides(id, list)`
+- `remove(id)` — removes both the global entry and all its overrides
 
 The `ManifestStore` trait has two implementations:
 - `FileManifest` — reads/writes `.github/gx.toml`
@@ -217,10 +217,10 @@ struct TomlActions {
     #[serde(flatten)]
     versions: BTreeMap<String, String>,                    // "owner/repo" -> "version"
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    exceptions: BTreeMap<String, Vec<TomlException>>,
+    overrides: BTreeMap<String, Vec<TomlOverride>>,
 }
 
-struct TomlException {
+struct TomlOverride {
     workflow: String,
     job: Option<String>,
     step: Option<usize>,
@@ -229,7 +229,7 @@ struct TomlException {
 ```
 
 Validation in `manifest_from_data()`:
-- An exception requires a global default for the same action
+- An override requires a global default for the same action
 - `step` requires `job` to be set
 - Duplicate scope entries (`workflow` + `job` + `step`) are rejected
 
@@ -341,7 +341,7 @@ Uses `reqwest` blocking client with 30-second timeout.
 - Short ref handling
 - Workflow writing with SHA replacement
 - No duplicate comments after update
-- Exception-aware per-file workflow updates (`test_gx_tidy_respects_exception_for_specific_workflow`)
-- Job-level exception resolution (`test_gx_tidy_exception_job_level`)
-- Stale exception pruning (`test_gx_tidy_removes_stale_exception`)
+- Override-aware per-file workflow updates (`test_gx_tidy_respects_override_for_specific_workflow`)
+- Job-level override resolution (`test_gx_tidy_override_job_level`)
+- Stale override pruning (`test_gx_tidy_removes_stale_override`)
 - Dominant version selection (most-used wins, tiebreak: highest semver)

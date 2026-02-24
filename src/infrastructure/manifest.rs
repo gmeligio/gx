@@ -64,7 +64,7 @@ pub enum ManifestError {
 // ---- TOML wire types ----
 
 #[derive(Debug, Default, Deserialize, Serialize)]
-struct TomlException {
+struct TomlOverride {
     workflow: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     job: Option<String>,
@@ -79,7 +79,7 @@ struct TomlActions {
     #[serde(default, flatten)]
     versions: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    overrides: BTreeMap<String, Vec<TomlException>>,
+    overrides: BTreeMap<String, Vec<TomlOverride>>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -110,7 +110,7 @@ fn manifest_from_data(data: ManifestData, _path: &Path) -> Result<Manifest, Mani
     for (action_str, toml_overrides) in data.actions.overrides {
         let id = ActionId::from(action_str.clone());
 
-        // Validation: exception without global default is an error
+        // Validation: override without global default is an error
         if !actions.contains_key(&id) {
             return Err(ManifestError::Validation(format!(
                 "\"{action_str}\" has overrides but no global version — run 'gx tidy' to fix"
@@ -124,7 +124,7 @@ fn manifest_from_data(data: ManifestData, _path: &Path) -> Result<Manifest, Mani
             // Validation: step without job
             if exc.step.is_some() && exc.job.is_none() {
                 return Err(ManifestError::Validation(format!(
-                    "exception for \"{}\" in \"{}\" has a step but no job",
+                    "override for \"{}\" in \"{}\" has a step but no job",
                     action_str, exc.workflow
                 )));
             }
@@ -133,7 +133,7 @@ fn manifest_from_data(data: ManifestData, _path: &Path) -> Result<Manifest, Mani
             let scope = (exc.workflow.clone(), exc.job.clone(), exc.step);
             if seen_scopes.contains(&scope) {
                 return Err(ManifestError::Validation(format!(
-                    "duplicate exception scope for \"{}\" in \"{}\"",
+                    "duplicate override scope for \"{}\" in \"{}\"",
                     action_str, exc.workflow
                 )));
             }
@@ -159,15 +159,15 @@ fn manifest_to_data(manifest: &Manifest) -> ManifestData {
         .map(|spec| (spec.id.as_str().to_owned(), spec.version.as_str().to_owned()))
         .collect();
 
-    let overrides: BTreeMap<String, Vec<TomlException>> = {
-        let mut map: BTreeMap<String, Vec<TomlException>> = BTreeMap::new();
+    let overrides: BTreeMap<String, Vec<TomlOverride>> = {
+        let mut map: BTreeMap<String, Vec<TomlOverride>> = BTreeMap::new();
         for (id, excs) in manifest.all_overrides() {
             if excs.is_empty() {
                 continue;
             }
-            let toml_excs: Vec<TomlException> = excs
+            let toml_excs: Vec<TomlOverride> = excs
                 .iter()
-                .map(|e| TomlException {
+                .map(|e| TomlOverride {
                     workflow: e.workflow.clone(),
                     job: e.job.clone(),
                     step: e.step,
@@ -272,7 +272,7 @@ impl ManifestStore for MemoryManifest {
             // Copy over overrides
             for (id, excs) in m.all_overrides() {
                 for exc in excs {
-                    fresh.add_exception(id.clone(), exc.clone());
+                    fresh.add_override(id.clone(), exc.clone());
                 }
             }
             fresh
@@ -406,8 +406,6 @@ mod tests {
         assert!(store.save(&manifest).is_ok());
     }
 
-    // ---- new exception tests ----
-
     #[test]
     fn test_load_manifest_with_overrides() {
         let content = r#"
@@ -446,7 +444,7 @@ mod tests {
 
         let mut manifest = Manifest::default();
         manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
-        manifest.add_exception(
+        manifest.add_override(
             ActionId::from("actions/checkout"),
             ActionOverride {
                 workflow: ".github/workflows/deploy.yml".to_string(),
@@ -471,7 +469,7 @@ mod tests {
     }
 
     #[test]
-    fn test_load_exception_without_global_is_error() {
+    fn test_load_override_without_global_is_error() {
         let content = r#"
 [actions]
 "actions/setup-node" = "v4"
@@ -499,7 +497,7 @@ mod tests {
     }
 
     #[test]
-    fn test_load_exception_step_without_job_is_error() {
+    fn test_load_override_step_without_job_is_error() {
         let content = r#"
 [actions]
 "actions/checkout" = "v4"

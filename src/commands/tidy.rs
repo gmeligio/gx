@@ -98,7 +98,7 @@ where
     // Scan with location context for per-step processing (also used for stale cleanup)
     let located = parser.scan_all_located()?;
 
-    // Remove stale exception entries (overrides pointing to removed workflows/jobs/steps)
+    // Remove stale override entries (overrides pointing to removed workflows/jobs/steps)
     prune_stale_overrides(&mut manifest, &located);
 
     // Resolve SHAs and validate version comments (must handle all versions in manifest + overrides)
@@ -182,7 +182,7 @@ fn build_keys_to_retain(manifest: &Manifest) -> Vec<LockKey> {
     keys
 }
 
-/// Build the per-file update map: resolves each step's version via exception hierarchy.
+/// Build the per-file update map: resolves each step's version via override hierarchy.
 fn build_file_update_map(
     manifest: &Manifest,
     lock: &Lock,
@@ -201,7 +201,7 @@ fn build_file_update_map(
     map
 }
 
-/// Remove exception entries whose referenced workflow/job/step no longer exists in the scanned set.
+/// Remove override entries whose referenced workflow/job/step no longer exists in the scanned set.
 fn prune_stale_overrides(manifest: &mut Manifest, located: &[LocatedAction]) {
     let live_workflows: HashSet<&str> =
         located.iter().map(|a| a.location.workflow.as_str()).collect();
@@ -214,7 +214,7 @@ fn prune_stale_overrides(manifest: &mut Manifest, located: &[LocatedAction]) {
             .into_iter()
             .filter(|exc| {
                 if !live_workflows.contains(exc.workflow.as_str()) {
-                    info!("Removing stale exception for {id} in {}", exc.workflow);
+                    info!("Removing stale override for {id} in {}", exc.workflow);
                     return false;
                 }
                 if let Some(job) = &exc.job {
@@ -224,7 +224,7 @@ fn prune_stale_overrides(manifest: &mut Manifest, located: &[LocatedAction]) {
                     });
                     if !job_exists {
                         info!(
-                            "Removing stale exception for {id} in {}/{}",
+                            "Removing stale override for {id} in {}/{}",
                             exc.workflow, job
                         );
                         return false;
@@ -238,7 +238,7 @@ fn prune_stale_overrides(manifest: &mut Manifest, located: &[LocatedAction]) {
                     });
                     if !step_exists {
                         info!(
-                            "Removing stale exception for {id} in {}:{}/{}",
+                            "Removing stale override for {id} in {}:{}/{}",
                             exc.workflow, job, step
                         );
                         return false;
@@ -261,7 +261,7 @@ fn update_lock<R: VersionRegistry>(
     let mut corrections = Vec::new();
     let mut unresolved = Vec::new();
 
-    // Collect all specs: global + exception versions
+    // Collect all specs: global + override versions
     let mut all_specs: Vec<ActionSpec> = manifest.specs().iter().map(|s| (*s).clone()).collect();
     for (id, overrides) in manifest.all_overrides() {
         for exc in overrides {
@@ -330,19 +330,19 @@ fn update_lock<R: VersionRegistry>(
         }
     }
 
-    // Then resolve exception versions (no SHA correction for overrides, just resolve)
+    // Then resolve override versions (no SHA correction for overrides, just resolve)
     for (id, overrides) in manifest.all_overrides() {
         for exc in overrides {
             let exc_spec = ActionSpec::new(id.clone(), exc.version.clone());
             let key = LockKey::from(&exc_spec);
             if !lock.has(&key) {
-                debug!("Resolving exception {exc_spec}");
+                debug!("Resolving override {exc_spec}");
                 match resolver.resolve(&exc_spec) {
                     ResolutionResult::Resolved(action) => {
                         lock.set(&action);
                     }
                     ResolutionResult::Unresolved { spec: s, reason } => {
-                        debug!("Could not resolve exception {s}: {reason}");
+                        debug!("Could not resolve override {s}: {reason}");
                         unresolved.push(format!("{s}: {reason}"));
                     }
                     ResolutionResult::Corrected { corrected, .. } => {

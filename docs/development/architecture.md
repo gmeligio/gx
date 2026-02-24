@@ -82,9 +82,9 @@ pub fn run<M: ManifestStore, L: LockStore, R: VersionRegistry, P: WorkflowScanne
 
 ### Manifest (`domain/manifest.rs`)
 
-Owns the `ActionId → ActionSpec` map, the `ActionId → Vec<ActionException>` exceptions map, and all domain behaviour:
+Owns the `ActionId → ActionSpec` map, the `ActionId → Vec<ActionOverride>` overrides map, and all domain behaviour:
 - `get`, `set`, `remove`, `has`, `is_empty`, `specs` — global default access and mutation
-- `add_exception`, `exceptions_for`, `all_exceptions`, `replace_exceptions` — exception management
+- `add_override`, `overrides_for`, `all_overrides`, `replace_overrides` — override management
 - `resolve_version(id, location)` — resolves through step > job > workflow > global hierarchy
 
 ### Lock (`domain/lock.rs`)
@@ -98,7 +98,7 @@ Owns the `LockKey → CommitSha` map and all domain behaviour:
 ### ManifestStore (`infrastructure/manifest.rs`)
 
 Pure I/O trait. Implementations:
-- `FileManifest` — reads/writes `.github/gx.toml` (includes `[actions.exceptions]`)
+- `FileManifest` — reads/writes `.github/gx.toml` (includes `[actions.overrides]`)
 - `MemoryManifest` — no-op `save()`, `load()` returns pre-seeded or empty `Manifest`; `from_workflows()` uses `dominant_version()`
 
 ### LockStore (`infrastructure/lock.rs`)
@@ -118,7 +118,7 @@ Implementation: `FileWorkflowScanner` (`infrastructure/workflow.rs`)
 ### WorkflowUpdater (`domain/workflow.rs`)
 
 - `update_all(map)` — applies `ActionId → "SHA # version"` map to every workflow file
-- `update_file(path, map)` — applies map to a single workflow file (used by tidy for per-file exception resolution)
+- `update_file(path, map)` — applies map to a single workflow file (used by tidy for per-file override resolution)
 
 Implementation: `FileWorkflowUpdater` (`infrastructure/workflow.rs`)
 
@@ -147,7 +147,7 @@ WorkflowActionSet { versions, shas, counts }
 LocatedAction { id, version, sha, location: WorkflowLocation }
     ▼
 Manifest { actions: HashMap<ActionId, ActionSpec>,
-           exceptions: HashMap<ActionId, Vec<ActionException>> }
+           overrides: HashMap<ActionId, Vec<ActionOverride>> }
     ▼ (resolved via VersionRegistry)
 ResolvedAction { id: ActionId, version: Version, sha: CommitSha }
     ▼ (stored in lock)
@@ -162,7 +162,7 @@ Lock { actions: HashMap<LockKey, CommitSha> }
 - `LockKey` — composite `action@version` key for the lock file
 - `WorkflowLocation` — `{ workflow: String, job: Option<String>, step: Option<usize> }`; identifies a step's position in the workflow tree
 - `LocatedAction` — `InterpretedRef` enriched with `WorkflowLocation`; one per `uses:` step
-- `ActionException` — location-specific version override in the manifest (`workflow`, `job`, `step`, `version`)
+- `ActionOverride` — location-specific version override in the manifest (`workflow`, `job`, `step`, `version`)
 
 ## Error handling
 

@@ -897,7 +897,7 @@ jobs:
 }
 
 #[test]
-fn test_gx_tidy_respects_exception_for_specific_workflow() {
+fn test_gx_tidy_respects_override_for_specific_workflow() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -931,17 +931,17 @@ fn test_gx_tidy_respects_exception_for_specific_workflow() {
         "ci.yml should use v4 SHA, got:\n{ci_updated}"
     );
 
-    // deploy.yml should use v3 SHA (exception applies)
+    // deploy.yml should use v3 SHA (override applies)
     let deploy_updated = fs::read_to_string(root.join(".github/workflows/deploy.yml")).unwrap();
     let checkout_v3_sha = MockRegistry::fake_sha("actions/checkout", "v3");
     assert!(
         deploy_updated.contains(&format!("actions/checkout@{checkout_v3_sha} # v3")),
-        "deploy.yml should use v3 SHA from exception, got:\n{deploy_updated}"
+        "deploy.yml should use v3 SHA from override, got:\n{deploy_updated}"
     );
 }
 
 #[test]
-fn test_gx_tidy_exception_job_level() {
+fn test_gx_tidy_override_job_level() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -970,7 +970,7 @@ jobs:
     let result = run_tidy(&root);
     assert!(result.is_ok(), "{:?}", result.err());
 
-    // The lock should have both versions since both are in manifest (global + exception)
+    // The lock should have both versions since both are in manifest (global + override)
     let lock_content = fs::read_to_string(root.join(".github/gx.lock")).unwrap();
     let v4_sha = MockRegistry::fake_sha("actions/checkout", "v4");
     let v3_sha = MockRegistry::fake_sha("actions/checkout", "v3");
@@ -979,11 +979,11 @@ jobs:
 }
 
 #[test]
-fn test_gx_tidy_removes_stale_exception() {
+fn test_gx_tidy_removes_stale_override() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
-    // Exception references a workflow that no longer exists
+    // Override references a workflow that no longer exists
     let manifest_content = r#"
 [actions]
 "actions/checkout" = "v4"
@@ -1006,6 +1006,6 @@ fn test_gx_tidy_removes_stale_exception() {
     let manifest_content = fs::read_to_string(root.join(".github/gx.toml")).unwrap();
     assert!(
         !manifest_content.contains("old-workflow.yml"),
-        "Stale exception should be removed, got:\n{manifest_content}"
+        "Stale override should be removed, got:\n{manifest_content}"
     );
 }

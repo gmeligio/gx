@@ -13,10 +13,10 @@ gx tidy
 1. **Scans** all workflow files in `.github/workflows/` (with per-step location context)
 2. **Adds** missing actions to `.github/gx.toml` that are used in workflows
 3. **Removes** unused actions from `.github/gx.toml` that aren't in any workflow
-4. **Prunes** stale exception entries that reference removed workflows/jobs/steps
-5. **Updates** `.github/gx.lock` with resolved commit SHAs for all action versions (both global defaults and exception versions)
+4. **Prunes** stale override entries that reference removed workflows/jobs/steps
+5. **Updates** `.github/gx.lock` with resolved commit SHAs for all action versions (both global defaults and override versions)
 6. **Removes** unused entries from `.github/gx.lock`
-7. **Updates** each workflow file using per-step exception resolution
+7. **Updates** each workflow file using per-step override resolution
 
 This is similar to how `go mod tidy` works for Go modules.
 
@@ -196,9 +196,9 @@ Running `gx tidy` creates:
 "actions/checkout" = "v3"
 ```
 
-## Exception-aware resolution
+## Override-aware resolution
 
-When the manifest contains `[actions.exceptions]` entries, `gx tidy` applies them per workflow file. Each step is resolved using the exception hierarchy (step > job > workflow > global), and workflow files are updated file-by-file with the correct version for each step.
+When the manifest contains `[actions.overrides]` entries, `gx tidy` applies them per workflow file. Each step is resolved using the override hierarchy (step > job > workflow > global), and workflow files are updated file-by-file with the correct version for each step.
 
 Example: given this manifest:
 
@@ -206,7 +206,7 @@ Example: given this manifest:
 [actions]
 "actions/checkout" = "v4"
 
-[actions.exceptions]
+[actions.overrides]
 "actions/checkout" = [
   { workflow = ".github/workflows/deploy.yml", version = "v3" },
 ]
@@ -216,9 +216,9 @@ After `gx tidy`:
 - `.github/workflows/ci.yml` steps use `v4` SHA
 - `.github/workflows/deploy.yml` steps use `v3` SHA
 
-### Stale exception cleanup
+### Stale override cleanup
 
-`gx tidy` automatically removes exception entries that reference workflows, jobs, or step indices that no longer exist in the scanned workflows.
+`gx tidy` automatically removes override entries that reference workflows, jobs, or step indices that no longer exist in the scanned workflows.
 
 ## Behavior
 

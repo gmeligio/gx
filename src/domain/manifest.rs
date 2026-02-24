@@ -52,9 +52,9 @@ impl Manifest {
     /// Resolve the effective version for an action at a given workflow location.
     ///
     /// Resolution order (most specific wins):
-    /// 1. Step-level exception (workflow + job + step)
-    /// 2. Job-level exception (workflow + job)
-    /// 3. Workflow-level exception (workflow only)
+    /// 1. Step-level override (workflow + job + step)
+    /// 2. Job-level override (workflow + job)
+    /// 3. Workflow-level override (workflow only)
     /// 4. Global default
     #[must_use]
     pub fn resolve_version(&self, id: &ActionId, location: &WorkflowLocation) -> Option<&Version> {
@@ -71,7 +71,7 @@ impl Manifest {
                 }
             }
 
-            // Job-level: workflow + job match, no step in exception
+            // Job-level: workflow + job match, no step in override
             if let Some(job) = &location.job {
                 for exc in overrides {
                     if exc.workflow == location.workflow
@@ -83,7 +83,7 @@ impl Manifest {
                 }
             }
 
-            // Workflow-level: workflow matches, no job/step in exception
+            // Workflow-level: workflow matches, no job/step in override
             for exc in overrides {
                 if exc.workflow == location.workflow && exc.job.is_none() && exc.step.is_none() {
                     return Some(&exc.version);
@@ -100,9 +100,9 @@ impl Manifest {
         self.actions.insert(id, spec);
     }
 
-    /// Add an exception entry for an action.
-    pub fn add_exception(&mut self, id: ActionId, exception: ActionOverride) {
-        self.overrides.entry(id).or_default().push(exception);
+    /// Add an override entry for an action.
+    pub fn add_override(&mut self, id: ActionId, action_override: ActionOverride) {
+        self.overrides.entry(id).or_default().push(action_override);
     }
 
     /// Get all overrides for an action.
@@ -188,7 +188,7 @@ mod tests {
     fn test_remove_also_clears_overrides() {
         let mut m = Manifest::default();
         m.set(ActionId::from("actions/checkout"), Version::from("v4"));
-        m.add_exception(
+        m.add_override(
             ActionId::from("actions/checkout"),
             ActionOverride {
                 workflow: ".github/workflows/ci.yml".to_string(),
@@ -218,7 +218,7 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_version_returns_global_when_no_exception() {
+    fn test_resolve_version_returns_global_when_no_override() {
         let mut m = Manifest::default();
         m.set(ActionId::from("actions/checkout"), Version::from("v4"));
         let loc = make_loc(".github/workflows/ci.yml", Some("build"), Some(0));
@@ -229,10 +229,10 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_version_exception_workflow_overrides_global() {
+    fn test_resolve_version_override_workflow_overrides_global() {
         let mut m = Manifest::default();
         m.set(ActionId::from("actions/checkout"), Version::from("v4"));
-        m.add_exception(
+        m.add_override(
             ActionId::from("actions/checkout"),
             ActionOverride {
                 workflow: ".github/workflows/deploy.yml".to_string(),
@@ -261,7 +261,7 @@ mod tests {
     fn test_resolve_version_job_overrides_workflow() {
         let mut m = Manifest::default();
         m.set(ActionId::from("actions/checkout"), Version::from("v4"));
-        m.add_exception(
+        m.add_override(
             ActionId::from("actions/checkout"),
             ActionOverride {
                 workflow: ".github/workflows/ci.yml".to_string(),
@@ -270,7 +270,7 @@ mod tests {
                 version: Version::from("v3"),
             },
         );
-        m.add_exception(
+        m.add_override(
             ActionId::from("actions/checkout"),
             ActionOverride {
                 workflow: ".github/workflows/ci.yml".to_string(),
@@ -299,7 +299,7 @@ mod tests {
     fn test_resolve_version_step_overrides_job() {
         let mut m = Manifest::default();
         m.set(ActionId::from("actions/checkout"), Version::from("v4"));
-        m.add_exception(
+        m.add_override(
             ActionId::from("actions/checkout"),
             ActionOverride {
                 workflow: ".github/workflows/ci.yml".to_string(),
@@ -308,7 +308,7 @@ mod tests {
                 version: Version::from("v3"),
             },
         );
-        m.add_exception(
+        m.add_override(
             ActionId::from("actions/checkout"),
             ActionOverride {
                 workflow: ".github/workflows/ci.yml".to_string(),
