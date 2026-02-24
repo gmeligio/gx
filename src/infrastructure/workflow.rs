@@ -36,6 +36,7 @@ struct Step {
 
 /// Parser for extracting action information from workflow files
 pub struct FileWorkflowScanner {
+    repo_root: PathBuf,
     workflows_dir: PathBuf,
 }
 
@@ -43,8 +44,18 @@ impl FileWorkflowScanner {
     #[must_use]
     pub fn new(repo_root: &Path) -> Self {
         Self {
+            repo_root: repo_root.to_path_buf(),
             workflows_dir: repo_root.join(".github").join("workflows"),
         }
+    }
+
+    /// Compute the path relative to the repo root for use in `WorkflowLocation`.
+    fn rel_path(&self, workflow_path: &Path) -> String {
+        workflow_path
+            .strip_prefix(&self.repo_root)
+            .unwrap_or(workflow_path)
+            .to_string_lossy()
+            .replace('\\', "/")
     }
 
     /// Find all workflow files in the repository's `.github/workflows` folder.
@@ -154,7 +165,7 @@ impl FileWorkflowScanner {
         &self,
         workflow_path: &Path,
     ) -> Result<crate::domain::WorkflowActionSet, WorkflowError> {
-        let rel = workflow_path.to_string_lossy().replace('\\', "/");
+        let rel = self.rel_path(workflow_path);
         let actions = Self::extract_actions(workflow_path, &rel)?;
         let mut action_set = crate::domain::WorkflowActionSet::new();
         for action in &actions {
@@ -182,7 +193,7 @@ impl FileWorkflowScanner {
 
         let mut action_set = crate::domain::WorkflowActionSet::new();
         for workflow in &workflows {
-            let rel = workflow.to_string_lossy().replace('\\', "/");
+            let rel = self.rel_path(workflow);
             let actions = Self::extract_actions(workflow, &rel)?;
             for action in &actions {
                 action_set.add(&action.uses_ref.interpret());
@@ -200,7 +211,7 @@ impl FileWorkflowScanner {
         let workflows = self.find_workflows()?;
         let mut result = Vec::new();
         for workflow in &workflows {
-            let rel = workflow.to_string_lossy().replace('\\', "/");
+            let rel = self.rel_path(workflow);
             let actions = Self::extract_actions(workflow, &rel)?;
             for action in actions {
                 let interpreted = action.uses_ref.interpret();
