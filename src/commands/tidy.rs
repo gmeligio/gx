@@ -98,16 +98,16 @@ where
     // Scan with location context for per-step processing (also used for stale cleanup)
     let located = parser.scan_all_located()?;
 
-    // Remove stale exception entries (exceptions pointing to removed workflows/jobs/steps)
-    prune_stale_exceptions(&mut manifest, &located);
+    // Remove stale exception entries (overrides pointing to removed workflows/jobs/steps)
+    prune_stale_overrides(&mut manifest, &located);
 
-    // Resolve SHAs and validate version comments (must handle all versions in manifest + exceptions)
+    // Resolve SHAs and validate version comments (must handle all versions in manifest + overrides)
     let corrections = update_lock(&mut lock, &mut manifest, &action_set, registry)?;
 
     // Persist manifest
     manifest_store.save(&manifest)?;
 
-    // Prune and persist lock: retain all version variants that appear in manifest or exceptions
+    // Prune and persist lock: retain all version variants that appear in manifest or overrides
     let keys_to_retain: Vec<LockKey> = build_keys_to_retain(&manifest);
     lock.retain(&keys_to_retain);
     lock_store.save(&lock)?;
@@ -168,11 +168,11 @@ fn select_dominant_version(action_id: &ActionId, action_set: &WorkflowActionSet)
     })
 }
 
-/// Collect all `LockKeys` needed: one per (action, version) pair across globals and exceptions.
+/// Collect all `LockKeys` needed: one per (action, version) pair across globals and overrides.
 fn build_keys_to_retain(manifest: &Manifest) -> Vec<LockKey> {
     let mut keys: Vec<LockKey> = manifest.specs().iter().map(|s| LockKey::from(*s)).collect();
-    for (id, exceptions) in manifest.all_exceptions() {
-        for exc in exceptions {
+    for (id, overrides) in manifest.all_overrides() {
+        for exc in overrides {
             let key = LockKey::new(id.clone(), exc.version.clone());
             if !keys.contains(&key) {
                 keys.push(key);
@@ -202,15 +202,15 @@ fn build_file_update_map(
 }
 
 /// Remove exception entries whose referenced workflow/job/step no longer exists in the scanned set.
-fn prune_stale_exceptions(manifest: &mut Manifest, located: &[LocatedAction]) {
+fn prune_stale_overrides(manifest: &mut Manifest, located: &[LocatedAction]) {
     let live_workflows: HashSet<&str> =
         located.iter().map(|a| a.location.workflow.as_str()).collect();
 
-    let action_ids: Vec<ActionId> = manifest.all_exceptions().keys().cloned().collect();
+    let action_ids: Vec<ActionId> = manifest.all_overrides().keys().cloned().collect();
 
     for id in action_ids {
-        let exceptions = manifest.exceptions_for(&id).to_vec();
-        let pruned: Vec<crate::domain::ActionException> = exceptions
+        let overrides = manifest.overrides_for(&id).to_vec();
+        let pruned: Vec<crate::domain::ActionOverride> = overrides
             .into_iter()
             .filter(|exc| {
                 if !live_workflows.contains(exc.workflow.as_str()) {
@@ -248,7 +248,7 @@ fn prune_stale_exceptions(manifest: &mut Manifest, located: &[LocatedAction]) {
             })
             .collect();
 
-        manifest.replace_exceptions(id, pruned);
+        manifest.replace_overrides(id, pruned);
     }
 }
 
@@ -263,8 +263,8 @@ fn update_lock<R: VersionRegistry>(
 
     // Collect all specs: global + exception versions
     let mut all_specs: Vec<ActionSpec> = manifest.specs().iter().map(|s| (*s).clone()).collect();
-    for (id, exceptions) in manifest.all_exceptions() {
-        for exc in exceptions {
+    for (id, overrides) in manifest.all_overrides() {
+        for exc in overrides {
             let key = LockKey::new(id.clone(), exc.version.clone());
             if !lock.has(&key) {
                 all_specs.push(ActionSpec::new(id.clone(), exc.version.clone()));
@@ -330,9 +330,9 @@ fn update_lock<R: VersionRegistry>(
         }
     }
 
-    // Then resolve exception versions (no SHA correction for exceptions, just resolve)
-    for (id, exceptions) in manifest.all_exceptions() {
-        for exc in exceptions {
+    // Then resolve exception versions (no SHA correction for overrides, just resolve)
+    for (id, overrides) in manifest.all_overrides() {
+        for exc in overrides {
             let exc_spec = ActionSpec::new(id.clone(), exc.version.clone());
             let key = LockKey::from(&exc_spec);
             if !lock.has(&key) {

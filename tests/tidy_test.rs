@@ -906,7 +906,7 @@ fn test_gx_tidy_respects_exception_for_specific_workflow() {
 [actions]
 "actions/checkout" = "v4"
 
-[actions.exceptions]
+[actions.overrides]
 "actions/checkout" = [
   { workflow = ".github/workflows/deploy.yml", version = "v3" },
 ]
@@ -949,7 +949,7 @@ fn test_gx_tidy_exception_job_level() {
 [actions]
 "actions/checkout" = "v4"
 
-[actions.exceptions]
+[actions.overrides]
 "actions/checkout" = [
   { workflow = ".github/workflows/ci.yml", job = "legacy-build", version = "v3" },
 ]
@@ -988,7 +988,7 @@ fn test_gx_tidy_removes_stale_exception() {
 [actions]
 "actions/checkout" = "v4"
 
-[actions.exceptions]
+[actions.overrides]
 "actions/checkout" = [
   { workflow = ".github/workflows/old-workflow.yml", version = "v3" },
 ]

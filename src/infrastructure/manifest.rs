@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-use crate::domain::{ActionException, ActionId, ActionSpec, Manifest, Version, WorkflowActionSet};
+use crate::domain::{ActionOverride, ActionId, ActionSpec, Manifest, Version, WorkflowActionSet};
 
 pub const MANIFEST_FILE_NAME: &str = "gx.toml";
 
@@ -73,13 +73,13 @@ struct TomlException {
     version: String,
 }
 
-/// The [actions] section: flat string entries + optional [actions.exceptions] sub-table.
+/// The [actions] section: flat string entries + optional [actions.overrides] sub-table.
 #[derive(Debug, Default, Deserialize, Serialize)]
 struct TomlActions {
     #[serde(default, flatten)]
     versions: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    exceptions: BTreeMap<String, Vec<TomlException>>,
+    overrides: BTreeMap<String, Vec<TomlException>>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -104,23 +104,23 @@ fn manifest_from_data(data: ManifestData, _path: &Path) -> Result<Manifest, Mani
         })
         .collect();
 
-    // Validate and convert exceptions
-    let mut exceptions: HashMap<ActionId, Vec<ActionException>> = HashMap::new();
+    // Validate and convert overrides
+    let mut overrides: HashMap<ActionId, Vec<ActionOverride>> = HashMap::new();
 
-    for (action_str, toml_exceptions) in data.actions.exceptions {
+    for (action_str, toml_overrides) in data.actions.overrides {
         let id = ActionId::from(action_str.clone());
 
         // Validation: exception without global default is an error
         if !actions.contains_key(&id) {
             return Err(ManifestError::Validation(format!(
-                "\"{action_str}\" has exceptions but no global version — run 'gx tidy' to fix"
+                "\"{action_str}\" has overrides but no global version — run 'gx tidy' to fix"
             )));
         }
 
         let mut seen_scopes: Vec<(String, Option<String>, Option<usize>)> = Vec::new();
 
         let mut converted = Vec::new();
-        for exc in toml_exceptions {
+        for exc in toml_overrides {
             // Validation: step without job
             if exc.step.is_some() && exc.job.is_none() {
                 return Err(ManifestError::Validation(format!(
@@ -139,17 +139,17 @@ fn manifest_from_data(data: ManifestData, _path: &Path) -> Result<Manifest, Mani
             }
             seen_scopes.push(scope);
 
-            converted.push(ActionException {
+            converted.push(ActionOverride {
                 workflow: exc.workflow,
                 job: exc.job,
                 step: exc.step,
                 version: Version::from(exc.version),
             });
         }
-        exceptions.insert(id, converted);
+        overrides.insert(id, converted);
     }
 
-    Ok(Manifest::with_exceptions(actions, exceptions))
+    Ok(Manifest::with_overrides(actions, overrides))
 }
 
 fn manifest_to_data(manifest: &Manifest) -> ManifestData {
@@ -159,9 +159,9 @@ fn manifest_to_data(manifest: &Manifest) -> ManifestData {
         .map(|spec| (spec.id.as_str().to_owned(), spec.version.as_str().to_owned()))
         .collect();
 
-    let exceptions: BTreeMap<String, Vec<TomlException>> = {
+    let overrides: BTreeMap<String, Vec<TomlException>> = {
         let mut map: BTreeMap<String, Vec<TomlException>> = BTreeMap::new();
-        for (id, excs) in manifest.all_exceptions() {
+        for (id, excs) in manifest.all_overrides() {
             if excs.is_empty() {
                 continue;
             }
@@ -180,7 +180,7 @@ fn manifest_to_data(manifest: &Manifest) -> ManifestData {
     };
 
     ManifestData {
-        actions: TomlActions { versions, exceptions },
+        actions: TomlActions { versions, overrides },
     }
 }
 
@@ -269,8 +269,8 @@ impl ManifestStore for MemoryManifest {
             for spec in m.specs() {
                 fresh.set(spec.id.clone(), spec.version.clone());
             }
-            // Copy over exceptions
-            for (id, excs) in m.all_exceptions() {
+            // Copy over overrides
+            for (id, excs) in m.all_overrides() {
                 for exc in excs {
                     fresh.add_exception(id.clone(), exc.clone());
                 }
@@ -409,12 +409,12 @@ mod tests {
     // ---- new exception tests ----
 
     #[test]
-    fn test_load_manifest_with_exceptions() {
+    fn test_load_manifest_with_overrides() {
         let content = r#"
 [actions]
 "actions/checkout" = "v4"
 
-[actions.exceptions]
+[actions.overrides]
 "actions/checkout" = [
   { workflow = ".github/workflows/deploy.yml", version = "v3" },
   { workflow = ".github/workflows/ci.yml", job = "legacy-build", version = "v2" },
@@ -431,16 +431,16 @@ mod tests {
             Some(&Version::from("v4"))
         );
 
-        let exceptions = manifest.exceptions_for(&ActionId::from("actions/checkout"));
-        assert_eq!(exceptions.len(), 2);
-        assert_eq!(exceptions[0].workflow, ".github/workflows/deploy.yml");
-        assert_eq!(exceptions[0].version.as_str(), "v3");
-        assert_eq!(exceptions[1].job.as_deref(), Some("legacy-build"));
-        assert_eq!(exceptions[1].version.as_str(), "v2");
+        let overrides = manifest.overrides_for(&ActionId::from("actions/checkout"));
+        assert_eq!(overrides.len(), 2);
+        assert_eq!(overrides[0].workflow, ".github/workflows/deploy.yml");
+        assert_eq!(overrides[0].version.as_str(), "v3");
+        assert_eq!(overrides[1].job.as_deref(), Some("legacy-build"));
+        assert_eq!(overrides[1].version.as_str(), "v2");
     }
 
     #[test]
-    fn test_save_and_load_roundtrip_with_exceptions() {
+    fn test_save_and_load_roundtrip_with_overrides() {
         let file = NamedTempFile::new().unwrap();
         let store = FileManifest::new(file.path());
 
@@ -448,7 +448,7 @@ mod tests {
         manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
         manifest.add_exception(
             ActionId::from("actions/checkout"),
-            ActionException {
+            ActionOverride {
                 workflow: ".github/workflows/deploy.yml".to_string(),
                 job: None,
                 step: None,
@@ -459,15 +459,15 @@ mod tests {
         store.save(&manifest).unwrap();
         let content = fs::read_to_string(file.path()).unwrap();
         assert!(
-            content.contains("actions.exceptions"),
-            "Expected exceptions section, got:\n{content}"
+            content.contains("actions.overrides"),
+            "Expected overrides section, got:\n{content}"
         );
 
         let loaded = store.load().unwrap();
-        let exceptions = loaded.exceptions_for(&ActionId::from("actions/checkout"));
-        assert_eq!(exceptions.len(), 1);
-        assert_eq!(exceptions[0].workflow, ".github/workflows/deploy.yml");
-        assert_eq!(exceptions[0].version.as_str(), "v3");
+        let overrides = loaded.overrides_for(&ActionId::from("actions/checkout"));
+        assert_eq!(overrides.len(), 1);
+        assert_eq!(overrides[0].workflow, ".github/workflows/deploy.yml");
+        assert_eq!(overrides[0].version.as_str(), "v3");
     }
 
     #[test]
@@ -476,7 +476,7 @@ mod tests {
 [actions]
 "actions/setup-node" = "v4"
 
-[actions.exceptions]
+[actions.overrides]
 "actions/checkout" = [
   { workflow = ".github/workflows/deploy.yml", version = "v3" },
 ]
@@ -504,7 +504,7 @@ mod tests {
 [actions]
 "actions/checkout" = "v4"
 
-[actions.exceptions]
+[actions.overrides]
 "actions/checkout" = [
   { workflow = ".github/workflows/ci.yml", step = 0, version = "v3" },
 ]
@@ -523,7 +523,7 @@ mod tests {
 [actions]
 "actions/checkout" = "v4"
 
-[actions.exceptions]
+[actions.overrides]
 "actions/checkout" = [
   { workflow = ".github/workflows/deploy.yml", version = "v3" },
   { workflow = ".github/workflows/deploy.yml", version = "v2" },
@@ -538,7 +538,7 @@ mod tests {
     }
 
     #[test]
-    fn test_save_no_exceptions_section_when_empty() {
+    fn test_save_no_overrides_section_when_empty() {
         let file = NamedTempFile::new().unwrap();
         let store = FileManifest::new(file.path());
 
@@ -548,7 +548,7 @@ mod tests {
         store.save(&manifest).unwrap();
         let content = fs::read_to_string(file.path()).unwrap();
         assert!(
-            !content.contains("exceptions"),
+            !content.contains("overrides"),
             "got:\n{content}"
         );
     }

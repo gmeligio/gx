@@ -5,7 +5,7 @@ use crate::domain::workflow_actions::WorkflowLocation;
 
 /// A version override for a specific workflow location.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ActionException {
+pub struct ActionOverride {
     /// Relative path from repo root, e.g. ".github/workflows/deploy.yml"
     pub workflow: String,
     /// Job id, if scoped to a job
@@ -21,7 +21,7 @@ pub struct ActionException {
 #[derive(Debug, Default)]
 pub struct Manifest {
     actions: HashMap<ActionId, ActionSpec>,
-    exceptions: HashMap<ActionId, Vec<ActionException>>,
+    overrides: HashMap<ActionId, Vec<ActionOverride>>,
 }
 
 impl Manifest {
@@ -30,17 +30,17 @@ impl Manifest {
     pub fn new(actions: HashMap<ActionId, ActionSpec>) -> Self {
         Self {
             actions,
-            exceptions: HashMap::new(),
+            overrides: HashMap::new(),
         }
     }
 
-    /// Create a `Manifest` with both actions and exceptions.
+    /// Create a `Manifest` with both actions and overrides.
     #[must_use]
-    pub fn with_exceptions(
+    pub fn with_overrides(
         actions: HashMap<ActionId, ActionSpec>,
-        exceptions: HashMap<ActionId, Vec<ActionException>>,
+        overrides: HashMap<ActionId, Vec<ActionOverride>>,
     ) -> Self {
-        Self { actions, exceptions }
+        Self { actions, overrides }
     }
 
     /// Get the version pinned for an action (global default).
@@ -58,10 +58,10 @@ impl Manifest {
     /// 4. Global default
     #[must_use]
     pub fn resolve_version(&self, id: &ActionId, location: &WorkflowLocation) -> Option<&Version> {
-        if let Some(exceptions) = self.exceptions.get(id) {
+        if let Some(overrides) = self.overrides.get(id) {
             // Step-level: workflow + job + step all match
             if let (Some(job), Some(step)) = (&location.job, location.step) {
-                for exc in exceptions {
+                for exc in overrides {
                     if exc.workflow == location.workflow
                         && exc.job.as_deref() == Some(job.as_str())
                         && exc.step == Some(step)
@@ -73,7 +73,7 @@ impl Manifest {
 
             // Job-level: workflow + job match, no step in exception
             if let Some(job) = &location.job {
-                for exc in exceptions {
+                for exc in overrides {
                     if exc.workflow == location.workflow
                         && exc.job.as_deref() == Some(job.as_str())
                         && exc.step.is_none()
@@ -84,7 +84,7 @@ impl Manifest {
             }
 
             // Workflow-level: workflow matches, no job/step in exception
-            for exc in exceptions {
+            for exc in overrides {
                 if exc.workflow == location.workflow && exc.job.is_none() && exc.step.is_none() {
                     return Some(&exc.version);
                 }
@@ -101,20 +101,20 @@ impl Manifest {
     }
 
     /// Add an exception entry for an action.
-    pub fn add_exception(&mut self, id: ActionId, exception: ActionException) {
-        self.exceptions.entry(id).or_default().push(exception);
+    pub fn add_exception(&mut self, id: ActionId, exception: ActionOverride) {
+        self.overrides.entry(id).or_default().push(exception);
     }
 
-    /// Get all exceptions for an action.
+    /// Get all overrides for an action.
     #[must_use]
-    pub fn exceptions_for(&self, id: &ActionId) -> &[ActionException] {
-        self.exceptions.get(id).map_or(&[], Vec::as_slice)
+    pub fn overrides_for(&self, id: &ActionId) -> &[ActionOverride] {
+        self.overrides.get(id).map_or(&[], Vec::as_slice)
     }
 
-    /// Remove an action from the manifest (global default and all its exceptions).
+    /// Remove an action from the manifest (global default and all its overrides).
     pub fn remove(&mut self, id: &ActionId) {
         self.actions.remove(id);
-        self.exceptions.remove(id);
+        self.overrides.remove(id);
     }
 
     /// Check if the manifest contains an action.
@@ -135,18 +135,18 @@ impl Manifest {
         self.actions.values().collect()
     }
 
-    /// Get all exceptions across all actions.
+    /// Get all overrides across all actions.
     #[must_use]
-    pub fn all_exceptions(&self) -> &HashMap<ActionId, Vec<ActionException>> {
-        &self.exceptions
+    pub fn all_overrides(&self) -> &HashMap<ActionId, Vec<ActionOverride>> {
+        &self.overrides
     }
 
-    /// Replace all exceptions for an action (used by stale cleanup).
-    pub fn replace_exceptions(&mut self, id: ActionId, exceptions: Vec<ActionException>) {
-        if exceptions.is_empty() {
-            self.exceptions.remove(&id);
+    /// Replace all overrides for an action (used by stale cleanup).
+    pub fn replace_overrides(&mut self, id: ActionId, overrides: Vec<ActionOverride>) {
+        if overrides.is_empty() {
+            self.overrides.remove(&id);
         } else {
-            self.exceptions.insert(id, exceptions);
+            self.overrides.insert(id, overrides);
         }
     }
 }
@@ -185,12 +185,12 @@ mod tests {
     }
 
     #[test]
-    fn test_remove_also_clears_exceptions() {
+    fn test_remove_also_clears_overrides() {
         let mut m = Manifest::default();
         m.set(ActionId::from("actions/checkout"), Version::from("v4"));
         m.add_exception(
             ActionId::from("actions/checkout"),
-            ActionException {
+            ActionOverride {
                 workflow: ".github/workflows/ci.yml".to_string(),
                 job: None,
                 step: None,
@@ -198,7 +198,7 @@ mod tests {
             },
         );
         m.remove(&ActionId::from("actions/checkout"));
-        assert!(m.exceptions_for(&ActionId::from("actions/checkout")).is_empty());
+        assert!(m.overrides_for(&ActionId::from("actions/checkout")).is_empty());
     }
 
     #[test]
@@ -234,7 +234,7 @@ mod tests {
         m.set(ActionId::from("actions/checkout"), Version::from("v4"));
         m.add_exception(
             ActionId::from("actions/checkout"),
-            ActionException {
+            ActionOverride {
                 workflow: ".github/workflows/deploy.yml".to_string(),
                 job: None,
                 step: None,
@@ -263,7 +263,7 @@ mod tests {
         m.set(ActionId::from("actions/checkout"), Version::from("v4"));
         m.add_exception(
             ActionId::from("actions/checkout"),
-            ActionException {
+            ActionOverride {
                 workflow: ".github/workflows/ci.yml".to_string(),
                 job: None,
                 step: None,
@@ -272,7 +272,7 @@ mod tests {
         );
         m.add_exception(
             ActionId::from("actions/checkout"),
-            ActionException {
+            ActionOverride {
                 workflow: ".github/workflows/ci.yml".to_string(),
                 job: Some("legacy-build".to_string()),
                 step: None,
@@ -301,7 +301,7 @@ mod tests {
         m.set(ActionId::from("actions/checkout"), Version::from("v4"));
         m.add_exception(
             ActionId::from("actions/checkout"),
-            ActionException {
+            ActionOverride {
                 workflow: ".github/workflows/ci.yml".to_string(),
                 job: Some("build".to_string()),
                 step: None,
@@ -310,7 +310,7 @@ mod tests {
         );
         m.add_exception(
             ActionId::from("actions/checkout"),
-            ActionException {
+            ActionOverride {
                 workflow: ".github/workflows/ci.yml".to_string(),
                 job: Some("build".to_string()),
                 step: Some(0),
