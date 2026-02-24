@@ -154,8 +154,8 @@ impl Manifest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{ActionId, Version};
     use crate::domain::workflow_actions::WorkflowLocation;
+    use crate::domain::{ActionId, Version};
 
     fn make_loc(workflow: &str, job: Option<&str>, step: Option<usize>) -> WorkflowLocation {
         WorkflowLocation {
@@ -198,7 +198,10 @@ mod tests {
             },
         );
         m.remove(&ActionId::from("actions/checkout"));
-        assert!(m.overrides_for(&ActionId::from("actions/checkout")).is_empty());
+        assert!(
+            m.overrides_for(&ActionId::from("actions/checkout"))
+                .is_empty()
+        );
     }
 
     #[test]

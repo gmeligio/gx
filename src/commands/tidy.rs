@@ -203,8 +203,10 @@ fn build_file_update_map(
 
 /// Remove override entries whose referenced workflow/job/step no longer exists in the scanned set.
 fn prune_stale_overrides(manifest: &mut Manifest, located: &[LocatedAction]) {
-    let live_workflows: HashSet<&str> =
-        located.iter().map(|a| a.location.workflow.as_str()).collect();
+    let live_workflows: HashSet<&str> = located
+        .iter()
+        .map(|a| a.location.workflow.as_str())
+        .collect();
 
     let action_ids: Vec<ActionId> = manifest.all_overrides().keys().cloned().collect();
 

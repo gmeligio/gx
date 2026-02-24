@@ -413,8 +413,7 @@ jobs:
 
         // Find the build-job checkout entry
         let build_checkout = located.iter().find(|a| {
-            a.id == ActionId::from("actions/checkout")
-                && a.location.job.as_deref() == Some("build")
+            a.id == ActionId::from("actions/checkout") && a.location.job.as_deref() == Some("build")
         });
         assert!(build_checkout.is_some());
         let bc = build_checkout.unwrap();
@@ -422,8 +421,7 @@ jobs:
         assert_eq!(bc.location.step, Some(0));
 
         let test_checkout = located.iter().find(|a| {
-            a.id == ActionId::from("actions/checkout")
-                && a.location.job.as_deref() == Some("test")
+            a.id == ActionId::from("actions/checkout") && a.location.job.as_deref() == Some("test")
         });
         assert!(test_checkout.is_some());
         assert_eq!(test_checkout.unwrap().version.as_str(), "v3");

@@ -916,7 +916,8 @@ fn test_gx_tidy_respects_override_for_specific_workflow() {
 
     // Two workflows
     let ci_content = "name: CI\njobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n";
-    let deploy_content = "name: Deploy\njobs:\n  deploy:\n    steps:\n      - uses: actions/checkout@v3\n";
+    let deploy_content =
+        "name: Deploy\njobs:\n  deploy:\n    steps:\n      - uses: actions/checkout@v3\n";
     fs::write(root.join(".github/workflows/ci.yml"), ci_content).unwrap();
     fs::write(root.join(".github/workflows/deploy.yml"), deploy_content).unwrap();
 

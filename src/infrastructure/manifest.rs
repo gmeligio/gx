@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-use crate::domain::{ActionOverride, ActionId, ActionSpec, Manifest, Version, WorkflowActionSet};
+use crate::domain::{ActionId, ActionOverride, ActionSpec, Manifest, Version, WorkflowActionSet};
 
 pub const MANIFEST_FILE_NAME: &str = "gx.toml";
 
@@ -156,7 +156,12 @@ fn manifest_to_data(manifest: &Manifest) -> ManifestData {
     let versions: BTreeMap<String, String> = manifest
         .specs()
         .into_iter()
-        .map(|spec| (spec.id.as_str().to_owned(), spec.version.as_str().to_owned()))
+        .map(|spec| {
+            (
+                spec.id.as_str().to_owned(),
+                spec.version.as_str().to_owned(),
+            )
+        })
         .collect();
 
     let overrides: BTreeMap<String, Vec<TomlOverride>> = {
@@ -180,7 +185,10 @@ fn manifest_to_data(manifest: &Manifest) -> ManifestData {
     };
 
     ManifestData {
-        actions: TomlActions { versions, overrides },
+        actions: TomlActions {
+            versions,
+            overrides,
+        },
     }
 }
 
@@ -486,14 +494,8 @@ mod tests {
         let result = store.load();
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(
-            err.to_string().contains("actions/checkout"),
-            "got: {err}"
-        );
-        assert!(
-            err.to_string().contains("gx tidy"),
-            "got: {err}"
-        );
+        assert!(err.to_string().contains("actions/checkout"), "got: {err}");
+        assert!(err.to_string().contains("gx tidy"), "got: {err}");
     }
 
     #[test]
@@ -545,9 +547,6 @@ mod tests {
 
         store.save(&manifest).unwrap();
         let content = fs::read_to_string(file.path()).unwrap();
-        assert!(
-            !content.contains("overrides"),
-            "got:\n{content}"
-        );
+        assert!(!content.contains("overrides"), "got:\n{content}");
     }
 }

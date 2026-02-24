@@ -12,5 +12,7 @@ pub use action::{
 pub use lock::Lock;
 pub use manifest::{ActionOverride, Manifest};
 pub use resolution::{ActionResolver, ResolutionError, ResolutionResult, VersionRegistry};
-pub use workflow::{UpdateResult, WorkflowError, WorkflowScanner, WorkflowScannerLocated, WorkflowUpdater};
+pub use workflow::{
+    UpdateResult, WorkflowError, WorkflowScanner, WorkflowScannerLocated, WorkflowUpdater,
+};
 pub use workflow_actions::{LocatedAction, WorkflowActionSet, WorkflowLocation};
