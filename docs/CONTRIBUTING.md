@@ -54,13 +54,6 @@ Clippy pedantic warnings are enabled in `Cargo.toml`. All warnings should be res
 
 See [docs/development/architecture.md](development/architecture.md) for the layer diagram, trait abstractions, domain types, and how to add a new command.
 
-## Documentation
-
-When changing code, update the corresponding documentation:
-
-- `docs/` — user-facing documentation (one file per command, plus manifest.md and lock.md)
-- `docs/development/` — contributor documentation (implementation details per command, plus architecture.md)
-
 ## Code style
 
 - Use strong domain types (`ActionId`, `Version`, `CommitSha`) instead of raw strings
