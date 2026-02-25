@@ -57,16 +57,7 @@ jobs:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
               with:
                   persist-credentials: false
-            - name: Install dist
-              # we specify bash to get pipefail; it guards against the `curl` command
-              # failing. otherwise `sh` won't catch that `curl` returned non-0
-              shell: bash
-              run: "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.31.0/cargo-dist-installer.sh | sh"
-            - name: Cache dist
-              uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-              with:
-                  name: cargo-dist-cache
-                  path: ~/.cargo/bin/dist
+            - uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
             # sure would be cool if github gave us proper conditionals...
             # so here's a doubly-nested ternary-via-truthiness to try to provide the best possible
             # functionality based on whether this is a pull_request, and whether it's from a fork.
@@ -123,8 +114,7 @@ jobs:
                     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
                     echo "$HOME/.cargo/bin" >> $GITHUB_PATH
                   fi
-            - name: Install dist
-              run: ${{ matrix.install_dist.run }}
+            - uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
             # Get the dist-manifest
             - name: Fetch local artifacts
               uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
@@ -174,12 +164,7 @@ jobs:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
               with:
                   persist-credentials: false
-            - name: Install cached dist
-              uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-              with:
-                  name: cargo-dist-cache
-                  path: ~/.cargo/bin/
-            - run: chmod +x ~/.cargo/bin/dist
+            - uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
             # Get all the local artifacts for the global tasks to use (for e.g. checksums)
             - name: Fetch local artifacts
               uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
@@ -226,12 +211,7 @@ jobs:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
               with:
                   persist-credentials: false
-            - name: Install cached dist
-              uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-              with:
-                  name: cargo-dist-cache
-                  path: ~/.cargo/bin/
-            - run: chmod +x ~/.cargo/bin/dist
+            - uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
             # Fetch artifacts from scratch-storage
             - name: Fetch artifacts
               uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
@@ -345,6 +325,7 @@ jobs:
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
               with:
+                  persist-credentials: false
                   ref: ${{ github.ref }}
             - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1
             - run: cargo publish

@@ -1,0 +1,30 @@
+[tools]
+"github:axodotdev/cargo-dist" = "0.31.0"
+
+[settings]
+github.github_attestations = true
+github.slsa = true
+
+[tasks.build]
+description = "Build the CLI"
+run = "cargo build"
+
+[tasks.lint]
+description = "Lint the code"
+run = "cargo clippy"
+
+[tasks.test]
+description = "Run all tests"
+run = "cargo test"
+
+[tasks.init]
+description = "Create manifest and lock from workflows"
+run = "cargo run -- init"
+
+[tasks.tidy]
+description = "Sync manifest/lock with workflows"
+run = "cargo run -- tidy"
+
+[tasks.upgrade]
+description = "Check for newer versions and upgrade"
+run = "cargo run -- upgrade"
