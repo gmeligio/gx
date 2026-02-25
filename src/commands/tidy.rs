@@ -98,6 +98,12 @@ where
     // Scan with location context for per-step processing (also used for stale cleanup)
     let located = parser.scan_all_located()?;
 
+    // Sync overrides: when multiple distinct versions of the same action appear across
+    // workflows, record overrides for steps whose version differs from the manifest global.
+    // Only applies to actions with multiple workflow versions — if the manifest has v4 but
+    // every workflow step uses v3, the manifest wins and no override is needed.
+    sync_overrides(&mut manifest, &located, &action_set);
+
     // Remove stale override entries (overrides pointing to removed workflows/jobs/steps)
     prune_stale_overrides(&mut manifest, &located);
 
@@ -199,6 +205,59 @@ fn build_file_update_map(
         }
     }
     map
+}
+
+/// Ensure overrides exist for every located step whose version differs from the manifest global,
+/// **only when** multiple distinct versions of that action appear across workflows.
+///
+/// When only one version appears in workflows (manifest is the authority), no override is created.
+/// When multiple versions coexist (e.g. `v5` in windows.yml, `v6.0.1` everywhere else),
+/// the minority versions are recorded as overrides so tidy does not overwrite them.
+fn sync_overrides(
+    manifest: &mut Manifest,
+    located: &[LocatedAction],
+    action_set: &WorkflowActionSet,
+) {
+    for action in located {
+        // Only create overrides when multiple distinct versions exist in workflows
+        let versions = action_set.versions_for(&action.id);
+        if versions.len() <= 1 {
+            continue;
+        }
+
+        let global_version = match manifest.get(&action.id) {
+            Some(v) => v.clone(),
+            None => continue,
+        };
+
+        // Skip steps already matching the global version
+        if action.version == global_version {
+            continue;
+        }
+
+        // Check if an override already covers this exact location
+        let already_covered = manifest.overrides_for(&action.id).iter().any(|o| {
+            o.workflow == action.location.workflow
+                && o.job == action.location.job
+                && o.step == action.location.step
+        });
+
+        if !already_covered {
+            info!(
+                "Recording override for {} in {} ({})",
+                action.id, action.location.workflow, action.version,
+            );
+            manifest.add_override(
+                action.id.clone(),
+                crate::domain::ActionOverride {
+                    workflow: action.location.workflow.clone(),
+                    job: action.location.job.clone(),
+                    step: action.location.step,
+                    version: action.version.clone(),
+                },
+            );
+        }
+    }
 }
 
 /// Remove override entries whose referenced workflow/job/step no longer exists in the scanned set.
@@ -399,5 +458,149 @@ mod tests {
             Version::from("v2"),
         ];
         assert_eq!(select_version(&versions), Version::from("v4"));
+    }
+
+    /// Bug #1 + #2: when workflows have a minority version (e.g. windows.yml uses
+    /// `actions/checkout@v5` while all others use SHA-pinned `v6.0.1`), tidy must:
+    ///   1. Record the minority version as an override in the manifest (Bug #1 / init)
+    ///   2. Not overwrite windows.yml with the v6.0.1 SHA (Bug #2 / tidy)
+    #[test]
+    fn test_tidy_records_minority_version_as_override_and_does_not_overwrite_file() {
+        use crate::domain::{ActionId, CommitSha, ResolvedAction};
+        use crate::infrastructure::{
+            FileLock, FileManifest, FileWorkflowScanner, FileWorkflowUpdater,
+        };
+        use std::fs;
+
+        // ---- Setup temp repo ----
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let repo_root = temp_dir.path();
+        let workflows_dir = repo_root.join(".github").join("workflows");
+        fs::create_dir_all(&workflows_dir).unwrap();
+        let github_dir = repo_root.join(".github");
+
+        // Most workflows: actions/checkout pinned to SHA with v6.0.1 comment
+        let sha_workflow = r#"on: pull_request
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+"#;
+        fs::write(workflows_dir.join("ci.yml"), sha_workflow).unwrap();
+        fs::write(workflows_dir.join("build.yml"), sha_workflow).unwrap();
+        fs::write(workflows_dir.join("release.yml"), sha_workflow).unwrap();
+
+        // windows.yml: plain tag @v5 (minority)
+        let windows_workflow = r#"on: pull_request
+jobs:
+  test_windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v5
+"#;
+        fs::write(workflows_dir.join("windows.yml"), windows_workflow).unwrap();
+
+        // ---- Run tidy with empty manifest (simulates `gx init`) ----
+        let manifest_path = github_dir.join("gx.toml");
+        let lock_path = github_dir.join("gx.lock");
+
+        // Pre-seed lock with both versions already resolved (simulates a pre-existing lock)
+        let lock_store_seed = FileLock::new(&lock_path);
+        let mut seed_lock = Lock::default();
+        seed_lock.set(&ResolvedAction::new(
+            ActionId::from("actions/checkout"),
+            Version::from("v6.0.1"),
+            CommitSha::from("8e8c483db84b4bee98b60c0593521ed34d9990e8"),
+        ));
+        seed_lock.set(&ResolvedAction::new(
+            ActionId::from("actions/checkout"),
+            Version::from("v5"),
+            CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+        ));
+        lock_store_seed.save(&seed_lock).unwrap();
+
+        struct NoopRegistry;
+        impl crate::domain::VersionRegistry for NoopRegistry {
+            fn lookup_sha(
+                &self,
+                _id: &ActionId,
+                _version: &Version,
+            ) -> Result<CommitSha, crate::domain::ResolutionError> {
+                Err(crate::domain::ResolutionError::TokenRequired)
+            }
+            fn tags_for_sha(
+                &self,
+                _id: &ActionId,
+                _sha: &CommitSha,
+            ) -> Result<Vec<Version>, crate::domain::ResolutionError> {
+                Err(crate::domain::ResolutionError::TokenRequired)
+            }
+            fn all_tags(
+                &self,
+                _id: &ActionId,
+            ) -> Result<Vec<Version>, crate::domain::ResolutionError> {
+                Err(crate::domain::ResolutionError::TokenRequired)
+            }
+        }
+
+        let manifest_store = FileManifest::new(&manifest_path);
+        let manifest = manifest_store.load().unwrap(); // empty on first run
+        let lock_store = FileLock::new(&lock_path);
+        let lock = lock_store.load().unwrap();
+        let scanner = FileWorkflowScanner::new(repo_root);
+        let updater = FileWorkflowUpdater::new(repo_root);
+
+        run(
+            repo_root,
+            manifest,
+            manifest_store,
+            lock,
+            lock_store,
+            NoopRegistry,
+            &scanner,
+            &updater,
+        )
+        .unwrap();
+
+        // ---- Assert: manifest has global v6.0.1 + override for windows.yml v5 ----
+        let manifest_store2 = FileManifest::new(&manifest_path);
+        let saved_manifest = manifest_store2.load().unwrap();
+
+        assert_eq!(
+            saved_manifest.get(&ActionId::from("actions/checkout")),
+            Some(&Version::from("v6.0.1")),
+            "Global version should be v6.0.1 (dominant)"
+        );
+
+        let overrides = saved_manifest.overrides_for(&ActionId::from("actions/checkout"));
+        assert!(
+            !overrides.is_empty(),
+            "Bug #1: Expected an override for actions/checkout v5 in windows.yml, got none"
+        );
+
+        let windows_override = overrides
+            .iter()
+            .find(|o| o.workflow.ends_with("windows.yml"));
+        assert!(
+            windows_override.is_some(),
+            "Override must be scoped to windows.yml"
+        );
+        assert_eq!(
+            windows_override.unwrap().version,
+            Version::from("v5"),
+            "Override version must be v5"
+        );
+
+        // ---- Assert: windows.yml was NOT overwritten with the v6.0.1 SHA ----
+        let windows_content = fs::read_to_string(workflows_dir.join("windows.yml")).unwrap();
+        assert!(
+            windows_content.contains("actions/checkout@"),
+            "windows.yml should still reference actions/checkout"
+        );
+        assert!(
+            !windows_content.contains("8e8c483db84b4bee98b60c0593521ed34d9990e8"),
+            "Bug #2: windows.yml was overwritten with the v6.0.1 SHA — it must use the v5 ref, not v6.0.1.\nGot:\n{windows_content}"
+        );
     }
 }
