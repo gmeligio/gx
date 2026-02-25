@@ -192,6 +192,53 @@ fn manifest_to_data(manifest: &Manifest) -> ManifestData {
     }
 }
 
+// ---- Formatting ----
+
+/// Formats the manifest data as TOML with proper inline table syntax for overrides.
+fn format_manifest_toml(data: &ManifestData) -> String {
+    use std::fmt::Write as FmtWrite;
+
+    let mut output = String::new();
+
+    // Write [actions] section header
+    output.push_str("[actions]\n");
+
+    // Write global action versions (sorted alphabetically)
+    for (action_id, version) in &data.actions.versions {
+        writeln!(output, "\"{action_id}\" = \"{version}\"").ok();
+    }
+
+    // Write [actions.overrides] section if there are any overrides
+    if !data.actions.overrides.is_empty() {
+        output.push('\n');
+        output.push_str("[actions.overrides]\n");
+
+        // Write overrides with inline table arrays (sorted alphabetically by action ID)
+        for (action_id, overrides) in &data.actions.overrides {
+            writeln!(output, "\"{action_id}\" = [").ok();
+
+            for override_entry in overrides {
+                write!(output, "  {{ workflow = \"{}\"", override_entry.workflow).ok();
+
+                if let Some(job) = &override_entry.job {
+                    write!(output, ", job = \"{job}\"").ok();
+                }
+
+                if let Some(step) = override_entry.step {
+                    write!(output, ", step = {step}").ok();
+                }
+
+                writeln!(output, ", version = \"{}\" }},", override_entry.version).ok();
+            }
+
+            output.push_str("]\n");
+        }
+    }
+
+    output.push('\n');
+    output
+}
+
 // ---- FileManifest ----
 
 pub struct FileManifest {
@@ -229,7 +276,7 @@ impl ManifestStore for FileManifest {
 
     fn save(&self, manifest: &Manifest) -> Result<(), ManifestError> {
         let data = manifest_to_data(manifest);
-        let content = toml::to_string_pretty(&data).map_err(ManifestError::Serialize)?;
+        let content = format_manifest_toml(&data);
         fs::write(&self.path, content).map_err(|source| ManifestError::Write {
             path: self.path.clone(),
             source,
@@ -548,5 +595,50 @@ mod tests {
         store.save(&manifest).unwrap();
         let content = fs::read_to_string(file.path()).unwrap();
         assert!(!content.contains("overrides"), "got:\n{content}");
+    }
+
+    #[test]
+    fn test_save_and_load_roundtrip_generates_correct_toml_format() {
+        let file = NamedTempFile::new().unwrap();
+        let store = FileManifest::new(file.path());
+
+        let mut manifest = Manifest::default();
+        manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
+        manifest.add_override(
+            ActionId::from("actions/checkout"),
+            ActionOverride {
+                workflow: ".github/workflows/windows.yml".to_string(),
+                job: Some("test_windows".to_string()),
+                step: Some(0),
+                version: Version::from("v5"),
+            },
+        );
+
+        store.save(&manifest).unwrap();
+        let content = fs::read_to_string(file.path()).unwrap();
+
+        // The format should be [actions.overrides] with inline table array syntax,
+        // NOT [[actions.overrides."actions/checkout"]]
+        assert!(
+            content.contains("[actions.overrides]"),
+            "Expected [actions.overrides] section, got:\n{content}"
+        );
+        assert!(
+            !content.contains("[[actions.overrides"),
+            "Should not use array-of-tables syntax, got:\n{content}"
+        );
+        assert!(
+            content.contains(r#""actions/checkout" = ["#),
+            "Expected inline table array syntax, got:\n{content}"
+        );
+
+        // Verify it can be loaded back correctly
+        let loaded = store.load().unwrap();
+        let overrides = loaded.overrides_for(&ActionId::from("actions/checkout"));
+        assert_eq!(overrides.len(), 1);
+        assert_eq!(overrides[0].workflow, ".github/workflows/windows.yml");
+        assert_eq!(overrides[0].job.as_deref(), Some("test_windows"));
+        assert_eq!(overrides[0].step, Some(0));
+        assert_eq!(overrides[0].version.as_str(), "v5");
     }
 }
