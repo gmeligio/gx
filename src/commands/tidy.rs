@@ -443,6 +443,30 @@ fn print_update_results(results: &[UpdateResult]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::{ActionId, CommitSha, ResolvedAction};
+    use crate::infrastructure::{FileLock, FileManifest, FileWorkflowScanner, FileWorkflowUpdater};
+    use std::fs;
+
+    struct NoopRegistry;
+    impl crate::domain::VersionRegistry for NoopRegistry {
+        fn lookup_sha(
+            &self,
+            _id: &ActionId,
+            _version: &Version,
+        ) -> Result<CommitSha, crate::domain::ResolutionError> {
+            Err(crate::domain::ResolutionError::TokenRequired)
+        }
+        fn tags_for_sha(
+            &self,
+            _id: &ActionId,
+            _sha: &CommitSha,
+        ) -> Result<Vec<Version>, crate::domain::ResolutionError> {
+            Err(crate::domain::ResolutionError::TokenRequired)
+        }
+        fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, crate::domain::ResolutionError> {
+            Err(crate::domain::ResolutionError::TokenRequired)
+        }
+    }
 
     #[test]
     fn test_select_version_single() {
@@ -466,12 +490,6 @@ mod tests {
     ///   2. Not overwrite windows.yml with the v6.0.1 SHA (Bug #2 / tidy)
     #[test]
     fn test_tidy_records_minority_version_as_override_and_does_not_overwrite_file() {
-        use crate::domain::{ActionId, CommitSha, ResolvedAction};
-        use crate::infrastructure::{
-            FileLock, FileManifest, FileWorkflowScanner, FileWorkflowUpdater,
-        };
-        use std::fs;
-
         // ---- Setup temp repo ----
         let temp_dir = tempfile::TempDir::new().unwrap();
         let repo_root = temp_dir.path();
@@ -480,25 +498,25 @@ mod tests {
         let github_dir = repo_root.join(".github");
 
         // Most workflows: actions/checkout pinned to SHA with v6.0.1 comment
-        let sha_workflow = r#"on: pull_request
+        let sha_workflow = "on: pull_request
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-"#;
+";
         fs::write(workflows_dir.join("ci.yml"), sha_workflow).unwrap();
         fs::write(workflows_dir.join("build.yml"), sha_workflow).unwrap();
         fs::write(workflows_dir.join("release.yml"), sha_workflow).unwrap();
 
         // windows.yml: plain tag @v5 (minority)
-        let windows_workflow = r#"on: pull_request
+        let windows_workflow = "on: pull_request
 jobs:
   test_windows:
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v5
-"#;
+";
         fs::write(workflows_dir.join("windows.yml"), windows_workflow).unwrap();
 
         // ---- Run tidy with empty manifest (simulates `gx init`) ----
@@ -519,30 +537,6 @@ jobs:
             CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
         ));
         lock_store_seed.save(&seed_lock).unwrap();
-
-        struct NoopRegistry;
-        impl crate::domain::VersionRegistry for NoopRegistry {
-            fn lookup_sha(
-                &self,
-                _id: &ActionId,
-                _version: &Version,
-            ) -> Result<CommitSha, crate::domain::ResolutionError> {
-                Err(crate::domain::ResolutionError::TokenRequired)
-            }
-            fn tags_for_sha(
-                &self,
-                _id: &ActionId,
-                _sha: &CommitSha,
-            ) -> Result<Vec<Version>, crate::domain::ResolutionError> {
-                Err(crate::domain::ResolutionError::TokenRequired)
-            }
-            fn all_tags(
-                &self,
-                _id: &ActionId,
-            ) -> Result<Vec<Version>, crate::domain::ResolutionError> {
-                Err(crate::domain::ResolutionError::TokenRequired)
-            }
-        }
 
         let manifest_store = FileManifest::new(&manifest_path);
         let manifest = manifest_store.load().unwrap(); // empty on first run
