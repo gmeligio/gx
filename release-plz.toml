@@ -12,5 +12,5 @@ git_tag_enable = true
 # cargo publish is handled by release.yml after all artifacts are built
 publish = false
 
-# Use git-cliff for changelog generation
-changelog_config = "cliff.toml"
+# release the package only when the release PR is merged
+release_always = false
