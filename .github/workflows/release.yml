@@ -324,6 +324,7 @@ jobs:
         runs-on: ubuntu-latest
         environment: release
         permissions:
+            # Allow to write id-token token for rust-lang/crates-io-auth-action to authenticate with crates.io via OIDC
             id-token: write
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6

@@ -1,1 +1,2 @@
-You are running on Windows 11
+- You are running on Windows 11.
+- Don't use grep, head or tail.
