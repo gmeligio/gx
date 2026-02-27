@@ -27,12 +27,12 @@ enum Commands {
     Init,
     /// Upgrade actions to newer versions
     Upgrade {
-        /// Upgrade a specific action to a specific version (e.g., actions/checkout@v5)
-        #[arg(value_name = "ACTION@VERSION")]
+        /// Upgrade a specific action (e.g., actions/checkout or actions/checkout@v5)
+        #[arg(value_name = "ACTION")]
         action: Option<String>,
 
-        /// Upgrade all actions to the absolute latest version, including major versions
-        #[arg(long, conflicts_with = "action")]
+        /// Upgrade to the absolute latest version, including major versions
+        #[arg(long)]
         latest: bool,
     },
 }
@@ -59,8 +59,8 @@ fn main() -> Result<()> {
         Commands::Tidy => commands::app::tidy(&repo_root, &manifest_path, &lock_path),
         Commands::Init => commands::app::init(&repo_root, &manifest_path, &lock_path),
         Commands::Upgrade { action, latest } => {
-            let mode = resolve_upgrade_mode(action.as_deref(), latest)?;
-            commands::app::upgrade(&repo_root, &manifest_path, &lock_path, &mode)
+            let request = resolve_upgrade_mode(action.as_deref(), latest)?;
+            commands::app::upgrade(&repo_root, &manifest_path, &lock_path, &request)
         }
     }
 }
@@ -68,21 +68,49 @@ fn main() -> Result<()> {
 fn resolve_upgrade_mode(
     action: Option<&str>,
     latest: bool,
-) -> Result<commands::upgrade::UpgradeMode> {
-    if latest {
-        Ok(commands::upgrade::UpgradeMode::Latest)
-    } else if let Some(action_str) = action {
-        let key = gx::domain::LockKey::parse(action_str).ok_or_else(|| {
-            anyhow::anyhow!(
-                "Invalid format: expected ACTION@VERSION (e.g., actions/checkout@v5), got: {action_str}"
-            )
-        })?;
-        Ok(commands::upgrade::UpgradeMode::Targeted(
-            key.id,
-            key.version,
-        ))
-    } else {
-        Ok(commands::upgrade::UpgradeMode::Safe)
+) -> Result<commands::upgrade::UpgradeRequest> {
+    use commands::upgrade::{UpgradeMode, UpgradeRequest, UpgradeScope};
+    use gx::domain::ActionId;
+
+    match (action, latest) {
+        // gx upgrade --latest
+        (None, true) => UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::All),
+
+        // gx upgrade --latest actions/checkout
+        (Some(action_str), true) => {
+            // action_str is bare ACTION (no version)
+            if action_str.contains('@') {
+                anyhow::bail!(
+                    "--latest cannot be combined with an exact version pin (ACTION@VERSION). \
+                     Use --latest ACTION to upgrade to latest, or ACTION@VERSION to pin."
+                );
+            }
+            let id = ActionId::from(action_str);
+            UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::Single(id))
+        }
+
+        // gx upgrade actions/checkout
+        (Some(action_str), false) => {
+            if action_str.contains('@') {
+                // Bare ACTION@VERSION → Pinned mode
+                let key = gx::domain::LockKey::parse(action_str).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Invalid format: expected ACTION@VERSION (e.g., actions/checkout@v5), got: {action_str}"
+                    )
+                })?;
+                UpgradeRequest::new(
+                    UpgradeMode::Pinned(key.version),
+                    UpgradeScope::Single(key.id),
+                )
+            } else {
+                // Bare ACTION → Safe mode, single action
+                let id = ActionId::from(action_str);
+                UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::Single(id))
+            }
+        }
+
+        // gx upgrade
+        (None, false) => UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All),
     }
 }
 

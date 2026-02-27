@@ -8,14 +8,43 @@ use crate::domain::{
 };
 use crate::infrastructure::{LockStore, ManifestStore};
 
+/// Which actions to upgrade: all or a single action.
+#[derive(Debug, Clone)]
+pub enum UpgradeScope {
+    /// Upgrade all actions in the manifest.
+    All,
+    /// Upgrade a single action by ID.
+    Single(ActionId),
+}
+
 /// How the upgrade command should find new versions.
+#[derive(Debug)]
 pub enum UpgradeMode {
-    /// Default: upgrade all actions within their current major version.
+    /// Default: upgrade within the current major version.
     Safe,
-    /// Upgrade all actions to the absolute latest version, including major versions.
+    /// Upgrade to the absolute latest version, including major versions.
     Latest,
-    /// Upgrade a single action to a specific version.
-    Targeted(ActionId, Version),
+    /// Upgrade to a specific version (only valid with Single scope).
+    Pinned(Version),
+}
+
+/// A request to upgrade actions with a specific mode and scope.
+#[derive(Debug)]
+pub struct UpgradeRequest {
+    pub mode: UpgradeMode,
+    pub scope: UpgradeScope,
+}
+
+impl UpgradeRequest {
+    /// Create a new upgrade request, validating that Pinned mode requires Single scope.
+    pub fn new(mode: UpgradeMode, scope: UpgradeScope) -> Result<Self> {
+        if matches!((&mode, &scope), (UpgradeMode::Pinned(_), UpgradeScope::All)) {
+            anyhow::bail!(
+                "Pinned mode requires a single action target (e.g., actions/checkout@v5)"
+            );
+        }
+        Ok(Self { mode, scope })
+    }
 }
 
 /// Run the upgrade command to find and apply available upgrades for actions.
@@ -34,7 +63,7 @@ pub fn run<M, L, R, W>(
     lock_store: L,
     registry: R,
     writer: &W,
-    mode: &UpgradeMode,
+    request: &UpgradeRequest,
 ) -> Result<()>
 where
     M: ManifestStore,
@@ -44,7 +73,7 @@ where
 {
     let service = ActionResolver::new(registry);
 
-    let Some((upgrades, repins)) = determine_upgrades(&manifest, &service, mode)? else {
+    let Some((upgrades, repins)) = determine_upgrades(&manifest, &service, request)? else {
         return Ok(());
     };
 
@@ -85,11 +114,20 @@ where
 fn determine_upgrades<R: VersionRegistry>(
     manifest: &Manifest,
     service: &ActionResolver<R>,
-    mode: &UpgradeMode,
+    request: &UpgradeRequest,
 ) -> Result<Option<(Vec<UpgradeCandidate>, Vec<ActionSpec>)>> {
-    match mode {
+    match &request.mode {
         UpgradeMode::Safe | UpgradeMode::Latest => {
-            let specs = manifest.specs();
+            let mut specs = manifest.specs();
+
+            // Filter to a single action if scope requires it
+            if let UpgradeScope::Single(target_id) = &request.scope {
+                specs.retain(|s| &s.id == target_id);
+                if specs.is_empty() {
+                    anyhow::bail!("{target_id} not found in manifest");
+                }
+            }
+
             if specs.is_empty() {
                 return Ok(None);
             }
@@ -111,7 +149,7 @@ fn determine_upgrades<R: VersionRegistry>(
 
                 match service.registry().all_tags(&spec.id) {
                     Ok(tags) => {
-                        let new_version = match mode {
+                        let new_version = match &request.mode {
                             UpgradeMode::Latest => spec.version.find_latest_upgrade(&tags),
                             _ => spec.version.find_upgrade(&tags),
                         };
@@ -136,7 +174,14 @@ fn determine_upgrades<R: VersionRegistry>(
 
             Ok(Some((upgrades, repins)))
         }
-        UpgradeMode::Targeted(id, version) => {
+        UpgradeMode::Pinned(version) => {
+            let id = match &request.scope {
+                UpgradeScope::Single(id) => id,
+                UpgradeScope::All => {
+                    unreachable!("Pinned + All should be rejected in UpgradeRequest::new")
+                }
+            };
+
             let current = manifest
                 .get(id)
                 .ok_or_else(|| anyhow::anyhow!("{id} not found in manifest"))?;

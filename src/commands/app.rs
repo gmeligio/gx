@@ -7,7 +7,7 @@ use crate::infrastructure::{
     ManifestStore, MemoryLock, MemoryManifest,
 };
 
-use super::upgrade::UpgradeMode;
+use super::upgrade::UpgradeRequest;
 
 /// Run the tidy command with automatic store selection based on manifest existence.
 ///
@@ -94,7 +94,7 @@ pub fn upgrade(
     repo_root: &Path,
     manifest_path: &Path,
     lock_path: &Path,
-    mode: &UpgradeMode,
+    request: &UpgradeRequest,
 ) -> Result<()> {
     let registry = GithubRegistry::from_env()?;
     let updater = FileWorkflowUpdater::new(repo_root);
@@ -112,7 +112,7 @@ pub fn upgrade(
             lock_store,
             registry,
             &updater,
-            mode,
+            request,
         )
     } else {
         let action_set = FileWorkflowScanner::new(repo_root).scan_all()?;
@@ -128,7 +128,7 @@ pub fn upgrade(
             lock_store,
             registry,
             &updater,
-            mode,
+            request,
         )
     }
 }
