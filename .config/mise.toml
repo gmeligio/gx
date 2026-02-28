@@ -1,5 +1,6 @@
 [tools]
 "github:axodotdev/cargo-dist" = "0.31.0"
+"github:obi1kenobi/cargo-semver-checks" = "0.46.0"
 
 [settings]
 github.github_attestations = true
@@ -28,3 +29,7 @@ run = "cargo run -- tidy"
 [tasks.upgrade]
 description = "Check for newer versions and upgrade"
 run = "cargo run -- upgrade"
+
+[tasks.semver]
+description = "Check for semver violations against the published crate"
+run = "cargo semver-checks"
