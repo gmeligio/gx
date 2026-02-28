@@ -5,30 +5,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-use crate::domain::{ActionId, ActionOverride, ActionSpec, Manifest, Version, WorkflowActionSet};
+use crate::domain::{ActionId, ActionOverride, ActionSpec, Manifest, Version};
 
 pub const MANIFEST_FILE_NAME: &str = "gx.toml";
-
-/// Pure I/O trait for loading and saving the manifest.
-/// Domain operations (get, set, remove, etc.) live on `Manifest`.
-pub trait ManifestStore {
-    /// Load the manifest from storage, returning a `Manifest` domain entity.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the file cannot be read or parsed.
-    fn load(&self) -> Result<Manifest, ManifestError>;
-
-    /// Save the given `Manifest` to storage.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the file cannot be written.
-    fn save(&self, manifest: &Manifest) -> Result<(), ManifestError>;
-
-    /// The path this store reads from and writes to.
-    fn path(&self) -> &Path;
-}
 
 /// Errors that can occur when working with manifest files
 #[derive(Debug, Error)]
@@ -254,27 +233,14 @@ impl FileManifest {
     }
 }
 
-impl ManifestStore for FileManifest {
-    fn load(&self) -> Result<Manifest, ManifestError> {
-        if !self.path.exists() {
-            return Ok(Manifest::default());
-        }
-
-        let content = fs::read_to_string(&self.path).map_err(|source| ManifestError::Read {
-            path: self.path.clone(),
-            source,
-        })?;
-
-        let data: ManifestData =
-            toml::from_str(&content).map_err(|source| ManifestError::Parse {
-                path: self.path.clone(),
-                source: Box::new(source),
-            })?;
-
-        manifest_from_data(data, &self.path)
-    }
-
-    fn save(&self, manifest: &Manifest) -> Result<(), ManifestError> {
+impl FileManifest {
+    /// Save the given `Manifest` to this file.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ManifestError::Write`] if the file cannot be written.
+    /// Returns [`ManifestError::Serialize`] if serialization fails.
+    pub fn save(&self, manifest: &Manifest) -> Result<(), ManifestError> {
         let data = manifest_to_data(manifest);
         let content = format_manifest_toml(&data);
         fs::write(&self.path, content).map_err(|source| ManifestError::Write {
@@ -285,62 +251,35 @@ impl ManifestStore for FileManifest {
         Ok(())
     }
 
-    fn path(&self) -> &Path {
+    #[must_use]
+    pub fn path(&self) -> &Path {
         &self.path
     }
 }
 
-// ---- MemoryManifest ----
-
-#[derive(Default)]
-pub struct MemoryManifest {
-    initial: Option<Manifest>,
-}
-
-impl MemoryManifest {
-    /// Create a store pre-seeded with a manifest built from workflow actions.
-    /// For each action, picks the dominant version (most-used; tiebreak: highest semver).
-    #[must_use]
-    pub fn from_workflows(action_set: &WorkflowActionSet) -> Self {
-        let mut manifest = Manifest::default();
-        for action_id in action_set.action_ids() {
-            let version = action_set.dominant_version(&action_id).unwrap_or_else(|| {
-                let versions = action_set.versions_for(&action_id);
-                Version::highest(&versions).unwrap_or_else(|| versions[0].clone())
-            });
-            manifest.set(action_id, version);
-        }
-        Self {
-            initial: Some(manifest),
-        }
-    }
-}
-
-impl ManifestStore for MemoryManifest {
-    fn load(&self) -> Result<Manifest, ManifestError> {
-        Ok(self.initial.as_ref().map_or_else(Manifest::default, |m| {
-            // Re-build from specs — Manifest doesn't implement Clone, build from specs
-            let mut fresh = Manifest::default();
-            for spec in m.specs() {
-                fresh.set(spec.id.clone(), spec.version.clone());
-            }
-            // Copy over overrides
-            for (id, excs) in m.all_overrides() {
-                for exc in excs {
-                    fresh.add_override(id.clone(), exc.clone());
-                }
-            }
-            fresh
-        }))
+/// Load a manifest from a file path. Returns `Manifest::default()` if the file does not exist.
+///
+/// # Errors
+///
+/// Returns [`ManifestError::Read`] if the file cannot be read.
+/// Returns [`ManifestError::Parse`] if the TOML is invalid.
+/// Returns [`ManifestError::Validation`] if the manifest data is invalid.
+pub fn parse_manifest(path: &Path) -> Result<Manifest, ManifestError> {
+    if !path.exists() {
+        return Ok(Manifest::default());
     }
 
-    fn save(&self, _manifest: &Manifest) -> Result<(), ManifestError> {
-        Ok(()) // no-op
-    }
+    let content = fs::read_to_string(path).map_err(|source| ManifestError::Read {
+        path: path.to_path_buf(),
+        source,
+    })?;
 
-    fn path(&self) -> &Path {
-        Path::new("in-memory")
-    }
+    let data: ManifestData = toml::from_str(&content).map_err(|source| ManifestError::Parse {
+        path: path.to_path_buf(),
+        source: Box::new(source),
+    })?;
+
+    manifest_from_data(data, path)
 }
 
 #[cfg(test)]
@@ -349,13 +288,6 @@ mod tests {
     use std::fs;
     use std::io::Write;
     use tempfile::NamedTempFile;
-
-    #[test]
-    fn test_file_manifest_load_missing_returns_empty() {
-        let store = FileManifest::new(Path::new("/nonexistent/path/gx.toml"));
-        let manifest = store.load().unwrap();
-        assert!(manifest.is_empty());
-    }
 
     #[test]
     fn test_file_manifest_save_and_load_roundtrip() {
@@ -368,7 +300,7 @@ mod tests {
 
         store.save(&manifest).unwrap();
 
-        let loaded = store.load().unwrap();
+        let loaded = parse_manifest(file.path()).unwrap();
         assert_eq!(
             loaded.get(&ActionId::from("actions/checkout")),
             Some(&Version::from("v4"))
@@ -389,8 +321,7 @@ mod tests {
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
-        let store = FileManifest::new(file.path());
-        let manifest = store.load().unwrap();
+        let manifest = parse_manifest(file.path()).unwrap();
         assert_eq!(
             manifest.get(&ActionId::from("actions/checkout")),
             Some(&Version::from("v4"))
@@ -430,35 +361,21 @@ mod tests {
     }
 
     #[test]
-    fn test_memory_manifest_load_returns_empty_by_default() {
-        let store = MemoryManifest::default();
-        let manifest = store.load().unwrap();
+    fn test_parse_manifest_missing_returns_empty() {
+        let manifest = parse_manifest(Path::new("/nonexistent/gx.toml")).unwrap();
         assert!(manifest.is_empty());
     }
 
     #[test]
-    fn test_memory_manifest_from_workflows() {
-        use crate::domain::{InterpretedRef, WorkflowActionSet};
-        let mut action_set = WorkflowActionSet::new();
-        action_set.add(&InterpretedRef {
-            id: ActionId::from("actions/checkout"),
-            version: Version::from("v4"),
-            sha: None,
-        });
-
-        let store = MemoryManifest::from_workflows(&action_set);
-        let manifest = store.load().unwrap();
+    fn test_parse_manifest_reads_file() {
+        let content = "[actions]\n\"actions/checkout\" = \"v4\"\n";
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+        let manifest = parse_manifest(file.path()).unwrap();
         assert_eq!(
             manifest.get(&ActionId::from("actions/checkout")),
             Some(&Version::from("v4"))
         );
-    }
-
-    #[test]
-    fn test_memory_manifest_save_is_noop() {
-        let store = MemoryManifest::default();
-        let manifest = Manifest::default();
-        assert!(store.save(&manifest).is_ok());
     }
 
     #[test]
@@ -476,8 +393,7 @@ mod tests {
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
-        let store = FileManifest::new(file.path());
-        let manifest = store.load().unwrap();
+        let manifest = parse_manifest(file.path()).unwrap();
 
         assert_eq!(
             manifest.get(&ActionId::from("actions/checkout")),
@@ -516,7 +432,7 @@ mod tests {
             "Expected overrides section, got:\n{content}"
         );
 
-        let loaded = store.load().unwrap();
+        let loaded = parse_manifest(file.path()).unwrap();
         let overrides = loaded.overrides_for(&ActionId::from("actions/checkout"));
         assert_eq!(overrides.len(), 1);
         assert_eq!(overrides[0].workflow, ".github/workflows/deploy.yml");
@@ -537,8 +453,7 @@ mod tests {
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
-        let store = FileManifest::new(file.path());
-        let result = store.load();
+        let result = parse_manifest(file.path());
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.to_string().contains("actions/checkout"), "got: {err}");
@@ -559,8 +474,7 @@ mod tests {
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
-        let store = FileManifest::new(file.path());
-        let result = store.load();
+        let result = parse_manifest(file.path());
         assert!(result.is_err());
     }
 
@@ -579,8 +493,7 @@ mod tests {
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
-        let store = FileManifest::new(file.path());
-        let result = store.load();
+        let result = parse_manifest(file.path());
         assert!(result.is_err());
     }
 
@@ -633,7 +546,7 @@ mod tests {
         );
 
         // Verify it can be loaded back correctly
-        let loaded = store.load().unwrap();
+        let loaded = parse_manifest(file.path()).unwrap();
         let overrides = loaded.overrides_for(&ActionId::from("actions/checkout"));
         assert_eq!(overrides.len(), 1);
         assert_eq!(overrides[0].workflow, ".github/workflows/windows.yml");

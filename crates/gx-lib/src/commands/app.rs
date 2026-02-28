@@ -1,11 +1,10 @@
 use std::path::Path;
 use thiserror::Error;
 
-use crate::domain::Lock;
+use crate::config::Config;
 use crate::infrastructure::{
     FileLock, FileManifest, FileWorkflowScanner, FileWorkflowUpdater, GithubError, GithubRegistry,
-    LockFileError, LockStore, ManifestError, ManifestStore, MemoryLock, MemoryManifest,
-    WorkflowError,
+    LockFileError, ManifestError, WorkflowError,
 };
 
 use super::tidy::TidyError;
@@ -52,43 +51,26 @@ pub enum AppError {
 /// Returns [`AppError::Lock`] if the lock file cannot be loaded.
 /// Returns [`AppError::Github`] if the registry cannot be created.
 /// Returns [`AppError::Tidy`] if the tidy command fails.
-pub fn tidy(repo_root: &Path, manifest_path: &Path, lock_path: &Path) -> Result<(), AppError> {
-    let registry = GithubRegistry::from_env()?;
+pub fn tidy(repo_root: &Path, config: Config) -> Result<(), AppError> {
+    let has_manifest = config.manifest_path.exists();
+    let registry = GithubRegistry::new(config.settings.github_token)?;
     let scanner = FileWorkflowScanner::new(repo_root);
     let updater = FileWorkflowUpdater::new(repo_root);
 
-    if manifest_path.exists() {
-        let manifest_store = FileManifest::new(manifest_path);
-        let manifest = manifest_store.load()?;
-        let lock_store = FileLock::new(lock_path);
-        let lock = lock_store.load()?;
-        super::tidy::run(
-            repo_root,
-            manifest,
-            manifest_store,
-            lock,
-            lock_store,
-            registry,
-            &scanner,
-            &updater,
-        )?;
-    } else {
-        let action_set = FileWorkflowScanner::new(repo_root).scan_all()?;
-        let manifest_store = MemoryManifest::from_workflows(&action_set);
-        let manifest = manifest_store.load()?;
-        let lock_store = MemoryLock;
-        let lock = Lock::default();
-        super::tidy::run(
-            repo_root,
-            manifest,
-            manifest_store,
-            lock,
-            lock_store,
-            registry,
-            &scanner,
-            &updater,
-        )?;
+    let (updated_manifest, updated_lock) = super::tidy::run(
+        config.manifest,
+        config.lock,
+        &config.manifest_path,
+        registry,
+        &scanner,
+        &updater,
+    )?;
+
+    if has_manifest {
+        FileManifest::new(&config.manifest_path).save(&updated_manifest)?;
+        FileLock::new(&config.lock_path).save(&updated_lock)?;
     }
+
     Ok(())
 }
 
@@ -102,28 +84,28 @@ pub fn tidy(repo_root: &Path, manifest_path: &Path, lock_path: &Path) -> Result<
 /// Returns [`AppError::Github`] if the registry cannot be created.
 /// Returns [`AppError::Workflow`] if workflows cannot be scanned.
 /// Returns [`AppError::Tidy`] if the tidy command fails.
-pub fn init(repo_root: &Path, manifest_path: &Path, lock_path: &Path) -> Result<(), AppError> {
-    if manifest_path.exists() {
+pub fn init(repo_root: &Path, config: Config) -> Result<(), AppError> {
+    if config.manifest_path.exists() {
         return Err(AppError::AlreadyInitialized);
     }
     log::info!("Reading actions from workflows into the manifest...");
-    let registry = GithubRegistry::from_env()?;
-    let manifest_store = FileManifest::new(manifest_path);
-    let manifest = manifest_store.load()?;
-    let lock_store = FileLock::new(lock_path);
-    let lock = lock_store.load()?;
+    let registry = GithubRegistry::new(config.settings.github_token)?;
     let scanner = FileWorkflowScanner::new(repo_root);
     let updater = FileWorkflowUpdater::new(repo_root);
-    super::tidy::run(
-        repo_root,
-        manifest,
-        manifest_store,
-        lock,
-        lock_store,
+
+    let (updated_manifest, updated_lock) = super::tidy::run(
+        config.manifest,
+        config.lock,
+        &config.manifest_path,
         registry,
         &scanner,
         &updater,
     )?;
+
+    // Always save for init — this creates the files
+    FileManifest::new(&config.manifest_path).save(&updated_manifest)?;
+    FileLock::new(&config.lock_path).save(&updated_lock)?;
+
     Ok(())
 }
 
@@ -136,47 +118,19 @@ pub fn init(repo_root: &Path, manifest_path: &Path, lock_path: &Path) -> Result<
 /// Returns [`AppError::Lock`] if the lock file cannot be loaded.
 /// Returns [`AppError::Github`] if the registry cannot be created.
 /// Returns [`AppError::Upgrade`] if the upgrade command fails.
-pub fn upgrade(
-    repo_root: &Path,
-    manifest_path: &Path,
-    lock_path: &Path,
-    request: &UpgradeRequest,
-) -> Result<(), AppError> {
-    let registry = GithubRegistry::from_env()?;
+pub fn upgrade(repo_root: &Path, config: Config, request: &UpgradeRequest) -> Result<(), AppError> {
+    let has_manifest = config.manifest_path.exists();
+    let registry = GithubRegistry::new(config.settings.github_token)?;
     let updater = FileWorkflowUpdater::new(repo_root);
 
-    if manifest_path.exists() {
-        let manifest_store = FileManifest::new(manifest_path);
-        let manifest = manifest_store.load()?;
-        let lock_store = FileLock::new(lock_path);
-        let lock = lock_store.load()?;
-        super::upgrade::run(
-            repo_root,
-            manifest,
-            manifest_store,
-            lock,
-            lock_store,
-            registry,
-            &updater,
-            request,
-        )?;
-    } else {
-        let action_set = FileWorkflowScanner::new(repo_root).scan_all()?;
-        let manifest_store = MemoryManifest::from_workflows(&action_set);
-        let manifest = manifest_store.load()?;
-        let lock_store = MemoryLock;
-        let lock = Lock::default();
-        super::upgrade::run(
-            repo_root,
-            manifest,
-            manifest_store,
-            lock,
-            lock_store,
-            registry,
-            &updater,
-            request,
-        )?;
+    let (updated_manifest, updated_lock) =
+        super::upgrade::run(config.manifest, config.lock, registry, &updater, request)?;
+
+    if has_manifest {
+        FileManifest::new(&config.manifest_path).save(&updated_manifest)?;
+        FileLock::new(&config.lock_path).save(&updated_lock)?;
     }
+
     Ok(())
 }
 

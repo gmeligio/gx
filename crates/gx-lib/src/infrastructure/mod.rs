@@ -5,10 +5,8 @@ pub mod repo;
 pub mod workflow;
 
 pub use github::{GithubError, GithubRegistry};
-pub use lock::{FileLock, LOCK_FILE_NAME, LOCK_FILE_VERSION, LockFileError, LockStore, MemoryLock};
-pub use manifest::{
-    FileManifest, MANIFEST_FILE_NAME, ManifestError, ManifestStore, MemoryManifest,
-};
+pub use lock::{FileLock, LOCK_FILE_NAME, LOCK_FILE_VERSION, LockFileError, parse_lock};
+pub use manifest::{FileManifest, MANIFEST_FILE_NAME, ManifestError, parse_manifest};
 pub use repo::{RepoError, find_root};
 pub use workflow::{FileWorkflowScanner, FileWorkflowUpdater};
 // WorkflowError and UpdateResult are now in domain; re-export from there for convenience

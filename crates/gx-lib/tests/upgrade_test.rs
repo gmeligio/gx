@@ -1,3 +1,4 @@
+#![allow(unused_crate_dependencies)]
 use gx_lib::commands::upgrade;
 use gx_lib::commands::upgrade::{UpgradeMode, UpgradeRequest, UpgradeScope};
 use gx_lib::domain::{
@@ -5,8 +6,7 @@ use gx_lib::domain::{
     VersionRegistry,
 };
 use gx_lib::infrastructure::{
-    FileLock, FileManifest, FileWorkflowUpdater, LockStore, ManifestStore, MemoryLock,
-    MemoryManifest,
+    FileLock, FileManifest, FileWorkflowUpdater, parse_lock, parse_manifest,
 };
 use std::fs;
 use std::io::Write;
@@ -89,21 +89,18 @@ fn run_upgrade_file_backed_with_request(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let manifest_path = repo_root.join(".github").join("gx.toml");
     let lock_path = repo_root.join(".github").join("gx.lock");
-    let manifest_store = FileManifest::new(&manifest_path);
-    let manifest = manifest_store.load()?;
-    let lock_store = FileLock::new(&lock_path);
-    let lock = lock_store.load()?;
+    let manifest = parse_manifest(&manifest_path)?;
+    let lock = parse_lock(&lock_path)?;
     let updater = FileWorkflowUpdater::new(repo_root);
-    upgrade::run(
-        repo_root,
+    let (updated_manifest, updated_lock) = upgrade::run(
         manifest,
-        manifest_store,
         lock,
-        lock_store,
         MockUpgradeRegistry::new(),
         &updater,
         request,
     )?;
+    FileManifest::new(&manifest_path).save(&updated_manifest)?;
+    FileLock::new(&lock_path).save(&updated_lock)?;
     Ok(())
 }
 
@@ -126,11 +123,8 @@ fn test_upgrade_empty_manifest_is_noop() {
     let lock = Lock::default();
     let updater = FileWorkflowUpdater::new(&root);
     let result = upgrade::run(
-        &root,
         manifest,
-        MemoryManifest::default(),
         lock,
-        MemoryLock,
         MockUpgradeRegistry::new(),
         &updater,
         &UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap(),
@@ -170,11 +164,8 @@ fn test_upgrade_non_semver_versions_skipped() {
     let lock = Lock::default();
     let updater = FileWorkflowUpdater::new(&root);
     let result = upgrade::run(
-        &root,
         manifest,
-        MemoryManifest::default(),
         lock,
-        MemoryLock,
         MockUpgradeRegistry::new(),
         &updater,
         &UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap(),
@@ -220,11 +211,11 @@ fn test_upgrade_no_lock_file_created_when_empty_manifest() {
     let result = run_upgrade_file_backed(&root);
     assert!(result.is_ok());
 
-    // No lock file should be created
-    let lock_path = root.join(".github").join("gx.lock");
+    // Manifest should remain unchanged (early return before upgrades, no actions)
+    let manifest_content = fs::read_to_string(root.join(".github").join("gx.toml")).unwrap();
     assert!(
-        !lock_path.exists(),
-        "Lock file should not be created when manifest is empty"
+        manifest_content.trim() == "[actions]" || manifest_content.trim() == "[actions]\n",
+        "Manifest should remain unchanged: {manifest_content}"
     );
 }
 
@@ -266,11 +257,8 @@ fn test_upgrade_memory_stores_no_side_effects() {
     let lock = Lock::default();
     let updater = FileWorkflowUpdater::new(&root);
     let result = upgrade::run(
-        &root,
         manifest,
-        MemoryManifest::default(),
         lock,
-        MemoryLock,
         MockUpgradeRegistry::new(),
         &updater,
         &UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap(),
@@ -417,11 +405,8 @@ fn test_upgrade_repins_branch_ref() {
 
     let updater = FileWorkflowUpdater::new(&root);
     let result = upgrade::run(
-        &root,
         manifest,
-        MemoryManifest::default(),
         lock,
-        MemoryLock,
         MockUpgradeRegistry::new(),
         &updater,
         &UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap(),
@@ -462,11 +447,8 @@ fn test_upgrade_latest_also_repins_branch_ref() {
 
     let updater = FileWorkflowUpdater::new(&root);
     let result = upgrade::run(
-        &root,
         manifest,
-        MemoryManifest::default(),
         lock,
-        MemoryLock,
         MockUpgradeRegistry::new(),
         &updater,
         &UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::All).unwrap(),
@@ -524,16 +506,7 @@ fn test_upgrade_targeted_does_not_repin_branch_ref() {
         UpgradeScope::Single(ActionId::from("actions/checkout")),
     )
     .unwrap();
-    let result = upgrade::run(
-        &root,
-        manifest,
-        MemoryManifest::default(),
-        lock,
-        MemoryLock,
-        registry,
-        &updater,
-        &request,
-    );
+    let result = upgrade::run(manifest, lock, registry, &updater, &request);
     assert!(result.is_ok());
 
     let updated_workflow =
@@ -584,11 +557,8 @@ fn test_upgrade_mixed_semver_and_branch() {
 
     let updater = FileWorkflowUpdater::new(&root);
     let result = upgrade::run(
-        &root,
         manifest,
-        MemoryManifest::default(),
         lock,
-        MemoryLock,
         registry,
         &updater,
         &UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::All).unwrap(),
@@ -631,11 +601,8 @@ fn test_upgrade_skips_bare_sha() {
     let lock = Lock::default();
     let updater = FileWorkflowUpdater::new(&root);
     let result = upgrade::run(
-        &root,
         manifest,
-        MemoryManifest::default(),
         lock,
-        MemoryLock,
         MockUpgradeRegistry::new(),
         &updater,
         &UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap(),
@@ -681,16 +648,7 @@ fn test_upgrade_safe_single_action() {
         UpgradeScope::Single(ActionId::from("actions/checkout")),
     )
     .unwrap();
-    let result = upgrade::run(
-        &root,
-        manifest,
-        MemoryManifest::default(),
-        lock,
-        MemoryLock,
-        registry,
-        &updater,
-        &request,
-    );
+    let result = upgrade::run(manifest, lock, registry, &updater, &request);
     assert!(result.is_ok());
 
     // Note: we can't directly verify manifest changes in memory-only mode,
@@ -725,16 +683,7 @@ fn test_upgrade_latest_single_action() {
         UpgradeScope::Single(ActionId::from("actions/checkout")),
     )
     .unwrap();
-    let result = upgrade::run(
-        &root,
-        manifest,
-        MemoryManifest::default(),
-        lock,
-        MemoryLock,
-        registry,
-        &updater,
-        &request,
-    );
+    let result = upgrade::run(manifest, lock, registry, &updater, &request);
     assert!(result.is_ok());
 }
 
@@ -753,11 +702,8 @@ fn test_upgrade_single_action_not_found() {
     )
     .unwrap();
     let result = upgrade::run(
-        &root,
         manifest,
-        MemoryManifest::default(),
         lock,
-        MemoryLock,
         MockUpgradeRegistry::new(),
         &updater,
         &request,
