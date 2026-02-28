@@ -1,7 +1,7 @@
 use std::path::Path;
 use thiserror::Error;
 
-use crate::config::AppConfig;
+use crate::config::Config;
 use crate::infrastructure::{
     FileLock, FileManifest, FileWorkflowScanner, FileWorkflowUpdater, GithubError, GithubRegistry,
     LockFileError, ManifestError, ManifestStore, MemoryLock, MemoryManifest, WorkflowError,
@@ -53,7 +53,7 @@ pub enum AppError {
 /// Returns [`AppError::Tidy`] if the tidy command fails.
 pub fn tidy(
     repo_root: &Path,
-    config: AppConfig,
+    config: Config,
     manifest_path: &Path,
     lock_path: &Path,
 ) -> Result<(), AppError> {
@@ -105,7 +105,7 @@ pub fn tidy(
 /// Returns [`AppError::Tidy`] if the tidy command fails.
 pub fn init(
     repo_root: &Path,
-    config: AppConfig,
+    config: Config,
     manifest_path: &Path,
     lock_path: &Path,
 ) -> Result<(), AppError> {
@@ -142,7 +142,7 @@ pub fn init(
 /// Returns [`AppError::Upgrade`] if the upgrade command fails.
 pub fn upgrade(
     repo_root: &Path,
-    config: AppConfig,
+    config: Config,
     manifest_path: &Path,
     lock_path: &Path,
     request: &UpgradeRequest,

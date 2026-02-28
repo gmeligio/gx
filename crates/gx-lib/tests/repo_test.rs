@@ -1,3 +1,4 @@
+#![allow(unused_crate_dependencies)]
 use gx_lib::infrastructure::repo;
 use std::fs;
 use tempfile::TempDir;

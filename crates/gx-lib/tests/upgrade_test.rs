@@ -1,3 +1,4 @@
+#![allow(unused_crate_dependencies)]
 use gx_lib::commands::upgrade;
 use gx_lib::commands::upgrade::{UpgradeMode, UpgradeRequest, UpgradeScope};
 use gx_lib::domain::{

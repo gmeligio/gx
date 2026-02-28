@@ -14,7 +14,7 @@ pub struct Settings {
 
 /// All application configuration, loaded once at startup.
 #[derive(Debug)]
-pub struct AppConfig {
+pub struct Config {
     pub settings: Settings,
     pub manifest: Manifest,
     pub lock: Lock,
@@ -30,7 +30,7 @@ impl Settings {
     }
 }
 
-impl AppConfig {
+impl Config {
     /// Load all configuration: settings from env, manifest and lock from disk.
     ///
     /// # Errors
@@ -61,7 +61,7 @@ mod tests {
 
     #[test]
     fn app_config_can_be_constructed_directly() {
-        let config = AppConfig {
+        let config = Config {
             settings: Settings {
                 github_token: Some("test_token".into()),
             },
@@ -77,7 +77,7 @@ mod tests {
         let manifest_path = dir.path().join("gx.toml");
         let lock_path = dir.path().join("gx.lock");
 
-        let config = AppConfig::load(&manifest_path, &lock_path).unwrap();
+        let config = Config::load(&manifest_path, &lock_path).unwrap();
         assert!(config.settings.github_token.is_none() || config.settings.github_token.is_some());
         // Manifest and lock should be empty defaults when files don't exist
         assert!(config.manifest.specs().is_empty());

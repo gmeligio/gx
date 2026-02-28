@@ -1,3 +1,4 @@
+#![allow(unused_crate_dependencies)]
 use gx_lib::commands::tidy;
 use gx_lib::domain::{ActionId, CommitSha, Lock, ResolutionError, Version, VersionRegistry};
 use gx_lib::infrastructure::{
