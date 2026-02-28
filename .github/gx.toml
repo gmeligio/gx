@@ -2,6 +2,10 @@
 "actions-rust-lang/rustfmt" = "v1"
 "actions-rust-lang/setup-rust-toolchain" = "v1"
 "actions/checkout" = "v6"
+"actions/create-github-app-token" = "v2.2.1"
 "actions/download-artifact" = "v7"
 "actions/upload-artifact" = "v6"
+"jdx/mise-action" = "v3.6.1"
 "release-plz/action" = "v0.5"
+"rust-lang/crates-io-auth-action" = "v1.0.3"
+
