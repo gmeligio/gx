@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 use gx_lib::commands;
 use gx_lib::commands::app::AppError;
+use gx_lib::config::AppConfig;
 use gx_lib::infrastructure::{LOCK_FILE_NAME, MANIFEST_FILE_NAME};
 use gx_lib::infrastructure::{repo, repo::RepoError};
 use log::{LevelFilter, info};
@@ -83,12 +84,14 @@ fn main() -> Result<(), GxError> {
     let manifest_path = repo_root.join(".github").join(MANIFEST_FILE_NAME);
     let lock_path = repo_root.join(".github").join(LOCK_FILE_NAME);
 
+    let config = AppConfig::load(&manifest_path, &lock_path)?;
+
     match cli.command {
-        Commands::Tidy => commands::app::tidy(&repo_root, &manifest_path, &lock_path)?,
-        Commands::Init => commands::app::init(&repo_root, &manifest_path, &lock_path)?,
+        Commands::Tidy => commands::app::tidy(&repo_root, config, &manifest_path, &lock_path)?,
+        Commands::Init => commands::app::init(&repo_root, config, &manifest_path, &lock_path)?,
         Commands::Upgrade { action, latest } => {
             let request = resolve_upgrade_mode(action.as_deref(), latest)?;
-            commands::app::upgrade(&repo_root, &manifest_path, &lock_path, &request)?;
+            commands::app::upgrade(&repo_root, config, &manifest_path, &lock_path, &request)?;
         }
     }
     Ok(())
