@@ -1,14 +1,11 @@
 use log::{info, warn};
-use std::path::Path;
 use thiserror::Error;
 
 use crate::domain::{
     ActionId, ActionResolver, ActionSpec, Lock, LockKey, Manifest, ResolutionError,
     ResolutionResult, UpdateResult, UpgradeCandidate, Version, VersionRegistry, WorkflowUpdater,
 };
-use crate::infrastructure::{
-    LockFileError, LockStore, ManifestError, ManifestStore, WorkflowError,
-};
+use crate::infrastructure::{LockFileError, ManifestError, WorkflowError};
 
 /// Which actions to upgrade: all or a single action.
 #[non_exhaustive]
@@ -95,31 +92,24 @@ pub enum UpgradeError {
 ///
 /// # Errors
 ///
-/// Returns [`UpgradeError::Manifest`] if the manifest cannot be saved.
-/// Returns [`UpgradeError::Lock`] if the lock file cannot be saved.
 /// Returns [`UpgradeError::Workflow`] if workflow files cannot be updated.
 /// Propagates errors from [`determine_upgrades`].
 #[allow(clippy::too_many_arguments, clippy::needless_pass_by_value)]
-pub fn run<M, L, R, W>(
-    _repo_root: &Path,
+pub fn run<R, W>(
     mut manifest: Manifest,
-    manifest_store: M,
     mut lock: Lock,
-    lock_store: L,
     registry: R,
     writer: &W,
     request: &UpgradeRequest,
-) -> Result<(), UpgradeError>
+) -> Result<(Manifest, Lock), UpgradeError>
 where
-    M: ManifestStore,
-    L: LockStore,
     R: VersionRegistry,
     W: WorkflowUpdater,
 {
     let service = ActionResolver::new(registry);
 
     let Some((upgrades, repins)) = determine_upgrades(&manifest, &service, request)? else {
-        return Ok(());
+        return Ok((manifest, lock));
     };
 
     info!("Upgrading actions:");
@@ -137,10 +127,8 @@ where
         resolve_and_store(&service, spec, &mut lock, "Could not re-pin");
     }
 
-    manifest_store.save(&manifest)?;
     let keys_to_retain: Vec<LockKey> = manifest.specs().iter().map(|s| LockKey::from(*s)).collect();
     lock.retain(&keys_to_retain);
-    lock_store.save(&lock)?;
 
     let mut update_keys: Vec<LockKey> = upgrades
         .iter()
@@ -153,7 +141,7 @@ where
     let results = writer.update_all(&update_map)?;
     print_update_results(&results);
 
-    Ok(())
+    Ok((manifest, lock))
 }
 
 type UpgradePlan = Option<(Vec<UpgradeCandidate>, Vec<ActionSpec>)>;

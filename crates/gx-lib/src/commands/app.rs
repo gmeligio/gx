@@ -4,8 +4,7 @@ use thiserror::Error;
 use crate::config::Config;
 use crate::infrastructure::{
     FileLock, FileManifest, FileWorkflowScanner, FileWorkflowUpdater, GithubError, GithubRegistry,
-    LockFileError, LockStore, ManifestError, ManifestStore, MemoryLock, MemoryManifest,
-    WorkflowError,
+    LockFileError, LockStore, ManifestError, ManifestStore, WorkflowError,
 };
 
 use super::tidy::TidyError;
@@ -120,38 +119,18 @@ pub fn init(repo_root: &Path, config: Config) -> Result<(), AppError> {
 /// Returns [`AppError::Github`] if the registry cannot be created.
 /// Returns [`AppError::Upgrade`] if the upgrade command fails.
 pub fn upgrade(repo_root: &Path, config: Config, request: &UpgradeRequest) -> Result<(), AppError> {
+    let has_manifest = config.manifest_path.exists();
     let registry = GithubRegistry::new(config.settings.github_token)?;
     let updater = FileWorkflowUpdater::new(repo_root);
 
-    if config.manifest_path.exists() {
-        let manifest_store = FileManifest::new(&config.manifest_path);
-        let lock_store = FileLock::new(&config.lock_path);
-        super::upgrade::run(
-            repo_root,
-            config.manifest,
-            manifest_store,
-            config.lock,
-            lock_store,
-            registry,
-            &updater,
-            request,
-        )?;
-    } else {
-        let action_set = FileWorkflowScanner::new(repo_root).scan_all()?;
-        let manifest_store = MemoryManifest::from_workflows(&action_set);
-        let manifest = manifest_store.load()?;
-        let lock_store = MemoryLock;
-        super::upgrade::run(
-            repo_root,
-            manifest,
-            manifest_store,
-            config.lock,
-            lock_store,
-            registry,
-            &updater,
-            request,
-        )?;
+    let (updated_manifest, updated_lock) =
+        super::upgrade::run(config.manifest, config.lock, registry, &updater, request)?;
+
+    if has_manifest {
+        FileManifest::new(&config.manifest_path).save(&updated_manifest)?;
+        FileLock::new(&config.lock_path).save(&updated_lock)?;
     }
+
     Ok(())
 }
 
