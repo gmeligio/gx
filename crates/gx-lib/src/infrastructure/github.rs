@@ -1,5 +1,4 @@
 use serde::Deserialize;
-use std::env;
 use std::time::Duration;
 use thiserror::Error;
 
@@ -75,15 +74,6 @@ pub struct GithubRegistry {
 }
 
 impl GithubRegistry {
-    /// Create a new Github client, reading token from `GITHUB_TOKEN` environment variable
-    ///
-    /// # Errors
-    ///
-    /// Returns `GithubError::ClientInit` if the HTTP client cannot be initialized.
-    pub fn from_env() -> Result<Self, GithubError> {
-        Self::new(env::var("GITHUB_TOKEN").ok())
-    }
-
     /// Create a new Github client with a custom token
     ///
     /// # Errors
