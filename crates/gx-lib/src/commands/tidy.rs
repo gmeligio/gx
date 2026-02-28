@@ -211,8 +211,8 @@ fn build_file_update_map(
     for action in steps {
         if let Some(version) = manifest.resolve_version(&action.id, &action.location) {
             let key = LockKey::new(action.id.clone(), version.clone());
-            if let Some(sha) = lock.get(&key) {
-                let workflow_ref = format!("{sha} # {version}");
+            if let Some(entry) = lock.get(&key) {
+                let workflow_ref = format!("{} # {}", entry.sha, version);
                 map.insert(action.id.clone(), workflow_ref);
             }
         }
@@ -483,7 +483,7 @@ mod tests {
             &self,
             _id: &ActionId,
             _version: &Version,
-        ) -> Result<CommitSha, crate::domain::ResolutionError> {
+        ) -> Result<crate::domain::ResolvedRef, crate::domain::ResolutionError> {
             Err(crate::domain::ResolutionError::TokenRequired)
         }
         fn tags_for_sha(
@@ -560,11 +560,17 @@ jobs:
             ActionId::from("actions/checkout"),
             Version::from("v6.0.1"),
             CommitSha::from("8e8c483db84b4bee98b60c0593521ed34d9990e8"),
+            "actions/checkout".to_string(),
+            crate::domain::RefType::Tag,
+            "2026-01-01T00:00:00Z".to_string(),
         ));
         seed_lock.set(&ResolvedAction::new(
             ActionId::from("actions/checkout"),
             Version::from("v5"),
             CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            "actions/checkout".to_string(),
+            crate::domain::RefType::Tag,
+            "2026-01-01T00:00:00Z".to_string(),
         ));
         lock_store_seed.save(&seed_lock).unwrap();
 

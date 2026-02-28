@@ -1,31 +1,63 @@
 use std::collections::{HashMap, HashSet};
 
-use super::{ActionId, CommitSha, LockKey, ResolvedAction};
+use super::{ActionId, CommitSha, LockKey, RefType, ResolvedAction};
 
-/// Domain entity representing the resolved lock state: maps action@version → commit SHA.
+/// Metadata about a resolved action entry in the lock file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LockEntry {
+    /// The resolved commit SHA
+    pub sha: CommitSha,
+    /// The GitHub repository that was queried
+    pub repository: String,
+    /// The type of reference that was resolved
+    pub ref_type: RefType,
+    /// RFC 3339 timestamp of the commit (meaning depends on `ref_type`)
+    pub date: String,
+}
+
+impl LockEntry {
+    /// Create a new lock entry.
+    #[must_use]
+    pub fn new(sha: CommitSha, repository: String, ref_type: RefType, date: String) -> Self {
+        Self {
+            sha,
+            repository,
+            ref_type,
+            date,
+        }
+    }
+}
+
+/// Domain entity representing the resolved lock state: maps action@version → lock entry.
 /// Contains all domain logic for querying and mutating the lock. No I/O.
 #[derive(Debug, Default)]
 pub struct Lock {
-    actions: HashMap<LockKey, CommitSha>,
+    actions: HashMap<LockKey, LockEntry>,
 }
 
 impl Lock {
-    /// Create a `Lock` from an existing map of keys to SHAs.
+    /// Create a `Lock` from an existing map of keys to entries.
     #[must_use]
-    pub fn new(actions: HashMap<LockKey, CommitSha>) -> Self {
+    pub fn new(actions: HashMap<LockKey, LockEntry>) -> Self {
         Self { actions }
     }
 
-    /// Get the locked commit SHA for a lock key.
+    /// Get the locked entry for a lock key.
     #[must_use]
-    pub fn get(&self, key: &LockKey) -> Option<&CommitSha> {
+    pub fn get(&self, key: &LockKey) -> Option<&LockEntry> {
         self.actions.get(key)
     }
 
-    /// Set or update a locked action with its commit SHA.
+    /// Set or update a locked action with its resolved metadata.
     pub fn set(&mut self, resolved: &ResolvedAction) {
         let key = LockKey::from(resolved);
-        self.actions.insert(key, resolved.sha.clone());
+        let entry = LockEntry::new(
+            resolved.sha.clone(),
+            resolved.repository.clone(),
+            resolved.ref_type.clone(),
+            resolved.date.clone(),
+        );
+        self.actions.insert(key, entry);
     }
 
     /// Check if the lock has an entry for the given key.
@@ -46,10 +78,8 @@ impl Lock {
     pub fn build_update_map(&self, keys: &[LockKey]) -> HashMap<ActionId, String> {
         keys.iter()
             .map(|key| {
-                let value = if let Some(sha) = self.get(key) {
-                    let resolved =
-                        ResolvedAction::new(key.id.clone(), key.version.clone(), sha.clone());
-                    resolved.to_workflow_ref()
+                let value = if let Some(entry) = self.get(key) {
+                    format!("{} # {}", entry.sha, key.version)
                 } else {
                     key.version.to_string()
                 };
@@ -58,8 +88,8 @@ impl Lock {
             .collect()
     }
 
-    /// Iterate over all (key, sha) entries.
-    pub fn entries(&self) -> impl Iterator<Item = (&LockKey, &CommitSha)> {
+    /// Iterate over all (key, entry) entries.
+    pub fn entries(&self) -> impl Iterator<Item = (&LockKey, &LockEntry)> {
         self.actions.iter()
     }
 
@@ -73,7 +103,7 @@ impl Lock {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{ActionId, CommitSha, LockKey, ResolvedAction, Version};
+    use crate::domain::{ActionId, CommitSha, LockKey, RefType, ResolvedAction, Version};
 
     fn make_key(action: &str, version: &str) -> LockKey {
         LockKey::new(ActionId::from(action), Version::from(version))
@@ -84,6 +114,9 @@ mod tests {
             ActionId::from(action),
             Version::from(version),
             CommitSha::from(sha),
+            ActionId::from(action).base_repo(),
+            RefType::Tag,
+            "2026-01-01T00:00:00Z".to_string(),
         )
     }
 
@@ -101,9 +134,11 @@ mod tests {
             "v4",
             "abc123def456789012345678901234567890abcd",
         ));
+        let entry = lock.get(&make_key("actions/checkout", "v4"));
+        assert!(entry.is_some());
         assert_eq!(
-            lock.get(&make_key("actions/checkout", "v4")),
-            Some(&CommitSha::from("abc123def456789012345678901234567890abcd"))
+            entry.unwrap().sha,
+            CommitSha::from("abc123def456789012345678901234567890abcd")
         );
         assert_eq!(lock.get(&make_key("actions/checkout", "v3")), None);
     }
@@ -204,9 +239,11 @@ mod tests {
             "v4",
             "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         ));
+        let entry = lock.get(&make_key("actions/checkout", "v4"));
+        assert!(entry.is_some());
         assert_eq!(
-            lock.get(&make_key("actions/checkout", "v4")),
-            Some(&CommitSha::from("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"))
+            entry.unwrap().sha,
+            CommitSha::from("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
         );
     }
 }

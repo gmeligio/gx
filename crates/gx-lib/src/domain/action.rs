@@ -318,6 +318,53 @@ impl From<&str> for CommitSha {
     }
 }
 
+/// The type of reference that was resolved
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum RefType {
+    /// Tag with a GitHub Release
+    #[serde(rename = "release")]
+    Release,
+    /// Tag without a GitHub Release (may be annotated or lightweight)
+    #[serde(rename = "tag")]
+    Tag,
+    /// Branch reference
+    #[serde(rename = "branch")]
+    Branch,
+    /// Direct commit SHA
+    #[serde(rename = "commit")]
+    Commit,
+}
+
+impl fmt::Display for RefType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RefType::Release => write!(f, "release"),
+            RefType::Tag => write!(f, "tag"),
+            RefType::Branch => write!(f, "branch"),
+            RefType::Commit => write!(f, "commit"),
+        }
+    }
+}
+
+impl From<String> for RefType {
+    fn from(s: String) -> Self {
+        RefType::from(s.as_str())
+    }
+}
+
+impl From<&str> for RefType {
+    #[allow(clippy::match_same_arms)]
+    fn from(s: &str) -> Self {
+        match s {
+            "release" => RefType::Release,
+            "tag" => RefType::Tag,
+            "branch" => RefType::Branch,
+            "commit" => RefType::Commit,
+            _ => RefType::Tag, // default to Tag for unknown
+        }
+    }
+}
+
 /// An action dependency specification (desired state)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActionSpec {
@@ -338,18 +385,36 @@ impl fmt::Display for ActionSpec {
     }
 }
 
-/// A fully resolved action with its commit SHA
+/// A fully resolved action with its commit SHA and metadata
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedAction {
     pub id: ActionId,
     pub version: Version,
     pub sha: CommitSha,
+    pub repository: String,
+    pub ref_type: RefType,
+    pub date: String,
 }
 
 impl ResolvedAction {
+    /// Create a new resolved action with all metadata.
     #[must_use]
-    pub fn new(id: ActionId, version: Version, sha: CommitSha) -> Self {
-        Self { id, version, sha }
+    pub fn new(
+        id: ActionId,
+        version: Version,
+        sha: CommitSha,
+        repository: String,
+        ref_type: RefType,
+        date: String,
+    ) -> Self {
+        Self {
+            id,
+            version,
+            sha,
+            repository,
+            ref_type,
+            date,
+        }
     }
 
     /// Format as "SHA # version" for workflow updates
@@ -515,6 +580,29 @@ mod tests {
     }
 
     #[test]
+    fn test_ref_type_display() {
+        assert_eq!(RefType::Release.to_string(), "release");
+        assert_eq!(RefType::Tag.to_string(), "tag");
+        assert_eq!(RefType::Branch.to_string(), "branch");
+        assert_eq!(RefType::Commit.to_string(), "commit");
+    }
+
+    #[test]
+    fn test_ref_type_from_string() {
+        assert_eq!(RefType::from("release"), RefType::Release);
+        assert_eq!(RefType::from("tag"), RefType::Tag);
+        assert_eq!(RefType::from("branch"), RefType::Branch);
+        assert_eq!(RefType::from("commit"), RefType::Commit);
+        assert_eq!(RefType::from("unknown"), RefType::Tag); // defaults to Tag
+    }
+
+    #[test]
+    fn test_ref_type_equality() {
+        assert_eq!(RefType::Release, RefType::Release);
+        assert_ne!(RefType::Release, RefType::Tag);
+    }
+
+    #[test]
     fn test_lock_key_display() {
         let key = LockKey::new(ActionId::from("actions/checkout"), Version::from("v4"));
         assert_eq!(key.to_string(), "actions/checkout@v4");
@@ -545,6 +633,9 @@ mod tests {
             ActionId::from("actions/checkout"),
             Version::from("v4"),
             CommitSha::from("abc123def456789012345678901234567890abcd"),
+            "actions/checkout".to_string(),
+            RefType::Tag,
+            "2026-01-01T00:00:00Z".to_string(),
         );
         assert_eq!(
             resolved.to_workflow_ref(),

@@ -2,8 +2,8 @@
 use gx_lib::commands::upgrade;
 use gx_lib::commands::upgrade::{UpgradeMode, UpgradeRequest, UpgradeScope};
 use gx_lib::domain::{
-    ActionId, CommitSha, Lock, LockKey, Manifest, ResolutionError, ResolvedAction, Version,
-    VersionRegistry,
+    ActionId, CommitSha, Lock, LockKey, Manifest, RefType, ResolutionError, ResolvedAction,
+    ResolvedRef, Version, VersionRegistry,
 };
 use gx_lib::infrastructure::{
     FileLock, FileManifest, FileWorkflowUpdater, parse_lock, parse_manifest,
@@ -26,10 +26,15 @@ impl MockUpgradeRegistry {
 }
 
 impl VersionRegistry for MockUpgradeRegistry {
-    fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<CommitSha, ResolutionError> {
+    fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<ResolvedRef, ResolutionError> {
         let sha = format!("{}{}", id.as_str(), version.as_str()).replace('/', "");
         let padded = format!("{:0<40}", &sha[..sha.len().min(40)]);
-        Ok(CommitSha::from(padded))
+        Ok(ResolvedRef::new(
+            CommitSha::from(padded),
+            id.base_repo(),
+            RefType::Tag,
+            String::new(),
+        ))
     }
 
     fn tags_for_sha(
@@ -228,7 +233,7 @@ fn test_upgrade_with_existing_lock_and_empty_manifest() {
     create_manifest(&root, "[actions]\n\"actions/checkout\" = \"v4\"\n");
     create_lock(
         &root,
-        "version = \"1.0\"\n\n[actions]\n\"actions/checkout@v4\" = \"abc123def456789012345678901234567890abcd\"\n",
+        "version = \"1.0\"\n\n[actions]\n\"actions/checkout@v4\" = { sha = \"abc123def456789012345678901234567890abcd\", repository = \"actions/checkout\", ref_type = \"tag\", date = \"\" }\n",
     );
 
     create_workflow(
@@ -340,6 +345,9 @@ jobs:
         ActionId::from("actions/checkout"),
         Version::from("v6.0.2"),
         CommitSha::from(checkout_new_sha),
+        "actions/checkout".to_string(),
+        RefType::Tag,
+        String::new(),
     ));
 
     // Retain only current manifest keys (this is what upgrade::run does)
@@ -401,6 +409,9 @@ fn test_upgrade_repins_branch_ref() {
         ActionId::from("my-org/my-action"),
         Version::from("main"),
         CommitSha::from(old_sha),
+        "my-org/my-action".to_string(),
+        RefType::Branch,
+        String::new(),
     ));
 
     let updater = FileWorkflowUpdater::new(&root);
@@ -443,6 +454,9 @@ fn test_upgrade_latest_also_repins_branch_ref() {
         ActionId::from("my-org/my-action"),
         Version::from("main"),
         CommitSha::from(old_sha),
+        "my-org/my-action".to_string(),
+        RefType::Branch,
+        String::new(),
     ));
 
     let updater = FileWorkflowUpdater::new(&root);
@@ -486,11 +500,17 @@ fn test_upgrade_targeted_does_not_repin_branch_ref() {
         ActionId::from("my-org/my-action"),
         Version::from("main"),
         CommitSha::from(branch_sha),
+        "my-org/my-action".to_string(),
+        RefType::Branch,
+        String::new(),
     ));
     lock.set(&ResolvedAction::new(
         ActionId::from("actions/checkout"),
         Version::from("v4"),
         CommitSha::from(checkout_sha),
+        "actions/checkout".to_string(),
+        RefType::Tag,
+        String::new(),
     ));
 
     // Registry returns v5 as a valid tag for checkout
@@ -541,11 +561,17 @@ fn test_upgrade_mixed_semver_and_branch() {
         ActionId::from("my-org/my-action"),
         Version::from("main"),
         CommitSha::from(old_branch_sha),
+        "my-org/my-action".to_string(),
+        RefType::Branch,
+        String::new(),
     ));
     lock.set(&ResolvedAction::new(
         ActionId::from("actions/checkout"),
         Version::from("v4"),
         CommitSha::from(old_checkout_sha),
+        "actions/checkout".to_string(),
+        RefType::Tag,
+        String::new(),
     ));
 
     // Registry has both v4 and v5 available for checkout

@@ -2,7 +2,10 @@ use serde::Deserialize;
 use std::time::Duration;
 use thiserror::Error;
 
-use crate::domain::{ActionId, ActionSpec, CommitSha, ResolutionError, Version, VersionRegistry};
+use crate::domain::{
+    ActionId, ActionSpec, CommitSha, RefType, ResolutionError, ResolvedRef, Version,
+    VersionRegistry,
+};
 
 const GITHUB_API_BASE: &str = "https://api.github.com";
 const USER_AGENT: &str = "gx-cli";
@@ -68,6 +71,37 @@ struct CommitResponse {
     sha: String,
 }
 
+/// Response for a release API call
+#[derive(Debug, Deserialize)]
+struct ReleaseResponse {
+    #[serde(rename = "published_at")]
+    published_at: Option<String>,
+}
+
+/// Response for a commit details API call
+#[derive(Debug, Deserialize)]
+struct CommitDetailResponse {
+    committer: Option<CommitterInfo>,
+}
+
+/// Committer info from commit details
+#[derive(Debug, Deserialize)]
+struct CommitterInfo {
+    date: Option<String>,
+}
+
+/// Response for a tag object API call
+#[derive(Debug, Deserialize)]
+struct TagObjectResponse {
+    tagger: Option<TaggerInfo>,
+}
+
+/// Tagger info from tag object
+#[derive(Debug, Deserialize)]
+struct TaggerInfo {
+    date: Option<String>,
+}
+
 pub struct GithubRegistry {
     client: reqwest::blocking::Client,
     token: Option<String>,
@@ -95,40 +129,50 @@ impl GithubRegistry {
         Ok(Self { client, token })
     }
 
-    /// Resolve a ref (tag, branch, or commit) to a full commit SHA
+    /// Resolve a ref (tag, branch, or commit) to a full commit SHA and detect the ref type
+    ///
+    /// Returns a tuple of (`sha`, `ref_type`) by tracking which API path succeeded.
     ///
     /// # Examples
     ///
-    /// - `resolve_ref("actions/checkout", "v4") -> "abc123..."`
-    /// - `resolve_ref("actions/checkout", "main") -> "def456..." -> "def456..."`
-    /// - `resolve_ref("actions/checkout", "abc123") -> "abc123..." -> "abc123..."` (if valid)
-    /// - `resolve_ref("github/codeql-action/upload-sarif", "v4") -> "abc123..." -> "abc123..."` (subpath action)
+    /// - `resolve_ref("actions/checkout", "v4") -> ("abc123...", RefType::Tag)`
+    /// - `resolve_ref("actions/checkout", "main") -> ("def456...", RefType::Branch)`
+    /// - `resolve_ref("actions/checkout", "abc123") -> ("abc123...", RefType::Commit)`
+    /// - `resolve_ref("github/codeql-action/upload-sarif", "v4") -> ("abc123...", RefType::Tag)`
     ///
     /// # Errors
     ///
     /// Return `GithubError::TokenRequired` if the client does not have a token.
-    pub fn resolve_ref(&self, owner_repo: &str, ref_name: &str) -> Result<String, GithubError> {
-        // If it already looks like a full SHA (40 hex chars), return it
+    pub fn resolve_ref(
+        &self,
+        owner_repo: &str,
+        ref_name: &str,
+    ) -> Result<(String, RefType), GithubError> {
+        // If it already looks like a full SHA (40 hex chars), return it as a Commit
         if CommitSha::is_valid(ref_name) {
-            return Ok(ref_name.to_string());
+            return Ok((ref_name.to_string(), RefType::Commit));
         }
 
         // Handle subpath actions (e.g., "github/codeql-action/upload-sarif")
         // Extract just the owner/repo part (first two path segments)
         let base_repo = owner_repo.split('/').take(2).collect::<Vec<_>>().join("/");
 
-        // Try to resolve as a tag or branch
+        // Try to resolve as a tag first
         let url = format!("{GITHUB_API_BASE}/repos/{base_repo}/git/ref/tags/{ref_name}");
+        if let Ok(sha) = self.fetch_ref(&url) {
+            return Ok((sha, RefType::Tag));
+        }
 
-        self.fetch_ref(&url)
-            .or_else(|_| {
-                let url = format!("{GITHUB_API_BASE}/repos/{base_repo}/git/ref/heads/{ref_name}");
-                self.fetch_ref(&url)
-            })
-            .or_else(|_| {
-                let url = format!("{GITHUB_API_BASE}/repos/{base_repo}/commits/{ref_name}");
-                self.fetch_commit_sha(&url)
-            })
+        // Try to resolve as a branch
+        let url = format!("{GITHUB_API_BASE}/repos/{base_repo}/git/ref/heads/{ref_name}");
+        if let Ok(sha) = self.fetch_ref(&url) {
+            return Ok((sha, RefType::Branch));
+        }
+
+        // Try to resolve as a direct commit
+        let url = format!("{GITHUB_API_BASE}/repos/{base_repo}/commits/{ref_name}");
+        self.fetch_commit_sha(&url)
+            .map(|sha| (sha, RefType::Commit))
     }
 
     fn fetch_ref(&self, url: &str) -> Result<String, GithubError> {
@@ -322,6 +366,112 @@ impl GithubRegistry {
 
         Ok(tags)
     }
+
+    /// Fetch the commit date from a commit SHA
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no token is set, the request fails, or the response cannot be parsed.
+    fn fetch_commit_date(&self, base_repo: &str, sha: &str) -> Result<Option<String>, GithubError> {
+        let token = self.token.as_ref().ok_or(GithubError::TokenRequired)?;
+        let url = format!("{GITHUB_API_BASE}/repos/{base_repo}/commits/{sha}");
+
+        let response = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .map_err(|source| GithubError::Request {
+                operation: "commit details",
+                url: url.clone(),
+                source,
+            })?;
+
+        if !response.status().is_success() {
+            return Err(GithubError::ApiStatus {
+                status: response.status(),
+                url,
+            });
+        }
+
+        let commit: CommitDetailResponse = response
+            .json()
+            .map_err(|source| GithubError::ParseResponse { url, source })?;
+
+        Ok(commit.committer.and_then(|c| c.date))
+    }
+
+    /// Fetch the release date from a release tag
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no token is set, the request fails, or the response cannot be parsed.
+    fn fetch_release_date(
+        &self,
+        base_repo: &str,
+        tag: &str,
+    ) -> Result<Option<String>, GithubError> {
+        let token = self.token.as_ref().ok_or(GithubError::TokenRequired)?;
+        let url = format!("{GITHUB_API_BASE}/repos/{base_repo}/releases/tags/{tag}");
+
+        let response = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .map_err(|source| GithubError::Request {
+                operation: "release",
+                url: url.clone(),
+                source,
+            })?;
+
+        if !response.status().is_success() {
+            return Err(GithubError::ApiStatus {
+                status: response.status(),
+                url,
+            });
+        }
+
+        let release: ReleaseResponse = response
+            .json()
+            .map_err(|source| GithubError::ParseResponse { url, source })?;
+
+        Ok(release.published_at)
+    }
+
+    /// Fetch the tag date from an annotated tag object
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no token is set, the request fails, or the response cannot be parsed.
+    fn fetch_tag_date(&self, base_repo: &str, sha: &str) -> Result<Option<String>, GithubError> {
+        let token = self.token.as_ref().ok_or(GithubError::TokenRequired)?;
+        let url = format!("{GITHUB_API_BASE}/repos/{base_repo}/git/tags/{sha}");
+
+        let response = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .map_err(|source| GithubError::Request {
+                operation: "tag",
+                url: url.clone(),
+                source,
+            })?;
+
+        if !response.status().is_success() {
+            return Err(GithubError::ApiStatus {
+                status: response.status(),
+                url,
+            });
+        }
+
+        let tag: TagObjectResponse = response
+            .json()
+            .map_err(|source| GithubError::ParseResponse { url, source })?;
+
+        Ok(tag.tagger.and_then(|t| t.date))
+    }
 }
 
 /// Parse the `Link` header to find the `rel="next"` URL for pagination.
@@ -340,16 +490,49 @@ fn parse_next_link(headers: &reqwest::header::HeaderMap) -> Option<String> {
 }
 
 impl VersionRegistry for GithubRegistry {
-    fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<CommitSha, ResolutionError> {
-        self.resolve_ref(id.as_str(), version.as_str())
-            .map(CommitSha::from)
-            .map_err(|e| match e {
-                GithubError::TokenRequired => ResolutionError::TokenRequired,
-                _ => ResolutionError::ResolveFailed {
-                    spec: ActionSpec::new(id.clone(), version.clone()),
-                    reason: e.to_string(),
-                },
-            })
+    fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<ResolvedRef, ResolutionError> {
+        let (sha, ref_type) =
+            self.resolve_ref(id.as_str(), version.as_str())
+                .map_err(|e| match e {
+                    GithubError::TokenRequired => ResolutionError::TokenRequired,
+                    _ => ResolutionError::ResolveFailed {
+                        spec: ActionSpec::new(id.clone(), version.clone()),
+                        reason: e.to_string(),
+                    },
+                })?;
+
+        let base_repo = id.base_repo();
+
+        // Fetch date with priority: release > annotated tag > commit
+        let date = if ref_type == RefType::Tag {
+            // For tags, try release first, then tag object, then commit
+            self.fetch_release_date(&base_repo, version.as_str())
+                .ok()
+                .flatten()
+                .or_else(|| self.fetch_tag_date(&base_repo, &sha).ok().flatten())
+                .or_else(|| self.fetch_commit_date(&base_repo, &sha).ok().flatten())
+                .unwrap_or_default()
+        } else if ref_type == RefType::Release {
+            // For releases, try release first, then fall back to commit
+            self.fetch_release_date(&base_repo, version.as_str())
+                .ok()
+                .flatten()
+                .or_else(|| self.fetch_commit_date(&base_repo, &sha).ok().flatten())
+                .unwrap_or_default()
+        } else {
+            // For branches and commits, just get the commit date
+            self.fetch_commit_date(&base_repo, &sha)
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+        };
+
+        Ok(ResolvedRef::new(
+            CommitSha::from(sha),
+            base_repo,
+            ref_type,
+            date,
+        ))
     }
 
     fn tags_for_sha(
@@ -395,8 +578,9 @@ mod tests {
     fn test_full_sha_passthrough() {
         let client = GithubRegistry::new(None).unwrap();
         let sha = "a1b2c3d4e5f6789012345678901234567890abcd";
-        let result = client.resolve_ref("actions/checkout", sha).unwrap();
-        assert_eq!(result, sha);
+        let (result_sha, result_type) = client.resolve_ref("actions/checkout", sha).unwrap();
+        assert_eq!(result_sha, sha);
+        assert_eq!(result_type, RefType::Commit);
     }
 
     #[test]
@@ -404,10 +588,11 @@ mod tests {
         let client = GithubRegistry::new(None).unwrap();
         let sha = "a1b2c3d4e5f6789012345678901234567890abcd";
         // Should work with subpath actions
-        let result = client
+        let (result_sha, result_type) = client
             .resolve_ref("github/codeql-action/upload-sarif", sha)
             .unwrap();
-        assert_eq!(result, sha);
+        assert_eq!(result_sha, sha);
+        assert_eq!(result_type, RefType::Commit);
     }
 
     #[test]
@@ -418,6 +603,7 @@ mod tests {
 
         // Full SHA should pass through
         let result = client.lookup_sha(&id, &sha_version).unwrap();
-        assert_eq!(result.as_str(), sha_version.as_str());
+        assert_eq!(result.sha.as_str(), sha_version.as_str());
+        assert_eq!(result.ref_type, RefType::Commit);
     }
 }

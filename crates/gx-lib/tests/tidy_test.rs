@@ -1,7 +1,8 @@
 #![allow(unused_crate_dependencies)]
 use gx_lib::commands::{self, tidy};
 use gx_lib::domain::{
-    ActionId, CommitSha, Lock, Manifest, ResolutionError, Version, VersionRegistry,
+    ActionId, CommitSha, Lock, Manifest, RefType, ResolutionError, ResolvedRef, Version,
+    VersionRegistry,
 };
 use gx_lib::infrastructure::{
     FileLock, FileManifest, FileWorkflowScanner, FileWorkflowUpdater, parse_lock, parse_manifest,
@@ -18,7 +19,11 @@ use tempfile::TempDir;
 struct NoopRegistry;
 
 impl VersionRegistry for NoopRegistry {
-    fn lookup_sha(&self, _id: &ActionId, _version: &Version) -> Result<CommitSha, ResolutionError> {
+    fn lookup_sha(
+        &self,
+        _id: &ActionId,
+        _version: &Version,
+    ) -> Result<ResolvedRef, ResolutionError> {
         Err(ResolutionError::TokenRequired)
     }
 
@@ -68,11 +73,13 @@ impl MockRegistry {
 }
 
 impl VersionRegistry for MockRegistry {
-    fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<CommitSha, ResolutionError> {
-        Ok(CommitSha::from(Self::fake_sha(
-            id.as_str(),
-            version.as_str(),
-        )))
+    fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<ResolvedRef, ResolutionError> {
+        Ok(ResolvedRef::new(
+            CommitSha::from(Self::fake_sha(id.as_str(), version.as_str())),
+            id.base_repo(),
+            RefType::Tag,
+            String::new(),
+        ))
     }
 
     fn tags_for_sha(
