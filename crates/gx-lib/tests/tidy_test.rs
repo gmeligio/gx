@@ -1,6 +1,5 @@
 #![allow(unused_crate_dependencies)]
 use gx_lib::commands::{self, tidy};
-use gx_lib::config::Config;
 use gx_lib::domain::{
     ActionId, CommitSha, Lock, Manifest, ResolutionError, Version, VersionRegistry,
 };
