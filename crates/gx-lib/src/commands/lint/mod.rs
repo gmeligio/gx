@@ -187,16 +187,15 @@ pub fn run(
     Ok(all_diagnostics)
 }
 
-// Rule implementations
 mod sha_mismatch;
 mod stale_comment;
 mod unpinned;
 mod unsynced_manifest;
 
-pub use sha_mismatch::ShaMismatchRule;
-pub use stale_comment::StaleCommentRule;
-pub use unpinned::UnpinnedRule;
-pub use unsynced_manifest::UnsyncedManifestRule;
+use sha_mismatch::ShaMismatchRule;
+use stale_comment::StaleCommentRule;
+use unpinned::UnpinnedRule;
+use unsynced_manifest::UnsyncedManifestRule;
 
 #[cfg(test)]
 mod tests {
