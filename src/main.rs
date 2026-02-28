@@ -1,10 +1,38 @@
-use anyhow::Result;
 use clap::{Parser, Subcommand};
 use gx::commands;
+use gx::commands::app::AppError;
 use gx::infrastructure::{LOCK_FILE_NAME, MANIFEST_FILE_NAME};
 use gx::infrastructure::{repo, repo::RepoError};
 use log::{LevelFilter, info};
 use std::io::Write;
+use thiserror::Error;
+
+/// Top-level error type for the gx CLI binary
+#[derive(Debug, Error)]
+enum GxError {
+    /// The `--latest` flag was combined with an exact version pin.
+    #[error(
+        "--latest cannot be combined with an exact version pin (ACTION@VERSION). \
+         Use --latest ACTION to upgrade to latest, or ACTION@VERSION to pin."
+    )]
+    LatestWithVersionPin,
+
+    /// The action argument could not be parsed as ACTION@VERSION.
+    #[error("invalid format: expected ACTION@VERSION (e.g., actions/checkout@v5), got: {input}")]
+    InvalidActionFormat { input: String },
+
+    /// Command orchestration failed.
+    #[error(transparent)]
+    App(#[from] AppError),
+
+    /// Repository detection failed.
+    #[error(transparent)]
+    Repo(#[from] RepoError),
+
+    /// An I/O error occurred.
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+}
 
 #[derive(Parser)]
 #[command(name = "gx")]
@@ -37,7 +65,7 @@ enum Commands {
     },
 }
 
-fn main() -> Result<()> {
+fn main() -> Result<(), GxError> {
     let cli = Cli::parse();
 
     init_logging(&cli);
@@ -66,31 +94,36 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+/// # Errors
+///
+/// Returns [`GxError::LatestWithVersionPin`] if `--latest` is combined with `ACTION@VERSION`.
+/// Returns [`GxError::InvalidActionFormat`] if the action string cannot be parsed.
+/// Propagates [`GxError::App`] from [`UpgradeRequest::new`].
 fn resolve_upgrade_mode(
     action: Option<&str>,
     latest: bool,
-) -> Result<commands::upgrade::UpgradeRequest> {
+) -> Result<commands::upgrade::UpgradeRequest, GxError> {
     use commands::upgrade::{UpgradeMode, UpgradeRequest, UpgradeScope};
     use gx::domain::ActionId;
 
     match (action, latest) {
         // gx upgrade --latest
-        (None, true) => Ok(UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::All)?),
+        (None, true) => {
+            Ok(UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::All)
+                .map_err(AppError::from)?)
+        }
 
         // gx upgrade --latest actions/checkout
         (Some(action_str), true) => {
             // action_str is bare ACTION (no version)
             if action_str.contains('@') {
-                anyhow::bail!(
-                    "--latest cannot be combined with an exact version pin (ACTION@VERSION). \
-                     Use --latest ACTION to upgrade to latest, or ACTION@VERSION to pin."
-                );
+                return Err(GxError::LatestWithVersionPin);
             }
             let id = ActionId::from(action_str);
-            Ok(UpgradeRequest::new(
-                UpgradeMode::Latest,
-                UpgradeScope::Single(id),
-            )?)
+            Ok(
+                UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::Single(id))
+                    .map_err(AppError::from)?,
+            )
         }
 
         // gx upgrade actions/checkout
@@ -98,26 +131,29 @@ fn resolve_upgrade_mode(
             if action_str.contains('@') {
                 // Bare ACTION@VERSION → Pinned mode
                 let key = gx::domain::LockKey::parse(action_str).ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "Invalid format: expected ACTION@VERSION (e.g., actions/checkout@v5), got: {action_str}"
-                    )
+                    GxError::InvalidActionFormat {
+                        input: action_str.to_string(),
+                    }
                 })?;
                 Ok(UpgradeRequest::new(
                     UpgradeMode::Pinned(key.version),
                     UpgradeScope::Single(key.id),
-                )?)
+                )
+                .map_err(AppError::from)?)
             } else {
                 // Bare ACTION → Safe mode, single action
                 let id = ActionId::from(action_str);
-                Ok(UpgradeRequest::new(
-                    UpgradeMode::Safe,
-                    UpgradeScope::Single(id),
-                )?)
+                Ok(
+                    UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::Single(id))
+                        .map_err(AppError::from)?,
+                )
             }
         }
 
         // gx upgrade
-        (None, false) => Ok(UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All)?),
+        (None, false) => Ok(
+            UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).map_err(AppError::from)?
+        ),
     }
 }
 

@@ -105,7 +105,8 @@ fn run_upgrade_file_backed_with_request(
         MockUpgradeRegistry::new(),
         &updater,
         &request,
-    )
+    )?;
+    Ok(())
 }
 
 // --- Tests that don't require GitHub API ---

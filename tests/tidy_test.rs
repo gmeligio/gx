@@ -123,7 +123,7 @@ fn run_tidy(repo_root: &Path) -> anyhow::Result<()> {
             MockRegistry::new(),
             &scanner,
             &updater,
-        )
+        )?;
     } else {
         let action_set = FileWorkflowScanner::new(repo_root).scan_all()?;
         let manifest_store = MemoryManifest::from_workflows(&action_set);
@@ -139,8 +139,9 @@ fn run_tidy(repo_root: &Path) -> anyhow::Result<()> {
             MockRegistry::new(),
             &scanner,
             &updater,
-        )
+        )?;
     }
+    Ok(())
 }
 
 /// Helper to create an empty manifest file (triggers file-backed mode)
