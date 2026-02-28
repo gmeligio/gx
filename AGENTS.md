@@ -1,2 +1,2 @@
 - You are running on Windows 11.
-- Don't use grep, head or tail.
+- Run commands without any piping to filtering tools. Don't use grep, head, tail, etc.
