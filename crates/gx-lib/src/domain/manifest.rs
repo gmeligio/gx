@@ -17,7 +17,7 @@ pub struct ActionOverride {
 }
 
 /// Domain entity owning the manifest's action→version mapping and all domain behaviour.
-/// No I/O — persistence is handled by infrastructure's `ManifestStore` trait.
+/// No I/O — persistence is handled by infrastructure's file-backed save methods.
 #[derive(Debug, Default)]
 pub struct Manifest {
     actions: HashMap<ActionId, ActionSpec>,

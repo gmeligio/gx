@@ -460,8 +460,8 @@ mod tests {
     use super::*;
     use crate::domain::{ActionId, CommitSha, ResolvedAction};
     use crate::infrastructure::{
-        FileLock, FileManifest, FileWorkflowScanner, FileWorkflowUpdater, LockStore, ManifestStore,
-        parse_lock, parse_manifest,
+        FileLock, FileManifest, FileWorkflowScanner, FileWorkflowUpdater, parse_lock,
+        parse_manifest,
     };
     use std::fs;
 

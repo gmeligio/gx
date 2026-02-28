@@ -6,8 +6,7 @@ use gx_lib::domain::{
     VersionRegistry,
 };
 use gx_lib::infrastructure::{
-    FileLock, FileManifest, FileWorkflowUpdater, LockStore, ManifestStore, parse_lock,
-    parse_manifest,
+    FileLock, FileManifest, FileWorkflowUpdater, parse_lock, parse_manifest,
 };
 use std::fs;
 use std::io::Write;

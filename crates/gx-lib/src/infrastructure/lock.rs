@@ -10,27 +10,6 @@ use crate::domain::{CommitSha, Lock, LockKey};
 pub const LOCK_FILE_NAME: &str = "gx.lock";
 pub const LOCK_FILE_VERSION: &str = "1.0";
 
-/// Pure I/O trait for loading and saving the lock file.
-/// Domain operations (get, set, retain, etc.) live on `Lock` in the domain layer.
-pub trait LockStore {
-    /// Load the lock from storage, returning a `Lock` domain entity.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the file cannot be read or parsed.
-    fn load(&self) -> Result<Lock, LockFileError>;
-
-    /// Save the given `Lock` to storage.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the file cannot be written.
-    fn save(&self, lock: &Lock) -> Result<(), LockFileError>;
-
-    /// The path this store reads from and writes to.
-    fn path(&self) -> &Path;
-}
-
 /// Errors that can occur when working with lock files
 #[derive(Debug, Error)]
 pub enum LockFileError {
@@ -111,34 +90,14 @@ impl FileLock {
     }
 }
 
-impl LockStore for FileLock {
-    fn load(&self) -> Result<Lock, LockFileError> {
-        if !self.path.exists() {
-            return Ok(Lock::default());
-        }
-
-        let content = fs::read_to_string(&self.path).map_err(|source| LockFileError::Read {
-            path: self.path.clone(),
-            source,
-        })?;
-
-        let data: LockData = toml::from_str(&content).map_err(|source| LockFileError::Parse {
-            path: self.path.clone(),
-            source: Box::new(source),
-        })?;
-
-        let needs_rewrite = data.version != LOCK_FILE_VERSION;
-        let lock = lock_from_data(data);
-
-        // Transparently migrate old lock files to the current format version
-        if needs_rewrite {
-            self.save(&lock)?;
-        }
-
-        Ok(lock)
-    }
-
-    fn save(&self, lock: &Lock) -> Result<(), LockFileError> {
+impl FileLock {
+    /// Save the given `Lock` to this file.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LockFileError::Serialize`] if serialization fails.
+    /// Returns [`LockFileError::Write`] if the file cannot be written.
+    pub fn save(&self, lock: &Lock) -> Result<(), LockFileError> {
         let data = lock_to_data(lock);
         let content = toml::to_string_pretty(&data).map_err(LockFileError::Serialize)?;
         fs::write(&self.path, content).map_err(|source| LockFileError::Write {
@@ -149,7 +108,8 @@ impl LockStore for FileLock {
         Ok(())
     }
 
-    fn path(&self) -> &Path {
+    #[must_use]
+    pub fn path(&self) -> &Path {
         &self.path
     }
 }
@@ -188,24 +148,6 @@ pub fn parse_lock(path: &Path) -> Result<Lock, LockFileError> {
     Ok(lock)
 }
 
-/// In-memory lock store that doesn't persist to disk. Used when no `gx.toml` exists.
-#[derive(Default)]
-pub struct MemoryLock;
-
-impl LockStore for MemoryLock {
-    fn load(&self) -> Result<Lock, LockFileError> {
-        Ok(Lock::default())
-    }
-
-    fn save(&self, _lock: &Lock) -> Result<(), LockFileError> {
-        Ok(()) // no-op
-    }
-
-    fn path(&self) -> &Path {
-        Path::new("in-memory")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -226,13 +168,6 @@ mod tests {
     }
 
     #[test]
-    fn test_file_lock_load_missing_file_returns_empty() {
-        let store = FileLock::new(Path::new("/nonexistent/path/gx.lock"));
-        let lock = store.load().unwrap();
-        assert!(!lock.has(&make_key("actions/checkout", "v4")));
-    }
-
-    #[test]
     fn test_file_lock_save_and_load_roundtrip() {
         let file = NamedTempFile::new().unwrap();
         let store = FileLock::new(file.path());
@@ -246,7 +181,7 @@ mod tests {
 
         store.save(&lock).unwrap();
 
-        let loaded = store.load().unwrap();
+        let loaded = parse_lock(file.path()).unwrap();
         assert_eq!(
             loaded.get(&make_key("actions/checkout", "v4")),
             Some(&CommitSha::from("abc123def456789012345678901234567890abcd"))
@@ -265,8 +200,7 @@ mod tests {
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
-        let store = FileLock::new(file.path());
-        let lock = store.load().unwrap();
+        let lock = parse_lock(file.path()).unwrap();
         assert_eq!(
             lock.get(&make_key("actions/checkout", "v4")),
             Some(&CommitSha::from("abc123def456789012345678901234567890abcd"))
@@ -283,8 +217,7 @@ mod tests {
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
-        let store = FileLock::new(file.path());
-        let _lock = store.load().unwrap();
+        let _lock = parse_lock(file.path()).unwrap();
 
         // File should now contain version field
         let written = fs::read_to_string(file.path()).unwrap();
@@ -306,19 +239,5 @@ mod tests {
         file.write_all(content.as_bytes()).unwrap();
         let lock = parse_lock(file.path()).unwrap();
         assert!(lock.has(&make_key("actions/checkout", "v4")));
-    }
-
-    #[test]
-    fn test_memory_lock_load_returns_empty() {
-        let store = MemoryLock;
-        let lock = store.load().unwrap();
-        assert!(!lock.has(&make_key("actions/checkout", "v4")));
-    }
-
-    #[test]
-    fn test_memory_lock_save_is_noop() {
-        let store = MemoryLock;
-        let lock = Lock::default();
-        assert!(store.save(&lock).is_ok());
     }
 }

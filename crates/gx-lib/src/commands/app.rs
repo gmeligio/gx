@@ -4,7 +4,7 @@ use thiserror::Error;
 use crate::config::Config;
 use crate::infrastructure::{
     FileLock, FileManifest, FileWorkflowScanner, FileWorkflowUpdater, GithubError, GithubRegistry,
-    LockFileError, LockStore, ManifestError, ManifestStore, WorkflowError,
+    LockFileError, ManifestError, WorkflowError,
 };
 
 use super::tidy::TidyError;

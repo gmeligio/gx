@@ -1,10 +1,11 @@
 #![allow(unused_crate_dependencies)]
 use gx_lib::commands::{self, tidy};
 use gx_lib::config::Config;
-use gx_lib::domain::{ActionId, CommitSha, Lock, ResolutionError, Version, VersionRegistry};
+use gx_lib::domain::{
+    ActionId, CommitSha, Lock, Manifest, ResolutionError, Version, VersionRegistry,
+};
 use gx_lib::infrastructure::{
-    FileLock, FileManifest, FileWorkflowScanner, FileWorkflowUpdater, LockStore, ManifestStore,
-    MemoryManifest, parse_lock, parse_manifest,
+    FileLock, FileManifest, FileWorkflowScanner, FileWorkflowUpdater, parse_lock, parse_manifest,
 };
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
@@ -125,13 +126,9 @@ fn run_tidy(repo_root: &Path) -> Result<(), commands::app::AppError> {
         FileManifest::new(&manifest_path).save(&updated_manifest)?;
         FileLock::new(&lock_path).save(&updated_lock)?;
     } else {
-        let action_set = FileWorkflowScanner::new(repo_root).scan_all()?;
-        let manifest =
-            gx_lib::infrastructure::MemoryManifest::from_workflows(&action_set).load()?;
-        let lock = Lock::default();
         let _ = tidy::run(
-            manifest,
-            lock,
+            Manifest::default(),
+            Lock::default(),
             &manifest_path,
             MockRegistry::new(),
             &scanner,
