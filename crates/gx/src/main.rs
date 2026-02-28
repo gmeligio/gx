@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 use gx_lib::commands;
 use gx_lib::commands::app::AppError;
+use gx_lib::commands::lint::LintError;
 use gx_lib::config::Config;
 use gx_lib::infrastructure::{repo, repo::RepoError};
 use log::{LevelFilter, info};
@@ -63,6 +64,8 @@ enum Commands {
         #[arg(long)]
         latest: bool,
     },
+    /// Run lint checks on workflows
+    Lint,
 }
 
 fn main() -> Result<(), GxError> {
@@ -89,6 +92,13 @@ fn main() -> Result<(), GxError> {
             let request = resolve_upgrade_mode(action.as_deref(), latest)?;
             commands::app::upgrade(&repo_root, config, &request)?;
         }
+        Commands::Lint => match commands::app::lint(&repo_root, &config) {
+            Err(AppError::Lint(LintError::ViolationsFound { .. })) => {
+                std::process::exit(1);
+            }
+            Err(err) => return Err(GxError::App(err)),
+            Ok(()) => {}
+        },
     }
     Ok(())
 }

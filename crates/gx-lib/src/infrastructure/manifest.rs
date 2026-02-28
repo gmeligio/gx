@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
+use crate::config::{LintConfig, RuleConfig};
 use crate::domain::{ActionId, ActionOverride, ActionSpec, Manifest, Version};
 
 pub const MANIFEST_FILE_NAME: &str = "gx.toml";
@@ -65,6 +66,15 @@ struct TomlActions {
 struct ManifestData {
     #[serde(default)]
     actions: TomlActions,
+    #[serde(default)]
+    lint: LintData,
+}
+
+/// The [lint] section of the manifest.
+#[derive(Debug, Default, Deserialize, Serialize)]
+struct LintData {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    rules: BTreeMap<String, RuleConfig>,
 }
 
 // ---- conversion ----
@@ -168,6 +178,7 @@ fn manifest_to_data(manifest: &Manifest) -> ManifestData {
             versions,
             overrides,
         },
+        lint: LintData::default(),
     }
 }
 
@@ -280,6 +291,32 @@ pub fn parse_manifest(path: &Path) -> Result<Manifest, ManifestError> {
     })?;
 
     manifest_from_data(data, path)
+}
+
+/// Load lint configuration from a manifest file. Returns `LintConfig::default()` if the file does not exist or has no `[lint]` section.
+///
+/// # Errors
+///
+/// Returns [`ManifestError::Read`] if the file cannot be read.
+/// Returns [`ManifestError::Parse`] if the TOML is invalid.
+pub fn parse_lint_config(path: &Path) -> Result<LintConfig, ManifestError> {
+    if !path.exists() {
+        return Ok(LintConfig::default());
+    }
+
+    let content = fs::read_to_string(path).map_err(|source| ManifestError::Read {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    let data: ManifestData = toml::from_str(&content).map_err(|source| ManifestError::Parse {
+        path: path.to_path_buf(),
+        source: Box::new(source),
+    })?;
+
+    Ok(LintConfig {
+        rules: data.lint.rules,
+    })
 }
 
 #[cfg(test)]
@@ -553,5 +590,83 @@ mod tests {
         assert_eq!(overrides[0].job.as_deref(), Some("test_windows"));
         assert_eq!(overrides[0].step, Some(0));
         assert_eq!(overrides[0].version.as_str(), "v5");
+    }
+
+    #[test]
+    fn parse_lint_config_missing_file_returns_default() {
+        let config = parse_lint_config(Path::new("/nonexistent/gx.toml")).unwrap();
+        assert!(config.rules.is_empty());
+    }
+
+    #[test]
+    fn parse_lint_config_no_lint_section_returns_default() {
+        let content = r#"
+[actions]
+"actions/checkout" = "v4"
+        "#;
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+
+        let config = parse_lint_config(file.path()).unwrap();
+        assert!(config.rules.is_empty());
+    }
+
+    #[test]
+    fn parse_lint_config_with_rules() {
+        let content = r#"
+[actions]
+"actions/checkout" = "v4"
+
+[lint.rules]
+sha-mismatch = { level = "error" }
+unpinned = { level = "error", ignore = [
+  { action = "actions/internal-tool" },
+] }
+stale-comment = { level = "off" }
+        "#;
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+
+        let config = parse_lint_config(file.path()).unwrap();
+        assert_eq!(config.rules.len(), 3);
+        assert!(config.rules.contains_key("sha-mismatch"));
+        assert!(config.rules.contains_key("unpinned"));
+        assert!(config.rules.contains_key("stale-comment"));
+    }
+
+    #[test]
+    fn parse_lint_config_ignore_targets() {
+        let content = r#"
+[actions]
+"actions/checkout" = "v4"
+
+[lint.rules]
+unpinned = { level = "warn", ignore = [
+  { action = "actions/checkout" },
+  { workflow = ".github/workflows/legacy.yml" },
+  { action = "actions/cache", workflow = ".github/workflows/ci.yml", job = "build" },
+] }
+        "#;
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+
+        let config = parse_lint_config(file.path()).unwrap();
+        let unpinned = &config.rules["unpinned"];
+        assert_eq!(unpinned.ignore.len(), 3);
+        assert_eq!(
+            unpinned.ignore[0].action,
+            Some("actions/checkout".to_string())
+        );
+        assert!(unpinned.ignore[0].workflow.is_none());
+        assert_eq!(
+            unpinned.ignore[1].workflow,
+            Some(".github/workflows/legacy.yml".to_string())
+        );
+        assert_eq!(unpinned.ignore[2].action, Some("actions/cache".to_string()));
+        assert_eq!(
+            unpinned.ignore[2].workflow,
+            Some(".github/workflows/ci.yml".to_string())
+        );
+        assert_eq!(unpinned.ignore[2].job, Some("build".to_string()));
     }
 }
