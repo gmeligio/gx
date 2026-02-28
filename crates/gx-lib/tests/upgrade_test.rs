@@ -1,10 +1,10 @@
-use gx::commands::upgrade;
-use gx::commands::upgrade::{UpgradeMode, UpgradeRequest, UpgradeScope};
-use gx::domain::{
+use gx_lib::commands::upgrade;
+use gx_lib::commands::upgrade::{UpgradeMode, UpgradeRequest, UpgradeScope};
+use gx_lib::domain::{
     ActionId, CommitSha, Lock, LockKey, Manifest, ResolutionError, ResolvedAction, Version,
     VersionRegistry,
 };
-use gx::infrastructure::{
+use gx_lib::infrastructure::{
     FileLock, FileManifest, FileWorkflowUpdater, LockStore, ManifestStore, MemoryLock,
     MemoryManifest,
 };

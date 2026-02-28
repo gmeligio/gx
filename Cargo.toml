@@ -1,34 +1,13 @@
-[package]
-name = "gx"
-version = "0.5.4"
-description = "CLI to manage Github Actions dependencies"
-license = "MIT"
-documentation = "https://docs.rs/gx"
-edition = "2024"
-homepage = "https://github.com/gmeligio/gx"
-repository = "https://github.com/gmeligio/gx"
+[workspace]
+members = ["crates/gx-lib", "crates/gx"]
+resolver = "2"
 
-[dependencies]
-clap = { version = "4", features = ["derive"] }
-env_logger = "0.11"
-gix-discover = "0.46.0"
-glob = "0.3"
-log = "0.4"
-regex = "1"
-reqwest = { version = "0.12", features = ["blocking", "json"] }
-semver = "1"
-serde = { version = "1", features = ["derive"] }
-serde-saphyr = "0.0.17"
-thiserror = "2.0.18"
-toml = "0.8"
+[workspace.lints.rust]
+unused-crate-dependencies = "warn"
 
-[dev-dependencies]
-tempfile = "3"
-
-[lints.clippy]
+[workspace.lints.clippy]
 pedantic = "warn"
 
-# The profile that 'dist' will build with
 [profile.dist]
 inherits = "release"
 lto = "thin"
