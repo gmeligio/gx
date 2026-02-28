@@ -34,7 +34,7 @@ pub fn tidy(repo_root: &Path, manifest_path: &Path, lock_path: &Path) -> Result<
             registry,
             &scanner,
             &updater,
-        )
+        )?;
     } else {
         let action_set = FileWorkflowScanner::new(repo_root).scan_all()?;
         let manifest_store = MemoryManifest::from_workflows(&action_set);
@@ -50,8 +50,9 @@ pub fn tidy(repo_root: &Path, manifest_path: &Path, lock_path: &Path) -> Result<
             registry,
             &scanner,
             &updater,
-        )
+        )?;
     }
+    Ok(())
 }
 
 /// Run the init command: create manifest and lock files from current workflows.
@@ -81,7 +82,8 @@ pub fn init(repo_root: &Path, manifest_path: &Path, lock_path: &Path) -> Result<
         registry,
         &scanner,
         &updater,
-    )
+    )?;
+    Ok(())
 }
 
 /// Run the upgrade command with automatic store selection based on manifest existence.

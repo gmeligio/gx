@@ -1,20 +1,45 @@
-use anyhow::Result;
 use log::{debug, info};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use thiserror::Error;
 
 use crate::domain::{
     ActionId, ActionResolver, ActionSpec, LocatedAction, Lock, LockKey, Manifest, ResolutionResult,
     UpdateResult, Version, VersionCorrection, VersionRegistry, WorkflowActionSet, WorkflowScanner,
     WorkflowScannerLocated, WorkflowUpdater,
 };
-use crate::infrastructure::{LockStore, ManifestStore};
+use crate::infrastructure::{
+    LockFileError, LockStore, ManifestError, ManifestStore, WorkflowError,
+};
+
+/// Errors that can occur during the tidy command
+#[derive(Debug, Error)]
+pub enum TidyError {
+    /// One or more actions could not be resolved to a commit SHA.
+    #[error("failed to resolve {count} action(s):\n  {specs}")]
+    ResolutionFailed { count: usize, specs: String },
+
+    /// The manifest store failed to save.
+    #[error(transparent)]
+    Manifest(#[from] ManifestError),
+
+    /// The lock store failed to save.
+    #[error(transparent)]
+    Lock(#[from] LockFileError),
+
+    /// Workflow files could not be scanned or updated.
+    #[error(transparent)]
+    Workflow(#[from] WorkflowError),
+}
 
 /// Run the tidy command: synchronize manifest and lock with workflows, then update workflow files.
 ///
 /// # Errors
 ///
-/// Returns an error if workflows cannot be read, resolution fails, or files cannot be saved.
+/// Returns [`TidyError::Workflow`] if workflows cannot be scanned or updated.
+/// Returns [`TidyError::Manifest`] if the manifest cannot be saved.
+/// Returns [`TidyError::Lock`] if the lock file cannot be saved.
+/// Returns [`TidyError::ResolutionFailed`] if actions cannot be resolved.
 ///
 /// # Panics
 ///
@@ -29,7 +54,7 @@ pub fn run<M, L, R, P, W>(
     registry: R,
     parser: &P,
     writer: &W,
-) -> Result<()>
+) -> Result<(), TidyError>
 where
     M: ManifestStore,
     L: LockStore,
@@ -313,12 +338,15 @@ fn prune_stale_overrides(manifest: &mut Manifest, located: &[LocatedAction]) {
     }
 }
 
+/// # Errors
+///
+/// Returns [`TidyError::ResolutionFailed`] if any actions could not be resolved.
 fn update_lock<R: VersionRegistry>(
     lock: &mut Lock,
     manifest: &mut Manifest,
     action_set: &WorkflowActionSet,
     registry: R,
-) -> Result<Vec<VersionCorrection>> {
+) -> Result<Vec<VersionCorrection>, TidyError> {
     let mut corrections = Vec::new();
     let mut unresolved = Vec::new();
 
@@ -415,11 +443,10 @@ fn update_lock<R: VersionRegistry>(
     }
 
     if !unresolved.is_empty() {
-        anyhow::bail!(
-            "failed to resolve {} action(s):\n  {}",
-            unresolved.len(),
-            unresolved.join("\n  ")
-        );
+        return Err(TidyError::ResolutionFailed {
+            count: unresolved.len(),
+            specs: unresolved.join("\n  "),
+        });
     }
 
     Ok(corrections)
@@ -446,6 +473,18 @@ mod tests {
     use crate::domain::{ActionId, CommitSha, ResolvedAction};
     use crate::infrastructure::{FileLock, FileManifest, FileWorkflowScanner, FileWorkflowUpdater};
     use std::fs;
+
+    #[test]
+    fn tidy_error_resolution_failed_displays_specs() {
+        let err = TidyError::ResolutionFailed {
+            count: 2,
+            specs: "actions/checkout: token required\n  actions/setup-node: timeout".to_string(),
+        };
+        assert_eq!(
+            err.to_string(),
+            "failed to resolve 2 action(s):\n  actions/checkout: token required\n  actions/setup-node: timeout"
+        );
+    }
 
     struct NoopRegistry;
     impl crate::domain::VersionRegistry for NoopRegistry {
