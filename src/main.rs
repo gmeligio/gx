@@ -74,7 +74,7 @@ fn resolve_upgrade_mode(
 
     match (action, latest) {
         // gx upgrade --latest
-        (None, true) => UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::All),
+        (None, true) => Ok(UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::All)?),
 
         // gx upgrade --latest actions/checkout
         (Some(action_str), true) => {
@@ -86,7 +86,10 @@ fn resolve_upgrade_mode(
                 );
             }
             let id = ActionId::from(action_str);
-            UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::Single(id))
+            Ok(UpgradeRequest::new(
+                UpgradeMode::Latest,
+                UpgradeScope::Single(id),
+            )?)
         }
 
         // gx upgrade actions/checkout
@@ -98,19 +101,22 @@ fn resolve_upgrade_mode(
                         "Invalid format: expected ACTION@VERSION (e.g., actions/checkout@v5), got: {action_str}"
                     )
                 })?;
-                UpgradeRequest::new(
+                Ok(UpgradeRequest::new(
                     UpgradeMode::Pinned(key.version),
                     UpgradeScope::Single(key.id),
-                )
+                )?)
             } else {
                 // Bare ACTION → Safe mode, single action
                 let id = ActionId::from(action_str);
-                UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::Single(id))
+                Ok(UpgradeRequest::new(
+                    UpgradeMode::Safe,
+                    UpgradeScope::Single(id),
+                )?)
             }
         }
 
         // gx upgrade
-        (None, false) => UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All),
+        (None, false) => Ok(UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All)?),
     }
 }
 

@@ -113,7 +113,7 @@ pub fn upgrade(
             registry,
             &updater,
             request,
-        )
+        )?;
     } else {
         let action_set = FileWorkflowScanner::new(repo_root).scan_all()?;
         let manifest_store = MemoryManifest::from_workflows(&action_set);
@@ -129,6 +129,7 @@ pub fn upgrade(
             registry,
             &updater,
             request,
-        )
+        )?;
     }
+    Ok(())
 }
