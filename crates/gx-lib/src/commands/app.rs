@@ -4,7 +4,8 @@ use thiserror::Error;
 use crate::config::Config;
 use crate::infrastructure::{
     FileLock, FileManifest, FileWorkflowScanner, FileWorkflowUpdater, GithubError, GithubRegistry,
-    LockFileError, ManifestError, ManifestStore, MemoryLock, MemoryManifest, WorkflowError,
+    LockFileError, LockStore, ManifestError, ManifestStore, MemoryLock, MemoryManifest,
+    WorkflowError,
 };
 
 use super::tidy::TidyError;
@@ -52,39 +53,25 @@ pub enum AppError {
 /// Returns [`AppError::Github`] if the registry cannot be created.
 /// Returns [`AppError::Tidy`] if the tidy command fails.
 pub fn tidy(repo_root: &Path, config: Config) -> Result<(), AppError> {
+    let has_manifest = config.manifest_path.exists();
     let registry = GithubRegistry::new(config.settings.github_token)?;
     let scanner = FileWorkflowScanner::new(repo_root);
     let updater = FileWorkflowUpdater::new(repo_root);
 
-    if config.manifest_path.exists() {
-        let manifest_store = FileManifest::new(&config.manifest_path);
-        let lock_store = FileLock::new(&config.lock_path);
-        super::tidy::run(
-            repo_root,
-            config.manifest,
-            manifest_store,
-            config.lock,
-            lock_store,
-            registry,
-            &scanner,
-            &updater,
-        )?;
-    } else {
-        let action_set = FileWorkflowScanner::new(repo_root).scan_all()?;
-        let manifest_store = MemoryManifest::from_workflows(&action_set);
-        let manifest = manifest_store.load()?;
-        let lock_store = MemoryLock;
-        super::tidy::run(
-            repo_root,
-            manifest,
-            manifest_store,
-            config.lock,
-            lock_store,
-            registry,
-            &scanner,
-            &updater,
-        )?;
+    let (updated_manifest, updated_lock) = super::tidy::run(
+        config.manifest,
+        config.lock,
+        &config.manifest_path,
+        registry,
+        &scanner,
+        &updater,
+    )?;
+
+    if has_manifest {
+        FileManifest::new(&config.manifest_path).save(&updated_manifest)?;
+        FileLock::new(&config.lock_path).save(&updated_lock)?;
     }
+
     Ok(())
 }
 
@@ -104,20 +91,22 @@ pub fn init(repo_root: &Path, config: Config) -> Result<(), AppError> {
     }
     log::info!("Reading actions from workflows into the manifest...");
     let registry = GithubRegistry::new(config.settings.github_token)?;
-    let manifest_store = FileManifest::new(&config.manifest_path);
-    let lock_store = FileLock::new(&config.lock_path);
     let scanner = FileWorkflowScanner::new(repo_root);
     let updater = FileWorkflowUpdater::new(repo_root);
-    super::tidy::run(
-        repo_root,
+
+    let (updated_manifest, updated_lock) = super::tidy::run(
         config.manifest,
-        manifest_store,
         config.lock,
-        lock_store,
+        &config.manifest_path,
         registry,
         &scanner,
         &updater,
     )?;
+
+    // Always save for init — this creates the files
+    FileManifest::new(&config.manifest_path).save(&updated_manifest)?;
+    FileLock::new(&config.lock_path).save(&updated_lock)?;
+
     Ok(())
 }
 

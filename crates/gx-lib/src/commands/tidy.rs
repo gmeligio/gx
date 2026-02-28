@@ -8,9 +8,7 @@ use crate::domain::{
     UpdateResult, Version, VersionCorrection, VersionRegistry, WorkflowActionSet, WorkflowScanner,
     WorkflowScannerLocated, WorkflowUpdater,
 };
-use crate::infrastructure::{
-    LockFileError, LockStore, ManifestError, ManifestStore, WorkflowError,
-};
+use crate::infrastructure::{LockFileError, ManifestError, WorkflowError};
 
 /// Errors that can occur during the tidy command
 #[derive(Debug, Error)]
@@ -37,34 +35,28 @@ pub enum TidyError {
 /// # Errors
 ///
 /// Returns [`TidyError::Workflow`] if workflows cannot be scanned or updated.
-/// Returns [`TidyError::Manifest`] if the manifest cannot be saved.
-/// Returns [`TidyError::Lock`] if the lock file cannot be saved.
 /// Returns [`TidyError::ResolutionFailed`] if actions cannot be resolved.
 ///
 /// # Panics
 ///
 /// Panics if an action in the intersection of workflow and manifest is not found in the manifest.
 #[allow(clippy::too_many_arguments, clippy::needless_pass_by_value)]
-pub fn run<M, L, R, P, W>(
-    _repo_root: &Path,
+pub fn run<R, P, W>(
     mut manifest: Manifest,
-    manifest_store: M,
     mut lock: Lock,
-    lock_store: L,
+    manifest_path: &Path,
     registry: R,
     parser: &P,
     writer: &W,
-) -> Result<(), TidyError>
+) -> Result<(Manifest, Lock), TidyError>
 where
-    M: ManifestStore,
-    L: LockStore,
     R: VersionRegistry,
     P: WorkflowScanner + WorkflowScannerLocated,
     W: WorkflowUpdater,
 {
     let action_set = parser.scan_all()?;
     if action_set.is_empty() {
-        return Ok(());
+        return Ok((manifest, lock));
     }
 
     let workflow_actions: HashSet<ActionId> = action_set.action_ids().into_iter().collect();
@@ -135,17 +127,13 @@ where
     // Resolve SHAs and validate version comments (must handle all versions in manifest + overrides)
     let corrections = update_lock(&mut lock, &mut manifest, &action_set, registry)?;
 
-    // Persist manifest
-    manifest_store.save(&manifest)?;
-
-    // Prune and persist lock: retain all version variants that appear in manifest or overrides
+    // Prune lock: retain all version variants that appear in manifest or overrides
     let keys_to_retain: Vec<LockKey> = build_keys_to_retain(&manifest);
     lock.retain(&keys_to_retain);
-    lock_store.save(&lock)?;
 
     if manifest.is_empty() {
-        info!("No actions found in {}", manifest_store.path().display());
-        return Ok(());
+        info!("No actions found in {}", manifest_path.display());
+        return Ok((manifest, lock));
     }
 
     // Group located steps by workflow location path
@@ -185,7 +173,7 @@ where
         }
     }
 
-    Ok(())
+    Ok((manifest, lock))
 }
 
 fn select_version(versions: &[Version]) -> Version {
@@ -471,7 +459,10 @@ fn print_update_results(results: &[UpdateResult]) {
 mod tests {
     use super::*;
     use crate::domain::{ActionId, CommitSha, ResolvedAction};
-    use crate::infrastructure::{FileLock, FileManifest, FileWorkflowScanner, FileWorkflowUpdater};
+    use crate::infrastructure::{
+        FileLock, FileManifest, FileWorkflowScanner, FileWorkflowUpdater, LockStore, ManifestStore,
+        parse_lock, parse_manifest,
+    };
     use std::fs;
 
     #[test]
@@ -577,28 +568,30 @@ jobs:
         ));
         lock_store_seed.save(&seed_lock).unwrap();
 
-        let manifest_store = FileManifest::new(&manifest_path);
-        let manifest = manifest_store.load().unwrap(); // empty on first run
-        let lock_store = FileLock::new(&lock_path);
-        let lock = lock_store.load().unwrap();
+        // Load manifest and lock via free functions
+        let manifest = parse_manifest(&manifest_path).unwrap(); // empty on first run
+        let lock = parse_lock(&lock_path).unwrap();
         let scanner = FileWorkflowScanner::new(repo_root);
         let updater = FileWorkflowUpdater::new(repo_root);
 
-        run(
-            repo_root,
+        let (updated_manifest, updated_lock) = run(
             manifest,
-            manifest_store,
             lock,
-            lock_store,
+            &manifest_path,
             NoopRegistry,
             &scanner,
             &updater,
         )
         .unwrap();
 
+        // Save the results (simulating what app.rs does when manifest exists)
+        FileManifest::new(&manifest_path)
+            .save(&updated_manifest)
+            .unwrap();
+        FileLock::new(&lock_path).save(&updated_lock).unwrap();
+
         // ---- Assert: manifest has global v6.0.1 + override for windows.yml v5 ----
-        let manifest_store2 = FileManifest::new(&manifest_path);
-        let saved_manifest = manifest_store2.load().unwrap();
+        let saved_manifest = parse_manifest(&manifest_path).unwrap();
 
         assert_eq!(
             saved_manifest.get(&ActionId::from("actions/checkout")),
