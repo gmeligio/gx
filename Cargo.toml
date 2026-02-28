@@ -3,10 +3,11 @@ members = ["crates/gx-lib", "crates/gx"]
 resolver = "2"
 
 [workspace.lints.rust]
-unused-crate-dependencies = "warn"
+unused-crate-dependencies = "deny"
+warnings = "deny"
 
 [workspace.lints.clippy]
-pedantic = "warn"
+pedantic = "deny"
 
 [profile.dist]
 inherits = "release"
