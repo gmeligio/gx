@@ -103,7 +103,7 @@ fn create_test_repo(temp_dir: &TempDir) -> std::path::PathBuf {
 }
 
 /// Helper to run tidy with appropriate DI based on manifest existence (same logic as main.rs)
-fn run_tidy(repo_root: &Path) -> anyhow::Result<()> {
+fn run_tidy(repo_root: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let manifest_path = repo_root.join(".github").join("gx.toml");
     let lock_path = repo_root.join(".github").join("gx.lock");
     let scanner = FileWorkflowScanner::new(repo_root);
@@ -123,7 +123,7 @@ fn run_tidy(repo_root: &Path) -> anyhow::Result<()> {
             MockRegistry::new(),
             &scanner,
             &updater,
-        )
+        )?;
     } else {
         let action_set = FileWorkflowScanner::new(repo_root).scan_all()?;
         let manifest_store = MemoryManifest::from_workflows(&action_set);
@@ -139,8 +139,9 @@ fn run_tidy(repo_root: &Path) -> anyhow::Result<()> {
             MockRegistry::new(),
             &scanner,
             &updater,
-        )
+        )?;
     }
+    Ok(())
 }
 
 /// Helper to create an empty manifest file (triggers file-backed mode)

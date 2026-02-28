@@ -1,10 +1,38 @@
-use anyhow::Result;
 use clap::{Parser, Subcommand};
 use gx::commands;
+use gx::commands::app::AppError;
 use gx::infrastructure::{LOCK_FILE_NAME, MANIFEST_FILE_NAME};
 use gx::infrastructure::{repo, repo::RepoError};
 use log::{LevelFilter, info};
 use std::io::Write;
+use thiserror::Error;
+
+/// Top-level error type for the gx CLI binary
+#[derive(Debug, Error)]
+enum GxError {
+    /// The `--latest` flag was combined with an exact version pin.
+    #[error(
+        "--latest cannot be combined with an exact version pin (ACTION@VERSION). \
+         Use --latest ACTION to upgrade to latest, or ACTION@VERSION to pin."
+    )]
+    LatestWithVersionPin,
+
+    /// The action argument could not be parsed as ACTION@VERSION.
+    #[error("invalid format: expected ACTION@VERSION (e.g., actions/checkout@v5), got: {input}")]
+    InvalidActionFormat { input: String },
+
+    /// Command orchestration failed.
+    #[error(transparent)]
+    App(#[from] AppError),
+
+    /// Repository detection failed.
+    #[error(transparent)]
+    Repo(#[from] RepoError),
+
+    /// An I/O error occurred.
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+}
 
 #[derive(Parser)]
 #[command(name = "gx")]
@@ -27,17 +55,17 @@ enum Commands {
     Init,
     /// Upgrade actions to newer versions
     Upgrade {
-        /// Upgrade a specific action to a specific version (e.g., actions/checkout@v5)
-        #[arg(value_name = "ACTION@VERSION")]
+        /// Upgrade a specific action (e.g., actions/checkout or actions/checkout@v5)
+        #[arg(value_name = "ACTION")]
         action: Option<String>,
 
-        /// Upgrade all actions to the absolute latest version, including major versions
-        #[arg(long, conflicts_with = "action")]
+        /// Upgrade to the absolute latest version, including major versions
+        #[arg(long)]
         latest: bool,
     },
 }
 
-fn main() -> Result<()> {
+fn main() -> Result<(), GxError> {
     let cli = Cli::parse();
 
     init_logging(&cli);
@@ -56,33 +84,76 @@ fn main() -> Result<()> {
     let lock_path = repo_root.join(".github").join(LOCK_FILE_NAME);
 
     match cli.command {
-        Commands::Tidy => commands::app::tidy(&repo_root, &manifest_path, &lock_path),
-        Commands::Init => commands::app::init(&repo_root, &manifest_path, &lock_path),
+        Commands::Tidy => commands::app::tidy(&repo_root, &manifest_path, &lock_path)?,
+        Commands::Init => commands::app::init(&repo_root, &manifest_path, &lock_path)?,
         Commands::Upgrade { action, latest } => {
-            let mode = resolve_upgrade_mode(action.as_deref(), latest)?;
-            commands::app::upgrade(&repo_root, &manifest_path, &lock_path, &mode)
+            let request = resolve_upgrade_mode(action.as_deref(), latest)?;
+            commands::app::upgrade(&repo_root, &manifest_path, &lock_path, &request)?;
         }
     }
+    Ok(())
 }
 
+/// # Errors
+///
+/// Returns [`GxError::LatestWithVersionPin`] if `--latest` is combined with `ACTION@VERSION`.
+/// Returns [`GxError::InvalidActionFormat`] if the action string cannot be parsed.
+/// Propagates [`GxError::App`] from [`UpgradeRequest::new`].
 fn resolve_upgrade_mode(
     action: Option<&str>,
     latest: bool,
-) -> Result<commands::upgrade::UpgradeMode> {
-    if latest {
-        Ok(commands::upgrade::UpgradeMode::Latest)
-    } else if let Some(action_str) = action {
-        let key = gx::domain::LockKey::parse(action_str).ok_or_else(|| {
-            anyhow::anyhow!(
-                "Invalid format: expected ACTION@VERSION (e.g., actions/checkout@v5), got: {action_str}"
+) -> Result<commands::upgrade::UpgradeRequest, GxError> {
+    use commands::upgrade::{UpgradeMode, UpgradeRequest, UpgradeScope};
+    use gx::domain::ActionId;
+
+    match (action, latest) {
+        // gx upgrade --latest
+        (None, true) => {
+            Ok(UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::All)
+                .map_err(AppError::from)?)
+        }
+
+        // gx upgrade --latest actions/checkout
+        (Some(action_str), true) => {
+            // action_str is bare ACTION (no version)
+            if action_str.contains('@') {
+                return Err(GxError::LatestWithVersionPin);
+            }
+            let id = ActionId::from(action_str);
+            Ok(
+                UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::Single(id))
+                    .map_err(AppError::from)?,
             )
-        })?;
-        Ok(commands::upgrade::UpgradeMode::Targeted(
-            key.id,
-            key.version,
-        ))
-    } else {
-        Ok(commands::upgrade::UpgradeMode::Safe)
+        }
+
+        // gx upgrade actions/checkout
+        (Some(action_str), false) => {
+            if action_str.contains('@') {
+                // Bare ACTION@VERSION → Pinned mode
+                let key = gx::domain::LockKey::parse(action_str).ok_or_else(|| {
+                    GxError::InvalidActionFormat {
+                        input: action_str.to_string(),
+                    }
+                })?;
+                Ok(UpgradeRequest::new(
+                    UpgradeMode::Pinned(key.version),
+                    UpgradeScope::Single(key.id),
+                )
+                .map_err(AppError::from)?)
+            } else {
+                // Bare ACTION → Safe mode, single action
+                let id = ActionId::from(action_str);
+                Ok(
+                    UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::Single(id))
+                        .map_err(AppError::from)?,
+                )
+            }
+        }
+
+        // gx upgrade
+        (None, false) => Ok(
+            UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).map_err(AppError::from)?
+        ),
     }
 }
 

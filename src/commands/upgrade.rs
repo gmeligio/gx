@@ -1,21 +1,90 @@
-use anyhow::Result;
 use log::{info, warn};
 use std::path::Path;
+use thiserror::Error;
 
 use crate::domain::{
-    ActionId, ActionResolver, ActionSpec, Lock, LockKey, Manifest, ResolutionResult, UpdateResult,
-    UpgradeCandidate, Version, VersionRegistry, WorkflowUpdater,
+    ActionId, ActionResolver, ActionSpec, Lock, LockKey, Manifest, ResolutionError,
+    ResolutionResult, UpdateResult, UpgradeCandidate, Version, VersionRegistry, WorkflowUpdater,
 };
-use crate::infrastructure::{LockStore, ManifestStore};
+use crate::infrastructure::{
+    LockFileError, LockStore, ManifestError, ManifestStore, WorkflowError,
+};
+
+/// Which actions to upgrade: all or a single action.
+#[derive(Debug, Clone)]
+pub enum UpgradeScope {
+    /// Upgrade all actions in the manifest.
+    All,
+    /// Upgrade a single action by ID.
+    Single(ActionId),
+}
 
 /// How the upgrade command should find new versions.
+#[derive(Debug)]
 pub enum UpgradeMode {
-    /// Default: upgrade all actions within their current major version.
+    /// Default: upgrade within the current major version.
     Safe,
-    /// Upgrade all actions to the absolute latest version, including major versions.
+    /// Upgrade to the absolute latest version, including major versions.
     Latest,
-    /// Upgrade a single action to a specific version.
-    Targeted(ActionId, Version),
+    /// Upgrade to a specific version (only valid with Single scope).
+    Pinned(Version),
+}
+
+/// A request to upgrade actions with a specific mode and scope.
+#[derive(Debug)]
+pub struct UpgradeRequest {
+    pub mode: UpgradeMode,
+    pub scope: UpgradeScope,
+}
+
+impl UpgradeRequest {
+    /// Create a new upgrade request, validating that Pinned mode requires Single scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`UpgradeError::PinnedRequiresSingleScope`] if `mode` is `Pinned` and `scope` is `All`.
+    pub fn new(mode: UpgradeMode, scope: UpgradeScope) -> Result<Self, UpgradeError> {
+        if matches!((&mode, &scope), (UpgradeMode::Pinned(_), UpgradeScope::All)) {
+            return Err(UpgradeError::PinnedRequiresSingleScope);
+        }
+        Ok(Self { mode, scope })
+    }
+}
+
+/// Errors that can occur during the upgrade command
+#[derive(Debug, Error)]
+pub enum UpgradeError {
+    /// Pinned mode was used without specifying a single action target.
+    #[error("pinned mode requires a single action target (e.g., actions/checkout@v5)")]
+    PinnedRequiresSingleScope,
+
+    /// The specified action was not found in the manifest.
+    #[error("{0} not found in manifest")]
+    ActionNotInManifest(ActionId),
+
+    /// The specified version tag does not exist in the registry for the action.
+    #[error("{version} not found in registry for {id}")]
+    TagNotFound { id: ActionId, version: Version },
+
+    /// Could not fetch tags from the registry for the action.
+    #[error("could not fetch tags for {id}")]
+    TagFetchFailed {
+        id: ActionId,
+        #[source]
+        source: ResolutionError,
+    },
+
+    /// The manifest store failed to save.
+    #[error(transparent)]
+    Manifest(#[from] ManifestError),
+
+    /// The lock store failed to save.
+    #[error(transparent)]
+    Lock(#[from] LockFileError),
+
+    /// Workflow files could not be updated.
+    #[error(transparent)]
+    Workflow(#[from] WorkflowError),
 }
 
 /// Run the upgrade command to find and apply available upgrades for actions.
@@ -24,7 +93,10 @@ pub enum UpgradeMode {
 ///
 /// # Errors
 ///
-/// Returns an error if workflows cannot be read or if files cannot be saved.
+/// Returns [`UpgradeError::Manifest`] if the manifest cannot be saved.
+/// Returns [`UpgradeError::Lock`] if the lock file cannot be saved.
+/// Returns [`UpgradeError::Workflow`] if workflow files cannot be updated.
+/// Propagates errors from [`determine_upgrades`].
 #[allow(clippy::too_many_arguments, clippy::needless_pass_by_value)]
 pub fn run<M, L, R, W>(
     _repo_root: &Path,
@@ -34,8 +106,8 @@ pub fn run<M, L, R, W>(
     lock_store: L,
     registry: R,
     writer: &W,
-    mode: &UpgradeMode,
-) -> Result<()>
+    request: &UpgradeRequest,
+) -> Result<(), UpgradeError>
 where
     M: ManifestStore,
     L: LockStore,
@@ -44,7 +116,7 @@ where
 {
     let service = ActionResolver::new(registry);
 
-    let Some((upgrades, repins)) = determine_upgrades(&manifest, &service, mode)? else {
+    let Some((upgrades, repins)) = determine_upgrades(&manifest, &service, request)? else {
         return Ok(());
     };
 
@@ -82,14 +154,30 @@ where
     Ok(())
 }
 
+type UpgradePlan = Option<(Vec<UpgradeCandidate>, Vec<ActionSpec>)>;
+
+/// # Errors
+///
+/// Returns [`UpgradeError::ActionNotInManifest`] if the target action is not in the manifest.
+/// Returns [`UpgradeError::TagNotFound`] if the pinned version tag does not exist.
+/// Returns [`UpgradeError::TagFetchFailed`] if tags cannot be fetched from the registry.
 fn determine_upgrades<R: VersionRegistry>(
     manifest: &Manifest,
     service: &ActionResolver<R>,
-    mode: &UpgradeMode,
-) -> Result<Option<(Vec<UpgradeCandidate>, Vec<ActionSpec>)>> {
-    match mode {
+    request: &UpgradeRequest,
+) -> Result<UpgradePlan, UpgradeError> {
+    match &request.mode {
         UpgradeMode::Safe | UpgradeMode::Latest => {
-            let specs = manifest.specs();
+            let mut specs = manifest.specs();
+
+            // Filter to a single action if scope requires it
+            if let UpgradeScope::Single(target_id) = &request.scope {
+                specs.retain(|s| &s.id == target_id);
+                if specs.is_empty() {
+                    return Err(UpgradeError::ActionNotInManifest(target_id.clone()));
+                }
+            }
+
             if specs.is_empty() {
                 return Ok(None);
             }
@@ -111,7 +199,7 @@ fn determine_upgrades<R: VersionRegistry>(
 
                 match service.registry().all_tags(&spec.id) {
                     Ok(tags) => {
-                        let new_version = match mode {
+                        let new_version = match &request.mode {
                             UpgradeMode::Latest => spec.version.find_latest_upgrade(&tags),
                             _ => spec.version.find_upgrade(&tags),
                         };
@@ -136,20 +224,33 @@ fn determine_upgrades<R: VersionRegistry>(
 
             Ok(Some((upgrades, repins)))
         }
-        UpgradeMode::Targeted(id, version) => {
+        UpgradeMode::Pinned(version) => {
+            let id = match &request.scope {
+                UpgradeScope::Single(id) => id,
+                UpgradeScope::All => {
+                    unreachable!("Pinned + All should be rejected in UpgradeRequest::new")
+                }
+            };
+
             let current = manifest
                 .get(id)
-                .ok_or_else(|| anyhow::anyhow!("{id} not found in manifest"))?;
+                .ok_or_else(|| UpgradeError::ActionNotInManifest(id.clone()))?;
 
             match service.registry().all_tags(id) {
                 Ok(tags) => {
                     let tag_exists = tags.iter().any(|t| t.as_str() == version.as_str());
                     if !tag_exists {
-                        anyhow::bail!("{version} not found in registry for {id}");
+                        return Err(UpgradeError::TagNotFound {
+                            id: id.clone(),
+                            version: version.clone(),
+                        });
                     }
                 }
                 Err(e) => {
-                    anyhow::bail!("Could not fetch tags for {id}: {e}");
+                    return Err(UpgradeError::TagFetchFailed {
+                        id: id.clone(),
+                        source: e,
+                    });
                 }
             }
 
@@ -217,5 +318,24 @@ mod tests {
             changes: vec!["actions/checkout v4 -> v5".to_string()],
         }];
         print_update_results(&results);
+    }
+
+    #[test]
+    fn new_should_reject_pinned_with_all_scope() {
+        let err = UpgradeRequest::new(UpgradeMode::Pinned(Version::from("v5")), UpgradeScope::All)
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "pinned mode requires a single action target (e.g., actions/checkout@v5)"
+        );
+    }
+
+    #[test]
+    fn new_should_accept_pinned_with_single_scope() {
+        let result = UpgradeRequest::new(
+            UpgradeMode::Pinned(Version::from("v5")),
+            UpgradeScope::Single(ActionId::from("actions/checkout")),
+        );
+        assert!(result.is_ok());
     }
 }
