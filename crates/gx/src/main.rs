@@ -63,6 +63,8 @@ enum Commands {
         #[arg(long)]
         latest: bool,
     },
+    /// Run lint checks on workflows
+    Lint,
 }
 
 fn main() -> Result<(), GxError> {
@@ -89,6 +91,7 @@ fn main() -> Result<(), GxError> {
             let request = resolve_upgrade_mode(action.as_deref(), latest)?;
             commands::app::upgrade(&repo_root, config, &request)?;
         }
+        Commands::Lint => commands::app::lint(&repo_root, &config)?,
     }
     Ok(())
 }

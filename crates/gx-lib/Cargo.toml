@@ -22,5 +22,5 @@ tempfile = "3"
 [package.metadata.dist]
 dist = false
 
-[lints.clippy]
-pedantic = "warn"
+[lints]
+workspace = true

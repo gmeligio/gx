@@ -134,6 +134,76 @@ pub fn upgrade(repo_root: &Path, config: Config, request: &UpgradeRequest) -> Re
     Ok(())
 }
 
+/// Run the lint command: check workflows against manifest and lock without modifying anything.
+///
+/// # Errors
+///
+/// Returns [`AppError::Workflow`] if workflows cannot be scanned.
+/// Returns [`AppError::Manifest`] if the manifest cannot be loaded.
+/// Returns [`AppError::Lock`] if the lock file cannot be loaded.
+///
+/// Note: Lint failures (violations detected) are not errors — they're printed and cause exit code 1
+/// via the main function's exit code handling. This function only returns Err for I/O or parsing issues.
+pub fn lint(repo_root: &Path, config: &Config) -> Result<(), AppError> {
+    use log::info;
+
+    let scanner = FileWorkflowScanner::new(repo_root);
+    let action_set = scanner.scan_all()?;
+    let workflows = scanner.scan_all_located()?;
+
+    let (diagnostics, has_errors) = super::lint::run(
+        &config.manifest,
+        &config.lock,
+        &workflows,
+        &action_set,
+        &config.lint_config,
+    );
+
+    // Print diagnostics
+    if diagnostics.is_empty() {
+        info!("No lint issues found.");
+    } else {
+        for diag in &diagnostics {
+            let level_str = match diag.level {
+                crate::config::Level::Error => "[error]",
+                crate::config::Level::Warn => "[warn]",
+                crate::config::Level::Off => "[off]", // Shouldn't happen
+            };
+            let location = diag
+                .workflow
+                .as_ref()
+                .map(|w| format!("{w}: "))
+                .unwrap_or_default();
+            info!("{} {}{}: {}", level_str, location, diag.rule, diag.message);
+        }
+        let error_count = diagnostics
+            .iter()
+            .filter(|d| d.level == crate::config::Level::Error)
+            .count();
+        let warn_count = diagnostics
+            .iter()
+            .filter(|d| d.level == crate::config::Level::Warn)
+            .count();
+        info!(
+            "{} issue(s) ({} error{}, {} warning{})",
+            diagnostics.len(),
+            error_count,
+            if error_count == 1 { "" } else { "s" },
+            warn_count,
+            if warn_count == 1 { "" } else { "s" }
+        );
+    }
+
+    // Signal errors via exit code by returning an error that main will convert
+    if has_errors {
+        return Err(AppError::Manifest(ManifestError::Validation(
+            "lint check failed with errors".to_string(),
+        )));
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
