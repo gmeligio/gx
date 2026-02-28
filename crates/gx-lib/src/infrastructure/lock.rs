@@ -1,6 +1,6 @@
 use log::info;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -43,15 +43,15 @@ pub enum LockFileError {
 struct LockData {
     #[serde(default)]
     version: String,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    actions: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    actions: BTreeMap<String, String>,
 }
 
 impl Default for LockData {
     fn default() -> Self {
         Self {
             version: LOCK_FILE_VERSION.to_string(),
-            actions: HashMap::new(),
+            actions: BTreeMap::new(),
         }
     }
 }
@@ -222,6 +222,45 @@ mod tests {
         // File should now contain version field
         let written = fs::read_to_string(file.path()).unwrap();
         assert!(written.contains(LOCK_FILE_VERSION));
+    }
+
+    #[test]
+    fn test_file_lock_save_sorts_actions_alphabetically() {
+        let file = NamedTempFile::new().unwrap();
+        let store = FileLock::new(file.path());
+
+        let mut lock = Lock::default();
+        // Insert in non-alphabetical order
+        lock.set(&make_resolved(
+            "docker/build-push-action",
+            "v5",
+            "def456789012345678901234567890abcdef123456",
+        ));
+        lock.set(&make_resolved(
+            "actions/checkout",
+            "v4",
+            "abc123def456789012345678901234567890abcdef",
+        ));
+        lock.set(&make_resolved(
+            "actions-rust-lang/rustfmt",
+            "v1",
+            "111222333444555666777888999000aaabbbcccddd",
+        ));
+
+        store.save(&lock).unwrap();
+
+        let content = fs::read_to_string(file.path()).unwrap();
+        let action_lines: Vec<&str> = content
+            .lines()
+            .filter(|l| l.trim().starts_with('"') && l.contains(" = "))
+            .collect();
+
+        let mut sorted = action_lines.clone();
+        sorted.sort_unstable();
+        assert_eq!(action_lines, sorted);
+        assert!(action_lines[0].contains("actions-rust-lang/rustfmt"));
+        assert!(action_lines[1].contains("actions/checkout"));
+        assert!(action_lines[2].contains("docker/build-push-action"));
     }
 
     #[test]

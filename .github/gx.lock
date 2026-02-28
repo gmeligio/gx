@@ -1,9 +1,12 @@
 version = "1.0"
 
 [actions]
-"release-plz/action@v0.5" = "efc7a2b896608c31370cd499ba1518cda3ac5660"
-"actions/upload-artifact@v6" = "b7c566a772e6b6bfb58ed0dc250532a479d7789f"
-"actions/checkout@v6" = "de0fac2e4500dabe0009e67214ff5f5447ce83dd"
 "actions-rust-lang/rustfmt@v1" = "4066006ec54a31931b9b1fddfd38f2fdf2d27143"
 "actions-rust-lang/setup-rust-toolchain@v1" = "1780873c7b576612439a134613cc4cc74ce5538c"
+"actions/checkout@v6" = "de0fac2e4500dabe0009e67214ff5f5447ce83dd"
+"actions/create-github-app-token@v2.2.1" = "29824e69f54612133e76f7eaac726eef6c875baf"
 "actions/download-artifact@v7" = "37930b1c2abaa49bbe596cd826c3c89aef350131"
+"actions/upload-artifact@v6" = "b7c566a772e6b6bfb58ed0dc250532a479d7789f"
+"jdx/mise-action@v3.6.1" = "6d1e696aa24c1aa1bcc1adea0212707c71ab78a8"
+"release-plz/action@v0.5" = "efc7a2b896608c31370cd499ba1518cda3ac5660"
+"rust-lang/crates-io-auth-action@v1.0.3" = "b7e9a28eded4986ec6b1fa40eeee8f8f165559ec"
