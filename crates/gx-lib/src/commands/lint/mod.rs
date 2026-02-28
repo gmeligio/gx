@@ -1,5 +1,19 @@
 use crate::config::{IgnoreTarget, Level, LintConfig};
 use crate::domain::{LocatedAction, Lock, Manifest, WorkflowActionSet};
+use crate::infrastructure::WorkflowError;
+use thiserror::Error;
+
+/// Errors that can occur during the lint command
+#[derive(Debug, Error)]
+pub enum LintError {
+    /// A workflow parsing or I/O error occurred.
+    #[error(transparent)]
+    Workflow(#[from] WorkflowError),
+
+    /// Lint violations were found (errors or warnings).
+    #[error("{errors} error(s) and {warnings} warning(s) found")]
+    ViolationsFound { errors: usize, warnings: usize },
+}
 
 /// A single diagnostic reported by a lint rule.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -103,14 +117,18 @@ fn matches_ignore(
 }
 
 /// Run lint checks on the given manifest/lock/workflows and return diagnostics.
-#[must_use]
+///
+/// # Errors
+///
+/// Returns [`LintError::Workflow`] if a workflow parsing error occurs.
+/// Returns [`LintError::ViolationsFound`] if lint diagnostics are produced (either errors or warnings).
 pub fn run(
     manifest: &Manifest,
     lock: &Lock,
     workflows: &[LocatedAction],
     action_set: &WorkflowActionSet,
     lint_config: &LintConfig,
-) -> (Vec<Diagnostic>, bool) {
+) -> Result<Vec<Diagnostic>, LintError> {
     let ctx = LintContext {
         manifest,
         lock,
@@ -166,10 +184,7 @@ pub fn run(
         }
     }
 
-    // Determine exit code: true if any errors present
-    let has_errors = all_diagnostics.iter().any(|d| d.level == Level::Error);
-
-    (all_diagnostics, has_errors)
+    Ok(all_diagnostics)
 }
 
 // Rule implementations
