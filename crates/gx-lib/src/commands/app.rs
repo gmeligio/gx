@@ -51,19 +51,14 @@ pub enum AppError {
 /// Returns [`AppError::Lock`] if the lock file cannot be loaded.
 /// Returns [`AppError::Github`] if the registry cannot be created.
 /// Returns [`AppError::Tidy`] if the tidy command fails.
-pub fn tidy(
-    repo_root: &Path,
-    config: Config,
-    manifest_path: &Path,
-    lock_path: &Path,
-) -> Result<(), AppError> {
+pub fn tidy(repo_root: &Path, config: Config) -> Result<(), AppError> {
     let registry = GithubRegistry::new(config.settings.github_token)?;
     let scanner = FileWorkflowScanner::new(repo_root);
     let updater = FileWorkflowUpdater::new(repo_root);
 
-    if manifest_path.exists() {
-        let manifest_store = FileManifest::new(manifest_path);
-        let lock_store = FileLock::new(lock_path);
+    if config.manifest_path.exists() {
+        let manifest_store = FileManifest::new(&config.manifest_path);
+        let lock_store = FileLock::new(&config.lock_path);
         super::tidy::run(
             repo_root,
             config.manifest,
@@ -103,19 +98,14 @@ pub fn tidy(
 /// Returns [`AppError::Github`] if the registry cannot be created.
 /// Returns [`AppError::Workflow`] if workflows cannot be scanned.
 /// Returns [`AppError::Tidy`] if the tidy command fails.
-pub fn init(
-    repo_root: &Path,
-    config: Config,
-    manifest_path: &Path,
-    lock_path: &Path,
-) -> Result<(), AppError> {
-    if manifest_path.exists() {
+pub fn init(repo_root: &Path, config: Config) -> Result<(), AppError> {
+    if config.manifest_path.exists() {
         return Err(AppError::AlreadyInitialized);
     }
     log::info!("Reading actions from workflows into the manifest...");
     let registry = GithubRegistry::new(config.settings.github_token)?;
-    let manifest_store = FileManifest::new(manifest_path);
-    let lock_store = FileLock::new(lock_path);
+    let manifest_store = FileManifest::new(&config.manifest_path);
+    let lock_store = FileLock::new(&config.lock_path);
     let scanner = FileWorkflowScanner::new(repo_root);
     let updater = FileWorkflowUpdater::new(repo_root);
     super::tidy::run(
@@ -140,19 +130,13 @@ pub fn init(
 /// Returns [`AppError::Lock`] if the lock file cannot be loaded.
 /// Returns [`AppError::Github`] if the registry cannot be created.
 /// Returns [`AppError::Upgrade`] if the upgrade command fails.
-pub fn upgrade(
-    repo_root: &Path,
-    config: Config,
-    manifest_path: &Path,
-    lock_path: &Path,
-    request: &UpgradeRequest,
-) -> Result<(), AppError> {
+pub fn upgrade(repo_root: &Path, config: Config, request: &UpgradeRequest) -> Result<(), AppError> {
     let registry = GithubRegistry::new(config.settings.github_token)?;
     let updater = FileWorkflowUpdater::new(repo_root);
 
-    if manifest_path.exists() {
-        let manifest_store = FileManifest::new(manifest_path);
-        let lock_store = FileLock::new(lock_path);
+    if config.manifest_path.exists() {
+        let manifest_store = FileManifest::new(&config.manifest_path);
+        let lock_store = FileLock::new(&config.lock_path);
         super::upgrade::run(
             repo_root,
             config.manifest,
