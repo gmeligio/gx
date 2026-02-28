@@ -62,6 +62,12 @@ impl Lock {
     pub fn entries(&self) -> impl Iterator<Item = (&LockKey, &CommitSha)> {
         self.actions.iter()
     }
+
+    /// Check if the lock is empty.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.actions.is_empty()
+    }
 }
 
 #[cfg(test)]
