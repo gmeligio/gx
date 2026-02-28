@@ -77,18 +77,16 @@ fn create_workflow(root: &Path, name: &str, content: &str) {
 }
 
 /// Helper to run upgrade with file-backed stores
-fn run_upgrade_file_backed(repo_root: &Path) -> anyhow::Result<()> {
-    run_upgrade_file_backed_with_request(
-        repo_root,
-        UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All)?,
-    )
+fn run_upgrade_file_backed(repo_root: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All)?;
+    run_upgrade_file_backed_with_request(repo_root, &request)
 }
 
 /// Helper to run upgrade with file-backed stores and a specific request
 fn run_upgrade_file_backed_with_request(
     repo_root: &Path,
-    request: UpgradeRequest,
-) -> anyhow::Result<()> {
+    request: &UpgradeRequest,
+) -> Result<(), Box<dyn std::error::Error>> {
     let manifest_path = repo_root.join(".github").join("gx.toml");
     let lock_path = repo_root.join(".github").join("gx.lock");
     let manifest_store = FileManifest::new(&manifest_path);
@@ -104,7 +102,7 @@ fn run_upgrade_file_backed_with_request(
         lock_store,
         MockUpgradeRegistry::new(),
         &updater,
-        &request,
+        request,
     )?;
     Ok(())
 }
@@ -791,6 +789,6 @@ fn test_upgrade_pinned_all_scope_rejected() {
         result
             .unwrap_err()
             .to_string()
-            .contains("Pinned mode requires a single action target")
+            .contains("pinned mode requires a single action target")
     );
 }

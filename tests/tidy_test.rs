@@ -103,7 +103,7 @@ fn create_test_repo(temp_dir: &TempDir) -> std::path::PathBuf {
 }
 
 /// Helper to run tidy with appropriate DI based on manifest existence (same logic as main.rs)
-fn run_tidy(repo_root: &Path) -> anyhow::Result<()> {
+fn run_tidy(repo_root: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let manifest_path = repo_root.join(".github").join("gx.toml");
     let lock_path = repo_root.join(".github").join("gx.lock");
     let scanner = FileWorkflowScanner::new(repo_root);
