@@ -56,13 +56,14 @@ fn main() -> Result<()> {
     let lock_path = repo_root.join(".github").join(LOCK_FILE_NAME);
 
     match cli.command {
-        Commands::Tidy => commands::app::tidy(&repo_root, &manifest_path, &lock_path),
-        Commands::Init => commands::app::init(&repo_root, &manifest_path, &lock_path),
+        Commands::Tidy => commands::app::tidy(&repo_root, &manifest_path, &lock_path)?,
+        Commands::Init => commands::app::init(&repo_root, &manifest_path, &lock_path)?,
         Commands::Upgrade { action, latest } => {
             let request = resolve_upgrade_mode(action.as_deref(), latest)?;
-            commands::app::upgrade(&repo_root, &manifest_path, &lock_path, &request)
+            commands::app::upgrade(&repo_root, &manifest_path, &lock_path, &request)?;
         }
     }
+    Ok(())
 }
 
 fn resolve_upgrade_mode(
