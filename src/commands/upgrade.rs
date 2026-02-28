@@ -11,6 +11,7 @@ use crate::infrastructure::{
 };
 
 /// Which actions to upgrade: all or a single action.
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub enum UpgradeScope {
     /// Upgrade all actions in the manifest.
@@ -20,6 +21,7 @@ pub enum UpgradeScope {
 }
 
 /// How the upgrade command should find new versions.
+#[non_exhaustive]
 #[derive(Debug)]
 pub enum UpgradeMode {
     /// Default: upgrade within the current major version.
