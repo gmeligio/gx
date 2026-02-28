@@ -290,6 +290,31 @@ impl ManifestStore for FileManifest {
     }
 }
 
+/// Load a manifest from a file path. Returns `Manifest::default()` if the file does not exist.
+///
+/// # Errors
+///
+/// Returns [`ManifestError::Read`] if the file cannot be read.
+/// Returns [`ManifestError::Parse`] if the TOML is invalid.
+/// Returns [`ManifestError::Validation`] if the manifest data is invalid.
+pub fn parse_manifest(path: &Path) -> Result<Manifest, ManifestError> {
+    if !path.exists() {
+        return Ok(Manifest::default());
+    }
+
+    let content = fs::read_to_string(path).map_err(|source| ManifestError::Read {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    let data: ManifestData = toml::from_str(&content).map_err(|source| ManifestError::Parse {
+        path: path.to_path_buf(),
+        source: Box::new(source),
+    })?;
+
+    manifest_from_data(data, path)
+}
+
 // ---- MemoryManifest ----
 
 #[derive(Default)]
@@ -427,6 +452,24 @@ mod tests {
         assert!(action_lines[0].contains("actions-rust-lang/rustfmt"));
         assert!(action_lines[1].contains("actions/checkout"));
         assert!(action_lines[2].contains("docker/build-push-action"));
+    }
+
+    #[test]
+    fn test_parse_manifest_missing_returns_empty() {
+        let manifest = parse_manifest(Path::new("/nonexistent/gx.toml")).unwrap();
+        assert!(manifest.is_empty());
+    }
+
+    #[test]
+    fn test_parse_manifest_reads_file() {
+        let content = "[actions]\n\"actions/checkout\" = \"v4\"\n";
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+        let manifest = parse_manifest(file.path()).unwrap();
+        assert_eq!(
+            manifest.get(&ActionId::from("actions/checkout")),
+            Some(&Version::from("v4"))
+        );
     }
 
     #[test]

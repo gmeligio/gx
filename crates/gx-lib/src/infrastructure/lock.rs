@@ -154,6 +154,40 @@ impl LockStore for FileLock {
     }
 }
 
+/// Load a lock from a file path. Returns `Lock::default()` if the file does not exist.
+/// Transparently migrates old lock file versions.
+///
+/// # Errors
+///
+/// Returns [`LockFileError::Read`] if the file cannot be read.
+/// Returns [`LockFileError::Parse`] if the TOML is invalid.
+pub fn parse_lock(path: &Path) -> Result<Lock, LockFileError> {
+    if !path.exists() {
+        return Ok(Lock::default());
+    }
+
+    let content = fs::read_to_string(path).map_err(|source| LockFileError::Read {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    let data: LockData = toml::from_str(&content).map_err(|source| LockFileError::Parse {
+        path: path.to_path_buf(),
+        source: Box::new(source),
+    })?;
+
+    let needs_rewrite = data.version != LOCK_FILE_VERSION;
+    let lock = lock_from_data(data);
+
+    if needs_rewrite {
+        // Reuse FileLock::save logic — create a temporary store to trigger migration write
+        let store = FileLock::new(path);
+        store.save(&lock)?;
+    }
+
+    Ok(lock)
+}
+
 /// In-memory lock store that doesn't persist to disk. Used when no `gx.toml` exists.
 #[derive(Default)]
 pub struct MemoryLock;
@@ -255,6 +289,23 @@ mod tests {
         // File should now contain version field
         let written = fs::read_to_string(file.path()).unwrap();
         assert!(written.contains(LOCK_FILE_VERSION));
+    }
+
+    #[test]
+    fn test_parse_lock_missing_returns_empty() {
+        let lock = parse_lock(Path::new("/nonexistent/gx.lock")).unwrap();
+        assert!(!lock.has(&make_key("actions/checkout", "v4")));
+    }
+
+    #[test]
+    fn test_parse_lock_reads_file() {
+        let content = format!(
+            "version = \"{LOCK_FILE_VERSION}\"\n\n[actions]\n\"actions/checkout@v4\" = \"abc123\"\n"
+        );
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+        let lock = parse_lock(file.path()).unwrap();
+        assert!(lock.has(&make_key("actions/checkout", "v4")));
     }
 
     #[test]
