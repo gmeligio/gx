@@ -1,6 +1,6 @@
-use gx::commands::tidy;
-use gx::domain::{ActionId, CommitSha, Lock, ResolutionError, Version, VersionRegistry};
-use gx::infrastructure::{
+use gx_lib::commands::tidy;
+use gx_lib::domain::{ActionId, CommitSha, Lock, ResolutionError, Version, VersionRegistry};
+use gx_lib::infrastructure::{
     FileLock, FileManifest, FileWorkflowScanner, FileWorkflowUpdater, LockStore, ManifestStore,
     MemoryLock, MemoryManifest,
 };
