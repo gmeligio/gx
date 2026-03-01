@@ -2,9 +2,10 @@ use std::path::Path;
 use thiserror::Error;
 
 use crate::config::Config;
+use crate::domain::WorkflowError;
 use crate::infrastructure::{
     FileLock, FileManifest, FileWorkflowScanner, FileWorkflowUpdater, GithubError, GithubRegistry,
-    LockFileError, ManifestError, WorkflowError,
+    LockFileError, ManifestError,
 };
 
 use super::lint::LintError;
@@ -62,14 +63,8 @@ pub fn tidy(repo_root: &Path, config: Config) -> Result<(), AppError> {
     let scanner = FileWorkflowScanner::new(repo_root);
     let updater = FileWorkflowUpdater::new(repo_root);
 
-    let (updated_manifest, updated_lock) = super::tidy::run(
-        config.manifest,
-        config.lock,
-        &config.manifest_path,
-        registry,
-        &scanner,
-        &updater,
-    )?;
+    let (updated_manifest, updated_lock) =
+        super::tidy::run(config.manifest, config.lock, registry, &scanner, &updater)?;
 
     if has_manifest {
         FileManifest::new(&config.manifest_path).save(&updated_manifest)?;
@@ -98,14 +93,8 @@ pub fn init(repo_root: &Path, config: Config) -> Result<(), AppError> {
     let scanner = FileWorkflowScanner::new(repo_root);
     let updater = FileWorkflowUpdater::new(repo_root);
 
-    let (updated_manifest, updated_lock) = super::tidy::run(
-        config.manifest,
-        config.lock,
-        &config.manifest_path,
-        registry,
-        &scanner,
-        &updater,
-    )?;
+    let (updated_manifest, updated_lock) =
+        super::tidy::run(config.manifest, config.lock, registry, &scanner, &updater)?;
 
     // Always save for init — this creates the files
     FileManifest::new(&config.manifest_path).save(&updated_manifest)?;
@@ -149,7 +138,6 @@ pub fn upgrade(repo_root: &Path, config: Config, request: &UpgradeRequest) -> Re
 /// Returns [`AppError::Lint`] if violations are found.
 pub fn lint(repo_root: &Path, config: &Config) -> Result<(), AppError> {
     use crate::domain::WorkflowActionSet;
-    use log::info;
 
     let scanner = FileWorkflowScanner::new(repo_root);
     let workflows = scanner.scan_all_located()?;
@@ -163,50 +151,7 @@ pub fn lint(repo_root: &Path, config: &Config) -> Result<(), AppError> {
         &config.lint_config,
     )?;
 
-    // Print diagnostics
-    if diagnostics.is_empty() {
-        info!("No lint issues found.");
-        return Ok(());
-    }
-
-    for diag in &diagnostics {
-        let level_str = match diag.level {
-            crate::config::Level::Error => "[error]",
-            crate::config::Level::Warn => "[warn]",
-            crate::config::Level::Off => "[off]",
-        };
-        let location = diag
-            .workflow
-            .as_ref()
-            .map(|w| format!("{w}: "))
-            .unwrap_or_default();
-        info!("{} {}{}: {}", level_str, location, diag.rule, diag.message);
-    }
-
-    let error_count = diagnostics
-        .iter()
-        .filter(|d| d.level == crate::config::Level::Error)
-        .count();
-    let warn_count = diagnostics
-        .iter()
-        .filter(|d| d.level == crate::config::Level::Warn)
-        .count();
-    info!(
-        "{} issue(s) ({} error{}, {} warning{})",
-        diagnostics.len(),
-        error_count,
-        if error_count == 1 { "" } else { "s" },
-        warn_count,
-        if warn_count == 1 { "" } else { "s" }
-    );
-
-    // Return error if there are violations
-    if error_count > 0 {
-        return Err(AppError::Lint(super::lint::LintError::ViolationsFound {
-            errors: error_count,
-            warnings: warn_count,
-        }));
-    }
+    super::lint::format_and_report(&diagnostics)?;
 
     Ok(())
 }

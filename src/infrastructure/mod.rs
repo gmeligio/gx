@@ -11,5 +11,3 @@ pub use manifest::{
 };
 pub use repo::{RepoError, find_root};
 pub use workflow::{FileWorkflowScanner, FileWorkflowUpdater};
-// WorkflowError and UpdateResult are now in domain; re-export from there for convenience
-pub use crate::domain::{UpdateResult, WorkflowError};

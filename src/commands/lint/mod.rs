@@ -1,6 +1,5 @@
 use crate::config::{IgnoreTarget, Level, LintConfig};
-use crate::domain::{LocatedAction, Lock, Manifest, WorkflowActionSet};
-use crate::infrastructure::WorkflowError;
+use crate::domain::{LocatedAction, Lock, Manifest, WorkflowActionSet, WorkflowError};
 use thiserror::Error;
 
 /// Errors that can occur during the lint command
@@ -114,6 +113,60 @@ fn matches_ignore(
     }
 
     true
+}
+
+/// Format and report diagnostics to the log, returning an error if violations exist.
+///
+/// # Errors
+///
+/// Returns [`LintError::ViolationsFound`] if there are any error-level diagnostics.
+pub fn format_and_report(diagnostics: &[Diagnostic]) -> Result<(), LintError> {
+    use log::info;
+
+    if diagnostics.is_empty() {
+        info!("No lint issues found.");
+        return Ok(());
+    }
+
+    for diag in diagnostics {
+        let level_str = match diag.level {
+            crate::config::Level::Error => "[error]",
+            crate::config::Level::Warn => "[warn]",
+            crate::config::Level::Off => "[off]",
+        };
+        let location = diag
+            .workflow
+            .as_ref()
+            .map(|w| format!("{w}: "))
+            .unwrap_or_default();
+        info!("{} {}{}: {}", level_str, location, diag.rule, diag.message);
+    }
+
+    let error_count = diagnostics
+        .iter()
+        .filter(|d| d.level == crate::config::Level::Error)
+        .count();
+    let warn_count = diagnostics
+        .iter()
+        .filter(|d| d.level == crate::config::Level::Warn)
+        .count();
+    info!(
+        "{} issue(s) ({} error{}, {} warning{})",
+        diagnostics.len(),
+        error_count,
+        if error_count == 1 { "" } else { "s" },
+        warn_count,
+        if warn_count == 1 { "" } else { "s" }
+    );
+
+    if error_count > 0 {
+        return Err(LintError::ViolationsFound {
+            errors: error_count,
+            warnings: warn_count,
+        });
+    }
+
+    Ok(())
 }
 
 /// Run lint checks on the given manifest/lock/workflows and return diagnostics.

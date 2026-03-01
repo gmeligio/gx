@@ -3,12 +3,25 @@ use std::env;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
-use crate::commands::app::AppError;
 use crate::domain::{Lock, Manifest};
 use crate::infrastructure::{
-    LOCK_FILE_NAME, MANIFEST_FILE_NAME, parse_lint_config, parse_lock, parse_manifest,
+    LOCK_FILE_NAME, LockFileError, MANIFEST_FILE_NAME, ManifestError, parse_lint_config,
+    parse_lock, parse_manifest,
 };
+
+/// Errors that can occur when loading configuration.
+#[derive(Debug, Error)]
+pub enum ConfigError {
+    /// The manifest file cannot be parsed.
+    #[error(transparent)]
+    Manifest(#[from] ManifestError),
+
+    /// The lock file cannot be parsed.
+    #[error(transparent)]
+    Lock(#[from] LockFileError),
+}
 
 /// Runtime settings loaded from environment variables.
 #[derive(Debug, Clone, Default)]
@@ -98,9 +111,9 @@ impl Config {
     ///
     /// # Errors
     ///
-    /// Returns [`AppError::Manifest`] if the manifest file cannot be parsed.
-    /// Returns [`AppError::Lock`] if the lock file cannot be parsed.
-    pub fn load(repo_root: &Path) -> Result<Self, AppError> {
+    /// Returns [`ConfigError::Manifest`] if the manifest file cannot be parsed.
+    /// Returns [`ConfigError::Lock`] if the lock file cannot be parsed.
+    pub fn load(repo_root: &Path) -> Result<Self, ConfigError> {
         let manifest_path = repo_root.join(".github").join(MANIFEST_FILE_NAME);
         let lock_path = repo_root.join(".github").join(LOCK_FILE_NAME);
         Ok(Self {

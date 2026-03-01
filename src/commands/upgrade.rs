@@ -4,9 +4,8 @@ use thiserror::Error;
 use crate::domain::{
     ActionId, ActionResolver, ActionSpec, Lock, LockKey, Manifest, ResolutionError,
     ResolutionResult, UpdateResult, UpgradeAction, UpgradeCandidate, Version, VersionRegistry,
-    WorkflowUpdater, find_upgrade_candidate,
+    WorkflowError, WorkflowUpdater, find_upgrade_candidate,
 };
-use crate::infrastructure::{LockFileError, ManifestError, WorkflowError};
 
 /// Which actions to upgrade: all or a single action.
 #[non_exhaustive]
@@ -73,14 +72,6 @@ pub enum UpgradeError {
         #[source]
         source: ResolutionError,
     },
-
-    /// The manifest store failed to save.
-    #[error(transparent)]
-    Manifest(#[from] ManifestError),
-
-    /// The lock store failed to save.
-    #[error(transparent)]
-    Lock(#[from] LockFileError),
 
     /// Workflow files could not be updated.
     #[error(transparent)]
