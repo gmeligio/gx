@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.5](https://github.com/gmeligio/gx/compare/v0.5.4...v0.5.5) - 2026-03-01
+
+### Fixed
+
+- use manifest as source of truth ([#38](https://github.com/gmeligio/gx/pull/38))
+
 ## [0.5.4](https://github.com/gmeligio/gx/compare/v0.5.3...v0.5.4) - 2026-02-28
 
 ### Added
