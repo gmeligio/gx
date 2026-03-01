@@ -3,7 +3,8 @@ use thiserror::Error;
 
 use crate::domain::{
     ActionId, ActionResolver, ActionSpec, Lock, LockKey, Manifest, ResolutionError,
-    ResolutionResult, UpdateResult, UpgradeCandidate, Version, VersionRegistry, WorkflowUpdater,
+    ResolutionResult, UpdateResult, UpgradeAction, UpgradeCandidate, Version, VersionRegistry,
+    WorkflowUpdater, find_upgrade_candidate, populate_resolved_fields,
 };
 use crate::infrastructure::{LockFileError, ManifestError, WorkflowError};
 
@@ -108,18 +109,34 @@ where
 {
     let service = ActionResolver::new(registry);
 
-    let Some((upgrades, repins)) = determine_upgrades(&manifest, &service, request)? else {
+    let Some((upgrades, repins)) = determine_upgrades(&manifest, &lock, &service, request)? else {
         return Ok((manifest, lock));
     };
 
     info!("Upgrading actions:");
     for upgrade in &upgrades {
         info!("+ {upgrade}");
-        manifest.set(upgrade.id.clone(), upgrade.upgraded.clone());
+        // Only update manifest for cross-range upgrades
+        if let UpgradeAction::CrossRange {
+            new_manifest_version,
+            ..
+        } = &upgrade.action
+        {
+            manifest.set(upgrade.id.clone(), new_manifest_version.clone());
+        }
     }
 
     for upgrade in &upgrades {
-        let spec = ActionSpec::new(upgrade.id.clone(), upgrade.upgraded.clone());
+        // For in-range upgrades, use the current manifest version
+        // For cross-range upgrades, use the new manifest version
+        let version_to_resolve = match &upgrade.action {
+            UpgradeAction::InRange { .. } => upgrade.current.clone(),
+            UpgradeAction::CrossRange {
+                new_manifest_version,
+                ..
+            } => new_manifest_version.clone(),
+        };
+        let spec = ActionSpec::new(upgrade.id.clone(), version_to_resolve);
         resolve_and_store(&service, &spec, &mut lock, "Could not resolve");
     }
 
@@ -132,7 +149,7 @@ where
 
     let mut update_keys: Vec<LockKey> = upgrades
         .iter()
-        .map(|u| LockKey::new(u.id.clone(), u.upgraded.clone()))
+        .map(|u| LockKey::new(u.id.clone(), u.manifest_version().clone()))
         .collect();
     for spec in &repins {
         update_keys.push(LockKey::from(spec));
@@ -153,6 +170,7 @@ type UpgradePlan = Option<(Vec<UpgradeCandidate>, Vec<ActionSpec>)>;
 /// Returns [`UpgradeError::TagFetchFailed`] if tags cannot be fetched from the registry.
 fn determine_upgrades<R: VersionRegistry>(
     manifest: &Manifest,
+    lock: &Lock,
     service: &ActionResolver<R>,
     request: &UpgradeRequest,
 ) -> Result<UpgradePlan, UpgradeError> {
@@ -189,15 +207,25 @@ fn determine_upgrades<R: VersionRegistry>(
 
                 match service.registry().all_tags(&spec.id) {
                     Ok(tags) => {
-                        let new_version = match &request.mode {
-                            UpgradeMode::Latest => spec.version.find_latest_upgrade(&tags),
-                            _ => spec.version.find_upgrade(&tags),
-                        };
-                        if let Some(upgraded) = new_version {
+                        // Get lock version as floor (if entry exists)
+                        let lock_key = LockKey::from(*spec);
+                        let lock_version_str =
+                            lock.get(&lock_key).and_then(|entry| entry.version.as_ref());
+                        let lock_version = lock_version_str.map(|v| Version::from(v.as_str()));
+
+                        let allow_major = matches!(request.mode, UpgradeMode::Latest);
+                        let action = find_upgrade_candidate(
+                            &spec.version,
+                            lock_version.as_ref(),
+                            &tags,
+                            allow_major,
+                        );
+
+                        if let Some(upgrade_action) = action {
                             upgrades.push(UpgradeCandidate {
                                 id: spec.id.clone(),
                                 current: spec.version.clone(),
-                                upgraded,
+                                action: upgrade_action,
                             });
                         }
                     }
@@ -248,7 +276,9 @@ fn determine_upgrades<R: VersionRegistry>(
                 vec![UpgradeCandidate {
                     id: id.clone(),
                     current: current.clone(),
-                    upgraded: version.clone(),
+                    action: UpgradeAction::InRange {
+                        candidate: version.clone(),
+                    },
                 }],
                 vec![],
             )))
@@ -264,10 +294,12 @@ fn resolve_and_store<R: VersionRegistry>(
 ) {
     match service.resolve(spec) {
         ResolutionResult::Resolved(resolved) => {
-            lock.set(&resolved);
+            let enriched = populate_resolved_fields(resolved, service.registry());
+            lock.set(&enriched);
         }
         ResolutionResult::Corrected { corrected, .. } => {
-            lock.set(&corrected);
+            let enriched = populate_resolved_fields(corrected, service.registry());
+            lock.set(&enriched);
         }
         ResolutionResult::Unresolved { spec: s, reason } => {
             warn!("{unresolved_msg} {s}: {reason}");

@@ -8,7 +8,7 @@ use thiserror::Error;
 use crate::domain::{CommitSha, Lock, LockEntry, LockKey, RefType};
 
 pub const LOCK_FILE_NAME: &str = "gx.lock";
-pub const LOCK_FILE_VERSION: &str = "1.1";
+pub const LOCK_FILE_VERSION: &str = "1.3";
 
 /// Errors that can occur when working with lock files
 #[derive(Debug, Error)]
@@ -42,6 +42,10 @@ pub enum LockFileError {
 #[derive(Debug, Clone, Deserialize)]
 struct ActionEntryData {
     sha: String,
+    #[serde(default)]
+    version: Option<String>,
+    #[serde(default)]
+    specifier: Option<String>,
     repository: String,
     ref_type: String,
     date: String,
@@ -86,6 +90,8 @@ fn migrate_v1(data: LockDataV1) -> LockData {
                 .unwrap_or_default();
             let entry = ActionEntryData {
                 sha,
+                version: None,
+                specifier: None,
                 repository,
                 ref_type: "tag".to_string(),
                 date: String::new(),
@@ -105,8 +111,10 @@ fn lock_from_data(data: LockData) -> Lock {
         .into_iter()
         .filter_map(|(k, entry_data)| {
             LockKey::parse(&k).map(|key| {
-                let entry = LockEntry::new(
+                let entry = LockEntry::with_version_and_specifier(
                     CommitSha::from(entry_data.sha),
+                    entry_data.version,
+                    entry_data.specifier,
                     entry_data.repository,
                     RefType::from(entry_data.ref_type),
                     entry_data.date,
@@ -120,6 +128,7 @@ fn lock_from_data(data: LockData) -> Lock {
 
 /// Serialize a Lock to TOML format with inline tables.
 /// Entries are sorted by key for deterministic output.
+/// Always outputs all 6 fields: sha, version, specifier, repository, `ref_type`, date.
 fn serialize_lock(lock: &Lock) -> String {
     use std::fmt::Write as _;
 
@@ -128,11 +137,17 @@ fn serialize_lock(lock: &Lock) -> String {
 
     let mut out = format!("version = \"{LOCK_FILE_VERSION}\"\n\n[actions]\n");
     for (key, entry) in entries {
-        let _ = writeln!(
-            out,
-            "\"{key}\" = {{ sha = \"{}\", repository = \"{}\", ref_type = \"{}\", date = \"{}\" }}",
-            entry.sha, entry.repository, entry.ref_type, entry.date
+        // Use lock key version as fallback for version field
+        let version = entry.version.as_deref().unwrap_or(key.version.as_str());
+        // Use empty string as fallback for specifier
+        let specifier = entry.specifier.as_deref().unwrap_or("");
+
+        let table = format!(
+            "sha = \"{}\", version = \"{}\", specifier = \"{}\", repository = \"{}\", ref_type = \"{}\", date = \"{}\"",
+            entry.sha, version, specifier, entry.repository, entry.ref_type, entry.date
         );
+
+        let _ = writeln!(out, "\"{key}\" = {{ {table} }}");
     }
     out
 }
@@ -370,14 +385,14 @@ mod tests {
         let output = serialize_lock(&lock);
 
         // Verify structure: version, blank line, [actions], then inline table entries
-        assert!(output.contains("version = \"1.1\""));
+        assert!(output.contains("version = \"1.3\""));
         assert!(output.contains("[actions]"));
-        // Verify inline tables (one line per entry with all fields)
+        // Verify inline tables (one line per entry with all 6 fields)
         assert!(output.contains(
-            "\"actions/checkout@v4\" = { sha = \"abc123def456789012345678901234567890abcd\""
+            "\"actions/checkout@v4\" = { sha = \"abc123def456789012345678901234567890abcd\", version = \"v4\", specifier ="
         ));
         assert!(output.contains(
-            "\"actions/upload-artifact@v6\" = { sha = \"def456789012345678901234567890abcdef4567\""
+            "\"actions/upload-artifact@v6\" = { sha = \"def456789012345678901234567890abcdef4567\", version = \"v6\", specifier ="
         ));
         // Verify entries are NOT in expanded table format (no multiple [actions."key"] headers)
         assert!(!output.contains("[actions.\"actions/checkout@v4\"]"));
@@ -385,5 +400,31 @@ mod tests {
         let checkout_pos = output.find("actions/checkout").unwrap();
         let upload_pos = output.find("actions/upload-artifact").unwrap();
         assert!(checkout_pos < upload_pos);
+    }
+
+    #[test]
+    fn test_roundtrip_with_version_and_specifier() {
+        let file = NamedTempFile::new().unwrap();
+        let store = FileLock::new(file.path());
+
+        // Create a lock entry with version and specifier
+        let content = format!(
+            r#"version = "1.3"
+
+[actions]
+"actions/checkout@v6" = {{ sha = "de0fac2e4500dabe0009e67214ff5f5447ce83dd", version = "v6.2.3", specifier = "^6", repository = "actions/checkout", ref_type = "release", date = "2026-01-09T19:42:23Z" }}
+"#
+        );
+        let mut f = std::fs::File::create(file.path()).unwrap();
+        use std::io::Write as StdWrite;
+        f.write_all(content.as_bytes()).unwrap();
+
+        // Load and verify the new fields are preserved
+        let lock = parse_lock(file.path()).unwrap();
+        let entry = lock.get(&make_key("actions/checkout", "v6"));
+        assert!(entry.is_some());
+        let entry = entry.unwrap();
+        assert_eq!(entry.version, Some("v6.2.3".to_string()));
+        assert_eq!(entry.specifier, Some("^6".to_string()));
     }
 }

@@ -7,12 +7,14 @@ pub mod workflow_actions;
 
 pub use action::{
     ActionId, ActionSpec, CommitSha, InterpretedRef, LockKey, RefType, ResolvedAction,
-    UpgradeCandidate, UsesRef, Version, VersionCorrection, VersionPrecision,
+    UpgradeAction, UpgradeCandidate, UsesRef, Version, VersionCorrection, VersionPrecision,
+    find_upgrade_candidate,
 };
 pub use lock::{Lock, LockEntry};
 pub use manifest::{ActionOverride, Manifest};
 pub use resolution::{
     ActionResolver, ResolutionError, ResolutionResult, ResolvedRef, VersionRegistry,
+    populate_resolved_fields,
 };
 pub use workflow::{
     UpdateResult, WorkflowError, WorkflowScanner, WorkflowScannerLocated, WorkflowUpdater,

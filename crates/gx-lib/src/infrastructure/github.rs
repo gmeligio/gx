@@ -108,6 +108,7 @@ struct TaggerInfo {
     date: Option<String>,
 }
 
+#[derive(Clone)]
 pub struct GithubRegistry {
     client: reqwest::blocking::Client,
     token: Option<String>,
@@ -487,6 +488,44 @@ impl GithubRegistry {
 
         Ok(tag.tagger.and_then(|t| t.date))
     }
+
+    /// Given a commit SHA and a list of version tags, find the most specific tag
+    /// (highest semver) pointing to that SHA.
+    ///
+    /// This method resolves each tag to its SHA and filters to tags matching the target.
+    /// Among matches, returns the tag with the highest semantic version.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no token is set, the request fails, or the response cannot be parsed.
+    pub fn resolve_version_for_sha(
+        &self,
+        owner_repo: &str,
+        sha: &str,
+        tags: &[String],
+    ) -> Result<Option<Version>, GithubError> {
+        use crate::domain::action::Version as VersionType;
+
+        // Find all tags from the provided list that point to this SHA
+        let matching_tags: Vec<VersionType> = tags
+            .iter()
+            .filter_map(|tag| {
+                // Try to resolve this tag to its SHA
+                let url = format!(
+                    "{GITHUB_API_BASE}/repos/{}/git/ref/tags/{}",
+                    owner_repo.split('/').take(2).collect::<Vec<_>>().join("/"),
+                    tag
+                );
+                match self.fetch_ref(&url) {
+                    Ok(tag_sha) if tag_sha == sha => Some(VersionType::from(tag.as_str())),
+                    _ => None,
+                }
+            })
+            .collect();
+
+        // Return the tag with the highest semver
+        Ok(VersionType::highest(&matching_tags))
+    }
 }
 
 /// Parse the `Link` header to find the `rel="next"` URL for pagination.
@@ -633,5 +672,19 @@ mod tests {
         let (sha, ref_type) = client.resolve_ref("actions/checkout", "v6").unwrap();
         assert!(!sha.is_empty());
         assert_eq!(ref_type, RefType::Release);
+    }
+
+    #[test]
+    fn test_resolve_version_for_sha_no_matching_tags() {
+        let client = GithubRegistry::new(None).unwrap();
+        // Non-existent SHA - no tags will match
+        let result = client.resolve_version_for_sha(
+            "actions/checkout",
+            "0000000000000000000000000000000000000000",
+            &["v1.0.0".to_string(), "v2.0.0".to_string()],
+        );
+        // Should return Ok(None) when no tags match
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
     }
 }

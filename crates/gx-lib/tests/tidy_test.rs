@@ -16,6 +16,7 @@ use std::string::ToString;
 use tempfile::TempDir;
 
 /// A no-op registry that always fails resolution (simulates missing `GITHUB_TOKEN`).
+#[derive(Clone, Copy)]
 struct NoopRegistry;
 
 impl VersionRegistry for NoopRegistry {
@@ -42,7 +43,7 @@ impl VersionRegistry for NoopRegistry {
 
 /// A mock registry that resolves any version to a deterministic SHA
 /// and tracks mappings so `tags_for_sha` returns consistent results.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct MockRegistry {
     /// Maps (action, SHA) → list of version tags pointing to that SHA.
     sha_tags: std::collections::HashMap<(String, String), Vec<String>>,

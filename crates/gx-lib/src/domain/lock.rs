@@ -7,6 +7,10 @@ use super::{ActionId, CommitSha, LockKey, RefType, ResolvedAction};
 pub struct LockEntry {
     /// The resolved commit SHA
     pub sha: CommitSha,
+    /// The most specific version tag pointing to this SHA
+    pub version: Option<String>,
+    /// The semver range specifier derived from the manifest version
+    pub specifier: Option<String>,
     /// The GitHub repository that was queried
     pub repository: String,
     /// The type of reference that was resolved
@@ -21,6 +25,28 @@ impl LockEntry {
     pub fn new(sha: CommitSha, repository: String, ref_type: RefType, date: String) -> Self {
         Self {
             sha,
+            version: None,
+            specifier: None,
+            repository,
+            ref_type,
+            date,
+        }
+    }
+
+    /// Create a lock entry with version and specifier.
+    #[must_use]
+    pub fn with_version_and_specifier(
+        sha: CommitSha,
+        version: Option<String>,
+        specifier: Option<String>,
+        repository: String,
+        ref_type: RefType,
+        date: String,
+    ) -> Self {
+        Self {
+            sha,
+            version,
+            specifier,
             repository,
             ref_type,
             date,
@@ -51,8 +77,10 @@ impl Lock {
     /// Set or update a locked action with its resolved metadata.
     pub fn set(&mut self, resolved: &ResolvedAction) {
         let key = LockKey::from(resolved);
-        let entry = LockEntry::new(
+        let entry = LockEntry::with_version_and_specifier(
             resolved.sha.clone(),
+            resolved.resolved_version.as_ref().map(ToString::to_string),
+            resolved.specifier.clone(),
             resolved.repository.clone(),
             resolved.ref_type.clone(),
             resolved.date.clone(),

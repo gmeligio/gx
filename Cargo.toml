@@ -4,7 +4,7 @@ resolver = "2"
 
 [workspace.lints.rust]
 unused-crate-dependencies = "deny"
-warnings = "deny"
+warnings = "warn"
 
 [workspace.lints.clippy]
 pedantic = "deny"

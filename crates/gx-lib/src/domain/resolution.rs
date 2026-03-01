@@ -151,6 +151,37 @@ impl<R: VersionRegistry> ActionResolver<R> {
     }
 }
 
+/// Populate `resolved_version` and specifier fields on a resolved action.
+///
+/// Fetches all tags pointing to the resolved SHA and finds the most specific version.
+/// Falls back to the manifest version if no more-specific tags exist or if the lookup fails.
+/// Computes the specifier from the manifest version's precision.
+pub fn populate_resolved_fields<R: VersionRegistry>(
+    mut action: ResolvedAction,
+    registry: &R,
+) -> ResolvedAction {
+    // Try to get the most specific tag for this SHA
+    let tags_result = registry.tags_for_sha(&action.id, &action.sha);
+    let resolved_version = match tags_result {
+        Ok(tags) => {
+            // Find the highest (most specific) tag pointing to this SHA
+            Version::highest(&tags)
+                // Fall back to manifest version if no tags found
+                .or_else(|| Some(action.version.clone()))
+        }
+        Err(_) => {
+            // Fall back to manifest version on error
+            Some(action.version.clone())
+        }
+    };
+    action.resolved_version = resolved_version;
+
+    // Compute specifier from manifest version
+    action.specifier = action.version.specifier();
+
+    action
+}
+
 /// Parse a version string (with optional 'v' prefix) into numeric components.
 /// Returns `None` if any component is non-numeric.
 fn parse_version_components(s: &str) -> Option<Vec<u64>> {

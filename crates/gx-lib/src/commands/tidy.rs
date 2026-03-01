@@ -6,7 +6,7 @@ use thiserror::Error;
 use crate::domain::{
     ActionId, ActionResolver, ActionSpec, LocatedAction, Lock, LockKey, Manifest, ResolutionResult,
     UpdateResult, Version, VersionCorrection, VersionRegistry, WorkflowActionSet, WorkflowScanner,
-    WorkflowScannerLocated, WorkflowUpdater,
+    WorkflowScannerLocated, WorkflowUpdater, populate_resolved_fields,
 };
 use crate::infrastructure::{LockFileError, ManifestError, WorkflowError};
 
@@ -50,7 +50,7 @@ pub fn run<R, P, W>(
     writer: &W,
 ) -> Result<(Manifest, Lock), TidyError>
 where
-    R: VersionRegistry,
+    R: VersionRegistry + Clone,
     P: WorkflowScanner + WorkflowScannerLocated,
     W: WorkflowUpdater,
 {
@@ -329,7 +329,7 @@ fn prune_stale_overrides(manifest: &mut Manifest, located: &[LocatedAction]) {
 /// # Errors
 ///
 /// Returns [`TidyError::ResolutionFailed`] if any actions could not be resolved.
-fn update_lock<R: VersionRegistry>(
+fn update_lock<R: VersionRegistry + Clone>(
     lock: &mut Lock,
     manifest: &mut Manifest,
     action_set: &WorkflowActionSet,
@@ -359,7 +359,7 @@ fn update_lock<R: VersionRegistry>(
         return Ok(corrections);
     }
 
-    let resolver = ActionResolver::new(registry);
+    let resolver = ActionResolver::new(registry.clone());
 
     // First handle globals with SHA validation/correction
     let specs: Vec<ActionSpec> = manifest.specs().iter().map(|s| (*s).clone()).collect();
@@ -389,7 +389,10 @@ fn update_lock<R: VersionRegistry>(
                     ResolutionResult::Resolved(action) => {
                         // Keep the workflow's pinned SHA (not the registry's current SHA)
                         let pinned_action = action.with_sha(workflow_sha.clone());
-                        lock.set(&pinned_action);
+
+                        // Populate resolved_version and specifier
+                        let enriched_action = populate_resolved_fields(pinned_action, &registry);
+                        lock.set(&enriched_action);
                     }
                     ResolutionResult::Unresolved { spec: s, reason } => {
                         debug!("Could not resolve {s}: {reason}");
@@ -407,14 +410,18 @@ fn update_lock<R: VersionRegistry>(
                 debug!("Resolving {spec}");
                 match resolver.resolve(spec) {
                     ResolutionResult::Resolved(action) => {
-                        lock.set(&action);
+                        // Populate resolved_version and specifier
+                        let enriched_action = populate_resolved_fields(action, &registry);
+                        lock.set(&enriched_action);
                     }
                     ResolutionResult::Unresolved { spec: s, reason } => {
                         debug!("Could not resolve {s}: {reason}");
                         unresolved.push(format!("{s}: {reason}"));
                     }
                     ResolutionResult::Corrected { corrected, .. } => {
-                        lock.set(&corrected);
+                        // Populate resolved_version and specifier
+                        let enriched_action = populate_resolved_fields(corrected, &registry);
+                        lock.set(&enriched_action);
                     }
                 }
             }
@@ -430,14 +437,18 @@ fn update_lock<R: VersionRegistry>(
                 debug!("Resolving override {exc_spec}");
                 match resolver.resolve(&exc_spec) {
                     ResolutionResult::Resolved(action) => {
-                        lock.set(&action);
+                        // Populate resolved_version and specifier
+                        let enriched_action = populate_resolved_fields(action, &registry);
+                        lock.set(&enriched_action);
                     }
                     ResolutionResult::Unresolved { spec: s, reason } => {
                         debug!("Could not resolve override {s}: {reason}");
                         unresolved.push(format!("{s}: {reason}"));
                     }
                     ResolutionResult::Corrected { corrected, .. } => {
-                        lock.set(&corrected);
+                        // Populate resolved_version and specifier
+                        let enriched_action = populate_resolved_fields(corrected, &registry);
+                        lock.set(&enriched_action);
                     }
                 }
             }
@@ -491,6 +502,7 @@ mod tests {
         );
     }
 
+    #[derive(Clone, Copy)]
     struct NoopRegistry;
     impl crate::domain::VersionRegistry for NoopRegistry {
         fn lookup_sha(
