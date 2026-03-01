@@ -18,7 +18,3 @@ release_always = false
 # semver is checked in PR CI (build.yml) before reaching main, so no need to run it again here
 semver_check = false
 
-[[package]]
-name = "gx-lib"
-release = false
-publish = false
