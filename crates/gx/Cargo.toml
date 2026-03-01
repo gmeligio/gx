@@ -9,11 +9,14 @@ homepage = "https://github.com/gmeligio/gx"
 repository = "https://github.com/gmeligio/gx"
 
 [dependencies]
-gx-lib = { path = "../gx-lib" }
-clap = { version = "4", features = ["derive"] }
-env_logger = "0.11"
-log = "0.4"
-thiserror = "2"
+# local
+gx-lib.workspace = true
+
+# third-party
+clap.workspace = true
+env_logger.workspace = true
+log.workspace = true
+thiserror.workspace = true
 
 [lints]
 workspace = true
