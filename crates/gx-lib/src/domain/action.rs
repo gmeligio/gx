@@ -422,6 +422,20 @@ impl ResolvedAction {
     pub fn to_workflow_ref(&self) -> String {
         format!("{} # {}", self.sha, self.version)
     }
+
+    /// Create a new `ResolvedAction` with the SHA replaced.
+    /// Used when a workflow has a pinned SHA that differs from the registry.
+    #[must_use]
+    pub fn with_sha(&self, sha: CommitSha) -> Self {
+        Self {
+            id: self.id.clone(),
+            version: self.version.clone(),
+            sha,
+            repository: self.repository.clone(),
+            ref_type: self.ref_type.clone(),
+            date: self.date.clone(),
+        }
+    }
 }
 
 /// Key for the lock file combining action ID and version

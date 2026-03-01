@@ -35,10 +35,10 @@ version = "1.0"
 "actions/checkout@v6" = "de0fac2e4500dabe0009e67214ff5f5447ce83dd"
 ```
 
-After (v2.0):
+After (v1.1):
 
 ```toml
-version = "2.0"
+version = "1.1"
 
 [actions]
 "actions/checkout@v6" = { sha = "de0fac2e...", repository = "actions/checkout", ref_type = "release", date = "2026-02-15T10:35:00Z" }
@@ -47,7 +47,7 @@ version = "2.0"
 
 ## Scope
 
-- Bump lock file version from `"1.0"` to `"2.0"`.
+- Bump lock file version from `"1.0"` to `"1.1"`.
 - Change the `VersionRegistry` trait and `ResolvedAction` to carry richer resolution data (repository, ref_type, date) — Option 2 from exploration.
 - Extend `GithubRegistry` to fetch the best available date during resolution: try release `published_at`, then annotated tag `tagger.date`, then commit `committer.date`.
 - Migrate existing v1.0 lock files by fetching metadata from GitHub for each entry.
@@ -62,4 +62,4 @@ version = "2.0"
 ## Risks
 
 - **Extra API calls during resolution**: fetching release/tag/commit dates adds 1-2 HTTP requests per action. May need to consider rate limits for repos with many actions.
-- **Migration requires GitHub token**: v1.0 → v2.0 migration needs to fetch metadata from GitHub, which requires `GITHUB_TOKEN`. If unavailable, migration must degrade gracefully.
+- **Migration requires GitHub token**: v1.0 → v1.1 migration needs to fetch metadata from GitHub, which requires `GITHUB_TOKEN`. If unavailable, migration must degrade gracefully.

@@ -1,6 +1,6 @@
 use log::info;
-use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use serde::Deserialize;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -39,7 +39,7 @@ pub enum LockFileError {
 }
 
 /// Action entry data in the lock file
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct ActionEntryData {
     sha: String,
     repository: String,
@@ -47,20 +47,20 @@ struct ActionEntryData {
     date: String,
 }
 
-/// Internal structure for TOML serialization (v2.0 format)
-#[derive(Debug, Deserialize, Serialize)]
+/// Internal structure for TOML deserialization
+#[derive(Debug, Deserialize)]
 struct LockData {
     #[serde(default)]
     version: String,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    actions: BTreeMap<String, ActionEntryData>,
+    #[serde(default)]
+    actions: HashMap<String, ActionEntryData>,
 }
 
 impl Default for LockData {
     fn default() -> Self {
         Self {
             version: LOCK_FILE_VERSION.to_string(),
-            actions: BTreeMap::new(),
+            actions: HashMap::new(),
         }
     }
 }
@@ -118,23 +118,23 @@ fn lock_from_data(data: LockData) -> Lock {
     Lock::new(actions)
 }
 
-fn lock_to_data(lock: &Lock) -> LockData {
-    let actions = lock
-        .entries()
-        .map(|(k, entry)| {
-            let entry_data = ActionEntryData {
-                sha: entry.sha.as_str().to_owned(),
-                repository: entry.repository.clone(),
-                ref_type: entry.ref_type.to_string(),
-                date: entry.date.clone(),
-            };
-            (k.to_string(), entry_data)
-        })
-        .collect();
-    LockData {
-        version: LOCK_FILE_VERSION.to_string(),
-        actions,
+/// Serialize a Lock to TOML format with inline tables.
+/// Entries are sorted by key for deterministic output.
+fn serialize_lock(lock: &Lock) -> String {
+    use std::fmt::Write as _;
+
+    let mut entries: Vec<_> = lock.entries().collect();
+    entries.sort_by_key(|(k, _)| k.to_string());
+
+    let mut out = format!("version = \"{LOCK_FILE_VERSION}\"\n\n[actions]\n");
+    for (key, entry) in entries {
+        let _ = writeln!(
+            out,
+            "\"{key}\" = {{ sha = \"{}\", repository = \"{}\", ref_type = \"{}\", date = \"{}\" }}",
+            entry.sha, entry.repository, entry.ref_type, entry.date
+        );
     }
+    out
 }
 
 /// File-backed lock store. Reads from and writes to `.github/gx.lock`.
@@ -156,11 +156,9 @@ impl FileLock {
     ///
     /// # Errors
     ///
-    /// Returns [`LockFileError::Serialize`] if serialization fails.
     /// Returns [`LockFileError::Write`] if the file cannot be written.
     pub fn save(&self, lock: &Lock) -> Result<(), LockFileError> {
-        let data = lock_to_data(lock);
-        let content = toml::to_string_pretty(&data).map_err(LockFileError::Serialize)?;
+        let content = serialize_lock(lock);
         fs::write(&self.path, content).map_err(|source| LockFileError::Write {
             path: self.path.clone(),
             source,
@@ -353,5 +351,39 @@ mod tests {
         file.write_all(content.as_bytes()).unwrap();
         let lock = parse_lock(file.path()).unwrap();
         assert!(lock.has(&make_key("actions/checkout", "v4")));
+    }
+
+    #[test]
+    fn test_serialize_lock_uses_inline_tables() {
+        let mut lock = Lock::default();
+        lock.set(&make_resolved(
+            "actions/checkout",
+            "v4",
+            "abc123def456789012345678901234567890abcd",
+        ));
+        lock.set(&make_resolved(
+            "actions/upload-artifact",
+            "v6",
+            "def456789012345678901234567890abcdef4567",
+        ));
+
+        let output = serialize_lock(&lock);
+
+        // Verify structure: version, blank line, [actions], then inline table entries
+        assert!(output.contains("version = \"1.1\""));
+        assert!(output.contains("[actions]"));
+        // Verify inline tables (one line per entry with all fields)
+        assert!(output.contains(
+            "\"actions/checkout@v4\" = { sha = \"abc123def456789012345678901234567890abcd\""
+        ));
+        assert!(output.contains(
+            "\"actions/upload-artifact@v6\" = { sha = \"def456789012345678901234567890abcdef4567\""
+        ));
+        // Verify entries are NOT in expanded table format (no multiple [actions."key"] headers)
+        assert!(!output.contains("[actions.\"actions/checkout@v4\"]"));
+        // Verify entries are sorted
+        let checkout_pos = output.find("actions/checkout").unwrap();
+        let upload_pos = output.find("actions/upload-artifact").unwrap();
+        assert!(checkout_pos < upload_pos);
     }
 }

@@ -81,6 +81,12 @@ struct ReleaseResponse {
 /// Response for a commit details API call
 #[derive(Debug, Deserialize)]
 struct CommitDetailResponse {
+    commit: CommitObject,
+}
+
+/// Commit object containing committer info
+#[derive(Debug, Deserialize)]
+struct CommitObject {
     committer: Option<CommitterInfo>,
 }
 
@@ -160,6 +166,15 @@ impl GithubRegistry {
         // Try to resolve as a tag first
         let url = format!("{GITHUB_API_BASE}/repos/{base_repo}/git/ref/tags/{ref_name}");
         if let Ok(sha) = self.fetch_ref(&url) {
+            // Check if this tag has a GitHub Release
+            if self
+                .fetch_release_date(&base_repo, ref_name)
+                .ok()
+                .flatten()
+                .is_some()
+            {
+                return Ok((sha, RefType::Release));
+            }
             return Ok((sha, RefType::Tag));
         }
 
@@ -398,7 +413,7 @@ impl GithubRegistry {
             .json()
             .map_err(|source| GithubError::ParseResponse { url, source })?;
 
-        Ok(commit.committer.and_then(|c| c.date))
+        Ok(commit.commit.committer.and_then(|c| c.date))
     }
 
     /// Fetch the release date from a release tag
@@ -605,5 +620,18 @@ mod tests {
         let result = client.lookup_sha(&id, &sha_version).unwrap();
         assert_eq!(result.sha.as_str(), sha_version.as_str());
         assert_eq!(result.ref_type, RefType::Commit);
+    }
+
+    #[test]
+    #[ignore = "requires GITHUB_TOKEN and network access"]
+    fn test_resolve_ref_returns_release_for_tag_with_release() {
+        // This test requires a valid GITHUB_TOKEN to call the GitHub API
+        // It verifies that a tag with an associated release returns RefType::Release
+        let token = std::env::var("GITHUB_TOKEN").ok();
+        let client = GithubRegistry::new(token).unwrap();
+        // Using actions/checkout@v6 as test case (has a GitHub Release)
+        let (sha, ref_type) = client.resolve_ref("actions/checkout", "v6").unwrap();
+        assert!(!sha.is_empty());
+        assert_eq!(ref_type, RefType::Release);
     }
 }

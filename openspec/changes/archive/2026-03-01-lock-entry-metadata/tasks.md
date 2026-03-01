@@ -81,16 +81,27 @@
 
 **Files**: `crates/gx-lib/src/infrastructure/github.rs`
 
-## 10. Bump lock file version to 2.0
-- [x] Change `LOCK_FILE_VERSION` from `"1.0"` to `"2.0"`
+## 10. Keep lock file version at 1.1
+- [x] Keep `LOCK_FILE_VERSION` at `"1.1"` — new fields are additive, no breaking change
 - [x] Verify TOML renders entries as inline tables (not sub-tables)
 - [x] Update any tests that reference the version string
 
 **Files**: `crates/gx-lib/src/infrastructure/lock.rs`
 
-## 11. End-to-end verification
+## 11. Serialize lock entries as inline TOML tables
+- [x] Replace `toml::to_string_pretty(&data)` in `FileLock::save()` with manual string building
+- [x] Sort entries by key for deterministic output
+- [x] Write each entry as `"key" = { sha = "...", repository = "...", ref_type = "...", date = "..." }`
+- [x] Update roundtrip test to verify inline format output
+- [x] Remove `Serialize` derive from `ActionEntryData` and `LockData` (no longer needed)
+
+**Files**: `crates/gx-lib/src/infrastructure/lock.rs`
+
+## 12. End-to-end verification
 - [x] Run `cargo test` — all tests pass
 - [x] Run `cargo clippy` — no warnings
 - [x] Manual test: run `gx tidy` on the gx repo itself, verify lock file has all fields populated
 - [x] Manual test: delete `gx.lock`, run `gx tidy`, verify fresh lock file is correct
 - [x] Manual test: create a v1.0 lock file, run `gx tidy`, verify migration works
+- [x] Verify lock file output uses inline tables (one line per entry under `[actions]`)
+- [x] Verify lock file version remains `"1.1"`

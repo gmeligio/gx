@@ -1,4 +1,4 @@
-### Requirement: Lock file v2.0 entry format
+### Requirement: Lock file v1.1 entry format
 Each action entry in the lock file SHALL be a TOML inline table with four fields: `sha`, `repository`, `ref_type`, and `date`.
 
 #### Scenario: Standard lock entry with all fields
@@ -12,8 +12,8 @@ Each action entry in the lock file SHALL be a TOML inline table with four fields
 - **GIVEN** an action `github/codeql-action/upload-sarif@v3` resolved against repository `github/codeql-action`
 - **THEN** the `repository` field is `"github/codeql-action"`
 
-#### Scenario: Lock file version is 2.0
-- **THEN** the lock file has `version = "2.0"` at the top level
+#### Scenario: Lock file version is 1.1
+- **THEN** the lock file has `version = "1.1"` at the top level
 
 ### Requirement: ref_type field values
 The `ref_type` field SHALL be one of four string values indicating what the user's ref resolved to.
@@ -57,20 +57,20 @@ The `date` field SHALL contain an RFC 3339 timestamp whose source depends on `re
 - **GIVEN** `ref_type = "commit"`
 - **THEN** `date` is the commit's `committer.date` value
 
-### Requirement: Migration from v1.0 to v2.0
-The system SHALL transparently migrate v1.0 lock files to v2.0 format.
+### Requirement: Migration from v1.0 to v1.1
+The system SHALL transparently migrate v1.0 lock files to v1.1 format.
 
 #### Scenario: Migration with GITHUB_TOKEN available
 - **GIVEN** a v1.0 lock file with plain string SHA values
 - **WHEN** the lock file is loaded and `GITHUB_TOKEN` is set
 - **THEN** each entry is enriched by fetching metadata from GitHub
-- **THEN** the file is rewritten in v2.0 format
+- **THEN** the file is rewritten in v1.1 format
 
 #### Scenario: Migration without GITHUB_TOKEN
 - **GIVEN** a v1.0 lock file and no `GITHUB_TOKEN`
 - **WHEN** the lock file is loaded
 - **THEN** each entry is populated with defaults: `repository` from `ActionId::base_repo()`, `ref_type = "tag"`, `date = ""`
-- **THEN** the file is rewritten in v2.0 format
+- **THEN** the file is rewritten in v1.1 format
 - **THEN** a warning is logged
 
 ### Requirement: Roundtrip integrity

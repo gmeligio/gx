@@ -1,4 +1,4 @@
-use log::{debug, info, warn};
+use log::{debug, warn};
 use thiserror::Error;
 
 use super::{ActionId, ActionSpec, CommitSha, RefType, ResolvedAction, Version};
@@ -117,77 +117,35 @@ impl<R: VersionRegistry> ActionResolver<R> {
         }
     }
 
-    /// Validate that a SHA matches the expected version, and correct if needed
-    pub fn validate_and_correct(
+    /// Correct a version based on the commit SHA it points to.
+    /// Returns `(best_version, was_corrected)`.
+    /// If the best tag matches the `original_version`, `was_corrected` is false.
+    /// This is a pure version-correction step; metadata resolution is done separately via `resolve()`.
+    pub fn correct_version(
         &self,
-        spec: &ActionSpec,
-        workflow_sha: &CommitSha,
-    ) -> ResolutionResult {
-        match self.registry.tags_for_sha(&spec.id, workflow_sha) {
+        id: &ActionId,
+        sha: &CommitSha,
+        original_version: &Version,
+    ) -> (Version, bool) {
+        match self.registry.tags_for_sha(id, sha) {
             Ok(tags) => {
-                // Check if the version matches any tag
-                if tags.iter().any(|t| t == &spec.version) {
-                    // Version matches, use as-is
-                    let resolved = ResolvedAction::new(
-                        spec.id.clone(),
-                        spec.version.clone(),
-                        workflow_sha.clone(),
-                        spec.id.base_repo(),
-                        RefType::Commit,
-                        String::new(),
-                    );
-                    ResolutionResult::Resolved(resolved)
-                } else if let Some(correct_version) = select_best_tag(&tags) {
-                    // Version comment doesn't match SHA - use the correct version
-                    info!(
-                        "Corrected {spec} version to {correct_version} (SHA {workflow_sha} points to {correct_version})",
-                    );
-
-                    let corrected = ResolvedAction::new(
-                        spec.id.clone(),
-                        correct_version,
-                        workflow_sha.clone(),
-                        spec.id.base_repo(),
-                        RefType::Commit,
-                        String::new(),
-                    );
-                    ResolutionResult::Corrected {
-                        original: spec.clone(),
-                        corrected,
-                    }
+                if let Some(tag) = select_best_tag(&tags) {
+                    let was_corrected = tag != *original_version;
+                    (tag, was_corrected)
                 } else {
-                    warn!("No tags found for {spec} SHA {workflow_sha}, keeping version");
-                    // No tags found, keep original version
-                    let resolved = ResolvedAction::new(
-                        spec.id.clone(),
-                        spec.version.clone(),
-                        workflow_sha.clone(),
-                        spec.id.base_repo(),
-                        RefType::Commit,
-                        String::new(),
-                    );
-                    ResolutionResult::Resolved(resolved)
+                    warn!("No tags found for {id} SHA {sha}, keeping version");
+                    (original_version.clone(), false)
                 }
             }
             Err(e) => {
-                // Log warning and continue
                 if matches!(e, ResolutionError::TokenRequired) {
                     warn!(
-                        "GITHUB_TOKEN not set. Without it, cannot validate for {spec} that {workflow_sha} commit SHA matches the version.",
+                        "GITHUB_TOKEN not set. Without it, cannot correct version for {id} SHA {sha}.",
                     );
                 } else {
-                    warn!("For {spec} could not validate {workflow_sha} commit SHA: {e}");
+                    warn!("Could not correct version for {id} SHA {sha}: {e}");
                 }
-                // Return as resolved with original version
-                let resolved = ResolvedAction::new(
-                    spec.id.clone(),
-                    spec.version.clone(),
-                    workflow_sha.clone(),
-                    spec.id.base_repo(),
-                    RefType::Commit,
-                    String::new(),
-                );
-                ResolutionResult::Resolved(resolved)
+                (original_version.clone(), false)
             }
         }
     }
@@ -314,8 +272,8 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_version_matches() {
-        let mock_registry = MockRegistry {
+    fn test_correct_version_no_correction_needed() {
+        let registry = MockRegistry {
             resolve_result: Ok(ResolvedRef::new(
                 CommitSha::from("abc123def456789012345678901234567890abcd"),
                 "actions/checkout".to_string(),
@@ -324,22 +282,19 @@ mod tests {
             )),
             tags_result: Ok(vec![Version::from("v4"), Version::from("v4.0.0")]),
         };
-        let service = ActionResolver::new(mock_registry);
+        let service = ActionResolver::new(registry);
 
-        let spec = ActionSpec::new(ActionId::from("actions/checkout"), Version::from("v4"));
+        let id = ActionId::from("actions/checkout");
         let sha = CommitSha::from("abc123def456789012345678901234567890abcd");
-        let result = service.validate_and_correct(&spec, &sha);
+        let original_version = Version::from("v4");
+        let (version, was_corrected) = service.correct_version(&id, &sha, &original_version);
 
-        match result {
-            ResolutionResult::Resolved(resolved) => {
-                assert_eq!(resolved.version.as_str(), "v4");
-            }
-            _ => panic!("Expected Resolved result"),
-        }
+        assert_eq!(version.as_str(), "v4");
+        assert!(!was_corrected);
     }
 
     #[test]
-    fn test_validate_version_corrected() {
+    fn test_correct_version_correction_needed() {
         let registry = MockRegistry {
             resolve_result: Ok(ResolvedRef::new(
                 CommitSha::from("abc123def456789012345678901234567890abcd"),
@@ -351,20 +306,13 @@ mod tests {
         };
         let service = ActionResolver::new(registry);
 
-        let spec = ActionSpec::new(ActionId::from("actions/checkout"), Version::from("v4"));
+        let id = ActionId::from("actions/checkout");
         let sha = CommitSha::from("abc123def456789012345678901234567890abcd");
-        let result = service.validate_and_correct(&spec, &sha);
+        let original_version = Version::from("v4");
+        let (version, was_corrected) = service.correct_version(&id, &sha, &original_version);
 
-        match result {
-            ResolutionResult::Corrected {
-                original,
-                corrected,
-            } => {
-                assert_eq!(original.version.as_str(), "v4");
-                assert_eq!(corrected.version.as_str(), "v5");
-            }
-            _ => panic!("Expected Corrected result"),
-        }
+        assert_eq!(version.as_str(), "v5");
+        assert!(was_corrected);
     }
 
     #[test]

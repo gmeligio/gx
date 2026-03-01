@@ -45,7 +45,7 @@
                   │  │  LockData → HashMap<String, ActionEntry> │   │
                   │  │  ActionEntry{sha,repository,ref_type,    │   │
                   │  │             date}                        │   │
-                  │  │  version = "2.0"                         │   │
+                  │  │  version = "1.1"                         │   │
                   │  └──────────────────────────────────────────┘   │
                   └─────────────────────────────────────────────────┘
 ```
@@ -151,13 +151,13 @@ The `repository` field is the GitHub repository that was actually queried. For s
 
 `ActionId::base_repo()` already computes this. The `GithubRegistry` uses the same logic internally. The resolved repository will be returned from the registry as part of `ResolvedRef` for consistency — the registry records what it actually queried.
 
-### D5: Lock file format migration (v1.0 → v2.0)
+### D5: Lock file format migration (v1.0 → v1.1)
 
-The existing migration mechanism in `parse_lock()` detects `version != LOCK_FILE_VERSION` and rewrites. For v2.0, migration must:
+The existing migration mechanism in `parse_lock()` detects `version != LOCK_FILE_VERSION` and rewrites. For v1.1, migration must:
 
 1. Parse the old format (detect that values are plain strings, not tables)
 2. For each entry, fetch metadata from GitHub (repository, ref_type, date)
-3. Write the new format with `version = "2.0"`
+3. Write the new format with `version = "1.1"`
 
 **Graceful degradation**: If `GITHUB_TOKEN` is unavailable during migration, the migration should warn and populate entries with defaults:
 - `repository` = derived from `ActionId::base_repo()`
@@ -197,7 +197,39 @@ pub struct ResolvedAction {
 
 This means `ActionResolver::resolve()` and `validate_and_correct()` must thread the metadata through their return paths.
 
-### D8: Extra API calls and rate limits
+### D8: Inline table serialization
+
+The lock file SHALL serialize action entries as TOML inline tables under a single `[actions]` header — not as separate `[actions."key"]` table headers. This matches the style used in `gx.toml` where each action is a single key = value line.
+
+**Why not `toml::to_string_pretty`?**
+
+The `toml` 0.9 crate's `to_string_pretty` always produces expanded tables (`[actions."key"]\nfield = value\n...`). There is no API to request inline table output. The `toml_writer` low-level crate underneath doesn't expose inline table formatting either.
+
+**Approach: manual string building**
+
+The lock format is simple enough (version + flat map of key → 4-field struct) that manual serialization is the cleanest solution:
+
+```rust
+fn serialize_lock(lock: &Lock) -> String {
+    let mut out = format!("version = \"{LOCK_FILE_VERSION}\"\n\n[actions]\n");
+    let mut entries: Vec<_> = lock.entries().collect();
+    entries.sort_by_key(|(k, _)| k.to_string());
+    for (key, entry) in entries {
+        writeln!(out, "\"{key}\" = {{ sha = \"{}\", repository = \"{}\", ref_type = \"{}\", date = \"{}\" }}",
+            entry.sha, entry.repository, entry.ref_type, entry.date).unwrap();
+    }
+    out
+}
+```
+
+- No new dependencies
+- Deterministic sorted output
+- Deserialization is unchanged — TOML parses inline and expanded tables identically
+- Round-trip: write inline → read via `toml::from_str` → write inline (stable)
+
+**Backward compatibility**: Both the old expanded format and the new inline format deserialize to the same `LockData` struct. The lock file version stays at `"1.1"` — the new fields are additive and older parsers that don't recognize them will simply ignore the inline table structure. No version bump needed.
+
+### D9: Extra API calls and rate limits
 
 For each action during resolution, the new flow may make up to 3 additional API calls (release check, tag object fetch, commit date fetch) beyond the current 1-3 calls for SHA resolution. For repositories with many actions, this could approach GitHub's rate limit (5000/hour for authenticated requests).
 

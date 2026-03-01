@@ -33,7 +33,7 @@ impl VersionRegistry for MockUpgradeRegistry {
             CommitSha::from(padded),
             id.base_repo(),
             RefType::Tag,
-            String::new(),
+            "2026-01-01T00:00:00Z".to_string(),
         ))
     }
 

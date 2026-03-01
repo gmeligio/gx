@@ -365,26 +365,40 @@ fn update_lock<R: VersionRegistry>(
     let specs: Vec<ActionSpec> = manifest.specs().iter().map(|s| (*s).clone()).collect();
     for spec in &specs {
         if let Some(workflow_sha) = action_set.sha_for(&spec.id) {
-            match resolver.validate_and_correct(spec, workflow_sha) {
-                ResolutionResult::Resolved(action) => {
-                    lock.set(&action);
-                }
-                ResolutionResult::Corrected {
-                    original,
-                    corrected,
-                } => {
-                    corrections.push(VersionCorrection {
-                        action: original.id.clone(),
-                        old_version: original.version.clone(),
-                        new_version: corrected.version.clone(),
-                        sha: corrected.sha.clone(),
-                    });
-                    manifest.set(corrected.id.clone(), corrected.version.clone());
-                    lock.set(&corrected);
-                }
-                ResolutionResult::Unresolved { spec: s, reason } => {
-                    debug!("Could not resolve {s}: {reason}");
-                    unresolved.push(format!("{s}: {reason}"));
+            // Two-step flow: correct version, then resolve with pinned SHA
+            let (corrected_version, was_corrected) =
+                resolver.correct_version(&spec.id, workflow_sha, &spec.version);
+
+            if was_corrected {
+                info!(
+                    "Corrected {spec} version to {corrected_version} (SHA {workflow_sha} points to {corrected_version})",
+                );
+                corrections.push(VersionCorrection {
+                    action: spec.id.clone(),
+                    old_version: spec.version.clone(),
+                    new_version: corrected_version.clone(),
+                    sha: workflow_sha.clone(),
+                });
+                manifest.set(spec.id.clone(), corrected_version.clone());
+            }
+
+            let resolve_spec = ActionSpec::new(spec.id.clone(), corrected_version.clone());
+            let resolve_key = LockKey::from(&resolve_spec);
+            if !lock.has(&resolve_key) {
+                match resolver.resolve(&resolve_spec) {
+                    ResolutionResult::Resolved(action) => {
+                        // Keep the workflow's pinned SHA (not the registry's current SHA)
+                        let pinned_action = action.with_sha(workflow_sha.clone());
+                        lock.set(&pinned_action);
+                    }
+                    ResolutionResult::Unresolved { spec: s, reason } => {
+                        debug!("Could not resolve {s}: {reason}");
+                        unresolved.push(format!("{s}: {reason}"));
+                    }
+                    ResolutionResult::Corrected { .. } => {
+                        // This shouldn't happen in resolve(), but handle it
+                        debug!("Unexpected Corrected result from resolve()");
+                    }
                 }
             }
         } else {

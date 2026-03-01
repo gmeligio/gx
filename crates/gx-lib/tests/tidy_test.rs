@@ -78,7 +78,7 @@ impl VersionRegistry for MockRegistry {
             CommitSha::from(Self::fake_sha(id.as_str(), version.as_str())),
             id.base_repo(),
             RefType::Tag,
-            String::new(),
+            "2026-01-01T00:00:00Z".to_string(),
         ))
     }
 
