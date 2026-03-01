@@ -118,6 +118,11 @@ impl Config {
 mod tests {
     use super::*;
 
+    #[derive(Deserialize)]
+    struct LevelWrapper {
+        level: Level,
+    }
+
     #[test]
     fn settings_default_has_no_token() {
         let settings = Settings::default();
@@ -153,31 +158,29 @@ mod tests {
 
     #[test]
     fn level_deserializes_from_string() {
-        #[derive(Deserialize)]
-        struct Wrapper {
-            level: Level,
-        }
         assert_eq!(
-            toml::from_str::<Wrapper>("level = \"error\"")
+            toml::from_str::<LevelWrapper>("level = \"error\"")
                 .unwrap()
                 .level,
             Level::Error
         );
         assert_eq!(
-            toml::from_str::<Wrapper>("level = \"warn\"").unwrap().level,
+            toml::from_str::<LevelWrapper>("level = \"warn\"")
+                .unwrap()
+                .level,
             Level::Warn
         );
         assert_eq!(
-            toml::from_str::<Wrapper>("level = \"off\"").unwrap().level,
+            toml::from_str::<LevelWrapper>("level = \"off\"")
+                .unwrap()
+                .level,
             Level::Off
         );
     }
 
     #[test]
     fn level_rejects_invalid_values() {
-        #[derive(Deserialize)]
-        struct Wrapper {}
-        assert!(toml::from_str::<Wrapper>("level = \"invalid\"").is_err());
+        assert!(toml::from_str::<LevelWrapper>("level = \"invalid\"").is_err());
     }
 
     #[test]
