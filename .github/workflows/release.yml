@@ -57,7 +57,7 @@ jobs:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
               with:
                   persist-credentials: false
-            - uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
+            - uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3
             # sure would be cool if github gave us proper conditionals...
             # so here's a doubly-nested ternary-via-truthiness to try to provide the best possible
             # functionality based on whether this is a pull_request, and whether it's from a fork.
@@ -114,7 +114,7 @@ jobs:
                     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
                     echo "$HOME/.cargo/bin" >> $GITHUB_PATH
                   fi
-            - uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
+            - uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3
             # Get the dist-manifest
             - name: Fetch local artifacts
               uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
@@ -164,7 +164,7 @@ jobs:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
               with:
                   persist-credentials: false
-            - uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
+            - uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3
             # Get all the local artifacts for the global tasks to use (for e.g. checksums)
             - name: Fetch local artifacts
               uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
@@ -211,7 +211,7 @@ jobs:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
               with:
                   persist-credentials: false
-            - uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
+            - uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3
             # Fetch artifacts from scratch-storage
             - name: Fetch artifacts
               uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
@@ -331,7 +331,7 @@ jobs:
               with:
                   persist-credentials: false
                   ref: ${{ github.ref }}
-            - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1
+            - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
             - uses: rust-lang/crates-io-auth-action@b7e9a28eded4986ec6b1fa40eeee8f8f165559ec # v1.0.3
               id: auth
             - run: cargo publish

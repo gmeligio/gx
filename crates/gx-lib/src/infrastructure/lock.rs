@@ -1,14 +1,14 @@
 use log::info;
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use serde::Deserialize;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-use crate::domain::{CommitSha, Lock, LockKey};
+use crate::domain::{CommitSha, Lock, LockEntry, LockKey, RefType};
 
 pub const LOCK_FILE_NAME: &str = "gx.lock";
-pub const LOCK_FILE_VERSION: &str = "1.0";
+pub const LOCK_FILE_VERSION: &str = "1.3";
 
 /// Errors that can occur when working with lock files
 #[derive(Debug, Error)]
@@ -38,21 +38,67 @@ pub enum LockFileError {
     Serialize(#[source] toml::ser::Error),
 }
 
-/// Internal structure for TOML serialization
-#[derive(Debug, Deserialize, Serialize)]
+/// Action entry data in the lock file
+#[derive(Debug, Clone, Deserialize)]
+struct ActionEntryData {
+    sha: String,
+    #[serde(default)]
+    version: Option<String>,
+    #[serde(default)]
+    specifier: Option<String>,
+    repository: String,
+    ref_type: String,
+    date: String,
+}
+
+/// Internal structure for TOML deserialization
+#[derive(Debug, Deserialize)]
 struct LockData {
     #[serde(default)]
     version: String,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    actions: BTreeMap<String, String>,
+    #[serde(default)]
+    actions: HashMap<String, ActionEntryData>,
 }
 
 impl Default for LockData {
     fn default() -> Self {
         Self {
             version: LOCK_FILE_VERSION.to_string(),
-            actions: BTreeMap::new(),
+            actions: HashMap::new(),
         }
+    }
+}
+
+/// Legacy v1.0 format: actions are plain strings (SHA only)
+#[derive(Debug, Deserialize)]
+struct LockDataV1 {
+    #[serde(default)]
+    actions: HashMap<String, String>,
+}
+
+/// Migrate a v1.0 lock data to v2.0 format using default metadata.
+fn migrate_v1(data: LockDataV1) -> LockData {
+    let actions = data
+        .actions
+        .into_iter()
+        .map(|(key, sha)| {
+            let repository = LockKey::parse(&key)
+                .map(|k| k.id.base_repo())
+                .unwrap_or_default();
+            let entry = ActionEntryData {
+                sha,
+                version: None,
+                specifier: None,
+                repository,
+                ref_type: "tag".to_string(),
+                date: String::new(),
+            };
+            (key, entry)
+        })
+        .collect();
+    LockData {
+        version: LOCK_FILE_VERSION.to_string(),
+        actions,
     }
 }
 
@@ -60,20 +106,47 @@ fn lock_from_data(data: LockData) -> Lock {
     let actions = data
         .actions
         .into_iter()
-        .filter_map(|(k, v)| LockKey::parse(&k).map(|key| (key, CommitSha::from(v))))
+        .filter_map(|(k, entry_data)| {
+            LockKey::parse(&k).map(|key| {
+                let entry = LockEntry::with_version_and_specifier(
+                    CommitSha::from(entry_data.sha),
+                    entry_data.version,
+                    entry_data.specifier,
+                    entry_data.repository,
+                    RefType::from(entry_data.ref_type),
+                    entry_data.date,
+                );
+                (key, entry)
+            })
+        })
         .collect();
     Lock::new(actions)
 }
 
-fn lock_to_data(lock: &Lock) -> LockData {
-    let actions = lock
-        .entries()
-        .map(|(k, sha)| (k.to_string(), sha.as_str().to_owned()))
-        .collect();
-    LockData {
-        version: LOCK_FILE_VERSION.to_string(),
-        actions,
+/// Serialize a Lock to TOML format with inline tables.
+/// Entries are sorted by key for deterministic output.
+/// Always outputs all 6 fields: sha, version, specifier, repository, `ref_type`, date.
+fn serialize_lock(lock: &Lock) -> String {
+    use std::fmt::Write as _;
+
+    let mut entries: Vec<_> = lock.entries().collect();
+    entries.sort_by_key(|(k, _)| k.to_string());
+
+    let mut out = format!("version = \"{LOCK_FILE_VERSION}\"\n\n[actions]\n");
+    for (key, entry) in entries {
+        // Use lock key version as fallback for version field
+        let version = entry.version.as_deref().unwrap_or(key.version.as_str());
+        // Use empty string as fallback for specifier
+        let specifier = entry.specifier.as_deref().unwrap_or("");
+
+        let table = format!(
+            "sha = \"{}\", version = \"{}\", specifier = \"{}\", repository = \"{}\", ref_type = \"{}\", date = \"{}\"",
+            entry.sha, version, specifier, entry.repository, entry.ref_type, entry.date
+        );
+
+        let _ = writeln!(out, "\"{key}\" = {{ {table} }}");
     }
+    out
 }
 
 /// File-backed lock store. Reads from and writes to `.github/gx.lock`.
@@ -95,11 +168,9 @@ impl FileLock {
     ///
     /// # Errors
     ///
-    /// Returns [`LockFileError::Serialize`] if serialization fails.
     /// Returns [`LockFileError::Write`] if the file cannot be written.
     pub fn save(&self, lock: &Lock) -> Result<(), LockFileError> {
-        let data = lock_to_data(lock);
-        let content = toml::to_string_pretty(&data).map_err(LockFileError::Serialize)?;
+        let content = serialize_lock(lock);
         fs::write(&self.path, content).map_err(|source| LockFileError::Write {
             path: self.path.clone(),
             source,
@@ -131,16 +202,23 @@ pub fn parse_lock(path: &Path) -> Result<Lock, LockFileError> {
         source,
     })?;
 
-    let data: LockData = toml::from_str(&content).map_err(|source| LockFileError::Parse {
-        path: path.to_path_buf(),
-        source: Box::new(source),
-    })?;
+    // Try parsing as v2.0 format first; if that fails, try v1.0 (plain string values)
+    let (data, needs_rewrite) = if let Ok(d) = toml::from_str::<LockData>(&content) {
+        let rewrite = d.version != LOCK_FILE_VERSION;
+        (d, rewrite)
+    } else {
+        // Try v1.0 format
+        let v1: LockDataV1 = toml::from_str(&content).map_err(|source| LockFileError::Parse {
+            path: path.to_path_buf(),
+            source: Box::new(source),
+        })?;
+        info!("Migrating lock file from v1.0 to v{LOCK_FILE_VERSION}");
+        (migrate_v1(v1), true)
+    };
 
-    let needs_rewrite = data.version != LOCK_FILE_VERSION;
     let lock = lock_from_data(data);
 
     if needs_rewrite {
-        // Reuse FileLock::save logic — create a temporary store to trigger migration write
         let store = FileLock::new(path);
         store.save(&lock)?;
     }
@@ -151,7 +229,7 @@ pub fn parse_lock(path: &Path) -> Result<Lock, LockFileError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{ActionId, CommitSha, LockKey, ResolvedAction, Version};
+    use crate::domain::{ActionId, CommitSha, LockKey, RefType, ResolvedAction, Version};
     use std::io::Write;
     use tempfile::NamedTempFile;
 
@@ -160,6 +238,9 @@ mod tests {
             ActionId::from(action),
             Version::from(version),
             CommitSha::from(sha),
+            ActionId::from(action).base_repo(),
+            RefType::Tag,
+            "2026-01-01T00:00:00Z".to_string(),
         )
     }
 
@@ -182,9 +263,11 @@ mod tests {
         store.save(&lock).unwrap();
 
         let loaded = parse_lock(file.path()).unwrap();
+        let entry = loaded.get(&make_key("actions/checkout", "v4"));
+        assert!(entry.is_some());
         assert_eq!(
-            loaded.get(&make_key("actions/checkout", "v4")),
-            Some(&CommitSha::from("abc123def456789012345678901234567890abcd"))
+            entry.unwrap().sha,
+            CommitSha::from("abc123def456789012345678901234567890abcd")
         );
     }
 
@@ -194,16 +277,18 @@ mod tests {
             r#"version = "{LOCK_FILE_VERSION}"
 
 [actions]
-"actions/checkout@v4" = "abc123def456789012345678901234567890abcd"
+"actions/checkout@v4" = {{ sha = "abc123def456789012345678901234567890abcd", repository = "actions/checkout", ref_type = "tag", date = "2026-01-01T00:00:00Z" }}
 "#
         );
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
         let lock = parse_lock(file.path()).unwrap();
+        let entry = lock.get(&make_key("actions/checkout", "v4"));
+        assert!(entry.is_some());
         assert_eq!(
-            lock.get(&make_key("actions/checkout", "v4")),
-            Some(&CommitSha::from("abc123def456789012345678901234567890abcd"))
+            entry.unwrap().sha,
+            CommitSha::from("abc123def456789012345678901234567890abcd")
         );
     }
 
@@ -272,11 +357,70 @@ mod tests {
     #[test]
     fn test_parse_lock_reads_file() {
         let content = format!(
-            "version = \"{LOCK_FILE_VERSION}\"\n\n[actions]\n\"actions/checkout@v4\" = \"abc123\"\n"
+            "version = \"{LOCK_FILE_VERSION}\"\n\n[actions]\n\"actions/checkout@v4\" = {{ sha = \"abc123\", repository = \"actions/checkout\", ref_type = \"tag\", date = \"\" }}\n"
         );
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(content.as_bytes()).unwrap();
         let lock = parse_lock(file.path()).unwrap();
         assert!(lock.has(&make_key("actions/checkout", "v4")));
+    }
+
+    #[test]
+    fn test_serialize_lock_uses_inline_tables() {
+        let mut lock = Lock::default();
+        lock.set(&make_resolved(
+            "actions/checkout",
+            "v4",
+            "abc123def456789012345678901234567890abcd",
+        ));
+        lock.set(&make_resolved(
+            "actions/upload-artifact",
+            "v6",
+            "def456789012345678901234567890abcdef4567",
+        ));
+
+        let output = serialize_lock(&lock);
+
+        // Verify structure: version, blank line, [actions], then inline table entries
+        assert!(output.contains("version = \"1.3\""));
+        assert!(output.contains("[actions]"));
+        // Verify inline tables (one line per entry with all 6 fields)
+        assert!(output.contains(
+            "\"actions/checkout@v4\" = { sha = \"abc123def456789012345678901234567890abcd\", version = \"v4\", specifier ="
+        ));
+        assert!(output.contains(
+            "\"actions/upload-artifact@v6\" = { sha = \"def456789012345678901234567890abcdef4567\", version = \"v6\", specifier ="
+        ));
+        // Verify entries are NOT in expanded table format (no multiple [actions."key"] headers)
+        assert!(!output.contains("[actions.\"actions/checkout@v4\"]"));
+        // Verify entries are sorted
+        let checkout_pos = output.find("actions/checkout").unwrap();
+        let upload_pos = output.find("actions/upload-artifact").unwrap();
+        assert!(checkout_pos < upload_pos);
+    }
+
+    #[test]
+    fn test_roundtrip_with_version_and_specifier() {
+        use std::io::Write as StdWrite;
+
+        let file = NamedTempFile::new().unwrap();
+        let _store = FileLock::new(file.path());
+
+        // Create a lock entry with version and specifier
+        let content = r#"version = "1.3"
+
+[actions]
+"actions/checkout@v6" = { sha = "de0fac2e4500dabe0009e67214ff5f5447ce83dd", version = "v6.2.3", specifier = "^6", repository = "actions/checkout", ref_type = "release", date = "2026-01-09T19:42:23Z" }
+"#;
+        let mut f = std::fs::File::create(file.path()).unwrap();
+        f.write_all(content.as_bytes()).unwrap();
+
+        // Load and verify the new fields are preserved
+        let lock = parse_lock(file.path()).unwrap();
+        let entry = lock.get(&make_key("actions/checkout", "v6"));
+        assert!(entry.is_some());
+        let entry = entry.unwrap();
+        assert_eq!(entry.version, Some("v6.2.3".to_string()));
+        assert_eq!(entry.specifier, Some("^6".to_string()));
     }
 }

@@ -25,21 +25,21 @@ impl LintRule for StaleCommentRule {
 
             // Look up what version this SHA should map to in the lock
             let key = LockKey::new(located.id.clone(), located.version.clone());
-            let Some(lock_sha) = ctx.lock.get(&key) else {
+            let Some(lock_entry) = ctx.lock.get(&key) else {
                 // Lock doesn't have an entry for this action@version
                 // This is a different issue (unsynced manifest or missing lock entry)
                 continue;
             };
 
             // Compare the SHA from the comment against what the lock says
-            if lock_sha != sha {
+            if lock_entry.sha != *sha {
                 let msg = format!(
                     "{}: action {} version {} has stale comment (SHA {} does not match lock SHA {})",
                     &located.location.workflow,
                     &located.id,
                     located.version.as_str(),
                     sha.as_str(),
-                    lock_sha.as_str()
+                    lock_entry.sha.as_str()
                 );
 
                 diagnostics.push(
@@ -67,6 +67,9 @@ mod tests {
             ActionId::from(action),
             Version::from(version),
             CommitSha::from(sha),
+            ActionId::from(action).base_repo(),
+            crate::domain::RefType::Tag,
+            "2026-01-01T00:00:00Z".to_string(),
         ));
         lock
     }

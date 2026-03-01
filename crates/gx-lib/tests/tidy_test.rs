@@ -1,7 +1,8 @@
 #![allow(unused_crate_dependencies)]
 use gx_lib::commands::{self, tidy};
 use gx_lib::domain::{
-    ActionId, CommitSha, Lock, Manifest, ResolutionError, Version, VersionRegistry,
+    ActionId, CommitSha, Lock, Manifest, RefType, ResolutionError, ResolvedRef, Version,
+    VersionRegistry,
 };
 use gx_lib::infrastructure::{
     FileLock, FileManifest, FileWorkflowScanner, FileWorkflowUpdater, parse_lock, parse_manifest,
@@ -15,10 +16,15 @@ use std::string::ToString;
 use tempfile::TempDir;
 
 /// A no-op registry that always fails resolution (simulates missing `GITHUB_TOKEN`).
+#[derive(Clone, Copy)]
 struct NoopRegistry;
 
 impl VersionRegistry for NoopRegistry {
-    fn lookup_sha(&self, _id: &ActionId, _version: &Version) -> Result<CommitSha, ResolutionError> {
+    fn lookup_sha(
+        &self,
+        _id: &ActionId,
+        _version: &Version,
+    ) -> Result<ResolvedRef, ResolutionError> {
         Err(ResolutionError::TokenRequired)
     }
 
@@ -37,7 +43,7 @@ impl VersionRegistry for NoopRegistry {
 
 /// A mock registry that resolves any version to a deterministic SHA
 /// and tracks mappings so `tags_for_sha` returns consistent results.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct MockRegistry {
     /// Maps (action, SHA) → list of version tags pointing to that SHA.
     sha_tags: std::collections::HashMap<(String, String), Vec<String>>,
@@ -68,11 +74,13 @@ impl MockRegistry {
 }
 
 impl VersionRegistry for MockRegistry {
-    fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<CommitSha, ResolutionError> {
-        Ok(CommitSha::from(Self::fake_sha(
-            id.as_str(),
-            version.as_str(),
-        )))
+    fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<ResolvedRef, ResolutionError> {
+        Ok(ResolvedRef::new(
+            CommitSha::from(Self::fake_sha(id.as_str(), version.as_str())),
+            id.base_repo(),
+            RefType::Tag,
+            "2026-01-01T00:00:00Z".to_string(),
+        ))
     }
 
     fn tags_for_sha(
