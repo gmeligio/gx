@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use super::{ActionId, CommitSha, LockKey, RefType, ResolvedAction};
+use super::{ActionId, CommitSha, LockKey, RefType, ResolvedAction, Version};
 
 /// Metadata about a resolved action entry in the lock file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +52,45 @@ impl LockEntry {
             date,
         }
     }
+
+    /// Check if this lock entry is complete for the given manifest version.
+    ///
+    /// An entry is complete when:
+    /// - version is present and non-empty
+    /// - specifier matches what would be derived from the manifest version
+    ///   (or is None if the manifest version is non-semver)
+    /// - repository is non-empty
+    /// - date is non-empty
+    #[must_use]
+    pub fn is_complete(&self, manifest_version: &Version) -> bool {
+        // Check version is present and non-empty
+        let version_ok = self.version.as_ref().is_some_and(|v| !v.is_empty());
+
+        // Check repository is non-empty
+        let repository_ok = !self.repository.is_empty();
+
+        // Check date is non-empty
+        let date_ok = !self.date.is_empty();
+
+        // Check specifier matches the manifest version's derivation
+        let expected_specifier = manifest_version.specifier();
+        let specifier_ok = match &self.specifier {
+            Some(s) if s.is_empty() => false, // Empty string is treated as missing
+            actual => actual == &expected_specifier, // Must match expected
+        };
+
+        version_ok && repository_ok && date_ok && specifier_ok
+    }
+
+    /// Set the version field on this entry.
+    pub fn set_version(&mut self, version: Option<String>) {
+        self.version = version;
+    }
+
+    /// Set the specifier field on this entry.
+    pub fn set_specifier(&mut self, specifier: Option<String>) {
+        self.specifier = specifier;
+    }
 }
 
 /// Domain entity representing the resolved lock state: maps action@version → lock entry.
@@ -77,15 +116,27 @@ impl Lock {
     /// Set or update a locked action with its resolved metadata.
     pub fn set(&mut self, resolved: &ResolvedAction) {
         let key = LockKey::from(resolved);
-        let entry = LockEntry::with_version_and_specifier(
+        let entry = LockEntry::new(
             resolved.sha.clone(),
-            resolved.resolved_version.as_ref().map(ToString::to_string),
-            resolved.specifier.clone(),
             resolved.repository.clone(),
             resolved.ref_type.clone(),
             resolved.date.clone(),
         );
         self.actions.insert(key, entry);
+    }
+
+    /// Set the version field for a lock entry.
+    pub fn set_version(&mut self, key: &LockKey, version: Option<String>) {
+        if let Some(entry) = self.actions.get_mut(key) {
+            entry.set_version(version);
+        }
+    }
+
+    /// Set the specifier field for a lock entry.
+    pub fn set_specifier(&mut self, key: &LockKey, specifier: Option<String>) {
+        if let Some(entry) = self.actions.get_mut(key) {
+            entry.set_specifier(specifier);
+        }
     }
 
     /// Check if the lock has an entry for the given key.
@@ -273,5 +324,126 @@ mod tests {
             entry.unwrap().sha,
             CommitSha::from("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
         );
+    }
+
+    // Tests for LockEntry::is_complete
+
+    #[test]
+    fn test_is_complete_with_all_fields() {
+        let entry = LockEntry::with_version_and_specifier(
+            CommitSha::from("abc123def456789012345678901234567890abcd"),
+            Some("v4".to_string()),
+            Some("^4".to_string()),
+            "actions/checkout".to_string(),
+            RefType::Tag,
+            "2026-01-01T00:00:00Z".to_string(),
+        );
+        assert!(entry.is_complete(&Version::from("v4")));
+    }
+
+    #[test]
+    fn test_is_complete_missing_specifier() {
+        let entry = LockEntry::with_version_and_specifier(
+            CommitSha::from("abc123def456789012345678901234567890abcd"),
+            Some("v4".to_string()),
+            None,
+            "actions/checkout".to_string(),
+            RefType::Tag,
+            "2026-01-01T00:00:00Z".to_string(),
+        );
+        assert!(!entry.is_complete(&Version::from("v4")));
+    }
+
+    #[test]
+    fn test_is_complete_empty_specifier_string() {
+        let entry = LockEntry::with_version_and_specifier(
+            CommitSha::from("abc123def456789012345678901234567890abcd"),
+            Some("v4".to_string()),
+            Some("".to_string()),
+            "actions/checkout".to_string(),
+            RefType::Tag,
+            "2026-01-01T00:00:00Z".to_string(),
+        );
+        assert!(!entry.is_complete(&Version::from("v4")));
+    }
+
+    #[test]
+    fn test_is_complete_stale_specifier() {
+        // Version changed from v6 to v6.1, specifier is wrong
+        let entry = LockEntry::with_version_and_specifier(
+            CommitSha::from("abc123def456789012345678901234567890abcd"),
+            Some("v6.0.2".to_string()),
+            Some("^6".to_string()), // Should be ^6.1 for v6.1
+            "actions/checkout".to_string(),
+            RefType::Tag,
+            "2026-01-01T00:00:00Z".to_string(),
+        );
+        assert!(!entry.is_complete(&Version::from("v6.1")));
+    }
+
+    #[test]
+    fn test_is_complete_missing_version() {
+        let entry = LockEntry::with_version_and_specifier(
+            CommitSha::from("abc123def456789012345678901234567890abcd"),
+            None,
+            Some("^4".to_string()),
+            "actions/checkout".to_string(),
+            RefType::Tag,
+            "2026-01-01T00:00:00Z".to_string(),
+        );
+        assert!(!entry.is_complete(&Version::from("v4")));
+    }
+
+    #[test]
+    fn test_is_complete_missing_date() {
+        let entry = LockEntry::with_version_and_specifier(
+            CommitSha::from("abc123def456789012345678901234567890abcd"),
+            Some("v4".to_string()),
+            Some("^4".to_string()),
+            "actions/checkout".to_string(),
+            RefType::Tag,
+            "".to_string(),
+        );
+        assert!(!entry.is_complete(&Version::from("v4")));
+    }
+
+    #[test]
+    fn test_is_complete_non_semver_version() {
+        // Non-semver (branch) versions have no specifier
+        let entry = LockEntry::with_version_and_specifier(
+            CommitSha::from("abc123def456789012345678901234567890abcd"),
+            Some("main".to_string()),
+            None,
+            "actions/checkout".to_string(),
+            RefType::Branch,
+            "2026-01-01T00:00:00Z".to_string(),
+        );
+        assert!(entry.is_complete(&Version::from("main")));
+    }
+
+    #[test]
+    fn test_is_complete_patch_version() {
+        let entry = LockEntry::with_version_and_specifier(
+            CommitSha::from("abc123def456789012345678901234567890abcd"),
+            Some("v4.1.0".to_string()),
+            Some("~4.1.0".to_string()),
+            "actions/checkout".to_string(),
+            RefType::Tag,
+            "2026-01-01T00:00:00Z".to_string(),
+        );
+        assert!(entry.is_complete(&Version::from("v4.1.0")));
+    }
+
+    #[test]
+    fn test_is_complete_minor_version() {
+        let entry = LockEntry::with_version_and_specifier(
+            CommitSha::from("abc123def456789012345678901234567890abcd"),
+            Some("v4.1".to_string()),
+            Some("^4.1".to_string()),
+            "actions/checkout".to_string(),
+            RefType::Tag,
+            "2026-01-01T00:00:00Z".to_string(),
+        );
+        assert!(entry.is_complete(&Version::from("v4.1")));
     }
 }

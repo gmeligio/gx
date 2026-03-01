@@ -6,7 +6,7 @@ use thiserror::Error;
 use crate::domain::{
     ActionId, ActionResolver, ActionSpec, LocatedAction, Lock, LockKey, Manifest, ResolutionResult,
     UpdateResult, Version, VersionCorrection, VersionRegistry, WorkflowActionSet, WorkflowScanner,
-    WorkflowScannerLocated, WorkflowUpdater, populate_resolved_fields,
+    WorkflowScannerLocated, WorkflowUpdater,
 };
 use crate::infrastructure::{LockFileError, ManifestError, WorkflowError};
 
@@ -361,11 +361,11 @@ fn update_lock<R: VersionRegistry + Clone>(
 
     let resolver = ActionResolver::new(registry.clone());
 
-    // First handle globals with SHA validation/correction
+    // Phase 1: Manifest correctness - sync manifest with workflows + SHA correction
     let specs: Vec<ActionSpec> = manifest.specs().iter().map(|s| (*s).clone()).collect();
     for spec in &specs {
         if let Some(workflow_sha) = action_set.sha_for(&spec.id) {
-            // Two-step flow: correct version, then resolve with pinned SHA
+            // Correct version based on workflow SHA
             let (corrected_version, was_corrected) =
                 resolver.correct_version(&spec.id, workflow_sha, &spec.version);
 
@@ -381,75 +381,107 @@ fn update_lock<R: VersionRegistry + Clone>(
                 });
                 manifest.set(spec.id.clone(), corrected_version.clone());
             }
+        }
+    }
 
-            let resolve_spec = ActionSpec::new(spec.id.clone(), corrected_version.clone());
-            let resolve_key = LockKey::from(&resolve_spec);
-            if !lock.has(&resolve_key) {
-                match resolver.resolve(&resolve_spec) {
-                    ResolutionResult::Resolved(action) => {
-                        // Keep the workflow's pinned SHA (not the registry's current SHA)
-                        let pinned_action = action.with_sha(workflow_sha.clone());
+    // Phase 2: Lock completeness - ensure all specs have complete lock entries
+    let updated_specs: Vec<ActionSpec> = manifest.specs().iter().map(|s| (*s).clone()).collect();
+    for spec in &updated_specs {
+        let key = LockKey::from(spec);
 
-                        // Populate resolved_version and specifier
-                        let enriched_action = populate_resolved_fields(pinned_action, &registry);
-                        lock.set(&enriched_action);
-                    }
-                    ResolutionResult::Unresolved { spec: s, reason } => {
-                        debug!("Could not resolve {s}: {reason}");
-                        unresolved.push(format!("{s}: {reason}"));
-                    }
-                    ResolutionResult::Corrected { .. } => {
-                        // This shouldn't happen in resolve(), but handle it
-                        debug!("Unexpected Corrected result from resolve()");
-                    }
-                }
-            }
-        } else {
-            let key = LockKey::from(spec);
+        // Check if entry exists and is complete
+        let needs_population = match lock.get(&key) {
+            Some(entry) => !entry.is_complete(&spec.version),
+            None => true,
+        };
+
+        if needs_population {
+            // Need to resolve if missing entirely
             if !lock.has(&key) {
                 debug!("Resolving {spec}");
                 match resolver.resolve(spec) {
                     ResolutionResult::Resolved(action) => {
-                        // Populate resolved_version and specifier
-                        let enriched_action = populate_resolved_fields(action, &registry);
-                        lock.set(&enriched_action);
+                        // Keep workflow's pinned SHA if available
+                        let action_with_sha =
+                            if let Some(workflow_sha) = action_set.sha_for(&spec.id) {
+                                action.with_sha(workflow_sha.clone())
+                            } else {
+                                action
+                            };
+                        lock.set(&action_with_sha);
                     }
                     ResolutionResult::Unresolved { spec: s, reason } => {
                         debug!("Could not resolve {s}: {reason}");
                         unresolved.push(format!("{s}: {reason}"));
                     }
                     ResolutionResult::Corrected { corrected, .. } => {
-                        // Populate resolved_version and specifier
-                        let enriched_action = populate_resolved_fields(corrected, &registry);
-                        lock.set(&enriched_action);
+                        lock.set(&corrected);
                     }
                 }
+            }
+
+            // Now populate missing fields if entry exists
+            if let Some(entry) = lock.get(&key) {
+                // REFINE: Get version if missing
+                if (entry.version.is_none()
+                    || entry
+                        .version
+                        .as_ref()
+                        .is_some_and(std::string::String::is_empty))
+                    && let Some(refined_version) = resolver.refine_version(&spec.id, &entry.sha)
+                {
+                    lock.set_version(&key, Some(refined_version.to_string()));
+                }
+
+                // DERIVE: Get specifier from manifest version
+                let expected_specifier = spec.version.specifier();
+                lock.set_specifier(&key, expected_specifier);
             }
         }
     }
 
-    // Then resolve override versions (no SHA correction for overrides, just resolve)
+    // Resolve override versions (no SHA correction for overrides, just resolve)
     for (id, overrides) in manifest.all_overrides() {
         for exc in overrides {
             let exc_spec = ActionSpec::new(id.clone(), exc.version.clone());
             let key = LockKey::from(&exc_spec);
-            if !lock.has(&key) {
-                debug!("Resolving override {exc_spec}");
-                match resolver.resolve(&exc_spec) {
-                    ResolutionResult::Resolved(action) => {
-                        // Populate resolved_version and specifier
-                        let enriched_action = populate_resolved_fields(action, &registry);
-                        lock.set(&enriched_action);
+
+            let needs_population = match lock.get(&key) {
+                Some(entry) => !entry.is_complete(&exc.version),
+                None => true,
+            };
+
+            if needs_population {
+                if !lock.has(&key) {
+                    debug!("Resolving override {exc_spec}");
+                    match resolver.resolve(&exc_spec) {
+                        ResolutionResult::Resolved(action) => {
+                            lock.set(&action);
+                        }
+                        ResolutionResult::Unresolved { spec: s, reason } => {
+                            debug!("Could not resolve override {s}: {reason}");
+                            unresolved.push(format!("{s}: {reason}"));
+                        }
+                        ResolutionResult::Corrected { corrected, .. } => {
+                            lock.set(&corrected);
+                        }
                     }
-                    ResolutionResult::Unresolved { spec: s, reason } => {
-                        debug!("Could not resolve override {s}: {reason}");
-                        unresolved.push(format!("{s}: {reason}"));
+                }
+
+                // Populate missing fields
+                if let Some(entry) = lock.get(&key) {
+                    if (entry.version.is_none()
+                        || entry
+                            .version
+                            .as_ref()
+                            .is_some_and(std::string::String::is_empty))
+                        && let Some(refined_version) = resolver.refine_version(id, &entry.sha)
+                    {
+                        lock.set_version(&key, Some(refined_version.to_string()));
                     }
-                    ResolutionResult::Corrected { corrected, .. } => {
-                        // Populate resolved_version and specifier
-                        let enriched_action = populate_resolved_fields(corrected, &registry);
-                        lock.set(&enriched_action);
-                    }
+
+                    let expected_specifier = exc.version.specifier();
+                    lock.set_specifier(&key, expected_specifier);
                 }
             }
         }
@@ -519,6 +551,64 @@ mod tests {
         ) -> Result<Vec<Version>, crate::domain::ResolutionError> {
             Err(crate::domain::ResolutionError::TokenRequired)
         }
+        fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, crate::domain::ResolutionError> {
+            Err(crate::domain::ResolutionError::TokenRequired)
+        }
+    }
+
+    // Mock registry for testing completeness scenarios
+    #[derive(Clone)]
+    struct TestRegistry {
+        versions: std::collections::HashMap<String, Vec<Version>>,
+    }
+
+    impl TestRegistry {
+        fn new() -> Self {
+            let mut versions = std::collections::HashMap::new();
+            // actions/checkout@v4 -> v4, v4.0.0, v4.0.1, etc.
+            versions.insert(
+                "abc123def456789012345678901234567890abcd".to_string(),
+                vec![
+                    Version::from("v4"),
+                    Version::from("v4.0.0"),
+                    Version::from("v4.0.1"),
+                ],
+            );
+            versions.insert(
+                "def456789012345678901234567890abcd123456".to_string(),
+                vec![Version::from("v6"), Version::from("v6.0.1")],
+            );
+            Self { versions }
+        }
+    }
+
+    impl crate::domain::VersionRegistry for TestRegistry {
+        fn lookup_sha(
+            &self,
+            _id: &ActionId,
+            _version: &Version,
+        ) -> Result<crate::domain::ResolvedRef, crate::domain::ResolutionError> {
+            Ok(crate::domain::ResolvedRef::new(
+                CommitSha::from("abc123def456789012345678901234567890abcd"),
+                "actions/checkout".to_string(),
+                crate::domain::RefType::Tag,
+                "2026-01-01T00:00:00Z".to_string(),
+            ))
+        }
+
+        fn tags_for_sha(
+            &self,
+            _id: &ActionId,
+            sha: &CommitSha,
+        ) -> Result<Vec<Version>, crate::domain::ResolutionError> {
+            self.versions.get(sha.as_str()).cloned().ok_or(
+                crate::domain::ResolutionError::NoTagsForSha {
+                    action: ActionId::from("test"),
+                    sha: sha.clone(),
+                },
+            )
+        }
+
         fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, crate::domain::ResolutionError> {
             Err(crate::domain::ResolutionError::TokenRequired)
         }
@@ -660,5 +750,125 @@ jobs:
             !windows_content.contains("8e8c483db84b4bee98b60c0593521ed34d9990e8"),
             "Bug #2: windows.yml was overwritten with the v6.0.1 SHA — it must use the v5 ref, not v6.0.1.\nGot:\n{windows_content}"
         );
+    }
+
+    #[test]
+    fn test_lock_completeness_missing_specifier_derived() {
+        use crate::domain::{LockEntry, LockKey, RefType, Version};
+        use std::collections::HashMap;
+
+        let key = LockKey::new(ActionId::from("actions/checkout"), Version::from("v4"));
+
+        // Create a lock entry with version but missing specifier
+        let entry = LockEntry::with_version_and_specifier(
+            CommitSha::from("abc123def456789012345678901234567890abcd"),
+            Some("v4".to_string()),
+            None, // Missing specifier
+            "actions/checkout".to_string(),
+            RefType::Tag,
+            "2026-01-01T00:00:00Z".to_string(),
+        );
+        let mut lock = Lock::new(HashMap::from([(key.clone(), entry)]));
+
+        // Verify it's not complete
+        let entry = lock.get(&key).unwrap();
+        assert!(!entry.is_complete(&Version::from("v4")));
+
+        // After tidy, specifier should be populated (DERIVE operation)
+        let manifest_version = Version::from("v4");
+        let expected_specifier = manifest_version.specifier();
+        lock.set_specifier(&key, expected_specifier);
+
+        // Now it should be complete
+        let entry = lock.get(&key).unwrap();
+        assert!(entry.is_complete(&Version::from("v4")));
+        assert_eq!(entry.specifier, Some("^4".to_string()));
+    }
+
+    #[test]
+    fn test_lock_completeness_missing_version_refined() {
+        use crate::domain::{LockEntry, LockKey, RefType, Version};
+        use std::collections::HashMap;
+
+        let key = LockKey::new(ActionId::from("actions/checkout"), Version::from("v4"));
+
+        // Create a lock entry with specifier but missing version
+        let entry = LockEntry::with_version_and_specifier(
+            CommitSha::from("abc123def456789012345678901234567890abcd"),
+            None, // Missing version
+            Some("^4".to_string()),
+            "actions/checkout".to_string(),
+            RefType::Tag,
+            "2026-01-01T00:00:00Z".to_string(),
+        );
+        let mut lock = Lock::new(HashMap::from([(key.clone(), entry)]));
+
+        // Verify it's not complete
+        let entry = lock.get(&key).unwrap();
+        assert!(!entry.is_complete(&Version::from("v4")));
+
+        // After tidy, version should be populated via REFINE
+        // (We'd call resolver.refine_version() in the real code)
+        lock.set_version(&key, Some("v4".to_string()));
+
+        // Now it should be complete
+        let entry = lock.get(&key).unwrap();
+        assert!(entry.is_complete(&Version::from("v4")));
+        assert_eq!(entry.version, Some("v4".to_string()));
+    }
+
+    #[test]
+    fn test_lock_completeness_complete_entry_unchanged() {
+        use crate::domain::{LockEntry, LockKey, RefType, Version};
+        use std::collections::HashMap;
+
+        let key = LockKey::new(ActionId::from("actions/checkout"), Version::from("v4"));
+
+        // Create a complete lock entry
+        let entry = LockEntry::with_version_and_specifier(
+            CommitSha::from("abc123def456789012345678901234567890abcd"),
+            Some("v4".to_string()),
+            Some("^4".to_string()),
+            "actions/checkout".to_string(),
+            RefType::Tag,
+            "2026-01-01T00:00:00Z".to_string(),
+        );
+        let lock = Lock::new(HashMap::from([(key.clone(), entry)]));
+
+        // Verify it's complete
+        let entry = lock.get(&key).unwrap();
+        assert!(entry.is_complete(&Version::from("v4")));
+        // No operations should be performed (skipped)
+    }
+
+    #[test]
+    fn test_lock_completeness_manifest_version_precision_mismatch() {
+        use crate::domain::{LockEntry, LockKey, RefType, Version};
+        use std::collections::HashMap;
+
+        let key = LockKey::new(ActionId::from("actions/checkout"), Version::from("v6.1"));
+
+        // Create entry with old specifier from when version was v6
+        let entry = LockEntry::with_version_and_specifier(
+            CommitSha::from("abc123def456789012345678901234567890abcd"),
+            Some("v6.0.2".to_string()),
+            Some("^6".to_string()), // Was correct for v6, wrong for v6.1
+            "actions/checkout".to_string(),
+            RefType::Tag,
+            "2026-01-01T00:00:00Z".to_string(),
+        );
+        let mut lock = Lock::new(HashMap::from([(key.clone(), entry)]));
+
+        // Verify it's not complete because specifier doesn't match v6.1
+        let entry = lock.get(&key).unwrap();
+        assert!(!entry.is_complete(&Version::from("v6.1")));
+
+        // Fix by updating specifier
+        lock.set_specifier(&key, Version::from("v6.1").specifier());
+
+        // Now it should be complete
+        let entry = lock.get(&key).unwrap();
+        assert!(entry.is_complete(&Version::from("v6.1")));
+        assert_eq!(entry.specifier, Some("^6.1".to_string()));
     }
 }

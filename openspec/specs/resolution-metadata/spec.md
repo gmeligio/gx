@@ -44,12 +44,13 @@ The system SHALL prefer more authoritative date sources over less authoritative 
 - **AND** NOT from the top-level `committer` field (which is a GitHub user object without a date)
 
 ### Requirement: ResolvedAction carries metadata
-The `ResolvedAction` struct SHALL include `repository`, `ref_type`, and `date` so that `Lock::set()` can store the full entry.
+The `ResolvedAction` struct SHALL include `repository`, `ref_type`, and `date` so that `Lock::set()` can store the full entry. `ResolvedAction` SHALL NOT carry `resolved_version` or `specifier` — these are outputs of REFINE and DERIVE respectively, not of resolution.
 
 #### Scenario: Resolution flows through to lock
 - **WHEN** `ActionResolver::resolve()` returns a `Resolved` result
-- **AND** `lock.set(&resolved_action)` is called
-- **THEN** the lock entry contains all four fields (sha, repository, ref_type, date)
+- **AND** REFINE and DERIVE are applied to produce version and specifier
+- **AND** `lock.set()` is called with the combined data
+- **THEN** the lock entry contains all six fields (sha, version, specifier, repository, ref_type, date)
 
 #### Scenario: ResolvedAction supports SHA override
 - **GIVEN** a `ResolvedAction` produced by `resolve()`
@@ -64,35 +65,27 @@ The `repository` field SHALL reflect the actual GitHub repository queried, not t
 - **WHEN** resolved against `github/codeql-action`
 - **THEN** `repository = "github/codeql-action"`
 
-### Requirement: Version correction is separate from metadata resolution
-The `ActionResolver` SHALL provide version correction as a standalone operation that returns only a version, not a `ResolvedAction`. Metadata resolution SHALL always go through `resolve()`.
+### Requirement: Version refinement
+The `ActionResolver` SHALL provide version refinement as a standalone operation that returns a version based on SHA tag lookup. This operation SHALL be used for both manifest version correction (Phase 1) and lock version population (Phase 2).
 
-#### Scenario: Version correction returns version only
-- **WHEN** `correct_version(id, sha)` is called with a SHA that points to tags `[v6, v6.0.1]`
-- **AND** the action's manifest version is `v6`
-- **THEN** the result is `(v6, false)` indicating no correction was needed
+#### Scenario: Version refinement returns best tag for SHA
+- **WHEN** `refine_version(id, sha)` is called with a SHA that points to tags `[v6, v6.0.1]`
+- **THEN** the result is `v6` (shortest/least-specific tag preferred)
 
-#### Scenario: Version correction detects mismatch
-- **WHEN** `correct_version(id, sha)` is called with a SHA that points to tags `[v5, v5.0.0]`
-- **AND** the action's manifest version is `v4`
-- **THEN** the result is `(v5, true)` indicating the version was corrected
+#### Scenario: Version refinement used for manifest correction
+- **WHEN** a workflow pins SHA `abc123` with comment `v4`
+- **AND** `refine_version(id, abc123)` returns `v5`
+- **THEN** the manifest version is corrected from `v4` to `v5`
 
-#### Scenario: Version correction degrades gracefully without token
-- **WHEN** `correct_version(id, sha)` is called without a GITHUB_TOKEN
-- **THEN** the result is `(original_version, false)` — the original version is kept unchanged
+#### Scenario: Version refinement used for lock version field
+- **WHEN** a lock entry is missing its `version` field
+- **AND** `refine_version(id, sha)` returns `v6.0.2`
+- **THEN** the lock entry's `version` is set to `v6.0.2`
 
-### Requirement: All lock entries flow through resolve
-Every action stored in the lock SHALL have its metadata populated via `resolve()` → `lookup_sha()`. There SHALL be no code path that constructs a `ResolvedAction` with hardcoded `ref_type` or `date` defaults.
-
-#### Scenario: SHA-pinned workflow action gets full metadata
-- **WHEN** a workflow has `uses: actions/checkout@de0fac2e... # v6`
-- **AND** `gx tidy` processes this action
-- **THEN** the lock entry has `ref_type` and `date` populated from the GitHub API (not hardcoded defaults)
-
-#### Scenario: Tag-only workflow action gets full metadata
-- **WHEN** a workflow has `uses: actions/checkout@v6`
-- **AND** `gx tidy` processes this action
-- **THEN** the lock entry has `ref_type` and `date` populated from the GitHub API
+#### Scenario: Version refinement degrades gracefully without token
+- **WHEN** `refine_version(id, sha)` is called without a GITHUB_TOKEN
+- **THEN** the operation returns `None` or the original version
+- **AND** the entry remains incomplete (to be retried on next run with token)
 
 ### Requirement: SHA-pinned actions keep the workflow SHA
 When a workflow already has a SHA-pinned action, the lock entry SHALL use the workflow's SHA, not the SHA that `lookup_sha()` returns for the version tag.

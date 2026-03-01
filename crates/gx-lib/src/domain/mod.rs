@@ -14,7 +14,6 @@ pub use lock::{Lock, LockEntry};
 pub use manifest::{ActionOverride, Manifest};
 pub use resolution::{
     ActionResolver, ResolutionError, ResolutionResult, ResolvedRef, VersionRegistry,
-    populate_resolved_fields,
 };
 pub use workflow::{
     UpdateResult, WorkflowError, WorkflowScanner, WorkflowScannerLocated, WorkflowUpdater,

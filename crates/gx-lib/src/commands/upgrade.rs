@@ -4,7 +4,7 @@ use thiserror::Error;
 use crate::domain::{
     ActionId, ActionResolver, ActionSpec, Lock, LockKey, Manifest, ResolutionError,
     ResolutionResult, UpdateResult, UpgradeAction, UpgradeCandidate, Version, VersionRegistry,
-    WorkflowUpdater, find_upgrade_candidate, populate_resolved_fields,
+    WorkflowUpdater, find_upgrade_candidate,
 };
 use crate::infrastructure::{LockFileError, ManifestError, WorkflowError};
 
@@ -294,12 +294,10 @@ fn resolve_and_store<R: VersionRegistry>(
 ) {
     match service.resolve(spec) {
         ResolutionResult::Resolved(resolved) => {
-            let enriched = populate_resolved_fields(resolved, service.registry());
-            lock.set(&enriched);
+            lock.set(&resolved);
         }
         ResolutionResult::Corrected { corrected, .. } => {
-            let enriched = populate_resolved_fields(corrected, service.registry());
-            lock.set(&enriched);
+            lock.set(&corrected);
         }
         ResolutionResult::Unresolved { spec: s, reason } => {
             warn!("{unresolved_msg} {s}: {reason}");

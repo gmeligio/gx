@@ -532,10 +532,6 @@ pub struct ResolvedAction {
     pub repository: String,
     pub ref_type: RefType,
     pub date: String,
-    /// The most specific resolved version (via SHA matching against all tags)
-    pub resolved_version: Option<Version>,
-    /// The semver range specifier derived from the manifest version's precision
-    pub specifier: Option<String>,
 }
 
 impl ResolvedAction {
@@ -556,8 +552,6 @@ impl ResolvedAction {
             repository,
             ref_type,
             date,
-            resolved_version: None,
-            specifier: None,
         }
     }
 
@@ -578,8 +572,6 @@ impl ResolvedAction {
             repository: self.repository.clone(),
             ref_type: self.ref_type.clone(),
             date: self.date.clone(),
-            resolved_version: self.resolved_version.clone(),
-            specifier: self.specifier.clone(),
         }
     }
 }
