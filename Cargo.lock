@@ -788,7 +788,7 @@ dependencies = [
 
 [[package]]
 name = "gx-lib"
-version = "0.5.4"
+version = "0.0.0"
 dependencies = [
  "gix-discover",
  "glob",
