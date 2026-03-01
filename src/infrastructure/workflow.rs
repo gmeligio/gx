@@ -1,5 +1,5 @@
 use glob::glob;
-use log::{debug, info, warn};
+use log::warn;
 use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -174,34 +174,6 @@ impl FileWorkflowScanner {
         Ok(action_set)
     }
 
-    /// Scan all workflows and aggregate actions into a `WorkflowActionSet`.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if any workflow file cannot be processed.
-    pub fn scan_all(&self) -> Result<crate::domain::WorkflowActionSet, WorkflowError> {
-        let workflows = self.find_workflows()?;
-        if workflows.is_empty() {
-            info!("No workflows found in .github/workflows/");
-            return Ok(crate::domain::WorkflowActionSet::new());
-        }
-
-        debug!("Scanning workflows...");
-        for workflow in &workflows {
-            debug!("{}", workflow.display());
-        }
-
-        let mut action_set = crate::domain::WorkflowActionSet::new();
-        for workflow in &workflows {
-            let rel = self.rel_path(workflow);
-            let actions = Self::extract_actions(workflow, &rel)?;
-            for action in &actions {
-                action_set.add(&action.uses_ref.interpret());
-            }
-        }
-        Ok(action_set)
-    }
-
     /// Scan all workflows and return one `LocatedAction` per step.
     ///
     /// # Errors
@@ -343,8 +315,12 @@ impl FileWorkflowUpdater {
 }
 
 impl crate::domain::WorkflowScanner for FileWorkflowScanner {
-    fn scan_all(&self) -> Result<crate::domain::WorkflowActionSet, WorkflowError> {
-        self.scan_all()
+    fn scan_all_located(&self) -> Result<Vec<crate::domain::LocatedAction>, WorkflowError> {
+        self.scan_all_located()
+    }
+
+    fn find_workflow_paths(&self) -> Result<Vec<PathBuf>, WorkflowError> {
+        self.find_workflows()
     }
 }
 
@@ -365,20 +341,10 @@ impl crate::domain::WorkflowUpdater for FileWorkflowUpdater {
     }
 }
 
-impl crate::domain::WorkflowScannerLocated for FileWorkflowScanner {
-    fn scan_all_located(&self) -> Result<Vec<crate::domain::LocatedAction>, WorkflowError> {
-        self.scan_all_located()
-    }
-
-    fn find_workflow_paths(&self) -> Result<Vec<PathBuf>, WorkflowError> {
-        self.find_workflows()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{ActionId, CommitSha};
+    use crate::domain::ActionId;
     use std::io::Write;
     use tempfile::TempDir;
 
@@ -539,7 +505,7 @@ jobs:
     }
 
     #[test]
-    fn test_scan_all() {
+    fn test_scan_all_located_derives_action_set() {
         let temp_dir = TempDir::new().unwrap();
         create_test_workflow(
             temp_dir.path(),
@@ -553,7 +519,8 @@ jobs:
         );
 
         let parser = FileWorkflowScanner::new(temp_dir.path());
-        let action_set = parser.scan_all().unwrap();
+        let located = parser.scan_all_located().unwrap();
+        let action_set = crate::domain::WorkflowActionSet::from_located(&located);
 
         assert_eq!(action_set.action_ids().len(), 2);
     }
@@ -660,67 +627,10 @@ jobs:
         let checkout_id = ActionId::from("actions/checkout");
         let versions = action_set.versions_for(&checkout_id);
         assert_eq!(versions[0].as_str(), "v6.0.1");
-        assert_eq!(
-            action_set.sha_for(&checkout_id).map(CommitSha::as_str),
-            Some("8e8c483db84b4bee98b60c0593521ed34d9990e8")
-        );
 
         let login_id = ActionId::from("docker/login-action");
         let versions = action_set.versions_for(&login_id);
         assert_eq!(versions[0].as_str(), "v3.6.0");
-        assert_eq!(
-            action_set.sha_for(&login_id).map(CommitSha::as_str),
-            Some("5e57cd118135c172c3672efd75eb46360885c0ef")
-        );
-    }
-
-    #[test]
-    fn test_scan_sha_none_for_tag() {
-        let temp_dir = TempDir::new().unwrap();
-        let content = "name: CI
-jobs:
-  build:
-    steps:
-      - uses: actions/checkout@v4
-";
-        let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
-
-        let parser = FileWorkflowScanner::new(temp_dir.path());
-        let action_set = parser.scan(&workflow_path).unwrap();
-
-        let versions = action_set.versions_for(&ActionId::from("actions/checkout"));
-        assert_eq!(versions[0].as_str(), "v4");
-        // No SHA when using a tag without comment
-        assert!(
-            action_set
-                .sha_for(&ActionId::from("actions/checkout"))
-                .is_none()
-        );
-    }
-
-    #[test]
-    fn test_scan_sha_none_for_short_ref() {
-        let temp_dir = TempDir::new().unwrap();
-        // Short SHA (not 40 chars) with comment
-        let content = "name: CI
-jobs:
-  build:
-    steps:
-      - uses: actions/checkout@abc123 # v4
-";
-        let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
-
-        let parser = FileWorkflowScanner::new(temp_dir.path());
-        let action_set = parser.scan(&workflow_path).unwrap();
-
-        let versions = action_set.versions_for(&ActionId::from("actions/checkout"));
-        assert_eq!(versions[0].as_str(), "v4");
-        // Short refs are not treated as SHAs
-        assert!(
-            action_set
-                .sha_for(&ActionId::from("actions/checkout"))
-                .is_none()
-        );
     }
 
     #[test]

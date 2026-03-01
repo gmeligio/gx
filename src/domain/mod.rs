@@ -12,10 +12,9 @@ pub use action::{
 };
 pub use lock::{Lock, LockEntry};
 pub use manifest::{ActionOverride, Manifest};
+pub use resolution::select_best_tag;
 pub use resolution::{
     ActionResolver, ResolutionError, ResolutionResult, ResolvedRef, VersionRegistry,
 };
-pub use workflow::{
-    UpdateResult, WorkflowError, WorkflowScanner, WorkflowScannerLocated, WorkflowUpdater,
-};
+pub use workflow::{UpdateResult, WorkflowError, WorkflowScanner, WorkflowUpdater};
 pub use workflow_actions::{LocatedAction, WorkflowActionSet, WorkflowLocation};

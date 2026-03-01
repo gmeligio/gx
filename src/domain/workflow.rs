@@ -43,16 +43,6 @@ pub struct UpdateResult {
 
 /// Trait for scanning workflow files and extracting action references
 pub trait WorkflowScanner {
-    /// Scan all workflow files and return the aggregated set of action references.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if any workflow file cannot be read or parsed.
-    fn scan_all(&self) -> Result<crate::domain::WorkflowActionSet, WorkflowError>;
-}
-
-/// Trait for scanning workflow files with full location context per step.
-pub trait WorkflowScannerLocated {
     /// Scan all workflow files and return one `LocatedAction` per step.
     ///
     /// # Errors

@@ -4,7 +4,9 @@ use std::fs;
 
 use gx::commands::lint;
 use gx::config::{Level, LintConfig};
-use gx::domain::{ActionId, CommitSha, Lock, Manifest, RefType, ResolvedAction, Version};
+use gx::domain::{
+    ActionId, CommitSha, Lock, Manifest, RefType, ResolvedAction, Version, WorkflowActionSet,
+};
 use gx::infrastructure::FileWorkflowScanner;
 
 #[test]
@@ -17,7 +19,7 @@ fn lint_clean_repo_no_diagnostics() {
     // Create a clean repo with no workflows
     let scanner = FileWorkflowScanner::new(repo_root);
     let workflows = scanner.scan_all_located().unwrap();
-    let action_set = scanner.scan_all().unwrap();
+    let action_set = WorkflowActionSet::from_located(&workflows);
 
     let manifest = Manifest::default();
     let lock = Lock::default();
@@ -60,7 +62,7 @@ jobs:
 
     let scanner = FileWorkflowScanner::new(repo_root);
     let workflows = scanner.scan_all_located().unwrap();
-    let action_set = scanner.scan_all().unwrap();
+    let action_set = WorkflowActionSet::from_located(&workflows);
     let lint_config = LintConfig::default();
 
     let diagnostics =
@@ -99,7 +101,7 @@ jobs:
 
     let scanner = FileWorkflowScanner::new(repo_root);
     let workflows = scanner.scan_all_located().unwrap();
-    let action_set = scanner.scan_all().unwrap();
+    let action_set = WorkflowActionSet::from_located(&workflows);
     let lint_config = LintConfig::default();
 
     let diagnostics =
@@ -138,7 +140,7 @@ jobs:
 
     let scanner = FileWorkflowScanner::new(repo_root);
     let workflows = scanner.scan_all_located().unwrap();
-    let action_set = scanner.scan_all().unwrap();
+    let action_set = WorkflowActionSet::from_located(&workflows);
 
     // Disable unpinned rule
     let mut lint_config = LintConfig::default();
@@ -186,7 +188,7 @@ jobs:
 
     let scanner = FileWorkflowScanner::new(repo_root);
     let workflows = scanner.scan_all_located().unwrap();
-    let action_set = scanner.scan_all().unwrap();
+    let action_set = WorkflowActionSet::from_located(&workflows);
 
     // Ignore actions/checkout
     let mut lint_config = LintConfig::default();
@@ -238,7 +240,7 @@ jobs:
 
     let scanner = FileWorkflowScanner::new(repo_root);
     let workflows = scanner.scan_all_located().unwrap();
-    let action_set = scanner.scan_all().unwrap();
+    let action_set = WorkflowActionSet::from_located(&workflows);
     let lint_config = LintConfig::default();
 
     let diagnostics =
@@ -290,7 +292,7 @@ jobs:
 
     let scanner = FileWorkflowScanner::new(repo_root);
     let workflows = scanner.scan_all_located().unwrap();
-    let action_set = scanner.scan_all().unwrap();
+    let action_set = WorkflowActionSet::from_located(&workflows);
     let lint_config = LintConfig::default();
 
     let diagnostics =
@@ -341,7 +343,7 @@ jobs:
 
     let scanner = FileWorkflowScanner::new(repo_root);
     let workflows = scanner.scan_all_located().unwrap();
-    let action_set = scanner.scan_all().unwrap();
+    let action_set = WorkflowActionSet::from_located(&workflows);
     let lint_config = LintConfig::default();
 
     let diagnostics =
@@ -391,7 +393,7 @@ jobs:
 
     let scanner = FileWorkflowScanner::new(repo_root);
     let workflows = scanner.scan_all_located().unwrap();
-    let action_set = scanner.scan_all().unwrap();
+    let action_set = WorkflowActionSet::from_located(&workflows);
 
     // Disable all error rules
     let mut lint_config = LintConfig::default();
@@ -451,7 +453,7 @@ jobs:
 
     let scanner = FileWorkflowScanner::new(repo_root);
     let workflows = scanner.scan_all_located().unwrap();
-    let action_set = scanner.scan_all().unwrap();
+    let action_set = WorkflowActionSet::from_located(&workflows);
     let lint_config = LintConfig::default();
 
     let diagnostics =
@@ -499,7 +501,7 @@ jobs:
 
     let scanner = FileWorkflowScanner::new(repo_root);
     let workflows = scanner.scan_all_located().unwrap();
-    let action_set = scanner.scan_all().unwrap();
+    let action_set = WorkflowActionSet::from_located(&workflows);
 
     // Promote stale-comment to Error
     let mut lint_config = LintConfig::default();
@@ -563,7 +565,7 @@ jobs:
 
     let scanner = FileWorkflowScanner::new(repo_root);
     let workflows = scanner.scan_all_located().unwrap();
-    let action_set = scanner.scan_all().unwrap();
+    let action_set = WorkflowActionSet::from_located(&workflows);
 
     // Ignore unpinned in ci.yml only
     let mut lint_config = LintConfig::default();

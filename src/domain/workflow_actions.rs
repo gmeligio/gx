@@ -9,8 +9,6 @@ use super::action::{ActionId, CommitSha, InterpretedRef, Version};
 pub struct WorkflowActionSet {
     /// Maps action ID to set of versions found in workflows
     versions: HashMap<ActionId, HashSet<Version>>,
-    /// Maps action ID to SHA if present in workflow (first one wins)
-    shas: HashMap<ActionId, CommitSha>,
     /// Count of how many times each version appears for each action (across all steps)
     counts: HashMap<ActionId, HashMap<Version, usize>>,
 }
@@ -19,6 +17,27 @@ impl WorkflowActionSet {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Create a `WorkflowActionSet` from a slice of `LocatedAction`.
+    /// Builds the `versions` and `counts` maps from the actions (no `shas` field).
+    #[must_use]
+    pub fn from_located(actions: &[LocatedAction]) -> Self {
+        let mut set = Self::new();
+        for action in actions {
+            // Build versions and counts maps from the actions
+            set.versions
+                .entry(action.id.clone())
+                .or_default()
+                .insert(action.version.clone());
+
+            *set.counts
+                .entry(action.id.clone())
+                .or_default()
+                .entry(action.version.clone())
+                .or_insert(0) += 1;
+        }
+        set
     }
 
     /// Add an interpreted action reference to the set.
@@ -35,13 +54,6 @@ impl WorkflowActionSet {
             .or_default()
             .entry(interpreted.version.clone())
             .or_insert(0) += 1;
-
-        // Store SHA if present (first one wins for consistency)
-        if let Some(sha) = &interpreted.sha {
-            self.shas
-                .entry(interpreted.id.clone())
-                .or_insert_with(|| sha.clone());
-        }
     }
 
     /// Select the dominant version for an action:
@@ -78,12 +90,6 @@ impl WorkflowActionSet {
     #[must_use]
     pub fn action_ids(&self) -> Vec<ActionId> {
         self.versions.keys().cloned().collect()
-    }
-
-    /// Get the SHA for an action if one was found in workflows.
-    #[must_use]
-    pub fn sha_for(&self, id: &ActionId) -> Option<&CommitSha> {
-        self.shas.get(id)
     }
 }
 
@@ -206,36 +212,6 @@ mod tests {
 
         let versions = set.versions_for(&ActionId::from("actions/checkout"));
         assert_eq!(versions.len(), 1);
-    }
-
-    #[test]
-    fn test_sha_first_wins() {
-        let mut set = WorkflowActionSet::new();
-        set.add(&make_interpreted(
-            "actions/checkout",
-            "v4",
-            Some("first_sha_12345678901234567890123456789012"),
-        ));
-        set.add(&make_interpreted(
-            "actions/checkout",
-            "v4",
-            Some("second_sha_1234567890123456789012345678901"),
-        ));
-
-        assert_eq!(
-            set.sha_for(&ActionId::from("actions/checkout")),
-            Some(&CommitSha::from(
-                "first_sha_12345678901234567890123456789012"
-            ))
-        );
-    }
-
-    #[test]
-    fn test_sha_none_when_not_present() {
-        let mut set = WorkflowActionSet::new();
-        set.add(&make_interpreted("actions/checkout", "v4", None));
-
-        assert!(set.sha_for(&ActionId::from("actions/checkout")).is_none());
     }
 
     #[test]

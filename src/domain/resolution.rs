@@ -173,7 +173,11 @@ fn parse_version_components(s: &str) -> Option<Vec<u64>> {
 
 /// Select the best tag from a list (prefers semver-like tags with fewer components,
 /// then highest version value among equal component counts, non-semver tags last).
-fn select_best_tag(tags: &[Version]) -> Option<Version> {
+/// Select the best version tag from a list.
+/// Prefers semver-like tags with fewer components (major over minor over patch),
+/// then highest version value among equal component counts, with non-semver tags last.
+#[must_use]
+pub fn select_best_tag(tags: &[Version]) -> Option<Version> {
     if tags.is_empty() {
         return None;
     }

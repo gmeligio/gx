@@ -29,8 +29,7 @@ toml = "0.9"
 tempfile = "3"
 
 [lints.rust]
-unused-crate-dependencies = "deny"
-warnings = "warn"
+warnings = "deny"
 
 [lints.clippy]
 pedantic = "deny"
