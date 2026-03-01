@@ -73,9 +73,6 @@ impl Default for LockData {
 #[derive(Debug, Deserialize)]
 struct LockDataV1 {
     #[serde(default)]
-    #[allow(dead_code)]
-    version: String,
-    #[serde(default)]
     actions: HashMap<String, String>,
 }
 
@@ -404,19 +401,18 @@ mod tests {
 
     #[test]
     fn test_roundtrip_with_version_and_specifier() {
+        use std::io::Write as StdWrite;
+
         let file = NamedTempFile::new().unwrap();
-        let store = FileLock::new(file.path());
+        let _store = FileLock::new(file.path());
 
         // Create a lock entry with version and specifier
-        let content = format!(
-            r#"version = "1.3"
+        let content = r#"version = "1.3"
 
 [actions]
-"actions/checkout@v6" = {{ sha = "de0fac2e4500dabe0009e67214ff5f5447ce83dd", version = "v6.2.3", specifier = "^6", repository = "actions/checkout", ref_type = "release", date = "2026-01-09T19:42:23Z" }}
-"#
-        );
+"actions/checkout@v6" = { sha = "de0fac2e4500dabe0009e67214ff5f5447ce83dd", version = "v6.2.3", specifier = "^6", repository = "actions/checkout", ref_type = "release", date = "2026-01-09T19:42:23Z" }
+"#;
         let mut f = std::fs::File::create(file.path()).unwrap();
-        use std::io::Write as StdWrite;
         f.write_all(content.as_bytes()).unwrap();
 
         // Load and verify the new fields are preserved

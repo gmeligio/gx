@@ -155,7 +155,6 @@ mod tests {
     fn level_deserializes_from_string() {
         #[derive(Deserialize)]
         struct Wrapper {
-            #[allow(dead_code)]
             level: Level,
         }
         assert_eq!(
@@ -177,10 +176,7 @@ mod tests {
     #[test]
     fn level_rejects_invalid_values() {
         #[derive(Deserialize)]
-        struct Wrapper {
-            #[allow(dead_code)]
-            level: Level,
-        }
+        struct Wrapper {}
         assert!(toml::from_str::<Wrapper>("level = \"invalid\"").is_err());
     }
 

@@ -4,7 +4,7 @@ use std::fs;
 
 use gx_lib::commands::lint;
 use gx_lib::config::{Level, LintConfig};
-use gx_lib::domain::{ActionId, CommitSha, Lock, Manifest, ResolvedAction, Version};
+use gx_lib::domain::{ActionId, CommitSha, Lock, Manifest, RefType, ResolvedAction, Version};
 use gx_lib::infrastructure::FileWorkflowScanner;
 
 #[test]
@@ -283,6 +283,9 @@ jobs:
         ActionId::from("actions/checkout"),
         Version::from("v4"),
         CommitSha::from("def456789012345678901234567890abcd123456"),
+        "actions/checkout".to_string(),
+        RefType::Tag,
+        "2026-01-01T00:00:00Z".to_string(),
     ));
 
     let scanner = FileWorkflowScanner::new(repo_root);
@@ -331,6 +334,9 @@ jobs:
         ActionId::from("actions/setup-node"),
         Version::from("v3"),
         CommitSha::from("def456789012345678901234567890abcd123456"),
+        "actions/setup-node".to_string(),
+        RefType::Tag,
+        "2026-01-01T00:00:00Z".to_string(),
     ));
 
     let scanner = FileWorkflowScanner::new(repo_root);
@@ -378,6 +384,9 @@ jobs:
         ActionId::from("actions/setup-node"),
         Version::from("v3"),
         CommitSha::from("def456789012345678901234567890abcd123456"),
+        "actions/setup-node".to_string(),
+        RefType::Tag,
+        "2026-01-01T00:00:00Z".to_string(),
     ));
 
     let scanner = FileWorkflowScanner::new(repo_root);
@@ -483,6 +492,9 @@ jobs:
         ActionId::from("actions/checkout"),
         Version::from("v4"),
         CommitSha::from("def456789012345678901234567890abcd123456"),
+        "actions/checkout".to_string(),
+        RefType::Tag,
+        "2026-01-01T00:00:00Z".to_string(),
     ));
 
     let scanner = FileWorkflowScanner::new(repo_root);

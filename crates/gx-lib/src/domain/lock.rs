@@ -359,7 +359,7 @@ mod tests {
         let entry = LockEntry::with_version_and_specifier(
             CommitSha::from("abc123def456789012345678901234567890abcd"),
             Some("v4".to_string()),
-            Some("".to_string()),
+            Some(String::new()),
             "actions/checkout".to_string(),
             RefType::Tag,
             "2026-01-01T00:00:00Z".to_string(),
@@ -402,7 +402,7 @@ mod tests {
             Some("^4".to_string()),
             "actions/checkout".to_string(),
             RefType::Tag,
-            "".to_string(),
+            String::new(),
         );
         assert!(!entry.is_complete(&Version::from("v4")));
     }

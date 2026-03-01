@@ -717,8 +717,9 @@ impl UpgradeCandidate {
     #[must_use]
     pub fn candidate(&self) -> &Version {
         match &self.action {
-            UpgradeAction::InRange { candidate } => candidate,
-            UpgradeAction::CrossRange { candidate, .. } => candidate,
+            UpgradeAction::InRange { candidate } | UpgradeAction::CrossRange { candidate, .. } => {
+                candidate
+            }
         }
     }
 

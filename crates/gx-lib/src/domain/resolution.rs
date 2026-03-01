@@ -129,9 +129,12 @@ impl<R: VersionRegistry> ActionResolver<R> {
     ) -> (Version, bool) {
         match self.registry.tags_for_sha(id, sha) {
             Ok(tags) => {
+                // If the original version is already a valid tag, keep it
+                if tags.contains(original_version) {
+                    return (original_version.clone(), false);
+                }
                 if let Some(tag) = select_best_tag(&tags) {
-                    let was_corrected = tag != *original_version;
-                    (tag, was_corrected)
+                    (tag, true)
                 } else {
                     warn!("No tags found for {id} SHA {sha}, keeping version");
                     (original_version.clone(), false)
