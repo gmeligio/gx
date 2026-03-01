@@ -1,12 +1,12 @@
-version = "1.1"
+version = "1.0"
 
 [actions]
-"actions-rust-lang/rustfmt@v1" = { sha = "4066006ec54a31931b9b1fddfd38f2fdf2d27143", repository = "actions-rust-lang/rustfmt", ref_type = "tag", date = "2025-12-14T19:52:54Z" }
-"actions-rust-lang/setup-rust-toolchain@v1.15.2" = { sha = "1780873c7b576612439a134613cc4cc74ce5538c", repository = "actions-rust-lang/setup-rust-toolchain", ref_type = "release", date = "2025-10-04T13:52:01Z" }
-"actions/checkout@v6" = { sha = "de0fac2e4500dabe0009e67214ff5f5447ce83dd", repository = "actions/checkout", ref_type = "tag", date = "2026-01-09T19:42:23Z" }
-"actions/create-github-app-token@v2" = { sha = "29824e69f54612133e76f7eaac726eef6c875baf", repository = "actions/create-github-app-token", ref_type = "tag", date = "2025-12-05T22:53:03Z" }
-"actions/download-artifact@v7" = { sha = "37930b1c2abaa49bbe596cd826c3c89aef350131", repository = "actions/download-artifact", ref_type = "tag", date = "2025-12-12T17:58:13Z" }
-"actions/upload-artifact@v6" = { sha = "b7c566a772e6b6bfb58ed0dc250532a479d7789f", repository = "actions/upload-artifact", ref_type = "tag", date = "2025-12-12T17:58:04Z" }
-"jdx/mise-action@v3" = { sha = "6d1e696aa24c1aa1bcc1adea0212707c71ab78a8", repository = "jdx/mise-action", ref_type = "tag", date = "2026-01-20T12:32:53Z" }
-"release-plz/action@v0.5" = { sha = "efc7a2b896608c31370cd499ba1518cda3ac5660", repository = "release-plz/action", ref_type = "tag", date = "2026-02-16T09:40:41Z" }
-"rust-lang/crates-io-auth-action@v1.0.3" = { sha = "b7e9a28eded4986ec6b1fa40eeee8f8f165559ec", repository = "rust-lang/crates-io-auth-action", ref_type = "release", date = "2025-11-06T13:27:32Z" }
+"actions-rust-lang/rustfmt@v1" = "4066006ec54a31931b9b1fddfd38f2fdf2d27143"
+"actions-rust-lang/setup-rust-toolchain@v1" = "1780873c7b576612439a134613cc4cc74ce5538c"
+"actions/checkout@v6" = "de0fac2e4500dabe0009e67214ff5f5447ce83dd"
+"actions/create-github-app-token@v2.2.1" = "29824e69f54612133e76f7eaac726eef6c875baf"
+"actions/download-artifact@v7" = "37930b1c2abaa49bbe596cd826c3c89aef350131"
+"actions/upload-artifact@v6" = "b7c566a772e6b6bfb58ed0dc250532a479d7789f"
+"jdx/mise-action@v3.6.1" = "6d1e696aa24c1aa1bcc1adea0212707c71ab78a8"
+"release-plz/action@v0.5" = "efc7a2b896608c31370cd499ba1518cda3ac5660"
+"rust-lang/crates-io-auth-action@v1.0.3" = "b7e9a28eded4986ec6b1fa40eeee8f8f165559ec"
