@@ -2,10 +2,10 @@
 
 use std::fs;
 
-use gx_lib::commands::lint;
-use gx_lib::config::{Level, LintConfig};
-use gx_lib::domain::{ActionId, CommitSha, Lock, Manifest, RefType, ResolvedAction, Version};
-use gx_lib::infrastructure::FileWorkflowScanner;
+use gx::commands::lint;
+use gx::config::{Level, LintConfig};
+use gx::domain::{ActionId, CommitSha, Lock, Manifest, RefType, ResolvedAction, Version};
+use gx::infrastructure::FileWorkflowScanner;
 
 #[test]
 fn lint_clean_repo_no_diagnostics() {
@@ -144,7 +144,7 @@ jobs:
     let mut lint_config = LintConfig::default();
     lint_config.rules.insert(
         "unpinned".to_string(),
-        gx_lib::config::RuleConfig {
+        gx::config::RuleConfig {
             level: Level::Off,
             ignore: vec![],
         },
@@ -192,9 +192,9 @@ jobs:
     let mut lint_config = LintConfig::default();
     lint_config.rules.insert(
         "unpinned".to_string(),
-        gx_lib::config::RuleConfig {
+        gx::config::RuleConfig {
             level: Level::Error,
-            ignore: vec![gx_lib::config::IgnoreTarget {
+            ignore: vec![gx::config::IgnoreTarget {
                 action: Some("actions/checkout".to_string()),
                 workflow: None,
                 job: None,
@@ -397,21 +397,21 @@ jobs:
     let mut lint_config = LintConfig::default();
     lint_config.rules.insert(
         "unpinned".to_string(),
-        gx_lib::config::RuleConfig {
+        gx::config::RuleConfig {
             level: Level::Off,
             ignore: vec![],
         },
     );
     lint_config.rules.insert(
         "sha-mismatch".to_string(),
-        gx_lib::config::RuleConfig {
+        gx::config::RuleConfig {
             level: Level::Off,
             ignore: vec![],
         },
     );
     lint_config.rules.insert(
         "unsynced-manifest".to_string(),
-        gx_lib::config::RuleConfig {
+        gx::config::RuleConfig {
             level: Level::Off,
             ignore: vec![],
         },
@@ -505,7 +505,7 @@ jobs:
     let mut lint_config = LintConfig::default();
     lint_config.rules.insert(
         "stale-comment".to_string(),
-        gx_lib::config::RuleConfig {
+        gx::config::RuleConfig {
             level: Level::Error,
             ignore: vec![],
         },
@@ -569,9 +569,9 @@ jobs:
     let mut lint_config = LintConfig::default();
     lint_config.rules.insert(
         "unpinned".to_string(),
-        gx_lib::config::RuleConfig {
+        gx::config::RuleConfig {
             level: Level::Error,
-            ignore: vec![gx_lib::config::IgnoreTarget {
+            ignore: vec![gx::config::IgnoreTarget {
                 action: None,
                 workflow: Some("ci.yml".to_string()),
                 job: None,

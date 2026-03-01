@@ -1,9 +1,11 @@
+#![allow(unused_crate_dependencies)]
+
 use clap::{Parser, Subcommand};
-use gx_lib::commands;
-use gx_lib::commands::app::AppError;
-use gx_lib::commands::lint::LintError;
-use gx_lib::config::Config;
-use gx_lib::infrastructure::{repo, repo::RepoError};
+use gx::commands;
+use gx::commands::app::AppError;
+use gx::commands::lint::LintError;
+use gx::config::Config;
+use gx::infrastructure::{repo, repo::RepoError};
 use log::{LevelFilter, info};
 use std::io::Write;
 use thiserror::Error;
@@ -113,7 +115,7 @@ fn resolve_upgrade_mode(
     latest: bool,
 ) -> Result<commands::upgrade::UpgradeRequest, GxError> {
     use commands::upgrade::{UpgradeMode, UpgradeRequest, UpgradeScope};
-    use gx_lib::domain::ActionId;
+    use gx::domain::ActionId;
 
     match (action, latest) {
         // gx upgrade --latest
@@ -139,7 +141,7 @@ fn resolve_upgrade_mode(
         (Some(action_str), false) => {
             if action_str.contains('@') {
                 // Bare ACTION@VERSION → Pinned mode
-                let key = gx_lib::domain::LockKey::parse(action_str).ok_or_else(|| {
+                let key = gx::domain::LockKey::parse(action_str).ok_or_else(|| {
                     GxError::InvalidActionFormat {
                         input: action_str.to_string(),
                     }

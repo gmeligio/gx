@@ -1,10 +1,10 @@
 #![allow(unused_crate_dependencies)]
-use gx_lib::commands::{self, tidy};
-use gx_lib::domain::{
+use gx::commands::{self, tidy};
+use gx::domain::{
     ActionId, CommitSha, Lock, Manifest, RefType, ResolutionError, ResolvedRef, Version,
     VersionRegistry,
 };
-use gx_lib::infrastructure::{
+use gx::infrastructure::{
     FileLock, FileManifest, FileWorkflowScanner, FileWorkflowUpdater, parse_lock, parse_manifest,
 };
 use std::collections::hash_map::DefaultHasher;
