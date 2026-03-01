@@ -79,15 +79,6 @@ impl Version {
             .is_some_and(|c| c.is_ascii_digit())
     }
 
-    /// Determines if this version should be replaced by `other`.
-    ///
-    /// Returns true when this version is a SHA and `other` is a semantic version tag.
-    /// This handles the case where someone upgraded from SHA to semver via comment.
-    #[must_use]
-    pub fn should_be_replaced_by(&self, other: &Version) -> bool {
-        self != other && self.is_sha() && other.is_semver_like()
-    }
-
     /// Select the highest version from a list.
     /// Prefers the highest semantic version if available.
     #[must_use]
@@ -898,40 +889,6 @@ mod tests {
         assert!(!Version::from("develop").is_semver_like());
         assert!(!Version::from("abc123def456789012345678901234567890abcd").is_semver_like());
         assert!(!Version::from("").is_semver_like());
-    }
-
-    #[test]
-    fn test_should_be_replaced_by_sha_to_semver() {
-        let sha = Version::from("abc123def456789012345678901234567890abcd");
-        let semver = Version::from("v4");
-        assert!(sha.should_be_replaced_by(&semver));
-    }
-
-    #[test]
-    fn test_should_be_replaced_by_same_version() {
-        let v = Version::from("v4");
-        assert!(!v.should_be_replaced_by(&Version::from("v4")));
-    }
-
-    #[test]
-    fn test_should_be_replaced_by_semver_to_semver() {
-        let v3 = Version::from("v3");
-        let v4 = Version::from("v4");
-        assert!(!v3.should_be_replaced_by(&v4));
-    }
-
-    #[test]
-    fn test_should_be_replaced_by_sha_to_sha() {
-        let sha1 = Version::from("abc123def456789012345678901234567890abcd");
-        let sha2 = Version::from("def456789012345678901234567890abcd12340000");
-        assert!(!sha1.should_be_replaced_by(&sha2));
-    }
-
-    #[test]
-    fn test_should_be_replaced_by_sha_to_branch() {
-        let sha = Version::from("abc123def456789012345678901234567890abcd");
-        let branch = Version::from("main");
-        assert!(!sha.should_be_replaced_by(&branch));
     }
 
     #[test]

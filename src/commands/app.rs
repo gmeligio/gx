@@ -148,11 +148,12 @@ pub fn upgrade(repo_root: &Path, config: Config, request: &UpgradeRequest) -> Re
 /// Returns [`AppError::Lock`] if the lock file cannot be loaded.
 /// Returns [`AppError::Lint`] if violations are found.
 pub fn lint(repo_root: &Path, config: &Config) -> Result<(), AppError> {
+    use crate::domain::WorkflowActionSet;
     use log::info;
 
     let scanner = FileWorkflowScanner::new(repo_root);
-    let action_set = scanner.scan_all()?;
     let workflows = scanner.scan_all_located()?;
+    let action_set = WorkflowActionSet::from_located(&workflows);
 
     let diagnostics = super::lint::run(
         &config.manifest,
