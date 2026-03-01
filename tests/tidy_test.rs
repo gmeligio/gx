@@ -122,21 +122,14 @@ fn run_tidy(repo_root: &Path) -> Result<(), commands::app::AppError> {
     if manifest_path.exists() {
         let manifest = parse_manifest(&manifest_path)?;
         let lock = parse_lock(&lock_path)?;
-        let (updated_manifest, updated_lock) = tidy::run(
-            manifest,
-            lock,
-            &manifest_path,
-            MockRegistry::new(),
-            &scanner,
-            &updater,
-        )?;
+        let (updated_manifest, updated_lock) =
+            tidy::run(manifest, lock, MockRegistry::new(), &scanner, &updater)?;
         FileManifest::new(&manifest_path).save(&updated_manifest)?;
         FileLock::new(&lock_path).save(&updated_lock)?;
     } else {
         let _ = tidy::run(
             Manifest::default(),
             Lock::default(),
-            &manifest_path,
             MockRegistry::new(),
             &scanner,
             &updater,
@@ -748,7 +741,7 @@ jobs:
     let scanner = FileWorkflowScanner::new(&root);
     let updater = FileWorkflowUpdater::new(&root);
     let (updated_manifest, updated_lock) =
-        tidy::run(manifest, lock, &manifest_path, registry, &scanner, &updater).unwrap();
+        tidy::run(manifest, lock, registry, &scanner, &updater).unwrap();
 
     // Save the results
     FileManifest::new(&manifest_path)
@@ -803,14 +796,7 @@ jobs:
     let lock = parse_lock(&lock_path).unwrap();
     let scanner = FileWorkflowScanner::new(&root);
     let updater = FileWorkflowUpdater::new(&root);
-    let result = tidy::run(
-        manifest,
-        lock,
-        &manifest_path,
-        NoopRegistry,
-        &scanner,
-        &updater,
-    );
+    let result = tidy::run(manifest, lock, NoopRegistry, &scanner, &updater);
 
     // The command should fail when it cannot resolve actions
     assert!(
@@ -850,15 +836,8 @@ jobs:
     let lock = parse_lock(&lock_path).unwrap();
     let scanner = FileWorkflowScanner::new(&root);
     let updater = FileWorkflowUpdater::new(&root);
-    let (updated_manifest, updated_lock) = tidy::run(
-        manifest,
-        lock,
-        &manifest_path,
-        MockRegistry::new(),
-        &scanner,
-        &updater,
-    )
-    .unwrap();
+    let (updated_manifest, updated_lock) =
+        tidy::run(manifest, lock, MockRegistry::new(), &scanner, &updater).unwrap();
 
     // Save the results
     FileManifest::new(&manifest_path)

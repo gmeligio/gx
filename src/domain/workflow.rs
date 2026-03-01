@@ -7,32 +7,17 @@ use crate::domain::ActionId;
 /// Errors that can occur when working with workflow files
 #[derive(Debug, Error)]
 pub enum WorkflowError {
-    #[error("failed to read glob pattern")]
-    Glob(#[from] glob::PatternError),
+    /// Failed to scan workflow files
+    #[error("failed to scan workflows: {reason}")]
+    ScanFailed { reason: String },
 
-    #[error("failed to read workflow: {}", path.display())]
-    Read {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
+    /// Failed to parse a workflow file
+    #[error("failed to parse workflow {path}: {reason}")]
+    ParseFailed { path: String, reason: String },
 
-    #[error("failed to parse YAML in workflow: {}", path.display())]
-    Parse {
-        path: PathBuf,
-        #[source]
-        source: Box<serde_saphyr::Error>,
-    },
-
-    #[error("failed to write workflow: {}", path.display())]
-    Write {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-
-    #[error("invalid regex pattern")]
-    Regex(#[from] regex::Error),
+    /// Failed to update a workflow file
+    #[error("failed to update workflow {path}: {reason}")]
+    UpdateFailed { path: String, reason: String },
 }
 
 /// Result of updating a single workflow file

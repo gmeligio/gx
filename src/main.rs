@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 use gx::commands;
 use gx::commands::app::AppError;
 use gx::commands::lint::LintError;
-use gx::config::Config;
+use gx::config::{Config, ConfigError};
 use gx::infrastructure::{repo, repo::RepoError};
 use log::{LevelFilter, info};
 use std::io::Write;
@@ -23,6 +23,10 @@ enum GxError {
     /// The action argument could not be parsed as ACTION@VERSION.
     #[error("invalid format: expected ACTION@VERSION (e.g., actions/checkout@v5), got: {input}")]
     InvalidActionFormat { input: String },
+
+    /// Configuration loading failed.
+    #[error(transparent)]
+    Config(#[from] ConfigError),
 
     /// Command orchestration failed.
     #[error(transparent)]

@@ -5,8 +5,62 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use thiserror::Error;
 
 use crate::domain::{ActionId, UpdateResult, UsesRef, WorkflowError};
+
+/// Internal I/O errors for workflow operations
+#[derive(Debug, Error)]
+enum IoWorkflowError {
+    #[error("glob pattern error")]
+    Glob(#[from] glob::PatternError),
+
+    #[error("read error: {}", path.display())]
+    Read {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+
+    #[error("YAML parse error: {}", path.display())]
+    Parse {
+        path: PathBuf,
+        source: Box<serde_saphyr::Error>,
+    },
+
+    #[error("write error: {}", path.display())]
+    Write {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+
+    #[error("regex error")]
+    Regex(#[from] regex::Error),
+}
+
+impl From<IoWorkflowError> for WorkflowError {
+    fn from(err: IoWorkflowError) -> Self {
+        match err {
+            IoWorkflowError::Glob(e) => WorkflowError::ScanFailed {
+                reason: e.to_string(),
+            },
+            IoWorkflowError::Read { path, source } => WorkflowError::ScanFailed {
+                reason: format!("failed to read {}: {}", path.display(), source),
+            },
+            IoWorkflowError::Parse { path, source } => WorkflowError::ParseFailed {
+                path: path.to_string_lossy().to_string(),
+                reason: source.to_string(),
+            },
+            IoWorkflowError::Write { path, source } => WorkflowError::UpdateFailed {
+                path: path.to_string_lossy().to_string(),
+                reason: format!("write error: {source}"),
+            },
+            IoWorkflowError::Regex(e) => WorkflowError::UpdateFailed {
+                path: String::new(),
+                reason: e.to_string(),
+            },
+        }
+    }
+}
 
 /// Action data extracted from a workflow file.
 /// Call `uses_ref.interpret()` to get domain types.
@@ -32,6 +86,31 @@ struct Job {
 #[derive(Debug, Deserialize)]
 struct Step {
     uses: Option<String>,
+}
+
+/// Find all workflow files in a workflows directory.
+///
+/// # Errors
+///
+/// Returns an error if the glob pattern is invalid or file access fails.
+fn find_workflow_files(workflows_dir: &Path) -> Result<Vec<PathBuf>, IoWorkflowError> {
+    let mut workflows = Vec::new();
+
+    for extension in &["yml", "yaml"] {
+        let pattern = workflows_dir
+            .join(format!("*.{extension}"))
+            .to_string_lossy()
+            .to_string();
+
+        for entry in glob(&pattern)? {
+            match entry {
+                Ok(path) => workflows.push(path),
+                Err(e) => warn!("Error reading path: {e}"),
+            }
+        }
+    }
+
+    Ok(workflows)
 }
 
 /// Parser for extracting action information from workflow files
@@ -64,24 +143,7 @@ impl FileWorkflowScanner {
     ///
     /// Returns an error if the glob pattern is invalid.
     pub fn find_workflows(&self) -> Result<Vec<PathBuf>, WorkflowError> {
-        let mut workflows = Vec::new();
-
-        for extension in &["yml", "yaml"] {
-            let pattern = self
-                .workflows_dir
-                .join(format!("*.{extension}"))
-                .to_string_lossy()
-                .to_string();
-
-            for entry in glob(&pattern)? {
-                match entry {
-                    Ok(path) => workflows.push(path),
-                    Err(e) => warn!("Error reading path: {e}"),
-                }
-            }
-        }
-
-        Ok(workflows)
+        find_workflow_files(&self.workflows_dir).map_err(Into::into)
     }
 
     /// Extract all actions from a single workflow file as data.
@@ -94,11 +156,12 @@ impl FileWorkflowScanner {
     fn extract_actions(
         workflow_path: &Path,
         workflow_rel_path: &str,
-    ) -> Result<Vec<ExtractedAction>, WorkflowError> {
-        let content = fs::read_to_string(workflow_path).map_err(|source| WorkflowError::Read {
-            path: workflow_path.to_path_buf(),
-            source,
-        })?;
+    ) -> Result<Vec<ExtractedAction>, IoWorkflowError> {
+        let content =
+            fs::read_to_string(workflow_path).map_err(|source| IoWorkflowError::Read {
+                path: workflow_path.to_path_buf(),
+                source,
+            })?;
 
         let mut actions = Vec::new();
 
@@ -117,7 +180,7 @@ impl FileWorkflowScanner {
 
         // Parse YAML to get structured job/step info
         let workflow: Workflow =
-            serde_saphyr::from_str(&content).map_err(|source| WorkflowError::Parse {
+            serde_saphyr::from_str(&content).map_err(|source| IoWorkflowError::Parse {
                 path: workflow_path.to_path_buf(),
                 source: Box::new(source),
             })?;
@@ -184,7 +247,8 @@ impl FileWorkflowScanner {
         let mut result = Vec::new();
         for workflow in &workflows {
             let rel = self.rel_path(workflow);
-            let actions = Self::extract_actions(workflow, &rel)?;
+            let actions =
+                Self::extract_actions(workflow, &rel).map_err(Into::<WorkflowError>::into)?;
             for action in actions {
                 let interpreted = action.uses_ref.interpret();
                 result.push(crate::domain::LocatedAction {
@@ -218,24 +282,7 @@ impl FileWorkflowUpdater {
     ///
     /// Returns an error if the glob pattern is invalid.
     pub fn find_workflows(&self) -> Result<Vec<PathBuf>, WorkflowError> {
-        let mut workflows = Vec::new();
-
-        for extension in &["yml", "yaml"] {
-            let pattern = self
-                .workflows_dir
-                .join(format!("*.{extension}"))
-                .to_string_lossy()
-                .to_string();
-
-            for entry in glob(&pattern)? {
-                match entry {
-                    Ok(path) => workflows.push(path),
-                    Err(e) => warn!("Error reading path: {e}"),
-                }
-            }
-        }
-
-        Ok(workflows)
+        find_workflow_files(&self.workflows_dir).map_err(Into::into)
     }
 
     /// Update action versions in a single workflow file.
@@ -248,10 +295,19 @@ impl FileWorkflowUpdater {
         workflow_path: &Path,
         actions: &HashMap<ActionId, String>,
     ) -> Result<UpdateResult, WorkflowError> {
-        let content = fs::read_to_string(workflow_path).map_err(|source| WorkflowError::Read {
-            path: workflow_path.to_path_buf(),
-            source,
-        })?;
+        FileWorkflowUpdater::update_workflow_internal(workflow_path, actions).map_err(Into::into)
+    }
+
+    /// Internal implementation using `IoWorkflowError` for granular error handling.
+    fn update_workflow_internal(
+        workflow_path: &Path,
+        actions: &HashMap<ActionId, String>,
+    ) -> Result<UpdateResult, IoWorkflowError> {
+        let content =
+            fs::read_to_string(workflow_path).map_err(|source| IoWorkflowError::Read {
+                path: workflow_path.to_path_buf(),
+                source,
+            })?;
 
         let mut updated_content = content.clone();
         let mut changes = Vec::new();
@@ -279,9 +335,11 @@ impl FileWorkflowUpdater {
         }
 
         if !changes.is_empty() {
-            fs::write(workflow_path, &updated_content).map_err(|source| WorkflowError::Write {
-                path: workflow_path.to_path_buf(),
-                source,
+            fs::write(workflow_path, &updated_content).map_err(|source| {
+                IoWorkflowError::Write {
+                    path: workflow_path.to_path_buf(),
+                    source,
+                }
             })?;
         }
 

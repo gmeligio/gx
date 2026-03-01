@@ -1,14 +1,12 @@
 use log::{debug, info};
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
 use thiserror::Error;
 
 use crate::domain::{
     ActionId, ActionResolver, ActionSpec, CommitSha, LocatedAction, Lock, LockKey, Manifest,
     ResolutionResult, UpdateResult, Version, VersionCorrection, VersionRegistry, WorkflowActionSet,
-    WorkflowScanner, WorkflowUpdater, select_best_tag,
+    WorkflowError, WorkflowScanner, WorkflowUpdater, select_best_tag,
 };
-use crate::infrastructure::{LockFileError, ManifestError, WorkflowError};
 
 /// Errors that can occur during the tidy command
 #[derive(Debug, Error)]
@@ -16,14 +14,6 @@ pub enum TidyError {
     /// One or more actions could not be resolved to a commit SHA.
     #[error("failed to resolve {count} action(s):\n  {specs}")]
     ResolutionFailed { count: usize, specs: String },
-
-    /// The manifest store failed to save.
-    #[error(transparent)]
-    Manifest(#[from] ManifestError),
-
-    /// The lock store failed to save.
-    #[error(transparent)]
-    Lock(#[from] LockFileError),
 
     /// Workflow files could not be scanned or updated.
     #[error(transparent)]
@@ -40,15 +30,10 @@ pub enum TidyError {
 /// # Panics
 ///
 /// Panics if an action in the intersection of workflow and manifest is not found in the manifest.
-#[allow(
-    clippy::too_many_arguments,
-    clippy::needless_pass_by_value,
-    clippy::too_many_lines
-)]
+#[allow(clippy::needless_pass_by_value)]
 pub fn run<R, P, W>(
     mut manifest: Manifest,
     mut lock: Lock,
-    manifest_path: &Path,
     registry: R,
     parser: &P,
     writer: &W,
@@ -58,13 +43,41 @@ where
     P: WorkflowScanner,
     W: WorkflowUpdater,
 {
-    // Single scan pass with location context
     let located = parser.scan_all_located()?;
     if located.is_empty() {
         return Ok((manifest, lock));
     }
 
     let action_set = WorkflowActionSet::from_located(&located);
+
+    // Phase 1: Sync manifest
+    sync_manifest_actions(&mut manifest, &located, &action_set, &registry);
+    upgrade_sha_versions_to_tags(&mut manifest, &registry);
+
+    // Phase 2: Sync overrides
+    sync_overrides(&mut manifest, &located, &action_set);
+    prune_stale_overrides(&mut manifest, &located);
+
+    // Phase 3: Resolve lock
+    let corrections = update_lock(&mut lock, &mut manifest, &registry)?;
+    let keys_to_retain: Vec<LockKey> = build_keys_to_retain(&manifest);
+    lock.retain(&keys_to_retain);
+
+    // Phase 4: Update workflows
+    let results = update_workflow_files(&located, &manifest, &lock, parser, writer)?;
+    print_update_results(&results);
+    print_corrections(&corrections);
+
+    Ok((manifest, lock))
+}
+
+/// Remove unused actions from manifest and add missing ones.
+fn sync_manifest_actions<R: VersionRegistry + Clone>(
+    manifest: &mut Manifest,
+    located: &[LocatedAction],
+    action_set: &WorkflowActionSet,
+    registry: &R,
+) {
     let workflow_actions: HashSet<ActionId> = action_set.action_ids().into_iter().collect();
     let manifest_actions: HashSet<ActionId> =
         manifest.specs().iter().map(|s| s.id.clone()).collect();
@@ -85,12 +98,9 @@ where
         info!("Adding missing actions to manifest:");
         let resolver = ActionResolver::new(registry.clone());
         for action_id in missing {
-            let version = select_dominant_version(action_id, &action_set);
+            let version = select_dominant_version(action_id, action_set);
 
-            // Task 2.4: SHA correction for new actions only
-            // Find a LocatedAction with the dominant version that has a SHA, then validate/correct the version
             let corrected_version = if version.is_sha() {
-                // Try to find a located action with this version and SHA
                 let located_with_version = located.iter().find(|loc| {
                     &loc.id == action_id && loc.version == version && loc.sha.is_some()
                 });
@@ -120,92 +130,74 @@ where
             info!("+ {spec}");
         }
     }
+}
 
-    // Task 2.3: Upgrade SHA versions to tags via registry
-    // After adding missing and removing unused, iterate existing manifest entries where version.is_sha()
-    // and try to upgrade them to the best tag available in the registry
-    {
-        let resolver = ActionResolver::new(registry.clone());
-        let specs: Vec<ActionSpec> = manifest.specs().iter().map(|s| (*s).clone()).collect();
-        let mut upgraded_actions = Vec::new();
+/// Upgrade SHA versions in manifest to tags via registry.
+fn upgrade_sha_versions_to_tags<R: VersionRegistry + Clone>(manifest: &mut Manifest, registry: &R) {
+    let resolver = ActionResolver::new(registry.clone());
+    let specs: Vec<ActionSpec> = manifest.specs().iter().map(|s| (*s).clone()).collect();
+    let mut upgraded_actions = Vec::new();
 
-        for spec in &specs {
-            if spec.version.is_sha() {
-                match resolver
-                    .registry()
-                    .tags_for_sha(&spec.id, &CommitSha::from(spec.version.as_str()))
-                {
-                    Ok(tags) => {
-                        if let Some(best_tag) = select_best_tag(&tags) {
-                            manifest.set(spec.id.clone(), best_tag.clone());
-                            upgraded_actions
-                                .push(format!("{} SHA upgraded to {}", spec.id, best_tag));
-                        }
+    for spec in &specs {
+        if spec.version.is_sha() {
+            match resolver
+                .registry()
+                .tags_for_sha(&spec.id, &CommitSha::from(spec.version.as_str()))
+            {
+                Ok(tags) => {
+                    if let Some(best_tag) = select_best_tag(&tags) {
+                        manifest.set(spec.id.clone(), best_tag.clone());
+                        upgraded_actions.push(format!("{} SHA upgraded to {}", spec.id, best_tag));
                     }
-                    Err(e) => {
-                        if matches!(e, crate::domain::resolution::ResolutionError::TokenRequired) {
-                            debug!(
-                                "GITHUB_TOKEN not set. Cannot upgrade {} SHA {}, keeping SHA",
-                                spec.id, spec.version
-                            );
-                        } else {
-                            debug!("Could not upgrade {} SHA {}: {}", spec.id, spec.version, e);
-                        }
+                }
+                Err(e) => {
+                    if matches!(e, crate::domain::resolution::ResolutionError::TokenRequired) {
+                        debug!(
+                            "GITHUB_TOKEN not set. Cannot upgrade {} SHA {}, keeping SHA",
+                            spec.id, spec.version
+                        );
+                    } else {
+                        debug!("Could not upgrade {} SHA {}: {}", spec.id, spec.version, e);
                     }
                 }
             }
         }
+    }
 
-        if !upgraded_actions.is_empty() {
-            info!("Upgrading SHA versions to tags:");
-            for upgrade in &upgraded_actions {
-                info!("~ {upgrade}");
-            }
+    if !upgraded_actions.is_empty() {
+        info!("Upgrading SHA versions to tags:");
+        for upgrade in &upgraded_actions {
+            info!("~ {upgrade}");
         }
     }
+}
 
-    // Sync overrides: when multiple distinct versions of the same action appear across
-    // workflows, record overrides for steps whose version differs from the manifest global.
-    // Only applies to actions with multiple workflow versions — if the manifest has v4 but
-    // every workflow step uses v3, the manifest wins and no override is needed.
-    sync_overrides(&mut manifest, &located, &action_set);
-
-    // Remove stale override entries (overrides pointing to removed workflows/jobs/steps)
-    prune_stale_overrides(&mut manifest, &located);
-
-    // Resolve SHAs and validate version comments (must handle all versions in manifest + overrides)
-    let corrections = update_lock(&mut lock, &mut manifest, &registry)?;
-
-    // Prune lock: retain all version variants that appear in manifest or overrides
-    let keys_to_retain: Vec<LockKey> = build_keys_to_retain(&manifest);
-    lock.retain(&keys_to_retain);
-
-    if manifest.is_empty() {
-        info!("No actions found in {}", manifest_path.display());
-        return Ok((manifest, lock));
-    }
-
-    // Group located steps by workflow location path
+/// Update workflow files with resolved actions from manifest and lock.
+fn update_workflow_files<P: WorkflowScanner, W: WorkflowUpdater>(
+    located: &[LocatedAction],
+    manifest: &Manifest,
+    lock: &Lock,
+    parser: &P,
+    writer: &W,
+) -> Result<Vec<UpdateResult>, TidyError> {
     let mut by_location: HashMap<String, Vec<&LocatedAction>> = HashMap::new();
-    for action in &located {
+    for action in located {
         by_location
             .entry(action.location.workflow.clone())
             .or_default()
             .push(action);
     }
 
-    // For each workflow file, find matching located steps and update
     let workflows = parser.find_workflow_paths()?;
     let mut all_results: Vec<UpdateResult> = Vec::new();
 
     for workflow_path in &workflows {
-        // Match absolute path against relative location paths (suffix match)
         let abs_str = workflow_path.to_string_lossy().replace('\\', "/");
         let steps: &[&LocatedAction] = by_location
             .iter()
             .find(|(loc, _)| abs_str.ends_with(loc.as_str()))
             .map_or(&[], |(_, steps)| steps.as_slice());
-        let file_map = build_file_update_map(&manifest, &lock, steps);
+        let file_map = build_file_update_map(manifest, lock, steps);
         if !file_map.is_empty() {
             let result = writer.update_file(workflow_path, &file_map)?;
             if !result.changes.is_empty() {
@@ -213,16 +205,18 @@ where
             }
         }
     }
-    print_update_results(&all_results);
 
+    Ok(all_results)
+}
+
+/// Print version corrections.
+fn print_corrections(corrections: &[VersionCorrection]) {
     if !corrections.is_empty() {
         info!("Version corrections:");
-        for c in &corrections {
+        for c in corrections {
             info!("{c}");
         }
     }
-
-    Ok((manifest, lock))
 }
 
 fn select_version(versions: &[Version]) -> Version {
@@ -625,15 +619,8 @@ jobs:
         let scanner = FileWorkflowScanner::new(repo_root);
         let updater = FileWorkflowUpdater::new(repo_root);
 
-        let (updated_manifest, updated_lock) = run(
-            manifest,
-            lock,
-            &manifest_path,
-            NoopRegistry,
-            &scanner,
-            &updater,
-        )
-        .unwrap();
+        let (updated_manifest, updated_lock) =
+            run(manifest, lock, NoopRegistry, &scanner, &updater).unwrap();
 
         // Save the results (simulating what app.rs does when manifest exists)
         FileManifest::new(&manifest_path)
@@ -823,7 +810,7 @@ jobs:
         fs::write(workflows_dir.join("ci.yml"), workflow).unwrap();
 
         // Manifest already tracks actions/checkout at v4 (user's intent)
-        let manifest_path = github_dir.join("gx.toml");
+        let _manifest_path = github_dir.join("gx.toml");
 
         let mut manifest = Manifest::default();
         manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
@@ -842,15 +829,7 @@ jobs:
         let scanner = FileWorkflowScanner::new(repo_root);
         let updater = FileWorkflowUpdater::new(repo_root);
 
-        let (updated_manifest, _) = run(
-            manifest,
-            lock,
-            &manifest_path,
-            NoopRegistry,
-            &scanner,
-            &updater,
-        )
-        .unwrap();
+        let (updated_manifest, _) = run(manifest, lock, NoopRegistry, &scanner, &updater).unwrap();
 
         // Manifest must still be v4 — workflow v3 SHA must NOT overwrite it
         assert_eq!(
@@ -909,7 +888,7 @@ jobs:
         );
         fs::write(workflows_dir.join("ci.yml"), &workflow).unwrap();
 
-        let manifest_path = github_dir.join("gx.toml");
+        let _manifest_path = github_dir.join("gx.toml");
 
         // Manifest has the raw SHA as the version
         let mut manifest = Manifest::default();
@@ -934,8 +913,7 @@ jobs:
         let scanner = FileWorkflowScanner::new(repo_root);
         let updater = FileWorkflowUpdater::new(repo_root);
 
-        let (updated_manifest, _) =
-            run(manifest, lock, &manifest_path, registry, &scanner, &updater).unwrap();
+        let (updated_manifest, _) = run(manifest, lock, registry, &scanner, &updater).unwrap();
 
         // Manifest should be upgraded from SHA to v4 (best tag)
         assert_eq!(
@@ -960,7 +938,7 @@ jobs:
         );
         fs::write(workflows_dir.join("ci.yml"), &workflow).unwrap();
 
-        let manifest_path = github_dir.join("gx.toml");
+        let _manifest_path = github_dir.join("gx.toml");
 
         let mut manifest = Manifest::default();
         manifest.set(ActionId::from("actions/checkout"), Version::from(sha));
@@ -980,15 +958,7 @@ jobs:
         let scanner = FileWorkflowScanner::new(repo_root);
         let updater = FileWorkflowUpdater::new(repo_root);
 
-        let (updated_manifest, _) = run(
-            manifest,
-            lock,
-            &manifest_path,
-            NoopRegistry,
-            &scanner,
-            &updater,
-        )
-        .unwrap();
+        let (updated_manifest, _) = run(manifest, lock, NoopRegistry, &scanner, &updater).unwrap();
 
         // SHA stays unchanged when no token is available
         assert_eq!(
@@ -1048,7 +1018,7 @@ jobs:
         );
         fs::write(workflows_dir.join("ci.yml"), &workflow).unwrap();
 
-        let manifest_path = github_dir.join("gx.toml");
+        let _manifest_path = github_dir.join("gx.toml");
 
         // Manifest has v4 (correct version)
         let mut manifest = Manifest::default();
@@ -1064,8 +1034,7 @@ jobs:
         let scanner = FileWorkflowScanner::new(repo_root);
         let updater = FileWorkflowUpdater::new(repo_root);
 
-        let (_, updated_lock) =
-            run(manifest, lock, &manifest_path, registry, &scanner, &updater).unwrap();
+        let (_, updated_lock) = run(manifest, lock, registry, &scanner, &updater).unwrap();
 
         // Lock must have the registry SHA, not the workflow SHA
         let key = LockKey::new(ActionId::from("actions/checkout"), Version::from("v4"));

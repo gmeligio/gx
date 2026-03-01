@@ -267,11 +267,19 @@ jobs:
             GITHUB_EMAIL: "admin+bot@axo.dev"
         if: ${{ !fromJson(needs.plan.outputs.val).announcement_is_prerelease || fromJson(needs.plan.outputs.val).publish_prereleases }}
         steps:
+            - name: Generate authentication token with GitHub App to trigger Actions
+              uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2
+              id: app-token
+              with:
+                  app-id: ${{ secrets.VERIFIED_COMMIT_ID }}
+                  private-key: ${{ secrets.VERIFIED_COMMIT_KEY }}
+                  repositories: ${{ github.event.repository.name }}
+                  owner: ${{ github.repository_owner }}
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
               with:
                   persist-credentials: true
                   repository: "gmeligio/homebrew-tap"
-                  token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+                  token: ${{ steps.app-token.outputs.token }}
             # So we have access to the formula
             - name: Fetch homebrew formulae
               uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
@@ -301,23 +309,6 @@ jobs:
                   done
                   git push
 
-    announce:
-        needs:
-            - plan
-            - host
-            - publish-homebrew-formula
-        # use "always() && ..." to allow us to wait for all publish jobs while
-        # still allowing individual publish jobs to skip themselves (for prereleases).
-        # "host" however must run to completion, no skipping allowed!
-        if: ${{ always() && needs.host.result == 'success' && (needs.publish-homebrew-formula.result == 'skipped' || needs.publish-homebrew-formula.result == 'success') }}
-        runs-on: "ubuntu-22.04"
-        env:
-            GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        steps:
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-              with:
-                  persist-credentials: false
-
     publish-crates:
         name: Publish to crates.io
         needs: [announce]
@@ -337,3 +328,20 @@ jobs:
             - run: cargo publish
               env:
                   CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
+    announce:
+        needs:
+            - plan
+            - host
+            - publish-homebrew-formula
+        # use "always() && ..." to allow us to wait for all publish jobs while
+        # still allowing individual publish jobs to skip themselves (for prereleases).
+        # "host" however must run to completion, no skipping allowed!
+        if: ${{ always() && needs.host.result == 'success' && (needs.publish-homebrew-formula.result == 'skipped' || needs.publish-homebrew-formula.result == 'success') }}
+        runs-on: "ubuntu-22.04"
+        env:
+            GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+              with:
+                  persist-credentials: false
