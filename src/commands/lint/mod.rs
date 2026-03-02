@@ -1,5 +1,7 @@
 use crate::config::{IgnoreTarget, Level, LintConfig};
-use crate::domain::{LocatedAction, Lock, Manifest, WorkflowActionSet, WorkflowError};
+use crate::domain::{
+    LocatedAction, Lock, Manifest, WorkflowActionSet, WorkflowError, WorkflowScanner,
+};
 use thiserror::Error;
 
 /// Errors that can occur during the lint command
@@ -169,68 +171,81 @@ pub fn format_and_report(diagnostics: &[Diagnostic]) -> Result<(), LintError> {
     Ok(())
 }
 
-/// Run lint checks on the given manifest/lock/workflows and return diagnostics.
+/// Run lint checks by scanning workflows and return diagnostics.
+///
+/// File-local rules (sha-mismatch, unpinned, stale-comment) run per-action during scanning.
+/// Global rules (unsynced-manifest) run after the full scan completes.
 ///
 /// # Errors
 ///
 /// Returns [`LintError::Workflow`] if a workflow parsing error occurs.
-/// Returns [`LintError::ViolationsFound`] if lint diagnostics are produced (either errors or warnings).
 pub fn run(
     manifest: &Manifest,
     lock: &Lock,
-    workflows: &[LocatedAction],
-    action_set: &WorkflowActionSet,
+    scanner: &dyn WorkflowScanner,
     lint_config: &LintConfig,
 ) -> Result<Vec<Diagnostic>, LintError> {
-    let ctx = LintContext {
-        manifest,
-        lock,
-        workflows,
-        action_set,
-    };
+    let sha_mismatch_level = lint_config.get_rule("sha-mismatch", Level::Error).level;
+    let unpinned_level = lint_config.get_rule("unpinned", Level::Error).level;
+    let stale_comment_level = lint_config.get_rule("stale-comment", Level::Warn).level;
 
     let mut all_diagnostics = Vec::new();
+    let mut located = Vec::new();
+    let mut action_set = WorkflowActionSet::new();
 
-    // Build a vec of rules with their configured levels
-    let rules: Vec<(Box<dyn LintRule>, Level)> = vec![
-        (
-            Box::new(ShaMismatchRule),
-            lint_config.get_rule("sha-mismatch", Level::Error).level,
-        ),
-        (
-            Box::new(UnpinnedRule),
-            lint_config.get_rule("unpinned", Level::Error).level,
-        ),
-        (
-            Box::new(UnsyncedManifestRule),
-            lint_config
-                .get_rule("unsynced-manifest", Level::Error)
-                .level,
-        ),
-        (
-            Box::new(StaleCommentRule),
-            lint_config.get_rule("stale-comment", Level::Warn).level,
-        ),
-    ];
+    // Phase 1: Scan workflows, running per-action rules on each action
+    for result in scanner.scan() {
+        let action = result?;
 
-    // Run each rule and collect diagnostics
-    for (rule, configured_level) in rules {
-        if configured_level == Level::Off {
-            continue;
+        // Per-action rules
+        if sha_mismatch_level != Level::Off
+            && let Some(mut diag) = ShaMismatchRule::check_action(&action, lock)
+        {
+            diag.level = sha_mismatch_level;
+            if !is_ignored(&diag, "sha-mismatch", Level::Error, lint_config, &action) {
+                all_diagnostics.push(diag);
+            }
+        }
+        if unpinned_level != Level::Off
+            && let Some(mut diag) = UnpinnedRule::check_action(&action)
+        {
+            diag.level = unpinned_level;
+            if !is_ignored(&diag, "unpinned", Level::Error, lint_config, &action) {
+                all_diagnostics.push(diag);
+            }
+        }
+        if stale_comment_level != Level::Off
+            && let Some(mut diag) = StaleCommentRule::check_action(&action, lock)
+        {
+            diag.level = stale_comment_level;
+            if !is_ignored(&diag, "stale-comment", Level::Warn, lint_config, &action) {
+                all_diagnostics.push(diag);
+            }
         }
 
-        let rule_diagnostics = rule.check(&ctx);
-        for mut diag in rule_diagnostics {
-            // Apply configured level (may be different from rule default)
-            diag.level = configured_level;
+        action_set.add_located(&action);
+        located.push(action);
+    }
 
-            // Filter against ignores
+    // Phase 2: Run global rules that need the full picture
+    let unsynced_level = lint_config
+        .get_rule("unsynced-manifest", Level::Error)
+        .level;
+    if unsynced_level != Level::Off {
+        let ctx = LintContext {
+            manifest,
+            lock,
+            workflows: &located,
+            action_set: &action_set,
+        };
+        let rule = UnsyncedManifestRule;
+        for mut diag in rule.check(&ctx) {
+            diag.level = unsynced_level;
             let ignored = lint_config
-                .get_rule(rule.name(), rule.default_level())
+                .get_rule("unsynced-manifest", Level::Error)
                 .ignore
                 .iter()
-                .any(|target| matches_ignore(&diag, target, workflows));
-
+                .any(|target| matches_ignore(&diag, target, &located));
             if !ignored {
                 all_diagnostics.push(diag);
             }
@@ -238,6 +253,46 @@ pub fn run(
     }
 
     Ok(all_diagnostics)
+}
+
+/// Check if a per-action diagnostic is ignored via lint config.
+fn is_ignored(
+    diag: &Diagnostic,
+    rule_name: &str,
+    default_level: Level,
+    lint_config: &LintConfig,
+    action: &LocatedAction,
+) -> bool {
+    lint_config
+        .get_rule(rule_name, default_level)
+        .ignore
+        .iter()
+        .any(|target| matches_ignore_action(diag, target, action))
+}
+
+/// Check if a diagnostic matches an ignore target using the current action context.
+fn matches_ignore_action(diag: &Diagnostic, target: &IgnoreTarget, action: &LocatedAction) -> bool {
+    let Some(diag_workflow) = &diag.workflow else {
+        return false;
+    };
+
+    if let Some(target_action) = &target.action
+        && action.id.as_str() != target_action.as_str()
+    {
+        return false;
+    }
+
+    if let Some(target_workflow) = &target.workflow
+        && !diag_workflow.ends_with(target_workflow.as_str())
+    {
+        return false;
+    }
+
+    if target.job.is_some() {
+        return false;
+    }
+
+    true
 }
 
 mod sha_mismatch;

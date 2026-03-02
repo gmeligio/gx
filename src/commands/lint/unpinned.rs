@@ -4,6 +4,24 @@ use crate::config::Level;
 /// unpinned rule: detects actions that use tag refs instead of SHA pins.
 pub struct UnpinnedRule;
 
+impl UnpinnedRule {
+    /// Check a single action for the unpinned rule.
+    pub fn check_action(action: &crate::domain::LocatedAction) -> Option<Diagnostic> {
+        if action.version.is_sha() {
+            return None;
+        }
+        let msg = format!(
+            "{}: action {} uses tag reference {} instead of SHA pin",
+            &action.location.workflow,
+            &action.id,
+            action.version.as_str()
+        );
+        Some(
+            Diagnostic::new("unpinned", Level::Error, msg).with_workflow(&action.location.workflow),
+        )
+    }
+}
+
 impl LintRule for UnpinnedRule {
     fn name(&self) -> &'static str {
         "unpinned"
@@ -14,26 +32,10 @@ impl LintRule for UnpinnedRule {
     }
 
     fn check(&self, ctx: &LintContext) -> Vec<Diagnostic> {
-        let mut diagnostics = Vec::new();
-
-        for located in ctx.workflows {
-            // If the version is not a SHA, it's unpinned (e.g., @v4, @main, etc.)
-            if !located.version.is_sha() {
-                let msg = format!(
-                    "{}: action {} uses tag reference {} instead of SHA pin",
-                    &located.location.workflow,
-                    &located.id,
-                    located.version.as_str()
-                );
-
-                diagnostics.push(
-                    Diagnostic::new(self.name(), self.default_level(), msg)
-                        .with_workflow(&located.location.workflow),
-                );
-            }
-        }
-
-        diagnostics
+        ctx.workflows
+            .iter()
+            .filter_map(Self::check_action)
+            .collect()
     }
 }
 

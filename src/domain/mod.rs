@@ -1,6 +1,7 @@
 pub mod action;
 pub mod lock;
 pub mod manifest;
+pub mod plan;
 pub mod resolution;
 pub mod workflow;
 pub mod workflow_actions;
@@ -12,6 +13,7 @@ pub use action::{
 };
 pub use lock::{Lock, LockEntry};
 pub use manifest::{ActionOverride, Manifest};
+pub use plan::{LockDiff, LockEntryPatch, ManifestDiff, TidyPlan, UpgradePlan, WorkflowPatch};
 pub use resolution::select_best_tag;
 pub use resolution::{
     ActionResolver, ResolutionError, ResolutionResult, ResolvedRef, VersionRegistry,

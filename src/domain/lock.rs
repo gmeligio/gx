@@ -95,7 +95,7 @@ impl LockEntry {
 
 /// Domain entity representing the resolved lock state: maps action@version → lock entry.
 /// Contains all domain logic for querying and mutating the lock. No I/O.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Lock {
     actions: HashMap<LockKey, LockEntry>,
 }

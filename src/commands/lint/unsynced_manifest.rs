@@ -18,9 +18,8 @@ impl LintRule for UnsyncedManifestRule {
     fn check(&self, ctx: &LintContext) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
 
-        let workflow_actions: HashSet<_> = ctx.action_set.action_ids().into_iter().collect();
-        let manifest_actions: HashSet<_> =
-            ctx.manifest.specs().iter().map(|s| s.id.clone()).collect();
+        let workflow_actions: HashSet<_> = ctx.action_set.action_ids().cloned().collect();
+        let manifest_actions: HashSet<_> = ctx.manifest.specs().map(|s| s.id.clone()).collect();
 
         // Actions in workflows but not in manifest
         for action_id in workflow_actions.difference(&manifest_actions) {

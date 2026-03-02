@@ -163,7 +163,7 @@ mod tests {
         // No .github folder created — both files are missing
         let config = Config::load(dir.path()).unwrap();
         assert!(config.settings.github_token.is_none() || config.settings.github_token.is_some());
-        assert!(config.manifest.specs().is_empty());
+        assert!(config.manifest.specs().next().is_none());
         assert!(config.lock.is_empty());
         assert!(config.manifest_path.ends_with("gx.toml"));
         assert!(config.lock_path.ends_with("gx.lock"));

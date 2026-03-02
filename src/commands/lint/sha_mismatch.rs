@@ -5,6 +5,34 @@ use crate::domain::LockKey;
 /// sha-mismatch rule: detects when a workflow SHA doesn't match the lock file.
 pub struct ShaMismatchRule;
 
+impl ShaMismatchRule {
+    /// Check a single action for the sha-mismatch rule.
+    pub fn check_action(
+        action: &crate::domain::LocatedAction,
+        lock: &crate::domain::Lock,
+    ) -> Option<Diagnostic> {
+        if !action.version.is_sha() {
+            return None;
+        }
+
+        let key = LockKey::new(action.id.clone(), action.version.clone());
+        if lock.has(&key) {
+            return None;
+        }
+
+        let msg = format!(
+            "{}: action {} SHA {} not found in lock file",
+            &action.location.workflow,
+            &action.id,
+            action.version.as_str()
+        );
+        Some(
+            Diagnostic::new("sha-mismatch", Level::Error, msg)
+                .with_workflow(&action.location.workflow),
+        )
+    }
+}
+
 impl LintRule for ShaMismatchRule {
     fn name(&self) -> &'static str {
         "sha-mismatch"
@@ -15,40 +43,10 @@ impl LintRule for ShaMismatchRule {
     }
 
     fn check(&self, ctx: &LintContext) -> Vec<Diagnostic> {
-        let mut diagnostics = Vec::new();
-
-        for located in ctx.workflows {
-            // Only check actions that have a SHA reference
-            if !located.version.is_sha() {
-                continue;
-            }
-
-            // For now, we assume the lock is well-formed.
-            // A real implementation would iterate through all lock entries for this action
-            // and verify the SHA matches. Since Lock doesn't expose detailed queries,
-            // we'll keep this simple: check if the key exists in the lock.
-            let key = LockKey::new(located.id.clone(), located.version.clone());
-
-            // If the key exists in the lock with this exact SHA, we're good
-            if ctx.lock.has(&key) {
-                continue;
-            }
-
-            // If we get here, the SHA in the workflow doesn't match the lock
-            let msg = format!(
-                "{}: action {} SHA {} not found in lock file",
-                &located.location.workflow,
-                &located.id,
-                located.version.as_str()
-            );
-
-            diagnostics.push(
-                Diagnostic::new(self.name(), self.default_level(), msg)
-                    .with_workflow(&located.location.workflow),
-            );
-        }
-
-        diagnostics
+        ctx.workflows
+            .iter()
+            .filter_map(|a| Self::check_action(a, ctx.lock))
+            .collect()
     }
 }
 

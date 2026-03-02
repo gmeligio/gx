@@ -3,9 +3,10 @@ use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
 use crate::domain::{
-    ActionId, ActionResolver, ActionSpec, CommitSha, LocatedAction, Lock, LockKey, Manifest,
-    ResolutionResult, UpdateResult, Version, VersionCorrection, VersionRegistry, WorkflowActionSet,
-    WorkflowError, WorkflowScanner, WorkflowUpdater, select_best_tag,
+    ActionId, ActionOverride, ActionResolver, ActionSpec, CommitSha, LocatedAction, Lock, LockDiff,
+    LockKey, Manifest, ManifestDiff, ResolutionResult, TidyPlan, UpdateResult, Version,
+    VersionCorrection, VersionRegistry, WorkflowActionSet, WorkflowError, WorkflowPatch,
+    WorkflowScanner, WorkflowUpdater, select_best_tag,
 };
 
 /// Errors that can occur during the tidy command
@@ -20,55 +21,187 @@ pub enum TidyError {
     Workflow(#[from] WorkflowError),
 }
 
-/// Run the tidy command: synchronize manifest and lock with workflows, then update workflow files.
+/// Compute a `TidyPlan` describing all changes without modifying the original manifest or lock.
+///
+/// Internally, this clones the manifest/lock and runs the same mutation logic, then diffs
+/// the before/after state to produce the plan.
 ///
 /// # Errors
 ///
-/// Returns [`TidyError::Workflow`] if workflows cannot be scanned or updated.
+/// Returns [`TidyError::Workflow`] if workflows cannot be scanned.
 /// Returns [`TidyError::ResolutionFailed`] if actions cannot be resolved.
-///
-/// # Panics
-///
-/// Panics if an action in the intersection of workflow and manifest is not found in the manifest.
 #[allow(clippy::needless_pass_by_value)]
-pub fn run<R, P, W>(
-    mut manifest: Manifest,
-    mut lock: Lock,
+pub fn plan<R, P>(
+    manifest: &Manifest,
+    lock: &Lock,
     registry: R,
-    parser: &P,
-    writer: &W,
-) -> Result<(Manifest, Lock), TidyError>
+    scanner: &P,
+) -> Result<TidyPlan, TidyError>
 where
     R: VersionRegistry + Clone,
     P: WorkflowScanner,
-    W: WorkflowUpdater,
 {
-    let located = parser.scan_all_located()?;
+    let mut located = Vec::new();
+    let mut action_set = WorkflowActionSet::new();
+    for result in scanner.scan() {
+        let action = result?;
+        action_set.add_located(&action);
+        located.push(action);
+    }
     if located.is_empty() {
-        return Ok((manifest, lock));
+        return Ok(TidyPlan::default());
     }
 
-    let action_set = WorkflowActionSet::from_located(&located);
+    // Work on clones to compute the planned state
+    let mut planned_manifest = manifest.clone();
+    let mut planned_lock = lock.clone();
 
     // Phase 1: Sync manifest
-    sync_manifest_actions(&mut manifest, &located, &action_set, &registry);
-    upgrade_sha_versions_to_tags(&mut manifest, &registry);
+    sync_manifest_actions(&mut planned_manifest, &located, &action_set, &registry);
+    upgrade_sha_versions_to_tags(&mut planned_manifest, &registry);
 
     // Phase 2: Sync overrides
-    sync_overrides(&mut manifest, &located, &action_set);
-    prune_stale_overrides(&mut manifest, &located);
+    sync_overrides(&mut planned_manifest, &located, &action_set);
+    prune_stale_overrides(&mut planned_manifest, &located);
 
     // Phase 3: Resolve lock
-    let corrections = update_lock(&mut lock, &mut manifest, &registry)?;
-    let keys_to_retain: Vec<LockKey> = build_keys_to_retain(&manifest);
-    lock.retain(&keys_to_retain);
+    let corrections = update_lock(&mut planned_lock, &mut planned_manifest, &registry)?;
+    let keys_to_retain: Vec<LockKey> = build_keys_to_retain(&planned_manifest);
+    planned_lock.retain(&keys_to_retain);
 
-    // Phase 4: Update workflows
-    let results = update_workflow_files(&located, &manifest, &lock, parser, writer)?;
-    print_update_results(&results);
-    print_corrections(&corrections);
+    // Phase 4: Compute workflow patches (instead of writing files)
+    let workflow_patches =
+        compute_workflow_patches(&located, &planned_manifest, &planned_lock, scanner)?;
 
-    Ok((manifest, lock))
+    // Diff original vs planned to produce the plan
+    let manifest_diff = diff_manifests(manifest, &planned_manifest);
+    let lock_diff = diff_locks(lock, &planned_lock);
+
+    Ok(TidyPlan {
+        manifest: manifest_diff,
+        lock: lock_diff,
+        workflows: workflow_patches,
+        corrections,
+    })
+}
+
+/// Compute workflow patches (pin maps) without writing files.
+fn compute_workflow_patches<P: WorkflowScanner>(
+    located: &[LocatedAction],
+    manifest: &Manifest,
+    lock: &Lock,
+    scanner: &P,
+) -> Result<Vec<WorkflowPatch>, TidyError> {
+    let mut by_location: HashMap<String, Vec<&LocatedAction>> = HashMap::new();
+    for action in located {
+        by_location
+            .entry(action.location.workflow.clone())
+            .or_default()
+            .push(action);
+    }
+
+    let workflows = scanner.find_workflow_paths()?;
+    let mut patches = Vec::new();
+
+    for workflow_path in &workflows {
+        let abs_str = workflow_path.to_string_lossy().replace('\\', "/");
+        let steps: &[&LocatedAction] = by_location
+            .iter()
+            .find(|(loc, _)| abs_str.ends_with(loc.as_str()))
+            .map_or(&[], |(_, steps)| steps.as_slice());
+        let file_map = build_file_update_map(manifest, lock, steps);
+        if !file_map.is_empty() {
+            let pins: Vec<(ActionId, String)> = file_map.into_iter().collect();
+            patches.push(WorkflowPatch {
+                path: workflow_path.clone(),
+                pins,
+            });
+        }
+    }
+
+    Ok(patches)
+}
+
+/// Diff two manifest states to produce a `ManifestDiff`.
+fn diff_manifests(before: &Manifest, after: &Manifest) -> ManifestDiff {
+    let before_ids: HashSet<ActionId> = before.specs().map(|s| s.id.clone()).collect();
+    let after_ids: HashSet<ActionId> = after.specs().map(|s| s.id.clone()).collect();
+
+    let added: Vec<(ActionId, Version)> = after_ids
+        .difference(&before_ids)
+        .filter_map(|id| after.get(id).map(|v| (id.clone(), v.clone())))
+        .collect();
+
+    let removed: Vec<ActionId> = before_ids.difference(&after_ids).cloned().collect();
+
+    // Detect version changes on existing actions (e.g. SHA upgraded to tag)
+    let updated: Vec<(ActionId, Version)> = before_ids
+        .intersection(&after_ids)
+        .filter_map(|id| {
+            let bv = before.get(id)?;
+            let av = after.get(id)?;
+            (bv != av).then(|| (id.clone(), av.clone()))
+        })
+        .collect();
+
+    // Diff overrides
+    let before_overrides = before.all_overrides();
+    let after_overrides = after.all_overrides();
+
+    let mut overrides_added = Vec::new();
+    let mut overrides_removed = Vec::new();
+
+    // Find new overrides
+    for (id, after_list) in after_overrides {
+        let before_list = before_overrides.get(id).cloned().unwrap_or_default();
+        for ovr in after_list {
+            if !before_list.contains(ovr) {
+                overrides_added.push((id.clone(), ovr.clone()));
+            }
+        }
+    }
+
+    // Find removed overrides
+    for (id, before_list) in before_overrides {
+        let after_list = after_overrides.get(id).cloned().unwrap_or_default();
+        let removed_for_id: Vec<ActionOverride> = before_list
+            .iter()
+            .filter(|ovr| !after_list.contains(ovr))
+            .cloned()
+            .collect();
+        if !removed_for_id.is_empty() {
+            overrides_removed.push((id.clone(), removed_for_id));
+        }
+    }
+
+    ManifestDiff {
+        added,
+        removed,
+        updated,
+        overrides_added,
+        overrides_removed,
+    }
+}
+
+/// Diff two lock states to produce a `LockDiff`.
+fn diff_locks(before: &Lock, after: &Lock) -> LockDiff {
+    let before_keys: HashSet<LockKey> = before.entries().map(|(k, _)| k.clone()).collect();
+    let after_keys: HashSet<LockKey> = after.entries().map(|(k, _)| k.clone()).collect();
+
+    let added = after_keys
+        .difference(&before_keys)
+        .filter_map(|k| after.get(k).map(|e| (k.clone(), e.clone())))
+        .collect();
+
+    let removed = before_keys.difference(&after_keys).cloned().collect();
+
+    // For now, we don't compute fine-grained LockEntryPatch updates.
+    // Added entries cover new entries, and the apply phase can handle full replacement.
+    LockDiff {
+        added,
+        removed,
+        updated: vec![],
+    }
 }
 
 /// Remove unused actions from manifest and add missing ones.
@@ -78,9 +211,8 @@ fn sync_manifest_actions<R: VersionRegistry + Clone>(
     action_set: &WorkflowActionSet,
     registry: &R,
 ) {
-    let workflow_actions: HashSet<ActionId> = action_set.action_ids().into_iter().collect();
-    let manifest_actions: HashSet<ActionId> =
-        manifest.specs().iter().map(|s| s.id.clone()).collect();
+    let workflow_actions: HashSet<ActionId> = action_set.action_ids().cloned().collect();
+    let manifest_actions: HashSet<ActionId> = manifest.specs().map(|s| s.id.clone()).collect();
 
     // Remove unused actions from manifest
     let unused: Vec<_> = manifest_actions.difference(&workflow_actions).collect();
@@ -135,30 +267,27 @@ fn sync_manifest_actions<R: VersionRegistry + Clone>(
 /// Upgrade SHA versions in manifest to tags via registry.
 fn upgrade_sha_versions_to_tags<R: VersionRegistry + Clone>(manifest: &mut Manifest, registry: &R) {
     let resolver = ActionResolver::new(registry.clone());
-    let specs: Vec<ActionSpec> = manifest.specs().iter().map(|s| (*s).clone()).collect();
+    // Collect only SHA specs (avoid cloning the full Vec when most specs are tags)
+    let sha_specs: Vec<(ActionId, CommitSha)> = manifest
+        .specs()
+        .filter(|s| s.version.is_sha())
+        .map(|s| (s.id.clone(), CommitSha::from(s.version.as_str())))
+        .collect();
     let mut upgraded_actions = Vec::new();
 
-    for spec in &specs {
-        if spec.version.is_sha() {
-            match resolver
-                .registry()
-                .tags_for_sha(&spec.id, &CommitSha::from(spec.version.as_str()))
-            {
-                Ok(tags) => {
-                    if let Some(best_tag) = select_best_tag(&tags) {
-                        manifest.set(spec.id.clone(), best_tag.clone());
-                        upgraded_actions.push(format!("{} SHA upgraded to {}", spec.id, best_tag));
-                    }
+    for (id, sha) in &sha_specs {
+        match resolver.registry().tags_for_sha(id, sha) {
+            Ok(tags) => {
+                if let Some(best_tag) = select_best_tag(&tags) {
+                    manifest.set(id.clone(), best_tag.clone());
+                    upgraded_actions.push(format!("{id} SHA upgraded to {best_tag}"));
                 }
-                Err(e) => {
-                    if matches!(e, crate::domain::resolution::ResolutionError::TokenRequired) {
-                        debug!(
-                            "GITHUB_TOKEN not set. Cannot upgrade {} SHA {}, keeping SHA",
-                            spec.id, spec.version
-                        );
-                    } else {
-                        debug!("Could not upgrade {} SHA {}: {}", spec.id, spec.version, e);
-                    }
+            }
+            Err(e) => {
+                if matches!(e, crate::domain::resolution::ResolutionError::TokenRequired) {
+                    debug!("GITHUB_TOKEN not set. Cannot upgrade {id} SHA {sha}, keeping SHA");
+                } else {
+                    debug!("Could not upgrade {id} SHA {sha}: {e}");
                 }
             }
         }
@@ -172,41 +301,27 @@ fn upgrade_sha_versions_to_tags<R: VersionRegistry + Clone>(manifest: &mut Manif
     }
 }
 
-/// Update workflow files with resolved actions from manifest and lock.
-fn update_workflow_files<P: WorkflowScanner, W: WorkflowUpdater>(
-    located: &[LocatedAction],
-    manifest: &Manifest,
-    lock: &Lock,
-    parser: &P,
+/// Apply workflow patches: write pin changes to workflow files and log results.
+///
+/// # Errors
+///
+/// Returns [`TidyError::Workflow`] if any workflow file cannot be updated.
+pub fn apply_workflow_patches<W: WorkflowUpdater>(
     writer: &W,
-) -> Result<Vec<UpdateResult>, TidyError> {
-    let mut by_location: HashMap<String, Vec<&LocatedAction>> = HashMap::new();
-    for action in located {
-        by_location
-            .entry(action.location.workflow.clone())
-            .or_default()
-            .push(action);
-    }
-
-    let workflows = parser.find_workflow_paths()?;
-    let mut all_results: Vec<UpdateResult> = Vec::new();
-
-    for workflow_path in &workflows {
-        let abs_str = workflow_path.to_string_lossy().replace('\\', "/");
-        let steps: &[&LocatedAction] = by_location
-            .iter()
-            .find(|(loc, _)| abs_str.ends_with(loc.as_str()))
-            .map_or(&[], |(_, steps)| steps.as_slice());
-        let file_map = build_file_update_map(manifest, lock, steps);
-        if !file_map.is_empty() {
-            let result = writer.update_file(workflow_path, &file_map)?;
-            if !result.changes.is_empty() {
-                all_results.push(result);
-            }
+    patches: &[WorkflowPatch],
+    corrections: &[VersionCorrection],
+) -> Result<(), TidyError> {
+    let mut results = Vec::new();
+    for patch in patches {
+        let map: HashMap<ActionId, String> = patch.pins.iter().cloned().collect();
+        let result = writer.update_file(&patch.path, &map)?;
+        if !result.changes.is_empty() {
+            results.push(result);
         }
     }
-
-    Ok(all_results)
+    print_update_results(&results);
+    print_corrections(corrections);
+    Ok(())
 }
 
 /// Print version corrections.
@@ -225,23 +340,23 @@ fn select_version(versions: &[Version]) -> Version {
 
 fn select_dominant_version(action_id: &ActionId, action_set: &WorkflowActionSet) -> Version {
     action_set.dominant_version(action_id).unwrap_or_else(|| {
-        let versions = action_set.versions_for(action_id);
+        let versions: Vec<Version> = action_set.versions_for(action_id).cloned().collect();
         select_version(&versions)
     })
 }
 
 /// Collect all `LockKeys` needed: one per (action, version) pair across globals and overrides.
 fn build_keys_to_retain(manifest: &Manifest) -> Vec<LockKey> {
-    let mut keys: Vec<LockKey> = manifest.specs().iter().map(|s| LockKey::from(*s)).collect();
-    for (id, overrides) in manifest.all_overrides() {
-        for exc in overrides {
-            let key = LockKey::new(id.clone(), exc.version.clone());
-            if !keys.contains(&key) {
-                keys.push(key);
-            }
-        }
-    }
-    keys
+    let seen: std::collections::HashSet<LockKey> = manifest
+        .specs()
+        .map(LockKey::from)
+        .chain(manifest.all_overrides().iter().flat_map(|(id, overrides)| {
+            overrides
+                .iter()
+                .map(move |exc| LockKey::new(id.clone(), exc.version.clone()))
+        }))
+        .collect();
+    seen.into_iter().collect()
 }
 
 /// Build the per-file update map: resolves each step's version via override hierarchy.
@@ -281,8 +396,8 @@ fn sync_overrides(
 ) {
     for action in located {
         // Only create overrides when multiple distinct versions exist in workflows
-        let versions = action_set.versions_for(&action.id);
-        if versions.len() <= 1 {
+        let version_count = action_set.versions_for(&action.id).count();
+        if version_count <= 1 {
             continue;
         }
 
@@ -328,48 +443,54 @@ fn prune_stale_overrides(manifest: &mut Manifest, located: &[LocatedAction]) {
         .map(|a| a.location.workflow.as_str())
         .collect();
 
-    let action_ids: Vec<ActionId> = manifest.all_overrides().keys().cloned().collect();
-
-    for id in action_ids {
-        let overrides = manifest.overrides_for(&id).to_vec();
-        let pruned: Vec<crate::domain::ActionOverride> = overrides
-            .into_iter()
-            .filter(|exc| {
-                if !live_workflows.contains(exc.workflow.as_str()) {
-                    info!("Removing stale override for {id} in {}", exc.workflow);
-                    return false;
-                }
-                if let Some(job) = &exc.job {
-                    let job_exists = located.iter().any(|a| {
-                        a.location.workflow == exc.workflow
-                            && a.location.job.as_deref() == Some(job.as_str())
-                    });
-                    if !job_exists {
-                        info!(
-                            "Removing stale override for {id} in {}/{}",
-                            exc.workflow, job
-                        );
+    // Compute all pruned override lists in one pass, then apply
+    let updates: Vec<(ActionId, Vec<crate::domain::ActionOverride>)> = manifest
+        .all_overrides()
+        .iter()
+        .map(|(id, overrides)| {
+            let pruned: Vec<crate::domain::ActionOverride> = overrides
+                .iter()
+                .filter(|exc| {
+                    if !live_workflows.contains(exc.workflow.as_str()) {
+                        info!("Removing stale override for {id} in {}", exc.workflow);
                         return false;
                     }
-                }
-                if let (Some(job), Some(step)) = (&exc.job, exc.step) {
-                    let step_exists = located.iter().any(|a| {
-                        a.location.workflow == exc.workflow
-                            && a.location.job.as_deref() == Some(job.as_str())
-                            && a.location.step == Some(step)
-                    });
-                    if !step_exists {
-                        info!(
-                            "Removing stale override for {id} in {}:{}/{}",
-                            exc.workflow, job, step
-                        );
-                        return false;
+                    if let Some(job) = &exc.job {
+                        let job_exists = located.iter().any(|a| {
+                            a.location.workflow == exc.workflow
+                                && a.location.job.as_deref() == Some(job.as_str())
+                        });
+                        if !job_exists {
+                            info!(
+                                "Removing stale override for {id} in {}/{}",
+                                exc.workflow, job
+                            );
+                            return false;
+                        }
                     }
-                }
-                true
-            })
-            .collect();
+                    if let (Some(job), Some(step)) = (&exc.job, exc.step) {
+                        let step_exists = located.iter().any(|a| {
+                            a.location.workflow == exc.workflow
+                                && a.location.job.as_deref() == Some(job.as_str())
+                                && a.location.step == Some(step)
+                        });
+                        if !step_exists {
+                            info!(
+                                "Removing stale override for {id} in {}:{}/{}",
+                                exc.workflow, job, step
+                            );
+                            return false;
+                        }
+                    }
+                    true
+                })
+                .cloned()
+                .collect();
+            (id.clone(), pruned)
+        })
+        .collect();
 
+    for (id, pruned) in updates {
         manifest.replace_overrides(id, pruned);
     }
 }
@@ -385,16 +506,16 @@ fn update_lock<R: VersionRegistry + Clone>(
     let corrections = Vec::new();
     let mut unresolved = Vec::new();
 
-    // Collect all specs: global + override versions
-    let mut all_specs: Vec<ActionSpec> = manifest.specs().iter().map(|s| (*s).clone()).collect();
-    for (id, overrides) in manifest.all_overrides() {
-        for exc in overrides {
-            let key = LockKey::new(id.clone(), exc.version.clone());
-            if !lock.has(&key) {
-                all_specs.push(ActionSpec::new(id.clone(), exc.version.clone()));
-            }
-        }
-    }
+    // Build all specs in one pass: global + override versions
+    let all_specs: Vec<ActionSpec> = manifest
+        .specs()
+        .cloned()
+        .chain(manifest.all_overrides().iter().flat_map(|(id, overrides)| {
+            overrides
+                .iter()
+                .map(move |exc| ActionSpec::new(id.clone(), exc.version.clone()))
+        }))
+        .collect();
 
     let needs_resolving = all_specs.iter().any(|spec| !lock.has(&LockKey::from(spec)));
 
@@ -404,18 +525,8 @@ fn update_lock<R: VersionRegistry + Clone>(
 
     let resolver = ActionResolver::new(registry.clone());
 
-    // Resolve lock entries for all specs
-    let updated_specs: Vec<ActionSpec> = manifest.specs().iter().map(|s| (*s).clone()).collect();
-    for spec in &updated_specs {
+    for spec in &all_specs {
         populate_lock_entry(lock, &resolver, spec, &mut unresolved);
-    }
-
-    // Resolve override versions (no SHA correction for overrides, just resolve)
-    for (id, overrides) in manifest.all_overrides() {
-        for exc in overrides {
-            let exc_spec = ActionSpec::new(id.clone(), exc.version.clone());
-            populate_lock_entry(lock, &resolver, &exc_spec, &mut unresolved);
-        }
     }
 
     if !unresolved.is_empty() {
@@ -498,8 +609,7 @@ mod tests {
     use super::*;
     use crate::domain::{ActionId, CommitSha, ResolvedAction};
     use crate::infrastructure::{
-        FileLock, FileManifest, FileWorkflowScanner, FileWorkflowUpdater, parse_lock,
-        parse_manifest,
+        FileWorkflowScanner, FileWorkflowUpdater, parse_lock, parse_manifest,
     };
     use std::fs;
 
@@ -593,25 +703,34 @@ jobs:
         let lock_path = github_dir.join("gx.lock");
 
         // Pre-seed lock with both versions already resolved (simulates a pre-existing lock)
-        let lock_store_seed = FileLock::new(&lock_path);
-        let mut seed_lock = Lock::default();
-        seed_lock.set(&ResolvedAction::new(
-            ActionId::from("actions/checkout"),
-            Version::from("v6.0.1"),
-            CommitSha::from("8e8c483db84b4bee98b60c0593521ed34d9990e8"),
-            "actions/checkout".to_string(),
-            crate::domain::RefType::Tag,
-            "2026-01-01T00:00:00Z".to_string(),
-        ));
-        seed_lock.set(&ResolvedAction::new(
-            ActionId::from("actions/checkout"),
-            Version::from("v5"),
-            CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-            "actions/checkout".to_string(),
-            crate::domain::RefType::Tag,
-            "2026-01-01T00:00:00Z".to_string(),
-        ));
-        lock_store_seed.save(&seed_lock).unwrap();
+        let seed_diff = crate::domain::LockDiff {
+            added: vec![
+                (
+                    LockKey::new(ActionId::from("actions/checkout"), Version::from("v6.0.1")),
+                    crate::domain::LockEntry {
+                        sha: CommitSha::from("8e8c483db84b4bee98b60c0593521ed34d9990e8"),
+                        version: Some("v6.0.1".to_string()),
+                        specifier: Some(String::new()),
+                        repository: "actions/checkout".to_string(),
+                        ref_type: crate::domain::RefType::Tag,
+                        date: "2026-01-01T00:00:00Z".to_string(),
+                    },
+                ),
+                (
+                    LockKey::new(ActionId::from("actions/checkout"), Version::from("v5")),
+                    crate::domain::LockEntry {
+                        sha: CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+                        version: Some("v5".to_string()),
+                        specifier: Some(String::new()),
+                        repository: "actions/checkout".to_string(),
+                        ref_type: crate::domain::RefType::Tag,
+                        date: "2026-01-01T00:00:00Z".to_string(),
+                    },
+                ),
+            ],
+            ..Default::default()
+        };
+        crate::infrastructure::create_lock(&lock_path, &seed_diff).unwrap();
 
         // Load manifest and lock via free functions
         let manifest = parse_manifest(&manifest_path).unwrap(); // empty on first run
@@ -619,14 +738,12 @@ jobs:
         let scanner = FileWorkflowScanner::new(repo_root);
         let updater = FileWorkflowUpdater::new(repo_root);
 
-        let (updated_manifest, updated_lock) =
-            run(manifest, lock, NoopRegistry, &scanner, &updater).unwrap();
+        let tidy_plan = plan(&manifest, &lock, NoopRegistry, &scanner).unwrap();
 
-        // Save the results (simulating what app.rs does when manifest exists)
-        FileManifest::new(&manifest_path)
-            .save(&updated_manifest)
-            .unwrap();
-        FileLock::new(&lock_path).save(&updated_lock).unwrap();
+        // Apply the plan — manifest doesn't exist yet so use create, lock exists so use apply
+        crate::infrastructure::create_manifest(&manifest_path, &tidy_plan.manifest).unwrap();
+        crate::infrastructure::apply_lock_diff(&lock_path, &tidy_plan.lock).unwrap();
+        apply_workflow_patches(&updater, &tidy_plan.workflows, &tidy_plan.corrections).unwrap();
 
         // ---- Assert: manifest has global v6.0.1 + override for windows.yml v5 ----
         let saved_manifest = parse_manifest(&manifest_path).unwrap();
@@ -797,7 +914,6 @@ jobs:
         let repo_root = temp_dir.path();
         let workflows_dir = repo_root.join(".github").join("workflows");
         fs::create_dir_all(&workflows_dir).unwrap();
-        let github_dir = repo_root.join(".github");
 
         // Workflow pins to a SHA that actually belongs to v3
         let workflow = "on: push
@@ -810,8 +926,6 @@ jobs:
         fs::write(workflows_dir.join("ci.yml"), workflow).unwrap();
 
         // Manifest already tracks actions/checkout at v4 (user's intent)
-        let _manifest_path = github_dir.join("gx.toml");
-
         let mut manifest = Manifest::default();
         manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
 
@@ -827,15 +941,24 @@ jobs:
         ));
 
         let scanner = FileWorkflowScanner::new(repo_root);
-        let updater = FileWorkflowUpdater::new(repo_root);
 
-        let (updated_manifest, _) = run(manifest, lock, NoopRegistry, &scanner, &updater).unwrap();
+        let tidy_plan = plan(&manifest, &lock, NoopRegistry, &scanner).unwrap();
 
-        // Manifest must still be v4 — workflow v3 SHA must NOT overwrite it
-        assert_eq!(
-            updated_manifest.get(&ActionId::from("actions/checkout")),
-            Some(&Version::from("v4")),
+        // Manifest diff must NOT change checkout's version — v4 is preserved
+        assert!(
+            !tidy_plan
+                .manifest
+                .updated
+                .iter()
+                .any(|(id, _)| id == &ActionId::from("actions/checkout")),
             "Manifest v4 must not be overwritten by workflow SHA pointing to v3"
+        );
+        assert!(
+            !tidy_plan
+                .manifest
+                .removed
+                .contains(&ActionId::from("actions/checkout")),
+            "Manifest should not remove actions/checkout"
         );
     }
 
@@ -878,7 +1001,6 @@ jobs:
         let repo_root = temp_dir.path();
         let workflows_dir = repo_root.join(".github").join("workflows");
         fs::create_dir_all(&workflows_dir).unwrap();
-        let github_dir = repo_root.join(".github");
 
         let sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
@@ -887,8 +1009,6 @@ jobs:
             "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@{sha}\n"
         );
         fs::write(workflows_dir.join("ci.yml"), &workflow).unwrap();
-
-        let _manifest_path = github_dir.join("gx.toml");
 
         // Manifest has the raw SHA as the version
         let mut manifest = Manifest::default();
@@ -911,15 +1031,18 @@ jobs:
         };
 
         let scanner = FileWorkflowScanner::new(repo_root);
-        let updater = FileWorkflowUpdater::new(repo_root);
 
-        let (updated_manifest, _) = run(manifest, lock, registry, &scanner, &updater).unwrap();
+        let tidy_plan = plan(&manifest, &lock, registry, &scanner).unwrap();
 
-        // Manifest should be upgraded from SHA to v4 (best tag)
-        assert_eq!(
-            updated_manifest.get(&ActionId::from("actions/checkout")),
-            Some(&Version::from("v4")),
-            "Manifest SHA should be upgraded to v4 via registry"
+        // Manifest should show the SHA upgraded to v4
+        let has_upgrade =
+            tidy_plan.manifest.updated.iter().any(|(id, v)| {
+                id == &ActionId::from("actions/checkout") && v == &Version::from("v4")
+            });
+        assert!(
+            has_upgrade,
+            "Manifest SHA should be upgraded to v4 via registry, got: {:?}",
+            tidy_plan.manifest.updated
         );
     }
 
@@ -929,7 +1052,6 @@ jobs:
         let repo_root = temp_dir.path();
         let workflows_dir = repo_root.join(".github").join("workflows");
         fs::create_dir_all(&workflows_dir).unwrap();
-        let github_dir = repo_root.join(".github");
 
         let sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
@@ -937,8 +1059,6 @@ jobs:
             "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@{sha}\n"
         );
         fs::write(workflows_dir.join("ci.yml"), &workflow).unwrap();
-
-        let _manifest_path = github_dir.join("gx.toml");
 
         let mut manifest = Manifest::default();
         manifest.set(ActionId::from("actions/checkout"), Version::from(sha));
@@ -956,14 +1076,16 @@ jobs:
 
         // NoopRegistry returns TokenRequired — simulates missing GITHUB_TOKEN
         let scanner = FileWorkflowScanner::new(repo_root);
-        let updater = FileWorkflowUpdater::new(repo_root);
 
-        let (updated_manifest, _) = run(manifest, lock, NoopRegistry, &scanner, &updater).unwrap();
+        let tidy_plan = plan(&manifest, &lock, NoopRegistry, &scanner).unwrap();
 
-        // SHA stays unchanged when no token is available
-        assert_eq!(
-            updated_manifest.get(&ActionId::from("actions/checkout")),
-            Some(&Version::from(sha)),
+        // SHA stays unchanged when no token is available — no version updates in plan
+        assert!(
+            !tidy_plan
+                .manifest
+                .updated
+                .iter()
+                .any(|(id, _)| id == &ActionId::from("actions/checkout")),
             "Without a token, SHA must stay unchanged"
         );
     }
@@ -1032,15 +1154,23 @@ jobs:
 
         let registry = RegistryShaRegistry(registry_sha.to_string());
         let scanner = FileWorkflowScanner::new(repo_root);
-        let updater = FileWorkflowUpdater::new(repo_root);
 
-        let (_, updated_lock) = run(manifest, lock, registry, &scanner, &updater).unwrap();
+        let tidy_plan = plan(&manifest, &lock, registry, &scanner).unwrap();
 
-        // Lock must have the registry SHA, not the workflow SHA
+        // Lock diff must add an entry with the registry SHA, not the workflow SHA
         let key = LockKey::new(ActionId::from("actions/checkout"), Version::from("v4"));
-        let entry = updated_lock.get(&key).expect("Lock entry should exist");
+        let added_entry = tidy_plan
+            .lock
+            .added
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, e)| e);
+        assert!(
+            added_entry.is_some(),
+            "Lock diff should add entry for actions/checkout@v4"
+        );
         assert_eq!(
-            entry.sha.as_str(),
+            added_entry.unwrap().sha.as_str(),
             registry_sha,
             "Lock SHA must come from registry, not from workflow"
         );
@@ -1094,6 +1224,301 @@ jobs:
         assert!(
             !workflow_ref.contains('#'),
             "SHA-only version must not have a # comment"
+        );
+    }
+
+    // ========== Step 8: tidy::plan() tests ==========
+
+    #[test]
+    fn test_plan_empty_workflows_returns_empty_plan() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let repo_root = temp_dir.path();
+        // Create .github/workflows dir but no workflow files
+        let workflows_dir = repo_root.join(".github").join("workflows");
+        fs::create_dir_all(&workflows_dir).unwrap();
+
+        let manifest = Manifest::default();
+        let lock = Lock::default();
+        let scanner = FileWorkflowScanner::new(repo_root);
+
+        let result = plan(&manifest, &lock, NoopRegistry, &scanner).unwrap();
+        assert!(result.is_empty(), "Plan for empty workflows must be empty");
+    }
+
+    #[test]
+    fn test_plan_one_new_action_produces_added_entries() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let repo_root = temp_dir.path();
+        let workflows_dir = repo_root.join(".github").join("workflows");
+        fs::create_dir_all(&workflows_dir).unwrap();
+
+        let sha = "abc123def456789012345678901234567890abcd";
+        let workflow = format!(
+            "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@{sha} # v4\n"
+        );
+        fs::write(workflows_dir.join("ci.yml"), &workflow).unwrap();
+
+        // Pre-seed lock so plan doesn't need to resolve via registry
+        let mut lock = Lock::default();
+        lock.set(&ResolvedAction::new(
+            ActionId::from("actions/checkout"),
+            Version::from("v4"),
+            CommitSha::from(sha),
+            "actions/checkout".to_string(),
+            crate::domain::RefType::Tag,
+            "2026-01-01T00:00:00Z".to_string(),
+        ));
+
+        let manifest = Manifest::default(); // empty — action is "new"
+        let scanner = FileWorkflowScanner::new(repo_root);
+
+        let result = plan(&manifest, &lock, NoopRegistry, &scanner).unwrap();
+
+        // Manifest should have added action
+        assert!(
+            result.manifest.added.iter().any(|(id, v)| {
+                id == &ActionId::from("actions/checkout") && v == &Version::from("v4")
+            }),
+            "Plan must include actions/checkout@v4 in manifest.added, got: {:?}",
+            result.manifest.added
+        );
+        assert!(result.manifest.removed.is_empty());
+    }
+
+    #[test]
+    fn test_plan_removed_action_produces_removed_entries() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let repo_root = temp_dir.path();
+        let workflows_dir = repo_root.join(".github").join("workflows");
+        fs::create_dir_all(&workflows_dir).unwrap();
+
+        // Workflow only has setup-node, not checkout
+        let workflow = "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/setup-node@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa # v3\n";
+        fs::write(workflows_dir.join("ci.yml"), workflow).unwrap();
+
+        // Manifest has both checkout and setup-node
+        let mut manifest = Manifest::default();
+        manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
+        manifest.set(ActionId::from("actions/setup-node"), Version::from("v3"));
+
+        // Pre-seed lock for both
+        let mut lock = Lock::default();
+        lock.set(&ResolvedAction::new(
+            ActionId::from("actions/checkout"),
+            Version::from("v4"),
+            CommitSha::from("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+            "actions/checkout".to_string(),
+            crate::domain::RefType::Tag,
+            "2026-01-01T00:00:00Z".to_string(),
+        ));
+        lock.set(&ResolvedAction::new(
+            ActionId::from("actions/setup-node"),
+            Version::from("v3"),
+            CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            "actions/setup-node".to_string(),
+            crate::domain::RefType::Tag,
+            "2026-01-01T00:00:00Z".to_string(),
+        ));
+
+        let scanner = FileWorkflowScanner::new(repo_root);
+
+        let result = plan(&manifest, &lock, NoopRegistry, &scanner).unwrap();
+
+        // checkout should be removed from manifest
+        assert!(
+            result
+                .manifest
+                .removed
+                .contains(&ActionId::from("actions/checkout")),
+            "Plan must include actions/checkout in manifest.removed, got: {:?}",
+            result.manifest.removed
+        );
+        // setup-node should NOT be removed
+        assert!(
+            !result
+                .manifest
+                .removed
+                .contains(&ActionId::from("actions/setup-node")),
+        );
+        // Lock should also have checkout removed
+        assert!(
+            result
+                .lock
+                .removed
+                .iter()
+                .any(|k| k.id == ActionId::from("actions/checkout")),
+            "Plan must include actions/checkout in lock.removed, got: {:?}",
+            result.lock.removed
+        );
+    }
+
+    #[test]
+    fn test_plan_multiple_versions_produces_override_diff() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let repo_root = temp_dir.path();
+        let workflows_dir = repo_root.join(".github").join("workflows");
+        fs::create_dir_all(&workflows_dir).unwrap();
+
+        // ci.yml: 3 workflows with checkout@SHA # v6.0.1
+        let sha_workflow = "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1\n";
+        fs::write(workflows_dir.join("ci.yml"), sha_workflow).unwrap();
+        fs::write(workflows_dir.join("build.yml"), sha_workflow).unwrap();
+
+        // windows.yml: checkout@v5 (minority version)
+        let win_workflow = "on: push\njobs:\n  test:\n    runs-on: windows-latest\n    steps:\n      - uses: actions/checkout@v5\n";
+        fs::write(workflows_dir.join("windows.yml"), win_workflow).unwrap();
+
+        let manifest = Manifest::default(); // empty — will be populated by plan
+
+        // Pre-seed lock for both versions
+        let mut lock = Lock::default();
+        lock.set(&ResolvedAction::new(
+            ActionId::from("actions/checkout"),
+            Version::from("v6.0.1"),
+            CommitSha::from("8e8c483db84b4bee98b60c0593521ed34d9990e8"),
+            "actions/checkout".to_string(),
+            crate::domain::RefType::Tag,
+            "2026-01-01T00:00:00Z".to_string(),
+        ));
+        lock.set(&ResolvedAction::new(
+            ActionId::from("actions/checkout"),
+            Version::from("v5"),
+            CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            "actions/checkout".to_string(),
+            crate::domain::RefType::Tag,
+            "2026-01-01T00:00:00Z".to_string(),
+        ));
+
+        let scanner = FileWorkflowScanner::new(repo_root);
+
+        let result = plan(&manifest, &lock, NoopRegistry, &scanner).unwrap();
+
+        // Should have override(s) for the minority version
+        assert!(
+            !result.manifest.overrides_added.is_empty(),
+            "Plan must include override entries for minority version, got: {:?}",
+            result.manifest.overrides_added
+        );
+
+        // At least one override should be for v5 in windows.yml
+        let has_windows_override = result.manifest.overrides_added.iter().any(|(id, ovr)| {
+            id == &ActionId::from("actions/checkout")
+                && ovr.workflow.ends_with("windows.yml")
+                && ovr.version == Version::from("v5")
+        });
+        assert!(
+            has_windows_override,
+            "Plan must include v5 override for windows.yml"
+        );
+    }
+
+    #[test]
+    fn test_plan_stale_override_produces_override_removal() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let repo_root = temp_dir.path();
+        let workflows_dir = repo_root.join(".github").join("workflows");
+        fs::create_dir_all(&workflows_dir).unwrap();
+
+        // Only ci.yml with checkout@SHA # v4
+        let workflow = "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb # v4\n";
+        fs::write(workflows_dir.join("ci.yml"), workflow).unwrap();
+
+        // Manifest has checkout@v4 + stale override for deploy.yml (which no longer exists)
+        let mut manifest = Manifest::default();
+        manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
+        manifest.add_override(
+            ActionId::from("actions/checkout"),
+            ActionOverride {
+                workflow: ".github/workflows/deploy.yml".to_string(),
+                job: None,
+                step: None,
+                version: Version::from("v3"),
+            },
+        );
+
+        // Pre-seed lock
+        let mut lock = Lock::default();
+        lock.set(&ResolvedAction::new(
+            ActionId::from("actions/checkout"),
+            Version::from("v4"),
+            CommitSha::from("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+            "actions/checkout".to_string(),
+            crate::domain::RefType::Tag,
+            "2026-01-01T00:00:00Z".to_string(),
+        ));
+
+        let scanner = FileWorkflowScanner::new(repo_root);
+
+        let result = plan(&manifest, &lock, NoopRegistry, &scanner).unwrap();
+
+        // Should have override removal for the stale deploy.yml override
+        assert!(
+            !result.manifest.overrides_removed.is_empty(),
+            "Plan must include removed override for stale deploy.yml, got: {:?}",
+            result.manifest.overrides_removed
+        );
+        let has_deploy_removal = result.manifest.overrides_removed.iter().any(|(id, ovrs)| {
+            id == &ActionId::from("actions/checkout")
+                && ovrs.iter().any(|o| o.workflow.ends_with("deploy.yml"))
+        });
+        assert!(
+            has_deploy_removal,
+            "Plan must include removal of deploy.yml override"
+        );
+    }
+
+    #[test]
+    fn test_plan_everything_in_sync_returns_empty_plan() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let repo_root = temp_dir.path();
+        let workflows_dir = repo_root.join(".github").join("workflows");
+        fs::create_dir_all(&workflows_dir).unwrap();
+
+        let sha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let workflow = format!(
+            "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@{sha} # v4\n"
+        );
+        fs::write(workflows_dir.join("ci.yml"), &workflow).unwrap();
+
+        // Manifest already has checkout@v4
+        let mut manifest = Manifest::default();
+        manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
+
+        // Lock already has the entry fully populated
+        let mut lock = Lock::default();
+        lock.set(&ResolvedAction::new(
+            ActionId::from("actions/checkout"),
+            Version::from("v4"),
+            CommitSha::from(sha),
+            "actions/checkout".to_string(),
+            crate::domain::RefType::Tag,
+            "2026-01-01T00:00:00Z".to_string(),
+        ));
+
+        let scanner = FileWorkflowScanner::new(repo_root);
+
+        let result = plan(&manifest, &lock, NoopRegistry, &scanner).unwrap();
+
+        // Everything is in sync — plan should have no manifest/lock changes
+        assert!(
+            result.manifest.added.is_empty(),
+            "No manifest additions expected, got: {:?}",
+            result.manifest.added
+        );
+        assert!(
+            result.manifest.removed.is_empty(),
+            "No manifest removals expected, got: {:?}",
+            result.manifest.removed
+        );
+        assert!(
+            result.lock.added.is_empty(),
+            "No lock additions expected, got: {:?}",
+            result.lock.added
+        );
+        assert!(
+            result.lock.removed.is_empty(),
+            "No lock removals expected, got: {:?}",
+            result.lock.removed
         );
     }
 }
