@@ -5,6 +5,36 @@ use crate::domain::LockKey;
 /// stale-comment rule: detects when a version comment doesn't match the lock file.
 pub struct StaleCommentRule;
 
+impl StaleCommentRule {
+    /// Check a single action for the stale-comment rule.
+    pub fn check_action(
+        action: &crate::domain::LocatedAction,
+        lock: &crate::domain::Lock,
+    ) -> Option<Diagnostic> {
+        let sha = action.sha.as_ref()?;
+
+        let key = LockKey::new(action.id.clone(), action.version.clone());
+        let lock_entry = lock.get(&key)?;
+
+        if lock_entry.sha == *sha {
+            return None;
+        }
+
+        let msg = format!(
+            "{}: action {} version {} has stale comment (SHA {} does not match lock SHA {})",
+            &action.location.workflow,
+            &action.id,
+            action.version.as_str(),
+            sha.as_str(),
+            lock_entry.sha.as_str()
+        );
+        Some(
+            Diagnostic::new("stale-comment", Level::Warn, msg)
+                .with_workflow(&action.location.workflow),
+        )
+    }
+}
+
 impl LintRule for StaleCommentRule {
     fn name(&self) -> &'static str {
         "stale-comment"
@@ -15,41 +45,10 @@ impl LintRule for StaleCommentRule {
     }
 
     fn check(&self, ctx: &LintContext) -> Vec<Diagnostic> {
-        let mut diagnostics = Vec::new();
-
-        for located in ctx.workflows {
-            // Only check actions that have a version comment (sha is Some)
-            let Some(sha) = &located.sha else {
-                continue; // No comment to validate
-            };
-
-            // Look up what version this SHA should map to in the lock
-            let key = LockKey::new(located.id.clone(), located.version.clone());
-            let Some(lock_entry) = ctx.lock.get(&key) else {
-                // Lock doesn't have an entry for this action@version
-                // This is a different issue (unsynced manifest or missing lock entry)
-                continue;
-            };
-
-            // Compare the SHA from the comment against what the lock says
-            if lock_entry.sha != *sha {
-                let msg = format!(
-                    "{}: action {} version {} has stale comment (SHA {} does not match lock SHA {})",
-                    &located.location.workflow,
-                    &located.id,
-                    located.version.as_str(),
-                    sha.as_str(),
-                    lock_entry.sha.as_str()
-                );
-
-                diagnostics.push(
-                    Diagnostic::new(self.name(), self.default_level(), msg)
-                        .with_workflow(&located.location.workflow),
-                );
-            }
-        }
-
-        diagnostics
+        ctx.workflows
+            .iter()
+            .filter_map(|a| Self::check_action(a, ctx.lock))
+            .collect()
     }
 }
 

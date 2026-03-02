@@ -1,5 +1,5 @@
 ---
-model: haiku
+model: sonnet
 name: "OPSX: Apply"
 description: Implement tasks from an OpenSpec change (Experimental)
 category: Workflow

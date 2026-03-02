@@ -224,7 +224,7 @@ impl FileWorkflowScanner {
     /// # Errors
     ///
     /// Returns an error if the workflow file cannot be processed.
-    pub fn scan(
+    pub fn scan_file(
         &self,
         workflow_path: &Path,
     ) -> Result<crate::domain::WorkflowActionSet, WorkflowError> {
@@ -237,29 +237,25 @@ impl FileWorkflowScanner {
         Ok(action_set)
     }
 
-    /// Scan all workflows and return one `LocatedAction` per step.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if any workflow file cannot be processed.
-    pub fn scan_all_located(&self) -> Result<Vec<crate::domain::LocatedAction>, WorkflowError> {
-        let workflows = self.find_workflows()?;
-        let mut result = Vec::new();
-        for workflow in &workflows {
-            let rel = self.rel_path(workflow);
-            let actions =
-                Self::extract_actions(workflow, &rel).map_err(Into::<WorkflowError>::into)?;
-            for action in actions {
+    /// Convert extracted actions from a single file into `LocatedAction` items.
+    fn located_from_file(
+        workflow_path: &Path,
+        workflow_rel_path: &str,
+    ) -> Result<Vec<crate::domain::LocatedAction>, WorkflowError> {
+        let actions =
+            Self::extract_actions(workflow_path, workflow_rel_path).map_err(WorkflowError::from)?;
+        Ok(actions
+            .into_iter()
+            .map(|action| {
                 let interpreted = action.uses_ref.interpret();
-                result.push(crate::domain::LocatedAction {
+                crate::domain::LocatedAction {
                     id: interpreted.id,
                     version: interpreted.version,
                     sha: interpreted.sha,
                     location: action.location,
-                });
-            }
-        }
-        Ok(result)
+                }
+            })
+            .collect())
     }
 }
 
@@ -373,12 +369,31 @@ impl FileWorkflowUpdater {
 }
 
 impl crate::domain::WorkflowScanner for FileWorkflowScanner {
-    fn scan_all_located(&self) -> Result<Vec<crate::domain::LocatedAction>, WorkflowError> {
-        self.scan_all_located()
+    fn scan(
+        &self,
+    ) -> Box<dyn Iterator<Item = Result<crate::domain::LocatedAction, WorkflowError>> + '_> {
+        let workflows = match self.find_workflows() {
+            Ok(w) => w,
+            Err(e) => return Box::new(std::iter::once(Err(e))),
+        };
+
+        Box::new(workflows.into_iter().flat_map(move |workflow_path| {
+            let rel = self.rel_path(&workflow_path);
+            match Self::located_from_file(&workflow_path, &rel) {
+                Ok(actions) => Box::new(actions.into_iter().map(Ok))
+                    as Box<
+                        dyn Iterator<Item = Result<crate::domain::LocatedAction, WorkflowError>>,
+                    >,
+                Err(e) => Box::new(std::iter::once(Err(e))),
+            }
+        }))
     }
 
-    fn find_workflow_paths(&self) -> Result<Vec<PathBuf>, WorkflowError> {
-        self.find_workflows()
+    fn scan_paths(&self) -> Box<dyn Iterator<Item = Result<PathBuf, WorkflowError>> + '_> {
+        match self.find_workflows() {
+            Ok(paths) => Box::new(paths.into_iter().map(Ok)),
+            Err(e) => Box::new(std::iter::once(Err(e))),
+        }
     }
 }
 
@@ -402,7 +417,7 @@ impl crate::domain::WorkflowUpdater for FileWorkflowUpdater {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::ActionId;
+    use crate::domain::{ActionId, WorkflowScanner};
     use std::io::Write;
     use tempfile::TempDir;
 
@@ -507,13 +522,13 @@ jobs:
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
         let parser = FileWorkflowScanner::new(temp_dir.path());
-        let action_set = parser.scan(&workflow_path).unwrap();
+        let action_set = parser.scan_file(&workflow_path).unwrap();
 
-        let ids = action_set.action_ids();
+        let ids: Vec<_> = action_set.action_ids().collect();
         assert_eq!(ids.len(), 3);
-        assert!(ids.contains(&ActionId::from("actions/checkout")));
-        assert!(ids.contains(&ActionId::from("actions/setup-node")));
-        assert!(ids.contains(&ActionId::from("docker/build-push-action")));
+        assert!(ids.contains(&&ActionId::from("actions/checkout")));
+        assert!(ids.contains(&&ActionId::from("actions/setup-node")));
+        assert!(ids.contains(&&ActionId::from("docker/build-push-action")));
     }
 
     #[test]
@@ -530,11 +545,11 @@ jobs:
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
         let parser = FileWorkflowScanner::new(temp_dir.path());
-        let action_set = parser.scan(&workflow_path).unwrap();
+        let action_set = parser.scan_file(&workflow_path).unwrap();
 
-        let ids = action_set.action_ids();
+        let ids: Vec<_> = action_set.action_ids().collect();
         assert_eq!(ids.len(), 1);
-        assert!(ids.contains(&ActionId::from("actions/checkout")));
+        assert!(ids.contains(&&ActionId::from("actions/checkout")));
     }
 
     #[test]
@@ -553,13 +568,17 @@ jobs:
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
         let parser = FileWorkflowScanner::new(temp_dir.path());
-        let action_set = parser.scan(&workflow_path).unwrap();
+        let action_set = parser.scan_file(&workflow_path).unwrap();
 
         // Two unique actions (checkout appears in both jobs with different versions)
-        assert_eq!(action_set.action_ids().len(), 2);
+        assert_eq!(action_set.action_ids().count(), 2);
 
-        let checkout_versions = action_set.versions_for(&ActionId::from("actions/checkout"));
-        assert_eq!(checkout_versions.len(), 2);
+        assert_eq!(
+            action_set
+                .versions_for(&ActionId::from("actions/checkout"))
+                .count(),
+            2
+        );
     }
 
     #[test]
@@ -580,7 +599,7 @@ jobs:
         let located = parser.scan_all_located().unwrap();
         let action_set = crate::domain::WorkflowActionSet::from_located(&located);
 
-        assert_eq!(action_set.action_ids().len(), 2);
+        assert_eq!(action_set.action_ids().count(), 2);
     }
 
     #[test]
@@ -596,13 +615,19 @@ jobs:
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
         let parser = FileWorkflowScanner::new(temp_dir.path());
-        let action_set = parser.scan(&workflow_path).unwrap();
+        let action_set = parser.scan_file(&workflow_path).unwrap();
 
-        let checkout_versions = action_set.versions_for(&ActionId::from("actions/checkout"));
-        assert_eq!(checkout_versions[0].as_str(), "v4");
+        let checkout_version = action_set
+            .versions_for(&ActionId::from("actions/checkout"))
+            .next()
+            .unwrap();
+        assert_eq!(checkout_version.as_str(), "v4");
 
-        let node_versions = action_set.versions_for(&ActionId::from("actions/setup-node"));
-        assert_eq!(node_versions[0].as_str(), "v3");
+        let node_version = action_set
+            .versions_for(&ActionId::from("actions/setup-node"))
+            .next()
+            .unwrap();
+        assert_eq!(node_version.as_str(), "v3");
     }
 
     #[test]
@@ -617,11 +642,14 @@ jobs:
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
         let parser = FileWorkflowScanner::new(temp_dir.path());
-        let action_set = parser.scan(&workflow_path).unwrap();
+        let action_set = parser.scan_file(&workflow_path).unwrap();
 
-        let versions = action_set.versions_for(&ActionId::from("actions/checkout"));
+        let version = action_set
+            .versions_for(&ActionId::from("actions/checkout"))
+            .next()
+            .unwrap();
         // Should normalize to v4
-        assert_eq!(versions[0].as_str(), "v4");
+        assert_eq!(version.as_str(), "v4");
     }
 
     #[test]
@@ -636,10 +664,13 @@ jobs:
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
         let parser = FileWorkflowScanner::new(temp_dir.path());
-        let action_set = parser.scan(&workflow_path).unwrap();
+        let action_set = parser.scan_file(&workflow_path).unwrap();
 
-        let versions = action_set.versions_for(&ActionId::from("actions/checkout"));
-        assert_eq!(versions[0].as_str(), "v4");
+        let version = action_set
+            .versions_for(&ActionId::from("actions/checkout"))
+            .next()
+            .unwrap();
+        assert_eq!(version.as_str(), "v4");
     }
 
     #[test]
@@ -654,11 +685,14 @@ jobs:
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
         let parser = FileWorkflowScanner::new(temp_dir.path());
-        let action_set = parser.scan(&workflow_path).unwrap();
+        let action_set = parser.scan_file(&workflow_path).unwrap();
 
-        let versions = action_set.versions_for(&ActionId::from("actions/checkout"));
+        let version = action_set
+            .versions_for(&ActionId::from("actions/checkout"))
+            .next()
+            .unwrap();
         // Should use SHA as version when no comment
-        assert_eq!(versions[0].as_str(), "abc123def456");
+        assert_eq!(version.as_str(), "abc123def456");
     }
 
     #[test]
@@ -680,15 +714,15 @@ jobs:
         let workflow_path = create_test_workflow(temp_dir.path(), "test.yml", content);
 
         let parser = FileWorkflowScanner::new(temp_dir.path());
-        let action_set = parser.scan(&workflow_path).unwrap();
+        let action_set = parser.scan_file(&workflow_path).unwrap();
 
         let checkout_id = ActionId::from("actions/checkout");
-        let versions = action_set.versions_for(&checkout_id);
-        assert_eq!(versions[0].as_str(), "v6.0.1");
+        let version = action_set.versions_for(&checkout_id).next().unwrap();
+        assert_eq!(version.as_str(), "v6.0.1");
 
         let login_id = ActionId::from("docker/login-action");
-        let versions = action_set.versions_for(&login_id);
-        assert_eq!(versions[0].as_str(), "v3.6.0");
+        let version = action_set.versions_for(&login_id).next().unwrap();
+        assert_eq!(version.as_str(), "v3.6.0");
     }
 
     #[test]
@@ -786,6 +820,71 @@ jobs:
         assert!(
             !updated.contains("# v3 # v2"),
             "Found duplicate comment in: {updated}"
+        );
+    }
+
+    #[test]
+    fn test_scan_iterator_matches_scan_all_located() {
+        let temp_dir = TempDir::new().unwrap();
+        create_test_workflow(
+            temp_dir.path(),
+            "ci.yml",
+            "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v3",
+        );
+        create_test_workflow(
+            temp_dir.path(),
+            "deploy.yml",
+            "jobs:\n  deploy:\n    steps:\n      - uses: docker/build-push-action@v5",
+        );
+
+        let scanner = FileWorkflowScanner::new(temp_dir.path());
+
+        // Collect via the iterator-based scan()
+        let via_iter: Vec<_> = scanner.scan().collect::<Result<Vec<_>, _>>().unwrap();
+        // Collect via the default scan_all_located()
+        let via_collect = scanner.scan_all_located().unwrap();
+
+        assert_eq!(via_iter.len(), via_collect.len());
+
+        // Same action IDs appear in both
+        let mut iter_ids: Vec<String> =
+            via_iter.iter().map(|a| a.id.as_str().to_string()).collect();
+        let mut collect_ids: Vec<String> = via_collect
+            .iter()
+            .map(|a| a.id.as_str().to_string())
+            .collect();
+        iter_ids.sort();
+        collect_ids.sort();
+        assert_eq!(iter_ids, collect_ids);
+    }
+
+    #[test]
+    fn test_scan_iterator_yields_error_for_malformed_file_without_aborting() {
+        let temp_dir = TempDir::new().unwrap();
+        // One valid workflow
+        create_test_workflow(
+            temp_dir.path(),
+            "good.yml",
+            "jobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4",
+        );
+        // One malformed workflow (invalid YAML)
+        create_test_workflow(temp_dir.path(), "bad.yml", ":\n  :\n    - [invalid yaml{{{");
+
+        let scanner = FileWorkflowScanner::new(temp_dir.path());
+
+        let results: Vec<_> = scanner.scan().collect();
+
+        // We should get at least one Ok (from good.yml) and at least one Err (from bad.yml)
+        let ok_count = results.iter().filter(|r| r.is_ok()).count();
+        let err_count = results.iter().filter(|r| r.is_err()).count();
+
+        assert!(
+            ok_count >= 1,
+            "Expected at least one Ok result from good.yml"
+        );
+        assert!(
+            err_count >= 1,
+            "Expected at least one Err result from bad.yml"
         );
     }
 }

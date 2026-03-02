@@ -56,6 +56,21 @@ impl WorkflowActionSet {
             .or_insert(0) += 1;
     }
 
+    /// Add a located action to the set (same logic as `add`, different input type).
+    pub fn add_located(&mut self, action: &LocatedAction) {
+        self.versions
+            .entry(action.id.clone())
+            .or_default()
+            .insert(action.version.clone());
+
+        *self
+            .counts
+            .entry(action.id.clone())
+            .or_default()
+            .entry(action.version.clone())
+            .or_insert(0) += 1;
+    }
+
     /// Select the dominant version for an action:
     /// 1. Most-used (highest occurrence count across all steps)
     /// 2. Tiebreak: highest semver
@@ -78,18 +93,17 @@ impl WorkflowActionSet {
     }
 
     /// Get all unique versions found for an action.
-    #[must_use]
-    pub fn versions_for(&self, id: &ActionId) -> Vec<Version> {
+    pub fn versions_for(&self, id: &ActionId) -> impl Iterator<Item = &Version> {
         self.versions
             .get(id)
-            .map(|v| v.iter().cloned().collect())
-            .unwrap_or_default()
+            .map(|v| v.iter())
+            .into_iter()
+            .flatten()
     }
 
     /// Get all action IDs discovered across workflows.
-    #[must_use]
-    pub fn action_ids(&self) -> Vec<ActionId> {
-        self.versions.keys().cloned().collect()
+    pub fn action_ids(&self) -> impl Iterator<Item = &ActionId> {
+        self.versions.keys()
     }
 }
 
@@ -187,9 +201,11 @@ mod tests {
         let mut set = WorkflowActionSet::new();
         set.add(&make_interpreted("actions/checkout", "v4", None));
 
-        let versions = set.versions_for(&ActionId::from("actions/checkout"));
+        let versions: Vec<_> = set
+            .versions_for(&ActionId::from("actions/checkout"))
+            .collect();
         assert_eq!(versions.len(), 1);
-        assert!(versions.contains(&Version::from("v4")));
+        assert!(versions.contains(&&Version::from("v4")));
     }
 
     #[test]
@@ -198,10 +214,12 @@ mod tests {
         set.add(&make_interpreted("actions/checkout", "v4", None));
         set.add(&make_interpreted("actions/checkout", "v3", None));
 
-        let versions = set.versions_for(&ActionId::from("actions/checkout"));
+        let versions: Vec<_> = set
+            .versions_for(&ActionId::from("actions/checkout"))
+            .collect();
         assert_eq!(versions.len(), 2);
-        assert!(versions.contains(&Version::from("v4")));
-        assert!(versions.contains(&Version::from("v3")));
+        assert!(versions.contains(&&Version::from("v4")));
+        assert!(versions.contains(&&Version::from("v3")));
     }
 
     #[test]
@@ -210,8 +228,11 @@ mod tests {
         set.add(&make_interpreted("actions/checkout", "v4", None));
         set.add(&make_interpreted("actions/checkout", "v4", None));
 
-        let versions = set.versions_for(&ActionId::from("actions/checkout"));
-        assert_eq!(versions.len(), 1);
+        assert_eq!(
+            set.versions_for(&ActionId::from("actions/checkout"))
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -220,16 +241,18 @@ mod tests {
         set.add(&make_interpreted("actions/checkout", "v4", None));
         set.add(&make_interpreted("actions/setup-node", "v3", None));
 
-        let ids = set.action_ids();
+        let ids: Vec<_> = set.action_ids().collect();
         assert_eq!(ids.len(), 2);
-        assert!(ids.contains(&ActionId::from("actions/checkout")));
-        assert!(ids.contains(&ActionId::from("actions/setup-node")));
+        assert!(ids.contains(&&ActionId::from("actions/checkout")));
+        assert!(ids.contains(&&ActionId::from("actions/setup-node")));
     }
 
     #[test]
     fn test_versions_for_unknown_action() {
         let set = WorkflowActionSet::new();
-        let versions = set.versions_for(&ActionId::from("unknown/action"));
-        assert!(versions.is_empty());
+        assert_eq!(
+            set.versions_for(&ActionId::from("unknown/action")).count(),
+            0
+        );
     }
 }

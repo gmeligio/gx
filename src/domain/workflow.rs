@@ -28,19 +28,38 @@ pub struct UpdateResult {
 
 /// Trait for scanning workflow files and extracting action references
 pub trait WorkflowScanner {
-    /// Scan all workflow files and return one `LocatedAction` per step.
+    /// Scan all workflow files, yielding one `LocatedAction` per step.
+    ///
+    /// Each item is a `Result` — errors are per-file and do not abort the scan.
+    /// The caller decides whether to collect, short-circuit, or continue past errors.
+    fn scan(
+        &self,
+    ) -> Box<dyn Iterator<Item = Result<crate::domain::LocatedAction, WorkflowError>> + '_>;
+
+    /// Enumerate all workflow file paths.
+    ///
+    /// Each item is a `Result` — errors are per-file.
+    fn scan_paths(
+        &self,
+    ) -> Box<dyn Iterator<Item = Result<std::path::PathBuf, WorkflowError>> + '_>;
+
+    /// Scan all workflow files and collect into a `Vec`. Fails on the first error.
     ///
     /// # Errors
     ///
     /// Returns an error if any workflow file cannot be read or parsed.
-    fn scan_all_located(&self) -> Result<Vec<crate::domain::LocatedAction>, WorkflowError>;
+    fn scan_all_located(&self) -> Result<Vec<crate::domain::LocatedAction>, WorkflowError> {
+        self.scan().collect()
+    }
 
-    /// Find all workflow file paths.
+    /// Find all workflow file paths and collect into a `Vec`.
     ///
     /// # Errors
     ///
     /// Returns an error if the workflow directory cannot be read.
-    fn find_workflow_paths(&self) -> Result<Vec<std::path::PathBuf>, WorkflowError>;
+    fn find_workflow_paths(&self) -> Result<Vec<std::path::PathBuf>, WorkflowError> {
+        self.scan_paths().collect()
+    }
 }
 
 /// Trait for updating action references in workflow files

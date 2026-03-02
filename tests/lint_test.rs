@@ -4,9 +4,7 @@ use std::fs;
 
 use gx::commands::lint;
 use gx::config::{Level, LintConfig};
-use gx::domain::{
-    ActionId, CommitSha, Lock, Manifest, RefType, ResolvedAction, Version, WorkflowActionSet,
-};
+use gx::domain::{ActionId, CommitSha, Lock, Manifest, RefType, ResolvedAction, Version};
 use gx::infrastructure::FileWorkflowScanner;
 
 #[test]
@@ -16,17 +14,12 @@ fn lint_clean_repo_no_diagnostics() {
     let workflows_dir = repo_root.join(".github").join("workflows");
     fs::create_dir_all(&workflows_dir).unwrap();
 
-    // Create a clean repo with no workflows
     let scanner = FileWorkflowScanner::new(repo_root);
-    let workflows = scanner.scan_all_located().unwrap();
-    let action_set = WorkflowActionSet::from_located(&workflows);
-
     let manifest = Manifest::default();
     let lock = Lock::default();
     let lint_config = LintConfig::default();
 
-    let diagnostics =
-        lint::run(&manifest, &lock, &workflows, &action_set, &lint_config).expect("Should succeed");
+    let diagnostics = lint::run(&manifest, &lock, &scanner, &lint_config).expect("Should succeed");
 
     assert!(
         diagnostics.is_empty(),
@@ -41,7 +34,6 @@ fn lint_detects_unpinned_actions() {
     let workflows_dir = repo_root.join(".github").join("workflows");
     fs::create_dir_all(&workflows_dir).unwrap();
 
-    // Create workflow with tag refs (unpinned)
     let workflow_content = "
 name: CI
 on: [push]
@@ -59,14 +51,10 @@ jobs:
     manifest.set(ActionId::from("actions/setup-node"), Version::from("v3"));
 
     let lock = Lock::default();
-
     let scanner = FileWorkflowScanner::new(repo_root);
-    let workflows = scanner.scan_all_located().unwrap();
-    let action_set = WorkflowActionSet::from_located(&workflows);
     let lint_config = LintConfig::default();
 
-    let diagnostics =
-        lint::run(&manifest, &lock, &workflows, &action_set, &lint_config).expect("Should succeed");
+    let diagnostics = lint::run(&manifest, &lock, &scanner, &lint_config).expect("Should succeed");
 
     let unpinned_count = diagnostics.iter().filter(|d| d.rule == "unpinned").count();
     assert!(unpinned_count > 0, "Should detect unpinned actions");
@@ -83,7 +71,6 @@ fn lint_detects_unsynced_manifest() {
     let workflows_dir = repo_root.join(".github").join("workflows");
     fs::create_dir_all(&workflows_dir).unwrap();
 
-    // Workflow uses actions/cache
     let workflow_content = "
 name: CI
 on: [push]
@@ -95,17 +82,12 @@ jobs:
 ";
     fs::write(workflows_dir.join("ci.yml"), workflow_content).unwrap();
 
-    // Manifest doesn't list actions/cache
     let manifest = Manifest::default();
     let lock = Lock::default();
-
     let scanner = FileWorkflowScanner::new(repo_root);
-    let workflows = scanner.scan_all_located().unwrap();
-    let action_set = WorkflowActionSet::from_located(&workflows);
     let lint_config = LintConfig::default();
 
-    let diagnostics =
-        lint::run(&manifest, &lock, &workflows, &action_set, &lint_config).expect("Should succeed");
+    let diagnostics = lint::run(&manifest, &lock, &scanner, &lint_config).expect("Should succeed");
 
     let unsynced_count = diagnostics
         .iter()
@@ -121,7 +103,6 @@ fn lint_respects_disabled_rules() {
     let workflows_dir = repo_root.join(".github").join("workflows");
     fs::create_dir_all(&workflows_dir).unwrap();
 
-    // Workflow has unpinned action
     let workflow_content = "
 name: CI
 on: [push]
@@ -137,12 +118,8 @@ jobs:
     manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
 
     let lock = Lock::default();
-
     let scanner = FileWorkflowScanner::new(repo_root);
-    let workflows = scanner.scan_all_located().unwrap();
-    let action_set = WorkflowActionSet::from_located(&workflows);
 
-    // Disable unpinned rule
     let mut lint_config = LintConfig::default();
     lint_config.rules.insert(
         "unpinned".to_string(),
@@ -152,8 +129,7 @@ jobs:
         },
     );
 
-    let diagnostics =
-        lint::run(&manifest, &lock, &workflows, &action_set, &lint_config).expect("Should succeed");
+    let diagnostics = lint::run(&manifest, &lock, &scanner, &lint_config).expect("Should succeed");
 
     let unpinned_count = diagnostics.iter().filter(|d| d.rule == "unpinned").count();
     assert_eq!(
@@ -169,7 +145,6 @@ fn lint_ignores_matching_targets() {
     let workflows_dir = repo_root.join(".github").join("workflows");
     fs::create_dir_all(&workflows_dir).unwrap();
 
-    // Workflow has unpinned action
     let workflow_content = "
 name: CI
 on: [push]
@@ -185,12 +160,8 @@ jobs:
     manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
 
     let lock = Lock::default();
-
     let scanner = FileWorkflowScanner::new(repo_root);
-    let workflows = scanner.scan_all_located().unwrap();
-    let action_set = WorkflowActionSet::from_located(&workflows);
 
-    // Ignore actions/checkout
     let mut lint_config = LintConfig::default();
     lint_config.rules.insert(
         "unpinned".to_string(),
@@ -204,8 +175,7 @@ jobs:
         },
     );
 
-    let diagnostics =
-        lint::run(&manifest, &lock, &workflows, &action_set, &lint_config).expect("Should succeed");
+    let diagnostics = lint::run(&manifest, &lock, &scanner, &lint_config).expect("Should succeed");
 
     let unpinned_count = diagnostics.iter().filter(|d| d.rule == "unpinned").count();
     assert_eq!(
@@ -214,7 +184,6 @@ jobs:
     );
 }
 
-// Task 3.1: Add test for sha-mismatch rule
 #[test]
 fn lint_sha_mismatch_rule_detects_workflow_sha_not_in_lock() {
     let temp_dir = tempfile::tempdir().unwrap();
@@ -222,7 +191,6 @@ fn lint_sha_mismatch_rule_detects_workflow_sha_not_in_lock() {
     let workflows_dir = repo_root.join(".github").join("workflows");
     fs::create_dir_all(&workflows_dir).unwrap();
 
-    // Workflow with a bare SHA reference (no version comment)
     let workflow_content = "
 name: CI
 on: [push]
@@ -235,16 +203,11 @@ jobs:
     fs::write(workflows_dir.join("ci.yml"), workflow_content).unwrap();
 
     let manifest = Manifest::default();
-    // Lock doesn't have this SHA registered as a version
     let lock = Lock::default();
-
     let scanner = FileWorkflowScanner::new(repo_root);
-    let workflows = scanner.scan_all_located().unwrap();
-    let action_set = WorkflowActionSet::from_located(&workflows);
     let lint_config = LintConfig::default();
 
-    let diagnostics =
-        lint::run(&manifest, &lock, &workflows, &action_set, &lint_config).expect("Should succeed");
+    let diagnostics = lint::run(&manifest, &lock, &scanner, &lint_config).expect("Should succeed");
 
     let sha_mismatch = diagnostics
         .iter()
@@ -256,7 +219,6 @@ jobs:
     );
 }
 
-// Task 3.2: Add test for stale-comment rule
 #[test]
 fn lint_stale_comment_rule_detects_mismatched_version_comment() {
     let temp_dir = tempfile::tempdir().unwrap();
@@ -264,7 +226,6 @@ fn lint_stale_comment_rule_detects_mismatched_version_comment() {
     let workflows_dir = repo_root.join(".github").join("workflows");
     fs::create_dir_all(&workflows_dir).unwrap();
 
-    // Workflow with a version comment that doesn't match the lock
     let workflow_content = "
 name: CI
 on: [push]
@@ -279,7 +240,6 @@ jobs:
     let mut manifest = Manifest::default();
     manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
 
-    // Lock says the SHA for v4 is different
     let mut lock = Lock::default();
     lock.set(&ResolvedAction::new(
         ActionId::from("actions/checkout"),
@@ -291,12 +251,9 @@ jobs:
     ));
 
     let scanner = FileWorkflowScanner::new(repo_root);
-    let workflows = scanner.scan_all_located().unwrap();
-    let action_set = WorkflowActionSet::from_located(&workflows);
     let lint_config = LintConfig::default();
 
-    let diagnostics =
-        lint::run(&manifest, &lock, &workflows, &action_set, &lint_config).expect("Should succeed");
+    let diagnostics = lint::run(&manifest, &lock, &scanner, &lint_config).expect("Should succeed");
 
     let stale_comment = diagnostics
         .iter()
@@ -305,7 +262,6 @@ jobs:
     assert!(stale_comment > 0, "Should detect stale-comment");
 }
 
-// Task 3.3: Add test for mixed severity output
 #[test]
 fn lint_mixed_severity_output_errors_and_warnings() {
     let temp_dir = tempfile::tempdir().unwrap();
@@ -313,7 +269,6 @@ fn lint_mixed_severity_output_errors_and_warnings() {
     let workflows_dir = repo_root.join(".github").join("workflows");
     fs::create_dir_all(&workflows_dir).unwrap();
 
-    // Workflow with both unpinned action and stale comment
     let workflow_content = "
 name: CI
 on: [push]
@@ -330,7 +285,6 @@ jobs:
     manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
     manifest.set(ActionId::from("actions/setup-node"), Version::from("v3"));
 
-    // Lock has different SHA for setup-node
     let mut lock = Lock::default();
     lock.set(&ResolvedAction::new(
         ActionId::from("actions/setup-node"),
@@ -342,12 +296,9 @@ jobs:
     ));
 
     let scanner = FileWorkflowScanner::new(repo_root);
-    let workflows = scanner.scan_all_located().unwrap();
-    let action_set = WorkflowActionSet::from_located(&workflows);
     let lint_config = LintConfig::default();
 
-    let diagnostics =
-        lint::run(&manifest, &lock, &workflows, &action_set, &lint_config).expect("Should succeed");
+    let diagnostics = lint::run(&manifest, &lock, &scanner, &lint_config).expect("Should succeed");
 
     let has_errors = diagnostics.iter().any(|d| d.level == Level::Error);
     let has_warnings = diagnostics.iter().any(|d| d.level == Level::Warn);
@@ -355,7 +306,6 @@ jobs:
     assert!(has_warnings, "Should have warning-level diagnostics");
 }
 
-// Task 3.4: Add test for warning-only output
 #[test]
 fn lint_warning_only_output_with_error_rules_disabled() {
     let temp_dir = tempfile::tempdir().unwrap();
@@ -363,7 +313,6 @@ fn lint_warning_only_output_with_error_rules_disabled() {
     let workflows_dir = repo_root.join(".github").join("workflows");
     fs::create_dir_all(&workflows_dir).unwrap();
 
-    // Workflow with unpinned action and stale comment
     let workflow_content = "
 name: CI
 on: [push]
@@ -380,7 +329,6 @@ jobs:
     manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
     manifest.set(ActionId::from("actions/setup-node"), Version::from("v3"));
 
-    // Lock has different SHA for setup-node
     let mut lock = Lock::default();
     lock.set(&ResolvedAction::new(
         ActionId::from("actions/setup-node"),
@@ -392,10 +340,7 @@ jobs:
     ));
 
     let scanner = FileWorkflowScanner::new(repo_root);
-    let workflows = scanner.scan_all_located().unwrap();
-    let action_set = WorkflowActionSet::from_located(&workflows);
 
-    // Disable all error rules
     let mut lint_config = LintConfig::default();
     lint_config.rules.insert(
         "unpinned".to_string(),
@@ -419,8 +364,7 @@ jobs:
         },
     );
 
-    let diagnostics =
-        lint::run(&manifest, &lock, &workflows, &action_set, &lint_config).expect("Should succeed");
+    let diagnostics = lint::run(&manifest, &lock, &scanner, &lint_config).expect("Should succeed");
 
     let has_errors = diagnostics.iter().any(|d| d.level == Level::Error);
     let has_warnings = diagnostics.iter().any(|d| d.level == Level::Warn);
@@ -428,7 +372,6 @@ jobs:
     assert!(has_warnings, "Should have warning-level diagnostics");
 }
 
-// Task 3.5: Add test for workflow with only local actions
 #[test]
 fn lint_local_actions_produce_no_diagnostics() {
     let temp_dir = tempfile::tempdir().unwrap();
@@ -436,7 +379,6 @@ fn lint_local_actions_produce_no_diagnostics() {
     let workflows_dir = repo_root.join(".github").join("workflows");
     fs::create_dir_all(&workflows_dir).unwrap();
 
-    // Workflow with only local actions (./path)
     let workflow_content = "
 name: CI
 on: [push]
@@ -450,14 +392,10 @@ jobs:
 
     let manifest = Manifest::default();
     let lock = Lock::default();
-
     let scanner = FileWorkflowScanner::new(repo_root);
-    let workflows = scanner.scan_all_located().unwrap();
-    let action_set = WorkflowActionSet::from_located(&workflows);
     let lint_config = LintConfig::default();
 
-    let diagnostics =
-        lint::run(&manifest, &lock, &workflows, &action_set, &lint_config).expect("Should succeed");
+    let diagnostics = lint::run(&manifest, &lock, &scanner, &lint_config).expect("Should succeed");
 
     assert!(
         diagnostics.is_empty(),
@@ -465,7 +403,6 @@ jobs:
     );
 }
 
-// Task 3.6: Add test for rule severity override
 #[test]
 fn lint_rule_severity_override_promote_warn_to_error() {
     let temp_dir = tempfile::tempdir().unwrap();
@@ -473,7 +410,6 @@ fn lint_rule_severity_override_promote_warn_to_error() {
     let workflows_dir = repo_root.join(".github").join("workflows");
     fs::create_dir_all(&workflows_dir).unwrap();
 
-    // Workflow with stale comment (which is Warn by default)
     let workflow_content = "
 name: CI
 on: [push]
@@ -488,7 +424,6 @@ jobs:
     let mut manifest = Manifest::default();
     manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
 
-    // Lock has different SHA
     let mut lock = Lock::default();
     lock.set(&ResolvedAction::new(
         ActionId::from("actions/checkout"),
@@ -500,10 +435,7 @@ jobs:
     ));
 
     let scanner = FileWorkflowScanner::new(repo_root);
-    let workflows = scanner.scan_all_located().unwrap();
-    let action_set = WorkflowActionSet::from_located(&workflows);
 
-    // Promote stale-comment to Error
     let mut lint_config = LintConfig::default();
     lint_config.rules.insert(
         "stale-comment".to_string(),
@@ -513,8 +445,7 @@ jobs:
         },
     );
 
-    let diagnostics =
-        lint::run(&manifest, &lock, &workflows, &action_set, &lint_config).expect("Should succeed");
+    let diagnostics = lint::run(&manifest, &lock, &scanner, &lint_config).expect("Should succeed");
 
     let stale_comment_errors = diagnostics
         .iter()
@@ -526,7 +457,6 @@ jobs:
     );
 }
 
-// Task 3.7: Add test for ignore scoped to specific workflow
 #[test]
 fn lint_ignore_scoped_to_specific_workflow() {
     let temp_dir = tempfile::tempdir().unwrap();
@@ -534,7 +464,6 @@ fn lint_ignore_scoped_to_specific_workflow() {
     let workflows_dir = repo_root.join(".github").join("workflows");
     fs::create_dir_all(&workflows_dir).unwrap();
 
-    // Create two workflows with unpinned actions
     let ci_content = "
 name: CI
 on: [push]
@@ -562,12 +491,8 @@ jobs:
     manifest.set(ActionId::from("actions/setup-node"), Version::from("v3"));
 
     let lock = Lock::default();
-
     let scanner = FileWorkflowScanner::new(repo_root);
-    let workflows = scanner.scan_all_located().unwrap();
-    let action_set = WorkflowActionSet::from_located(&workflows);
 
-    // Ignore unpinned in ci.yml only
     let mut lint_config = LintConfig::default();
     lint_config.rules.insert(
         "unpinned".to_string(),
@@ -581,8 +506,7 @@ jobs:
         },
     );
 
-    let diagnostics =
-        lint::run(&manifest, &lock, &workflows, &action_set, &lint_config).expect("Should succeed");
+    let diagnostics = lint::run(&manifest, &lock, &scanner, &lint_config).expect("Should succeed");
 
     let ci_unpinned = diagnostics
         .iter()

@@ -1,11 +1,11 @@
 #![allow(unused_crate_dependencies)]
 use gx::commands::{self, tidy};
 use gx::domain::{
-    ActionId, CommitSha, Lock, Manifest, RefType, ResolutionError, ResolvedRef, Version,
-    VersionRegistry,
+    ActionId, CommitSha, Manifest, RefType, ResolutionError, ResolvedRef, Version, VersionRegistry,
 };
 use gx::infrastructure::{
-    FileLock, FileManifest, FileWorkflowScanner, FileWorkflowUpdater, parse_lock, parse_manifest,
+    FileWorkflowScanner, FileWorkflowUpdater, apply_lock_diff, apply_manifest_diff, parse_lock,
+    parse_manifest,
 };
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
@@ -114,27 +114,43 @@ fn create_test_repo(temp_dir: &TempDir) -> std::path::PathBuf {
 
 /// Helper to run tidy with appropriate DI based on manifest existence (same logic as app.rs)
 fn run_tidy(repo_root: &Path) -> Result<(), commands::app::AppError> {
+    run_tidy_with_registry(repo_root, MockRegistry::new())
+}
+
+/// Helper to run tidy with a custom registry (plan+apply path).
+fn run_tidy_with_registry<R: VersionRegistry + Clone>(
+    repo_root: &Path,
+    registry: R,
+) -> Result<(), commands::app::AppError> {
     let manifest_path = repo_root.join(".github").join("gx.toml");
     let lock_path = repo_root.join(".github").join("gx.lock");
     let scanner = FileWorkflowScanner::new(repo_root);
     let updater = FileWorkflowUpdater::new(repo_root);
+    let has_manifest = manifest_path.exists();
 
-    if manifest_path.exists() {
-        let manifest = parse_manifest(&manifest_path)?;
-        let lock = parse_lock(&lock_path)?;
-        let (updated_manifest, updated_lock) =
-            tidy::run(manifest, lock, MockRegistry::new(), &scanner, &updater)?;
-        FileManifest::new(&manifest_path).save(&updated_manifest)?;
-        FileLock::new(&lock_path).save(&updated_lock)?;
+    let manifest = if has_manifest {
+        parse_manifest(&manifest_path)?
     } else {
-        let _ = tidy::run(
-            Manifest::default(),
-            Lock::default(),
-            MockRegistry::new(),
-            &scanner,
-            &updater,
-        )?;
+        Manifest::default()
+    };
+    let lock = parse_lock(&lock_path)?;
+
+    let plan = tidy::plan(&manifest, &lock, registry, &scanner)?;
+
+    if !plan.is_empty() {
+        if has_manifest {
+            if lock_path.exists() {
+                apply_manifest_diff(&manifest_path, &plan.manifest)?;
+                apply_lock_diff(&lock_path, &plan.lock)?;
+            } else {
+                // First run: manifest exists but lock doesn't yet — apply manifest diff, create lock
+                apply_manifest_diff(&manifest_path, &plan.manifest)?;
+                gx::infrastructure::create_lock(&lock_path, &plan.lock)?;
+            }
+        }
+        tidy::apply_workflow_patches(&updater, &plan.workflows, &plan.corrections)?;
     }
+
     Ok(())
 }
 
@@ -223,7 +239,7 @@ jobs:
 
     // Execute command (file-backed mode since manifest exists)
     let result = run_tidy(&root);
-    assert!(result.is_ok());
+    assert!(result.is_ok(), "tidy failed: {result:?}");
 
     // Verify manifest was updated
     let manifest_path = root.join(".github").join("gx.toml");
@@ -723,10 +739,6 @@ jobs:
         .unwrap();
 
     // Execute command with a mock registry that knows which tags map to these SHAs
-    let manifest_path = root.join(".github").join("gx.toml");
-    let lock_path = root.join(".github").join("gx.lock");
-    let manifest = parse_manifest(&manifest_path).unwrap();
-    let lock = parse_lock(&lock_path).unwrap();
     let registry = MockRegistry::new()
         .with_tags(
             "actions/checkout",
@@ -738,16 +750,9 @@ jobs:
             "5e57cd118135c172c3672efd75eb46360885c0ef",
             &["v3", "v3.6.0"],
         );
-    let scanner = FileWorkflowScanner::new(&root);
-    let updater = FileWorkflowUpdater::new(&root);
-    let (updated_manifest, updated_lock) =
-        tidy::run(manifest, lock, registry, &scanner, &updater).unwrap();
-
-    // Save the results
-    FileManifest::new(&manifest_path)
-        .save(&updated_manifest)
-        .unwrap();
-    FileLock::new(&lock_path).save(&updated_lock).unwrap();
+    let result = run_tidy_with_registry(&root, registry);
+    assert!(result.is_ok(), "tidy failed: {result:?}");
+    let manifest_path = root.join(".github").join("gx.toml");
 
     // Verify manifest contains version tags from comments, not SHAs
     let manifest_content = fs::read_to_string(&manifest_path).unwrap();
@@ -790,13 +795,7 @@ jobs:
         .unwrap();
 
     // Run tidy with NoopRegistry (simulates missing GITHUB_TOKEN)
-    let manifest_path = root.join(".github").join("gx.toml");
-    let lock_path = root.join(".github").join("gx.lock");
-    let manifest = parse_manifest(&manifest_path).unwrap();
-    let lock = parse_lock(&lock_path).unwrap();
-    let scanner = FileWorkflowScanner::new(&root);
-    let updater = FileWorkflowUpdater::new(&root);
-    let result = tidy::run(manifest, lock, NoopRegistry, &scanner, &updater);
+    let result = run_tidy_with_registry(&root, NoopRegistry);
 
     // The command should fail when it cannot resolve actions
     assert!(
@@ -830,20 +829,10 @@ jobs:
         .unwrap();
 
     // Run tidy with a mock registry that resolves versions to SHAs
-    let manifest_path = root.join(".github").join("gx.toml");
-    let lock_path = root.join(".github").join("gx.lock");
-    let manifest = parse_manifest(&manifest_path).unwrap();
-    let lock = parse_lock(&lock_path).unwrap();
-    let scanner = FileWorkflowScanner::new(&root);
-    let updater = FileWorkflowUpdater::new(&root);
-    let (updated_manifest, updated_lock) =
-        tidy::run(manifest, lock, MockRegistry::new(), &scanner, &updater).unwrap();
+    let result = run_tidy(&root);
+    assert!(result.is_ok(), "tidy failed: {result:?}");
 
-    // Save the results
-    FileManifest::new(&manifest_path)
-        .save(&updated_manifest)
-        .unwrap();
-    FileLock::new(&lock_path).save(&updated_lock).unwrap();
+    let lock_path = root.join(".github").join("gx.lock");
 
     // Verify the workflow was updated: tags should be replaced with SHAs + version comments
     let updated_workflow = fs::read_to_string(&workflow_path).unwrap();

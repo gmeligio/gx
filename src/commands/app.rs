@@ -4,8 +4,8 @@ use thiserror::Error;
 use crate::config::Config;
 use crate::domain::WorkflowError;
 use crate::infrastructure::{
-    FileLock, FileManifest, FileWorkflowScanner, FileWorkflowUpdater, GithubError, GithubRegistry,
-    LockFileError, ManifestError,
+    FileWorkflowScanner, FileWorkflowUpdater, GithubError, GithubRegistry, LockFileError,
+    ManifestError, apply_lock_diff, apply_manifest_diff, create_lock, create_manifest,
 };
 
 use super::lint::LintError;
@@ -63,13 +63,22 @@ pub fn tidy(repo_root: &Path, config: Config) -> Result<(), AppError> {
     let scanner = FileWorkflowScanner::new(repo_root);
     let updater = FileWorkflowUpdater::new(repo_root);
 
-    let (updated_manifest, updated_lock) =
-        super::tidy::run(config.manifest, config.lock, registry, &scanner, &updater)?;
+    let plan = super::tidy::plan(&config.manifest, &config.lock, registry, &scanner)?;
+
+    if plan.is_empty() {
+        return Ok(());
+    }
 
     if has_manifest {
-        FileManifest::new(&config.manifest_path).save(&updated_manifest)?;
-        FileLock::new(&config.lock_path).save(&updated_lock)?;
+        apply_manifest_diff(&config.manifest_path, &plan.manifest)?;
+        if config.lock_path.exists() {
+            apply_lock_diff(&config.lock_path, &plan.lock)?;
+        } else {
+            create_lock(&config.lock_path, &plan.lock)?;
+        }
     }
+
+    super::tidy::apply_workflow_patches(&updater, &plan.workflows, &plan.corrections)?;
 
     Ok(())
 }
@@ -93,12 +102,14 @@ pub fn init(repo_root: &Path, config: Config) -> Result<(), AppError> {
     let scanner = FileWorkflowScanner::new(repo_root);
     let updater = FileWorkflowUpdater::new(repo_root);
 
-    let (updated_manifest, updated_lock) =
-        super::tidy::run(config.manifest, config.lock, registry, &scanner, &updater)?;
+    let plan = super::tidy::plan(&config.manifest, &config.lock, registry, &scanner)?;
 
-    // Always save for init — this creates the files
-    FileManifest::new(&config.manifest_path).save(&updated_manifest)?;
-    FileLock::new(&config.lock_path).save(&updated_lock)?;
+    if !plan.is_empty() {
+        // Create new files (init always creates from scratch)
+        create_manifest(&config.manifest_path, &plan.manifest)?;
+        create_lock(&config.lock_path, &plan.lock)?;
+        super::tidy::apply_workflow_patches(&updater, &plan.workflows, &plan.corrections)?;
+    }
 
     Ok(())
 }
@@ -117,13 +128,18 @@ pub fn upgrade(repo_root: &Path, config: Config, request: &UpgradeRequest) -> Re
     let registry = GithubRegistry::new(config.settings.github_token)?;
     let updater = FileWorkflowUpdater::new(repo_root);
 
-    let (updated_manifest, updated_lock) =
-        super::upgrade::run(config.manifest, config.lock, registry, &updater, request)?;
+    let plan = super::upgrade::plan(&config.manifest, &config.lock, registry, request)?;
+
+    if plan.is_empty() {
+        return Ok(());
+    }
 
     if has_manifest {
-        FileManifest::new(&config.manifest_path).save(&updated_manifest)?;
-        FileLock::new(&config.lock_path).save(&updated_lock)?;
+        apply_manifest_diff(&config.manifest_path, &plan.manifest)?;
+        apply_lock_diff(&config.lock_path, &plan.lock)?;
     }
+
+    super::upgrade::apply_upgrade_workflows(&updater, &plan.lock, &plan.upgrades)?;
 
     Ok(())
 }
@@ -137,17 +153,12 @@ pub fn upgrade(repo_root: &Path, config: Config, request: &UpgradeRequest) -> Re
 /// Returns [`AppError::Lock`] if the lock file cannot be loaded.
 /// Returns [`AppError::Lint`] if violations are found.
 pub fn lint(repo_root: &Path, config: &Config) -> Result<(), AppError> {
-    use crate::domain::WorkflowActionSet;
-
     let scanner = FileWorkflowScanner::new(repo_root);
-    let workflows = scanner.scan_all_located()?;
-    let action_set = WorkflowActionSet::from_located(&workflows);
 
     let diagnostics = super::lint::run(
         &config.manifest,
         &config.lock,
-        &workflows,
-        &action_set,
+        &scanner,
         &config.lint_config,
     )?;
 

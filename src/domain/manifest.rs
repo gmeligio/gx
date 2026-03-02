@@ -18,7 +18,7 @@ pub struct ActionOverride {
 
 /// Domain entity owning the manifest's action→version mapping and all domain behaviour.
 /// No I/O — persistence is handled by infrastructure's file-backed save methods.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Manifest {
     actions: HashMap<ActionId, ActionSpec>,
     overrides: HashMap<ActionId, Vec<ActionOverride>>,
@@ -130,9 +130,8 @@ impl Manifest {
     }
 
     /// Get all action specs (global defaults only).
-    #[must_use]
-    pub fn specs(&self) -> Vec<&ActionSpec> {
-        self.actions.values().collect()
+    pub fn specs(&self) -> impl Iterator<Item = &ActionSpec> {
+        self.actions.values()
     }
 
     /// Get all overrides across all actions.
@@ -217,7 +216,7 @@ mod tests {
         let mut m = Manifest::default();
         m.set(ActionId::from("actions/checkout"), Version::from("v4"));
         m.set(ActionId::from("actions/setup-node"), Version::from("v3"));
-        assert_eq!(m.specs().len(), 2);
+        assert_eq!(m.specs().count(), 2);
     }
 
     #[test]
