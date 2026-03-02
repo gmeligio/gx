@@ -45,7 +45,7 @@ jobs:
         permissions:
             # Allow to write contents to create the Github release draft
             contents: write
-        runs-on: "ubuntu-22.04"
+        runs-on: "ubuntu-24.04"
         outputs:
             val: ${{ steps.plan.outputs.manifest }}
             tag: ${{ !github.event.pull_request && github.ref_name || '' }}
@@ -156,7 +156,7 @@ jobs:
         needs:
             - plan
             - build-local-artifacts
-        runs-on: "ubuntu-22.04"
+        runs-on: "ubuntu-24.04"
         env:
             GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
             BUILD_MANIFEST_NAME: target/distrib/global-dist-manifest.json
@@ -204,7 +204,7 @@ jobs:
         if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.publishing == 'true' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') }}
         env:
             GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        runs-on: "ubuntu-22.04"
+        runs-on: "ubuntu-24.04"
         outputs:
             val: ${{ steps.host.outputs.manifest }}
         steps:
@@ -259,7 +259,7 @@ jobs:
         needs:
             - plan
             - host
-        runs-on: "ubuntu-22.04"
+        runs-on: "ubuntu-24.04"
         env:
             GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
             PLAN: ${{ needs.plan.outputs.val }}
@@ -273,7 +273,7 @@ jobs:
               with:
                   app-id: ${{ secrets.VERIFIED_COMMIT_ID }}
                   private-key: ${{ secrets.VERIFIED_COMMIT_KEY }}
-                  repositories: ${{ github.event.repository.name }}
+                  repositories: homebrew-tap
                   owner: ${{ github.repository_owner }}
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
               with:
@@ -310,9 +310,10 @@ jobs:
                   git push
 
     publish-crates:
-        name: Publish to crates.io
-        needs: [announce]
-        runs-on: ubuntu-latest
+        needs:
+            - plan
+            - host
+        runs-on: ubuntu-24.04
         environment: release
         permissions:
             # Allow to write id-token token for rust-lang/crates-io-auth-action to authenticate with crates.io via OIDC
@@ -328,20 +329,3 @@ jobs:
             - run: cargo publish
               env:
                   CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
-
-    announce:
-        needs:
-            - plan
-            - host
-            - publish-homebrew-formula
-        # use "always() && ..." to allow us to wait for all publish jobs while
-        # still allowing individual publish jobs to skip themselves (for prereleases).
-        # "host" however must run to completion, no skipping allowed!
-        if: ${{ always() && needs.host.result == 'success' && (needs.publish-homebrew-formula.result == 'skipped' || needs.publish-homebrew-formula.result == 'success') }}
-        runs-on: "ubuntu-22.04"
-        env:
-            GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        steps:
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-              with:
-                  persist-credentials: false
