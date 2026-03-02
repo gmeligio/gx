@@ -1,7 +1,8 @@
 [workspace]
 # Only bump version for feat: and fix: commits (including scoped variants like feat(x):)
+# Also matches breaking changes like feat!: and fix!:
 # Other commits still open/update the Release PR and appear in CHANGELOG.md
-release_commits = "^(feat|fix)[(![:]"
+release_commits = "^(feat|fix)[:(!]"
 
 # cargo-dist creates the GitHub Release — release-plz must not
 git_release_enable = false
