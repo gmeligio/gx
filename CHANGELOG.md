@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.6](https://github.com/gmeligio/gx/compare/v0.5.5...v0.5.6) - 2026-03-02
+
+### Fixed
+
+- update release_commits ([#43](https://github.com/gmeligio/gx/pull/43))
+- correct release-plz regex ([#42](https://github.com/gmeligio/gx/pull/42))
+- use iterators ([#41](https://github.com/gmeligio/gx/pull/41))
+
 ## [0.5.5](https://github.com/gmeligio/gx/compare/v0.5.4...v0.5.5) - 2026-03-01
 
 ### Fixed
