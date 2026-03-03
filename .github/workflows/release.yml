@@ -263,8 +263,6 @@ jobs:
         env:
             GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
             PLAN: ${{ needs.plan.outputs.val }}
-            GITHUB_USER: "axo bot"
-            GITHUB_EMAIL: "admin+bot@axo.dev"
         if: ${{ !fromJson(needs.plan.outputs.val).announcement_is_prerelease || fromJson(needs.plan.outputs.val).publish_prereleases }}
         steps:
             - name: Generate authentication token with GitHub App to trigger Actions
@@ -275,9 +273,18 @@ jobs:
                   private-key: ${{ secrets.VERIFIED_COMMIT_KEY }}
                   repositories: homebrew-tap
                   owner: ${{ github.repository_owner }}
+            - name: Get GitHub App user
+              id: app-user
+              env:
+                  GH_TOKEN: ${{ steps.app-token.outputs.token }}
+              run: |
+                  slug=$(gh api /app --jq '.slug')
+                  app_id="${{ secrets.VERIFIED_COMMIT_ID }}"
+                  echo "name=${slug}[bot]" >> "$GITHUB_OUTPUT"
+                  echo "email=${app_id}+${slug}[bot]@users.noreply.github.com" >> "$GITHUB_OUTPUT"
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
               with:
-                  persist-credentials: true
+                  persist-credentials: false
                   repository: "gmeligio/homebrew-tap"
                   token: ${{ steps.app-token.outputs.token }}
             # So we have access to the formula
@@ -291,8 +298,8 @@ jobs:
             # so we need to find releases with a *.rb file, and publish with that filename.
             - name: Commit formula files
               run: |
-                  git config --global user.name "${GITHUB_USER}"
-                  git config --global user.email "${GITHUB_EMAIL}"
+                  git config --global user.name "${{ steps.app-user.outputs.name }}"
+                  git config --global user.email "${{ steps.app-user.outputs.email }}"
 
                   for release in $(echo "$PLAN" | jq --compact-output '.releases[] | select([.artifacts[] | endswith(".rb")] | any)'); do
                     filename=$(echo "$release" | jq '.artifacts[] | select(endswith(".rb"))' --raw-output)
@@ -307,7 +314,10 @@ jobs:
                     git add "Formula/${filename}"
                     git commit -m "${name} ${version}"
                   done
+                  git remote set-url origin "https://x-access-token:${PUSH_TOKEN}@github.com/gmeligio/homebrew-tap.git"
                   git push
+              env:
+                  PUSH_TOKEN: ${{ steps.app-token.outputs.token }}
 
     publish-crates:
         needs:
