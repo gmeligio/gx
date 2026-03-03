@@ -4,8 +4,8 @@ use thiserror::Error;
 use crate::domain::UpgradePlan as DomainUpgradePlan;
 use crate::domain::{
     ActionId, ActionResolver, ActionSpec, Lock, LockDiff, LockKey, Manifest, ManifestDiff,
-    ResolutionError, ResolutionResult, UpdateResult, UpgradeAction, UpgradeCandidate, Version,
-    VersionRegistry, WorkflowError, WorkflowUpdater, find_upgrade_candidate,
+    ResolutionError, UpdateResult, UpgradeAction, UpgradeCandidate, Version, VersionRegistry,
+    WorkflowError, WorkflowUpdater, find_upgrade_candidate,
 };
 
 /// Which actions to upgrade: all or a single action.
@@ -362,14 +362,11 @@ fn resolve_and_store<R: VersionRegistry>(
     unresolved_msg: &str,
 ) {
     match service.resolve(spec) {
-        ResolutionResult::Resolved(resolved) => {
+        Ok(resolved) => {
             lock.set(&resolved);
         }
-        ResolutionResult::Corrected { corrected, .. } => {
-            lock.set(&corrected);
-        }
-        ResolutionResult::Unresolved { spec: s, reason } => {
-            warn!("{unresolved_msg} {s}: {reason}");
+        Err(e) => {
+            warn!("{unresolved_msg} {spec}: {e}");
         }
     }
 }
