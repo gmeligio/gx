@@ -495,6 +495,295 @@ fn e2e_lint_detects_unsynced_manifest() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// SHA-aware mock registry (supports tags_for_sha for SHA-first resolution)
+// ---------------------------------------------------------------------------
+
+/// Registry that resolves versions to deterministic SHAs AND supports reverse
+/// SHA→tags lookups. This is needed to test the SHA-first resolution path
+/// where workflows already have SHA-pinned actions.
+#[derive(Clone, Default)]
+struct ShaAwareRegistry {
+    /// action_id → list of available version tags
+    tags: std::collections::HashMap<String, Vec<String>>,
+}
+
+impl ShaAwareRegistry {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn with_all_tags(mut self, id: &str, tags: Vec<&str>) -> Self {
+        self.tags
+            .insert(id.to_string(), tags.into_iter().map(String::from).collect());
+        self
+    }
+
+    fn fake_sha(id: &str, version: &str) -> String {
+        E2eRegistry::fake_sha(id, version)
+    }
+}
+
+impl VersionRegistry for ShaAwareRegistry {
+    fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<ResolvedRef, ResolutionError> {
+        Ok(ResolvedRef::new(
+            CommitSha::from(Self::fake_sha(id.as_str(), version.as_str())),
+            id.base_repo(),
+            RefType::Tag,
+            "2026-01-01T00:00:00Z".to_string(),
+        ))
+    }
+
+    fn tags_for_sha(
+        &self,
+        id: &ActionId,
+        sha: &CommitSha,
+    ) -> Result<Vec<Version>, ResolutionError> {
+        // Reverse lookup: find all tags whose fake SHA matches the given SHA
+        let all_tags = self.tags.get(id.as_str()).cloned().unwrap_or_default();
+        let matching: Vec<Version> = all_tags
+            .iter()
+            .filter(|tag| Self::fake_sha(id.as_str(), tag) == sha.as_str())
+            .map(|tag| Version::from(tag.as_str()))
+            .collect();
+        Ok(matching)
+    }
+
+    fn all_tags(&self, id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
+        Ok(self
+            .tags
+            .get(id.as_str())
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(Version::from)
+            .collect())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SHA-first resolution tests
+// ---------------------------------------------------------------------------
+
+/// `init` on a repo with SHA-pinned workflows must set lock `version` to a
+/// semver tag, not the raw SHA.
+#[test]
+fn e2e_init_sha_pinned_workflow_sets_version_not_sha() {
+    let temp = TempDir::new().unwrap();
+    let root = setup_repo(&temp);
+
+    // Simulate a repo that already has SHA-pinned actions (like after a previous gx tidy)
+    let checkout_sha = ShaAwareRegistry::fake_sha("actions/checkout", "v4");
+    let setup_sha = ShaAwareRegistry::fake_sha("actions/setup-node", "v3");
+
+    write_workflow(
+        &root,
+        "ci.yml",
+        &format!(
+            "name: CI\non: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@{checkout_sha} # v4\n      - uses: actions/setup-node@{setup_sha} # v3\n"
+        ),
+    );
+
+    // Registry knows which tags point to which SHAs
+    let registry = ShaAwareRegistry::new()
+        .with_all_tags("actions/checkout", vec!["v4", "v4.2.1"])
+        .with_all_tags("actions/setup-node", vec!["v3", "v3.1.0"]);
+
+    run_init(&root, registry);
+
+    // Lock should exist and have correct version fields
+    let lock = parse_lock(&lock_path(&root)).unwrap();
+    let checkout_key =
+        gx::domain::LockKey::new(ActionId::from("actions/checkout"), Version::from("v4"));
+    let setup_key =
+        gx::domain::LockKey::new(ActionId::from("actions/setup-node"), Version::from("v3"));
+
+    let checkout_entry = lock.get(&checkout_key).expect("Lock must have checkout");
+    let setup_entry = lock.get(&setup_key).expect("Lock must have setup-node");
+
+    // The version field must be a semver tag, NOT the SHA
+    assert_ne!(
+        checkout_entry.version.as_deref(),
+        Some(checkout_sha.as_str()),
+        "Lock version for checkout must NOT be a raw SHA"
+    );
+    assert_ne!(
+        setup_entry.version.as_deref(),
+        Some(setup_sha.as_str()),
+        "Lock version for setup-node must NOT be a raw SHA"
+    );
+
+    // It should be the most specific tag
+    assert_eq!(
+        checkout_entry.version.as_deref(),
+        Some("v4.2.1"),
+        "Lock version for checkout should be most specific tag"
+    );
+    assert_eq!(
+        setup_entry.version.as_deref(),
+        Some("v3.1.0"),
+        "Lock version for setup-node should be most specific tag"
+    );
+}
+
+/// `tidy` on a repo with SHA-pinned workflows (no prior lock entry) must
+/// resolve version correctly via SHA-first path.
+#[test]
+fn e2e_tidy_sha_pinned_new_action_resolves_version() {
+    let temp = TempDir::new().unwrap();
+    let root = setup_repo(&temp);
+
+    // Start with one unpinned action
+    write_workflow(
+        &root,
+        "ci.yml",
+        "name: CI\non: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n",
+    );
+
+    let registry = ShaAwareRegistry::new()
+        .with_all_tags("actions/checkout", vec!["v4", "v4.2.1"])
+        .with_all_tags("actions/setup-node", vec!["v3", "v3.5.0"]);
+
+    run_init(&root, registry.clone());
+
+    // Now add a SHA-pinned action to the workflow (simulating manual edit)
+    let node_sha = ShaAwareRegistry::fake_sha("actions/setup-node", "v3");
+    let lock = parse_lock(&lock_path(&root)).unwrap();
+    let checkout_key =
+        gx::domain::LockKey::new(ActionId::from("actions/checkout"), Version::from("v4"));
+    let checkout_sha = lock.get(&checkout_key).unwrap().sha.to_string();
+
+    write_workflow(
+        &root,
+        "ci.yml",
+        &format!(
+            "name: CI\non: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@{checkout_sha} # v4\n      - uses: actions/setup-node@{node_sha} # v3\n"
+        ),
+    );
+
+    run_tidy(&root, registry);
+
+    // The new action should have version as semver tag, not SHA
+    let lock = parse_lock(&lock_path(&root)).unwrap();
+    let node_key =
+        gx::domain::LockKey::new(ActionId::from("actions/setup-node"), Version::from("v3"));
+    let node_entry = lock.get(&node_key).expect("Lock must have setup-node");
+
+    assert_ne!(
+        node_entry.version.as_deref(),
+        Some(node_sha.as_str()),
+        "Lock version for setup-node must NOT be a raw SHA"
+    );
+    assert_eq!(
+        node_entry.version.as_deref(),
+        Some("v3.5.0"),
+        "Lock version should be most specific tag from tags_for_sha"
+    );
+}
+
+/// `tidy` after `init` on SHA-pinned workflows is idempotent (no changes).
+#[test]
+fn e2e_tidy_after_sha_pinned_init_is_noop() {
+    let temp = TempDir::new().unwrap();
+    let root = setup_repo(&temp);
+
+    let checkout_sha = ShaAwareRegistry::fake_sha("actions/checkout", "v4");
+    write_workflow(
+        &root,
+        "ci.yml",
+        &format!(
+            "name: CI\non: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@{checkout_sha} # v4\n"
+        ),
+    );
+
+    let registry = ShaAwareRegistry::new().with_all_tags("actions/checkout", vec!["v4", "v4.2.1"]);
+
+    run_init(&root, registry.clone());
+
+    let manifest_before = fs::read_to_string(manifest_path(&root)).unwrap();
+    let lock_before = fs::read_to_string(lock_path(&root)).unwrap();
+    let workflow_before = fs::read_to_string(root.join(".github/workflows/ci.yml")).unwrap();
+
+    run_tidy(&root, registry);
+
+    assert_eq!(
+        fs::read_to_string(manifest_path(&root)).unwrap(),
+        manifest_before,
+        "Manifest should not change on second tidy"
+    );
+    assert_eq!(
+        fs::read_to_string(lock_path(&root)).unwrap(),
+        lock_before,
+        "Lock should not change on second tidy"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join(".github/workflows/ci.yml")).unwrap(),
+        workflow_before,
+        "Workflow should not change on second tidy"
+    );
+}
+
+/// Full pipeline: init (SHA-pinned) → tidy → upgrade. Version fields must
+/// never contain a raw SHA at any stage.
+#[test]
+fn e2e_full_pipeline_sha_pinned_init_tidy_upgrade() {
+    let temp = TempDir::new().unwrap();
+    let root = setup_repo(&temp);
+
+    // Start with SHA-pinned workflow at v3
+    let checkout_sha = ShaAwareRegistry::fake_sha("actions/checkout", "v3");
+    write_workflow(
+        &root,
+        "ci.yml",
+        &format!(
+            "name: CI\non: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@{checkout_sha} # v3\n"
+        ),
+    );
+
+    let registry = ShaAwareRegistry::new()
+        .with_all_tags("actions/checkout", vec!["v3", "v3.6.1", "v4", "v4.2.0"]);
+
+    // Step 1: Init
+    run_init(&root, registry.clone());
+
+    let lock = parse_lock(&lock_path(&root)).unwrap();
+    let v3_key = gx::domain::LockKey::new(ActionId::from("actions/checkout"), Version::from("v3"));
+    let entry = lock.get(&v3_key).expect("Lock must have checkout@v3");
+    assert_eq!(
+        entry.version.as_deref(),
+        Some("v3.6.1"),
+        "After init, version should be most specific tag"
+    );
+
+    // Step 2: Tidy (should be no-op)
+    run_tidy(&root, registry.clone());
+
+    // Step 3: Upgrade to v4
+    let request = UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::All).unwrap();
+    run_upgrade(&root, registry, &request);
+
+    let manifest = parse_manifest(&manifest_path(&root)).unwrap();
+    assert_eq!(
+        manifest.get(&ActionId::from("actions/checkout")),
+        Some(&Version::from("v4")),
+        "Checkout should be upgraded to v4"
+    );
+
+    let lock = parse_lock(&lock_path(&root)).unwrap();
+    let v4_key = gx::domain::LockKey::new(ActionId::from("actions/checkout"), Version::from("v4"));
+    let v4_entry = lock.get(&v4_key).expect("Lock must have checkout@v4");
+
+    // Version must be semver, not SHA
+    assert!(
+        v4_entry
+            .version
+            .as_ref()
+            .is_some_and(|v| !CommitSha::is_valid(v)),
+        "After upgrade, lock version must not be a raw SHA, got: {:?}",
+        v4_entry.version
+    );
+}
+
 /// Sequential init → tidy → modify workflow → tidy → upgrade produces correct final state.
 #[test]
 fn e2e_full_pipeline_init_tidy_modify_tidy_upgrade() {
