@@ -3,8 +3,8 @@ use std::time::Duration;
 use thiserror::Error;
 
 use crate::domain::{
-    ActionId, ActionSpec, CommitSha, RefType, ResolutionError, ResolvedRef, Version,
-    VersionRegistry,
+    ActionId, ActionSpec, CommitSha, RefType, ResolutionError, ResolvedRef, ShaDescription,
+    Version, VersionRegistry,
 };
 
 const GITHUB_API_BASE: &str = "https://api.github.com";
@@ -663,6 +663,40 @@ impl VersionRegistry for GithubRegistry {
                     reason: e.to_string(),
                 },
             })
+    }
+
+    fn describe_sha(
+        &self,
+        id: &ActionId,
+        sha: &CommitSha,
+    ) -> Result<ShaDescription, ResolutionError> {
+        let base_repo = id.base_repo();
+
+        // Fetch commit date directly — no tag/branch fallback chain needed since SHA is trusted
+        let date = self
+            .fetch_commit_date(&base_repo, sha.as_str())
+            .map_err(|e| match e {
+                GithubError::TokenRequired => ResolutionError::TokenRequired,
+                _ => ResolutionError::ResolveFailed {
+                    spec: ActionSpec::new(id.clone(), Version::from(sha.as_str())),
+                    reason: e.to_string(),
+                },
+            })?
+            .unwrap_or_default();
+
+        // Tag lookup is non-fatal: return empty tags on failure
+        let tags = self
+            .get_tags_for_sha(id.as_str(), sha.as_str())
+            .unwrap_or_default()
+            .into_iter()
+            .map(Version::from)
+            .collect();
+
+        Ok(ShaDescription {
+            tags,
+            repository: base_repo,
+            date,
+        })
     }
 }
 

@@ -15,7 +15,8 @@ use gx::commands::upgrade::{UpgradeMode, UpgradeRequest, UpgradeScope};
 use gx::commands::{lint, tidy, upgrade};
 use gx::config::LintConfig;
 use gx::domain::{
-    ActionId, CommitSha, Manifest, RefType, ResolutionError, ResolvedRef, Version, VersionRegistry,
+    ActionId, ActionSpec, CommitSha, Manifest, RefType, ResolutionError, ResolvedRef,
+    ShaDescription, Version, VersionRegistry,
 };
 use gx::infrastructure::{
     FileWorkflowScanner, FileWorkflowUpdater, apply_lock_diff, apply_manifest_diff, create_lock,
@@ -86,6 +87,18 @@ impl VersionRegistry for E2eRegistry {
             .into_iter()
             .map(Version::from)
             .collect())
+    }
+
+    fn describe_sha(
+        &self,
+        id: &ActionId,
+        _sha: &CommitSha,
+    ) -> Result<ShaDescription, ResolutionError> {
+        Ok(ShaDescription {
+            tags: vec![],
+            repository: id.base_repo(),
+            date: "2026-01-01T00:00:00Z".to_string(),
+        })
     }
 }
 
@@ -578,6 +591,118 @@ impl VersionRegistry for ShaAwareRegistry {
             .map(Version::from)
             .collect())
     }
+
+    fn describe_sha(
+        &self,
+        id: &ActionId,
+        sha: &CommitSha,
+    ) -> Result<ShaDescription, ResolutionError> {
+        let key = (id.as_str().to_string(), sha.as_str().to_string());
+        let tags = self
+            .sha_tags
+            .get(&key)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(Version::from)
+            .collect();
+        Ok(ShaDescription {
+            tags,
+            repository: id.base_repo(),
+            date: "2026-01-01T00:00:00Z".to_string(),
+        })
+    }
+}
+
+/// Registry where `describe_sha` returns Ok with an empty date string,
+/// simulating a `fetch_commit_date` failure handled gracefully.
+#[derive(Clone)]
+struct EmptyDateRegistry;
+
+impl EmptyDateRegistry {
+    fn fake_sha(id: &str, version: &str) -> String {
+        E2eRegistry::fake_sha(id, version)
+    }
+}
+
+impl VersionRegistry for EmptyDateRegistry {
+    fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<ResolvedRef, ResolutionError> {
+        Ok(ResolvedRef::new(
+            CommitSha::from(Self::fake_sha(id.as_str(), version.as_str())),
+            id.base_repo(),
+            RefType::Tag,
+            String::new(),
+        ))
+    }
+
+    fn tags_for_sha(
+        &self,
+        _id: &ActionId,
+        _sha: &CommitSha,
+    ) -> Result<Vec<Version>, ResolutionError> {
+        Ok(vec![])
+    }
+
+    fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
+        Ok(vec![])
+    }
+
+    fn describe_sha(
+        &self,
+        id: &ActionId,
+        _sha: &CommitSha,
+    ) -> Result<ShaDescription, ResolutionError> {
+        Ok(ShaDescription {
+            tags: vec![],
+            repository: id.base_repo(),
+            date: String::new(),
+        })
+    }
+}
+
+/// Registry where `describe_sha` returns an error,
+/// simulating a fatal API failure (e.g., 422 from GitHub).
+#[derive(Clone)]
+struct FailingDescribeRegistry;
+
+impl FailingDescribeRegistry {
+    fn fake_sha(id: &str, version: &str) -> String {
+        E2eRegistry::fake_sha(id, version)
+    }
+}
+
+impl VersionRegistry for FailingDescribeRegistry {
+    fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<ResolvedRef, ResolutionError> {
+        Ok(ResolvedRef::new(
+            CommitSha::from(Self::fake_sha(id.as_str(), version.as_str())),
+            id.base_repo(),
+            RefType::Tag,
+            "2026-01-01T00:00:00Z".to_string(),
+        ))
+    }
+
+    fn tags_for_sha(
+        &self,
+        _id: &ActionId,
+        _sha: &CommitSha,
+    ) -> Result<Vec<Version>, ResolutionError> {
+        Ok(vec![])
+    }
+
+    fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
+        Ok(vec![])
+    }
+
+    fn describe_sha(
+        &self,
+        id: &ActionId,
+        sha: &CommitSha,
+    ) -> Result<ShaDescription, ResolutionError> {
+        Err(ResolutionError::ResolveFailed {
+            spec: ActionSpec::new(id.clone(), Version::from(sha.as_str())),
+            reason: "Github API returned status 422 Unprocessable Entity".to_string(),
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -914,5 +1039,120 @@ fn e2e_full_pipeline_init_tidy_modify_tidy_upgrade() {
     assert!(
         wf.contains(&v4_sha),
         "Workflow should contain upgraded checkout SHA"
+    );
+}
+
+/// `init` on a SHA-pinned workflow where `describe_sha` returns no tags must use the SHA as version.
+#[test]
+fn test_init_sha_first_describe_sha_no_tags() {
+    let temp = TempDir::new().unwrap();
+    let root = setup_repo(&temp);
+
+    // Use E2eRegistry which returns empty tags from describe_sha.
+    // Simulate a SHA-pinned workflow where the action has no tags.
+    let checkout_sha = E2eRegistry::fake_sha("actions/checkout", "v4");
+
+    write_workflow(
+        &root,
+        "ci.yml",
+        &format!(
+            "name: CI\non: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@{checkout_sha} # v4\n"
+        ),
+    );
+
+    // E2eRegistry.describe_sha returns empty tags → SHA used as version in lock entry
+    run_init(&root, E2eRegistry::new());
+
+    let lock = parse_lock(&lock_path(&root)).unwrap();
+    let key = gx::domain::LockKey::new(ActionId::from("actions/checkout"), Version::from("v4"));
+    let entry = lock.get(&key).expect("Lock must have checkout@v4 entry");
+
+    // SHA in lock must match the workflow SHA
+    assert_eq!(
+        entry.sha.as_str(),
+        checkout_sha.as_str(),
+        "Lock SHA must match the workflow-pinned SHA"
+    );
+
+    // When describe_sha returns no tags, resolve_from_sha falls back to
+    // SHA as version — this is stored in the lock entry's version field.
+    assert_eq!(
+        entry.version.as_deref(),
+        Some(checkout_sha.as_str()),
+        "When describe_sha returns no tags, lock version should be the SHA itself"
+    );
+}
+
+/// `init` on a SHA-pinned workflow where `describe_sha` cannot fetch the commit date
+/// must still succeed — date fetch failures are non-fatal.
+#[test]
+fn test_init_sha_first_describe_sha_empty_date() {
+    let temp = TempDir::new().unwrap();
+    let root = setup_repo(&temp);
+
+    // Registry where describe_sha returns Ok but with an empty date
+    // (simulates fetch_commit_date returning 422 and being handled gracefully).
+    let checkout_sha = EmptyDateRegistry::fake_sha("actions/checkout", "v4");
+
+    write_workflow(
+        &root,
+        "ci.yml",
+        &format!(
+            "name: CI\non: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@{checkout_sha} # v4\n"
+        ),
+    );
+
+    run_init(&root, EmptyDateRegistry);
+
+    let lock = parse_lock(&lock_path(&root)).unwrap();
+    let key = gx::domain::LockKey::new(ActionId::from("actions/checkout"), Version::from("v4"));
+    let entry = lock.get(&key).expect("Lock must have checkout@v4 entry");
+
+    // SHA in lock must match the workflow SHA
+    assert_eq!(
+        entry.sha.as_str(),
+        checkout_sha.as_str(),
+        "Lock SHA must match the workflow-pinned SHA"
+    );
+
+    // Date should be empty (non-fatal failure)
+    assert_eq!(
+        entry.date, "",
+        "Date should be empty when commit date fetch fails"
+    );
+}
+
+/// `init` on a SHA-pinned workflow where `describe_sha` fails must fall back
+/// to `resolve(spec)` (tag-based resolution) instead of failing entirely.
+#[test]
+fn test_init_sha_first_describe_sha_fails_falls_back_to_resolve() {
+    let temp = TempDir::new().unwrap();
+    let root = setup_repo(&temp);
+
+    let checkout_sha = FailingDescribeRegistry::fake_sha("actions/checkout", "v4");
+
+    write_workflow(
+        &root,
+        "ci.yml",
+        &format!(
+            "name: CI\non: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@{checkout_sha} # v4\n"
+        ),
+    );
+
+    // describe_sha fails, but init must succeed by falling back to resolve(spec)
+    // which uses lookup_sha with the tag name (v4) — the old working path.
+    run_init(&root, FailingDescribeRegistry);
+
+    let lock = parse_lock(&lock_path(&root)).unwrap();
+    let key = gx::domain::LockKey::new(ActionId::from("actions/checkout"), Version::from("v4"));
+    let entry = lock.get(&key).expect("Lock must have checkout@v4 entry");
+
+    // The fallback resolve(spec) uses lookup_sha which returns a SHA for v4.
+    // The SHA may differ from the workflow SHA because it comes from the tag,
+    // but the lock entry must exist and be complete.
+    assert!(!entry.sha.as_str().is_empty(), "Lock entry must have a SHA");
+    assert_eq!(
+        entry.repository, "actions/checkout",
+        "Repository must be set"
     );
 }
