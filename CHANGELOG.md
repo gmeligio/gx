@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.7](https://github.com/gmeligio/gx/compare/v0.5.6...v0.5.7) - 2026-03-03
+
+### Added
+
+- use verified GitHub App commits for Homebrew formula push ([#47](https://github.com/gmeligio/gx/pull/47))
+- SHA-first lock resolution from workflow SHAs ([#45](https://github.com/gmeligio/gx/pull/45))
+
 ## [0.5.6](https://github.com/gmeligio/gx/compare/v0.5.5...v0.5.6) - 2026-03-02
 
 ### Fixed

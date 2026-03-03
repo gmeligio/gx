@@ -1,6 +1,6 @@
 [package]
 name = "gx"
-version = "0.5.6"
+version = "0.5.7"
 description = "CLI to manage Github Actions dependencies"
 authors = ["Eligio Mariño"]
 documentation = "https://docs.rs/gx"
