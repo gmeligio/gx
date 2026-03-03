@@ -16,20 +16,6 @@ pub enum ResolutionError {
     TokenRequired,
 }
 
-/// Result of attempting to resolve an action version
-#[derive(Debug)]
-pub enum ResolutionResult {
-    /// Successfully resolved to a SHA
-    Resolved(ResolvedAction),
-    /// Version was corrected based on SHA lookup
-    Corrected {
-        original: ActionSpec,
-        corrected: ResolvedAction,
-    },
-    /// Could not resolve, with reason
-    Unresolved { spec: ActionSpec, reason: String },
-}
-
 /// The result of resolving a ref to its metadata
 #[derive(Debug, Clone)]
 pub struct ResolvedRef {
@@ -94,27 +80,52 @@ impl<R: VersionRegistry> ActionResolver<R> {
         &self.registry
     }
 
-    /// Resolve an action spec to a commit SHA
-    pub fn resolve(&self, spec: &ActionSpec) -> ResolutionResult {
+    /// Resolve an action spec to a commit SHA.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ResolutionError` if the registry lookup fails.
+    pub fn resolve(&self, spec: &ActionSpec) -> Result<ResolvedAction, ResolutionError> {
         debug!("Resolving {spec}");
+        let resolved_ref = self.registry.lookup_sha(&spec.id, &spec.version)?;
+        Ok(ResolvedAction::new(
+            spec.id.clone(),
+            spec.version.clone(),
+            resolved_ref.sha,
+            resolved_ref.repository,
+            resolved_ref.ref_type,
+            resolved_ref.date,
+        ))
+    }
 
-        match self.registry.lookup_sha(&spec.id, &spec.version) {
-            Ok(resolved_ref) => {
-                let resolved = ResolvedAction::new(
-                    spec.id.clone(),
-                    spec.version.clone(),
-                    resolved_ref.sha,
-                    resolved_ref.repository,
-                    resolved_ref.ref_type,
-                    resolved_ref.date,
-                );
-                ResolutionResult::Resolved(resolved)
-            }
-            Err(e) => ResolutionResult::Unresolved {
-                spec: spec.clone(),
-                reason: e.to_string(),
-            },
-        }
+    /// Resolve an action from a known commit SHA.
+    /// Derives version (most specific tag) and `ref_type` from tags for the SHA.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ResolutionError` if the registry lookup fails.
+    pub fn resolve_from_sha(
+        &self,
+        id: &ActionId,
+        sha: &CommitSha,
+    ) -> Result<ResolvedAction, ResolutionError> {
+        let meta = self.registry.lookup_sha(id, &Version::from(sha.as_str()))?;
+        let tags = self.registry.tags_for_sha(id, sha).unwrap_or_default();
+        let version =
+            select_most_specific_tag(&tags).unwrap_or_else(|| Version::from(sha.as_str()));
+        let ref_type = if tags.is_empty() {
+            RefType::Commit
+        } else {
+            RefType::Tag
+        };
+        Ok(ResolvedAction::new(
+            id.clone(),
+            version,
+            sha.clone(),
+            meta.repository,
+            ref_type,
+            meta.date,
+        ))
     }
 
     /// Correct a version based on the commit SHA it points to.
@@ -133,7 +144,7 @@ impl<R: VersionRegistry> ActionResolver<R> {
                 if tags.contains(original_version) {
                     return (original_version.clone(), false);
                 }
-                if let Some(tag) = select_best_tag(&tags) {
+                if let Some(tag) = select_most_specific_tag(&tags) {
                     (tag, true)
                 } else {
                     warn!("No tags found for {id} SHA {sha}, keeping version");
@@ -158,7 +169,7 @@ impl<R: VersionRegistry> ActionResolver<R> {
     /// Returns `Some(version)` if tags are found, `None` if not.
     pub fn refine_version(&self, id: &ActionId, sha: &CommitSha) -> Option<Version> {
         match self.registry.tags_for_sha(id, sha) {
-            Ok(tags) => select_best_tag(&tags),
+            Ok(tags) => select_most_specific_tag(&tags),
             Err(_) => None,
         }
     }
@@ -171,13 +182,11 @@ fn parse_version_components(s: &str) -> Option<Vec<u64>> {
     stripped.split('.').map(|p| p.parse::<u64>().ok()).collect()
 }
 
-/// Select the best tag from a list (prefers semver-like tags with fewer components,
-/// then highest version value among equal component counts, non-semver tags last).
-/// Select the best version tag from a list.
-/// Prefers semver-like tags with fewer components (major over minor over patch),
+/// Select the most specific version tag from a list.
+/// Prefers semver-like tags with more components (patch over minor over major),
 /// then highest version value among equal component counts, with non-semver tags last.
 #[must_use]
-pub fn select_best_tag(tags: &[Version]) -> Option<Version> {
+pub fn select_most_specific_tag(tags: &[Version]) -> Option<Version> {
     if tags.is_empty() {
         return None;
     }
@@ -187,7 +196,7 @@ pub fn select_best_tag(tags: &[Version]) -> Option<Version> {
         .map(|t| (t, parse_version_components(t.as_str())))
         .collect();
 
-    // Sort: semver-like tags first (fewer components preferred: v4 < v4.1 < v4.1.0),
+    // Sort: semver-like tags first (more components preferred: v4.1.0 > v4.1 > v4),
     // then highest version value wins among equal component counts, non-semver tags last.
     indexed.sort_by(|(_, av), (_, bv)| match (av, bv) {
         (None, None) => std::cmp::Ordering::Equal,
@@ -196,9 +205,9 @@ pub fn select_best_tag(tags: &[Version]) -> Option<Version> {
         (Some(av), Some(bv)) => {
             let a_len = av.len();
             let b_len = bv.len();
-            match a_len.cmp(&b_len) {
+            match b_len.cmp(&a_len) {
                 std::cmp::Ordering::Equal => bv.cmp(av), // higher version wins (descending)
-                other => other,                          // fewer components wins (ascending)
+                other => other,                          // more components wins (descending)
             }
         }
     });
@@ -253,17 +262,13 @@ mod tests {
         let spec = ActionSpec::new(ActionId::from("actions/checkout"), Version::from("v4"));
         let result = service.resolve(&spec);
 
-        match result {
-            ResolutionResult::Resolved(resolved) => {
-                assert_eq!(resolved.id.as_str(), "actions/checkout");
-                assert_eq!(resolved.version.as_str(), "v4");
-                assert_eq!(
-                    resolved.sha.as_str(),
-                    "abc123def456789012345678901234567890abcd"
-                );
-            }
-            _ => panic!("Expected Resolved result"),
-        }
+        let resolved = result.expect("Expected Ok result");
+        assert_eq!(resolved.id.as_str(), "actions/checkout");
+        assert_eq!(resolved.version.as_str(), "v4");
+        assert_eq!(
+            resolved.sha.as_str(),
+            "abc123def456789012345678901234567890abcd"
+        );
     }
 
     #[test]
@@ -280,12 +285,7 @@ mod tests {
         let spec = ActionSpec::new(ActionId::from("actions/checkout"), Version::from("v4"));
         let result = service.resolve(&spec);
 
-        match result {
-            ResolutionResult::Unresolved { spec: s, reason: _ } => {
-                assert_eq!(s.id.as_str(), "actions/checkout");
-            }
-            _ => panic!("Expected Unresolved result"),
-        }
+        assert!(result.is_err());
     }
 
     #[test]
@@ -328,53 +328,122 @@ mod tests {
         let original_version = Version::from("v4");
         let (version, was_corrected) = service.correct_version(&id, &sha, &original_version);
 
-        assert_eq!(version.as_str(), "v5");
+        assert_eq!(version.as_str(), "v5.0.0");
         assert!(was_corrected);
     }
 
     #[test]
-    fn test_select_best_tag_empty() {
-        assert_eq!(select_best_tag(&[]), None);
+    fn test_resolve_from_sha_with_tags() {
+        let sha = CommitSha::from("abc123def456789012345678901234567890abcd");
+        let registry = MockRegistry {
+            resolve_result: Ok(ResolvedRef::new(
+                sha.clone(),
+                "owner/repo".to_string(),
+                RefType::Commit,
+                "2026-01-01T00:00:00Z".to_string(),
+            )),
+            tags_result: Ok(vec![
+                Version::from("v3"),
+                Version::from("v3.6"),
+                Version::from("v3.6.1"),
+            ]),
+        };
+        let service = ActionResolver::new(registry);
+        let id = ActionId::from("owner/repo");
+
+        let result = service
+            .resolve_from_sha(&id, &sha)
+            .expect("Expected Ok result");
+
+        assert_eq!(result.version.as_str(), "v3.6.1");
+        assert_eq!(result.sha, sha);
+        assert_eq!(result.ref_type, RefType::Tag);
+        assert_eq!(result.repository, "owner/repo");
     }
 
     #[test]
-    fn test_select_best_tag_single() {
+    fn test_resolve_from_sha_no_tags() {
+        let sha = CommitSha::from("abc123def456789012345678901234567890abcd");
+        let registry = MockRegistry {
+            resolve_result: Ok(ResolvedRef::new(
+                sha.clone(),
+                "owner/repo".to_string(),
+                RefType::Commit,
+                "2026-01-01T00:00:00Z".to_string(),
+            )),
+            tags_result: Ok(vec![]),
+        };
+        let service = ActionResolver::new(registry);
+        let id = ActionId::from("owner/repo");
+
+        let result = service
+            .resolve_from_sha(&id, &sha)
+            .expect("Expected Ok result");
+
+        assert_eq!(result.version.as_str(), sha.as_str());
+        assert_eq!(result.sha, sha);
+        assert_eq!(result.ref_type, RefType::Commit);
+    }
+
+    #[test]
+    fn test_select_most_specific_tag_empty() {
+        assert_eq!(select_most_specific_tag(&[]), None);
+    }
+
+    #[test]
+    fn test_select_most_specific_tag_single() {
         let tags = vec![Version::from("v4")];
-        assert_eq!(select_best_tag(&tags), Some(Version::from("v4")));
+        assert_eq!(select_most_specific_tag(&tags), Some(Version::from("v4")));
     }
 
     #[test]
-    fn test_select_best_tag_prefers_major_over_patch() {
+    fn test_select_most_specific_tag_prefers_patch_over_major() {
         let tags = vec![Version::from("v4.1.0"), Version::from("v4")];
-        assert_eq!(select_best_tag(&tags), Some(Version::from("v4")));
+        assert_eq!(
+            select_most_specific_tag(&tags),
+            Some(Version::from("v4.1.0"))
+        );
     }
 
     #[test]
-    fn test_select_best_tag_prefers_major_over_minor() {
+    fn test_select_most_specific_tag_prefers_minor_over_major() {
         let tags = vec![Version::from("v4.1"), Version::from("v4")];
-        assert_eq!(select_best_tag(&tags), Some(Version::from("v4")));
+        assert_eq!(select_most_specific_tag(&tags), Some(Version::from("v4.1")));
     }
 
     #[test]
-    fn test_select_best_tag_non_semver_sorted_last() {
+    fn test_select_most_specific_tag_three_tiers() {
+        let tags = vec![
+            Version::from("v3"),
+            Version::from("v3.6"),
+            Version::from("v3.6.1"),
+        ];
+        assert_eq!(
+            select_most_specific_tag(&tags),
+            Some(Version::from("v3.6.1"))
+        );
+    }
+
+    #[test]
+    fn test_select_most_specific_tag_non_semver_sorted_last() {
         let tags = vec![Version::from("latest"), Version::from("v4")];
-        assert_eq!(select_best_tag(&tags), Some(Version::from("v4")));
+        assert_eq!(select_most_specific_tag(&tags), Some(Version::from("v4")));
     }
 
     #[test]
-    fn test_select_best_tag_all_non_semver_returns_first() {
+    fn test_select_most_specific_tag_all_non_semver_returns_first() {
         let tags = vec![Version::from("latest"), Version::from("stable")];
         // No semver tags — returns the first one
-        assert!(select_best_tag(&tags).is_some());
+        assert!(select_most_specific_tag(&tags).is_some());
     }
 
     #[test]
-    fn test_select_best_tag_higher_major_wins_among_same_precision() {
+    fn test_select_most_specific_tag_higher_major_wins_among_same_precision() {
         let tags = vec![
             Version::from("v3"),
             Version::from("v4"),
             Version::from("v5"),
         ];
-        assert_eq!(select_best_tag(&tags), Some(Version::from("v5")));
+        assert_eq!(select_most_specific_tag(&tags), Some(Version::from("v5")));
     }
 }
