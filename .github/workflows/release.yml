@@ -275,10 +275,8 @@ jobs:
                   owner: ${{ github.repository_owner }}
             - name: Get GitHub App user
               id: app-user
-              env:
-                  GH_TOKEN: ${{ steps.app-token.outputs.token }}
               run: |
-                  slug=$(gh api /app --jq '.slug')
+                  slug="${{ steps.app-token.outputs.app-slug }}"
                   app_id="${{ secrets.VERIFIED_COMMIT_ID }}"
                   echo "name=${slug}[bot]" >> "$GITHUB_OUTPUT"
                   echo "email=${app_id}+${slug}[bot]@users.noreply.github.com" >> "$GITHUB_OUTPUT"
