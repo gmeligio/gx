@@ -502,10 +502,17 @@ fn e2e_lint_detects_unsynced_manifest() {
 /// Registry that resolves versions to deterministic SHAs AND supports reverse
 /// SHA→tags lookups. This is needed to test the SHA-first resolution path
 /// where workflows already have SHA-pinned actions.
+///
+/// Unlike `E2eRegistry` (which returns empty from `tags_for_sha`), this
+/// registry supports explicit `(action, sha) → tags` mappings so that
+/// multiple version tags can point to the same commit SHA (like in reality
+/// where `v4` and `v4.2.1` are tags on the same commit).
 #[derive(Clone, Default)]
 struct ShaAwareRegistry {
-    /// action_id → list of available version tags
+    /// action_id → list of available version tags (for `all_tags`)
     tags: std::collections::HashMap<String, Vec<String>>,
+    /// (action_id, sha) → list of tags pointing to that SHA (for `tags_for_sha`)
+    sha_tags: std::collections::HashMap<(String, String), Vec<String>>,
 }
 
 impl ShaAwareRegistry {
@@ -516,6 +523,16 @@ impl ShaAwareRegistry {
     fn with_all_tags(mut self, id: &str, tags: Vec<&str>) -> Self {
         self.tags
             .insert(id.to_string(), tags.into_iter().map(String::from).collect());
+        self
+    }
+
+    /// Register that a specific SHA has the given tags pointing to it.
+    /// This is the reverse mapping used by `tags_for_sha`.
+    fn with_sha_tags(mut self, id: &str, sha: &str, tags: Vec<&str>) -> Self {
+        self.sha_tags.insert(
+            (id.to_string(), sha.to_string()),
+            tags.into_iter().map(String::from).collect(),
+        );
         self
     }
 
@@ -539,14 +556,16 @@ impl VersionRegistry for ShaAwareRegistry {
         id: &ActionId,
         sha: &CommitSha,
     ) -> Result<Vec<Version>, ResolutionError> {
-        // Reverse lookup: find all tags whose fake SHA matches the given SHA
-        let all_tags = self.tags.get(id.as_str()).cloned().unwrap_or_default();
-        let matching: Vec<Version> = all_tags
-            .iter()
-            .filter(|tag| Self::fake_sha(id.as_str(), tag) == sha.as_str())
-            .map(|tag| Version::from(tag.as_str()))
-            .collect();
-        Ok(matching)
+        // Use explicit sha_tags mapping if available
+        let key = (id.as_str().to_string(), sha.as_str().to_string());
+        Ok(self
+            .sha_tags
+            .get(&key)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(Version::from)
+            .collect())
     }
 
     fn all_tags(&self, id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
@@ -572,7 +591,8 @@ fn e2e_init_sha_pinned_workflow_sets_version_not_sha() {
     let temp = TempDir::new().unwrap();
     let root = setup_repo(&temp);
 
-    // Simulate a repo that already has SHA-pinned actions (like after a previous gx tidy)
+    // Simulate a repo that already has SHA-pinned actions (like after a previous gx tidy).
+    // In reality, v4 and v4.2.1 point to the SAME commit (v4 is a floating major tag).
     let checkout_sha = ShaAwareRegistry::fake_sha("actions/checkout", "v4");
     let setup_sha = ShaAwareRegistry::fake_sha("actions/setup-node", "v3");
 
@@ -584,10 +604,13 @@ fn e2e_init_sha_pinned_workflow_sets_version_not_sha() {
         ),
     );
 
-    // Registry knows which tags point to which SHAs
+    // Registry knows which tags point to which SHAs.
+    // Multiple tags share the same SHA (v4 + v4.2.1 on same commit).
     let registry = ShaAwareRegistry::new()
         .with_all_tags("actions/checkout", vec!["v4", "v4.2.1"])
-        .with_all_tags("actions/setup-node", vec!["v3", "v3.1.0"]);
+        .with_all_tags("actions/setup-node", vec!["v3", "v3.1.0"])
+        .with_sha_tags("actions/checkout", &checkout_sha, vec!["v4", "v4.2.1"])
+        .with_sha_tags("actions/setup-node", &setup_sha, vec!["v3", "v3.1.0"]);
 
     run_init(&root, registry);
 
@@ -640,14 +663,13 @@ fn e2e_tidy_sha_pinned_new_action_resolves_version() {
         "name: CI\non: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n",
     );
 
+    let node_sha = ShaAwareRegistry::fake_sha("actions/setup-node", "v3");
     let registry = ShaAwareRegistry::new()
         .with_all_tags("actions/checkout", vec!["v4", "v4.2.1"])
-        .with_all_tags("actions/setup-node", vec!["v3", "v3.5.0"]);
+        .with_all_tags("actions/setup-node", vec!["v3", "v3.5.0"])
+        .with_sha_tags("actions/setup-node", &node_sha, vec!["v3", "v3.5.0"]);
 
     run_init(&root, registry.clone());
-
-    // Now add a SHA-pinned action to the workflow (simulating manual edit)
-    let node_sha = ShaAwareRegistry::fake_sha("actions/setup-node", "v3");
     let lock = parse_lock(&lock_path(&root)).unwrap();
     let checkout_key =
         gx::domain::LockKey::new(ActionId::from("actions/checkout"), Version::from("v4"));
@@ -696,7 +718,9 @@ fn e2e_tidy_after_sha_pinned_init_is_noop() {
         ),
     );
 
-    let registry = ShaAwareRegistry::new().with_all_tags("actions/checkout", vec!["v4", "v4.2.1"]);
+    let registry = ShaAwareRegistry::new()
+        .with_all_tags("actions/checkout", vec!["v4", "v4.2.1"])
+        .with_sha_tags("actions/checkout", &checkout_sha, vec!["v4", "v4.2.1"]);
 
     run_init(&root, registry.clone());
 
@@ -741,7 +765,8 @@ fn e2e_full_pipeline_sha_pinned_init_tidy_upgrade() {
     );
 
     let registry = ShaAwareRegistry::new()
-        .with_all_tags("actions/checkout", vec!["v3", "v3.6.1", "v4", "v4.2.0"]);
+        .with_all_tags("actions/checkout", vec!["v3", "v3.6.1", "v4", "v4.2.0"])
+        .with_sha_tags("actions/checkout", &checkout_sha, vec!["v3", "v3.6.1"]);
 
     // Step 1: Init
     run_init(&root, registry.clone());
