@@ -3,8 +3,8 @@ use std::time::Duration;
 use thiserror::Error;
 
 use crate::domain::{
-    ActionId, ActionSpec, CommitSha, RefType, ResolutionError, ResolvedRef, Version,
-    VersionRegistry,
+    ActionId, ActionSpec, CommitSha, RefType, ResolutionError, ResolvedRef, ShaDescription,
+    Version, VersionRegistry,
 };
 
 const GITHUB_API_BASE: &str = "https://api.github.com";
@@ -52,10 +52,12 @@ pub struct GitRef {
     pub object: GitObject,
 }
 
-/// Git object containing a SHA
+/// Git object containing a SHA and type
 #[derive(Debug, Deserialize)]
 pub struct GitObject {
     pub sha: String,
+    #[serde(rename = "type", default)]
+    pub object_type: String,
 }
 
 /// Structure for git ref entries returned by the refs API
@@ -69,6 +71,13 @@ pub struct GitRefEntry {
 #[derive(Deserialize)]
 struct CommitResponse {
     sha: String,
+}
+
+/// Response from `GET /repos/{owner}/{repo}/git/tags/{sha}` for annotated tags.
+/// The `object.sha` field contains the underlying commit SHA.
+#[derive(Deserialize)]
+struct GitTagResponse {
+    object: GitObject,
 }
 
 /// Response for a release API call
@@ -257,8 +266,9 @@ impl GithubRegistry {
     /// Get all tags that point to a specific commit SHA.
     ///
     /// Returns tag names without the "refs/tags/" prefix (e.g., `["v5", "v5.0.0"]`)
-    /// Note: This only works for lightweight tags. Annotated tags store the tag object SHA,
-    /// not the commit SHA, so they won't match.
+    /// Handles both lightweight tags (where `object.sha` is the commit SHA directly)
+    /// and annotated tags (where `object.sha` is the tag object SHA, requiring
+    /// dereferencing via `git/tags/{tag_sha}` to find the underlying commit SHA).
     ///
     /// # Errors
     ///
@@ -301,19 +311,57 @@ impl GithubRegistry {
                     source,
                 })?;
 
-        // Filter tags that point to the given SHA and extract tag names
-        let tags: Vec<String> = refs
-            .into_iter()
-            .filter(|r| r.object.sha == sha)
-            .map(|r| {
-                r.ref_name
-                    .strip_prefix("refs/tags/")
-                    .unwrap_or(&r.ref_name)
-                    .to_string()
-            })
-            .collect();
+        // Collect lightweight tag matches directly
+        let mut tags = filter_refs_by_sha(&refs, sha);
+
+        // Dereference annotated tags to check if they point to the target commit
+        for entry in &refs {
+            if entry.object.object_type == "tag"
+                && entry.object.sha != sha
+                && let Some(tag_name) = self.dereference_tag(token, &base_repo, entry, sha)
+            {
+                tags.push(tag_name);
+            }
+        }
 
         Ok(tags)
+    }
+
+    /// Dereference an annotated tag to check if it points to the given commit SHA.
+    /// Returns `Some(tag_name)` if the tag's underlying commit matches, `None` otherwise.
+    fn dereference_tag(
+        &self,
+        token: &str,
+        base_repo: &str,
+        entry: &GitRefEntry,
+        commit_sha: &str,
+    ) -> Option<String> {
+        let tag_url = format!(
+            "{GITHUB_API_BASE}/repos/{base_repo}/git/tags/{}",
+            entry.object.sha
+        );
+        let tag_response = self
+            .client
+            .get(&tag_url)
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .ok()?;
+
+        if !tag_response.status().is_success() {
+            return None;
+        }
+
+        let tag_data: GitTagResponse = tag_response.json().ok()?;
+        if tag_data.object.sha == commit_sha {
+            let tag_name = entry
+                .ref_name
+                .strip_prefix("refs/tags/")
+                .unwrap_or(&entry.ref_name)
+                .to_string();
+            Some(tag_name)
+        } else {
+            None
+        }
     }
 
     /// Fetch all version-like tags using the matching-refs endpoint.
@@ -616,6 +664,40 @@ impl VersionRegistry for GithubRegistry {
                 },
             })
     }
+
+    fn describe_sha(
+        &self,
+        id: &ActionId,
+        sha: &CommitSha,
+    ) -> Result<ShaDescription, ResolutionError> {
+        let base_repo = id.base_repo();
+
+        // Fetch commit date directly — no tag/branch fallback chain needed since SHA is trusted
+        let date = self
+            .fetch_commit_date(&base_repo, sha.as_str())
+            .map_err(|e| match e {
+                GithubError::TokenRequired => ResolutionError::TokenRequired,
+                _ => ResolutionError::ResolveFailed {
+                    spec: ActionSpec::new(id.clone(), Version::from(sha.as_str())),
+                    reason: e.to_string(),
+                },
+            })?
+            .unwrap_or_default();
+
+        // Tag lookup is non-fatal: return empty tags on failure
+        let tags = self
+            .get_tags_for_sha(id.as_str(), sha.as_str())
+            .unwrap_or_default()
+            .into_iter()
+            .map(Version::from)
+            .collect();
+
+        Ok(ShaDescription {
+            tags,
+            repository: base_repo,
+            date,
+        })
+    }
 }
 
 impl Default for GithubRegistry {
@@ -624,9 +706,40 @@ impl Default for GithubRegistry {
     }
 }
 
+/// Filter git ref entries to find lightweight tags pointing to a specific commit SHA.
+/// Returns tag names without the "refs/tags/" prefix.
+///
+/// Only matches lightweight tags where `object.sha` is the commit SHA directly.
+/// Annotated tags (`object_type` == "tag") must be dereferenced separately.
+fn filter_refs_by_sha(refs: &[GitRefEntry], sha: &str) -> Vec<String> {
+    refs.iter()
+        .filter(|r| r.object.sha == sha)
+        .map(|r| {
+            r.ref_name
+                .strip_prefix("refs/tags/")
+                .unwrap_or(&r.ref_name)
+                .to_string()
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn make_ref_entry(ref_name: &str, sha: &str) -> GitRefEntry {
+        make_ref_entry_typed(ref_name, sha, "commit")
+    }
+
+    fn make_ref_entry_typed(ref_name: &str, sha: &str, object_type: &str) -> GitRefEntry {
+        GitRefEntry {
+            ref_name: ref_name.to_string(),
+            object: GitObject {
+                sha: sha.to_string(),
+                object_type: object_type.to_string(),
+            },
+        }
+    }
 
     #[test]
     fn test_full_sha_passthrough() {
@@ -686,5 +799,68 @@ mod tests {
         // Should return Ok(None) when no tags match
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
+    }
+
+    // --- filter_refs_by_sha tests ---
+
+    #[test]
+    fn test_filter_refs_lightweight_tags_match_commit_sha() {
+        let commit_sha = "abc123def456789012345678901234567890abcd";
+        let refs = vec![
+            make_ref_entry("refs/tags/v4", commit_sha),
+            make_ref_entry("refs/tags/v4.2.1", commit_sha),
+            make_ref_entry("refs/tags/v3", "other_sha_000000000000000000000000000"),
+        ];
+
+        let tags = filter_refs_by_sha(&refs, commit_sha);
+        assert_eq!(tags, vec!["v4", "v4.2.1"]);
+    }
+
+    #[test]
+    fn test_filter_refs_no_matches() {
+        let refs = vec![
+            make_ref_entry("refs/tags/v4", "aaa0000000000000000000000000000000000000"),
+            make_ref_entry("refs/tags/v3", "bbb0000000000000000000000000000000000000"),
+        ];
+
+        let tags = filter_refs_by_sha(&refs, "ccc0000000000000000000000000000000000000");
+        assert!(tags.is_empty());
+    }
+
+    /// `filter_refs_by_sha` only matches lightweight tags. Annotated tags
+    /// `(object_type == "tag")` are handled separately by `get_tags_for_sha`
+    /// via dereferencing.
+    #[test]
+    fn test_filter_refs_skips_annotated_tags() {
+        let commit_sha = "abc123def456789012345678901234567890abcd";
+        let tag_object_sha = "fedcba9876543210fedcba9876543210fedcba98";
+
+        let refs = vec![
+            make_ref_entry_typed("refs/tags/v6", tag_object_sha, "tag"), // annotated
+            make_ref_entry_typed("refs/tags/v6.2.0", tag_object_sha, "tag"), // annotated
+            make_ref_entry("refs/tags/v5", commit_sha),                  // lightweight
+        ];
+
+        // filter_refs_by_sha only picks up lightweight matches
+        let tags = filter_refs_by_sha(&refs, commit_sha);
+        assert_eq!(tags, vec!["v5"]);
+    }
+
+    /// Integration test: `get_tags_for_sha` should return both lightweight
+    /// and annotated tags pointing to the same commit.
+    #[test]
+    #[ignore = "requires GITHUB_TOKEN and network access"]
+    fn test_get_tags_for_sha_includes_annotated_tags() {
+        let token = std::env::var("GITHUB_TOKEN").ok();
+        let client = GithubRegistry::new(token).unwrap();
+        // actions/checkout v6 is an annotated tag
+        // First resolve v6 to get the commit SHA
+        let (sha, _) = client.resolve_ref("actions/checkout", "v6").unwrap();
+        let tags = client.get_tags_for_sha("actions/checkout", &sha).unwrap();
+        // Should include both v6 and more specific versions like v6.x.y
+        assert!(
+            tags.iter().any(|t| t == "v6"),
+            "expected v6 in tags, got: {tags:?}"
+        );
     }
 }

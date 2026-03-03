@@ -16,6 +16,14 @@ pub enum ResolutionError {
     TokenRequired,
 }
 
+/// Metadata for a known commit SHA: the tags pointing to it, the base repository, and the commit date.
+#[derive(Debug, Clone)]
+pub struct ShaDescription {
+    pub tags: Vec<Version>,
+    pub repository: String,
+    pub date: String,
+}
+
 /// The result of resolving a ref to its metadata
 #[derive(Debug, Clone)]
 pub struct ResolvedRef {
@@ -61,6 +69,17 @@ pub trait VersionRegistry {
     ///
     /// Returns an error if the lookup fails
     fn all_tags(&self, id: &ActionId) -> Result<Vec<Version>, ResolutionError>;
+
+    /// Describe a known commit SHA: return the tags pointing to it, the base repository, and the commit date.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the commit lookup fails (tag lookup failure is non-fatal, returns empty tags).
+    fn describe_sha(
+        &self,
+        id: &ActionId,
+        sha: &CommitSha,
+    ) -> Result<ShaDescription, ResolutionError>;
 }
 
 /// Resolves actions to their correct version and commit SHA
@@ -109,11 +128,10 @@ impl<R: VersionRegistry> ActionResolver<R> {
         id: &ActionId,
         sha: &CommitSha,
     ) -> Result<ResolvedAction, ResolutionError> {
-        let meta = self.registry.lookup_sha(id, &Version::from(sha.as_str()))?;
-        let tags = self.registry.tags_for_sha(id, sha).unwrap_or_default();
+        let desc = self.registry.describe_sha(id, sha)?;
         let version =
-            select_most_specific_tag(&tags).unwrap_or_else(|| Version::from(sha.as_str()));
-        let ref_type = if tags.is_empty() {
+            select_most_specific_tag(&desc.tags).unwrap_or_else(|| Version::from(sha.as_str()));
+        let ref_type = if desc.tags.is_empty() {
             RefType::Commit
         } else {
             RefType::Tag
@@ -122,9 +140,9 @@ impl<R: VersionRegistry> ActionResolver<R> {
             id.clone(),
             version,
             sha.clone(),
-            meta.repository,
+            desc.repository,
             ref_type,
-            meta.date,
+            desc.date,
         ))
     }
 
@@ -243,6 +261,20 @@ mod tests {
 
         fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
             self.tags_result.clone()
+        }
+
+        fn describe_sha(
+            &self,
+            _id: &ActionId,
+            _sha: &CommitSha,
+        ) -> Result<ShaDescription, ResolutionError> {
+            let meta = self.resolve_result.clone()?;
+            let tags = self.tags_result.clone().unwrap_or_default();
+            Ok(ShaDescription {
+                tags,
+                repository: meta.repository,
+                date: meta.date,
+            })
         }
     }
 
@@ -383,6 +415,23 @@ mod tests {
         assert_eq!(result.version.as_str(), sha.as_str());
         assert_eq!(result.sha, sha);
         assert_eq!(result.ref_type, RefType::Commit);
+    }
+
+    #[test]
+    fn test_resolve_from_sha_describe_error_propagates() {
+        let registry = MockRegistry {
+            resolve_result: Err(ResolutionError::TokenRequired),
+            tags_result: Ok(vec![]),
+        };
+        let service = ActionResolver::new(registry);
+        let id = ActionId::from("owner/repo");
+        let sha = CommitSha::from("abc123def456789012345678901234567890abcd");
+
+        let result = service.resolve_from_sha(&id, &sha);
+        assert!(
+            matches!(result, Err(ResolutionError::TokenRequired)),
+            "describe_sha error should propagate through resolve_from_sha"
+        );
     }
 
     #[test]

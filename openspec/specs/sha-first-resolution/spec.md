@@ -23,7 +23,7 @@ When workflow files pin an action to a SHA, lock resolution SHALL use that SHA d
 - **THEN** no registry call is made for that entry (workflow SHA is not used to overwrite)
 
 ### Requirement: resolve_from_sha derives all lock fields from SHA
-`ActionResolver` SHALL provide a `resolve_from_sha` method that takes an `ActionId` and `CommitSha` and returns a `ResolvedAction` with version, ref_type, and date derived from the SHA.
+`ActionResolver` SHALL provide a `resolve_from_sha` method that takes an `ActionId` and `CommitSha` and returns a `ResolvedAction` with version, ref_type, and date derived from the SHA. The method SHALL use `describe_sha` to obtain tags and metadata in a single registry operation, rather than calling `lookup_sha` and `tags_for_sha` separately.
 
 #### Scenario: SHA with tags resolves to most specific version
 - **GIVEN** action `actions/checkout` with SHA `abc123...`
@@ -38,6 +38,11 @@ When workflow files pin an action to a SHA, lock resolution SHALL use that SHA d
 - **WHEN** `resolve_from_sha` is called
 - **THEN** the result has `version = "abc123..."` (the SHA itself)
 - **AND** the result has `ref_type = Commit`
+
+#### Scenario: describe_sha error propagates through resolve_from_sha
+- **GIVEN** `describe_sha` returns an error (e.g., `TokenRequired`)
+- **WHEN** `resolve_from_sha` is called
+- **THEN** the error is propagated to the caller
 
 ### Requirement: Lock version field uses most specific tag
 The lock entry's `version` field SHALL always be the most specific (most components) semver tag pointing to the entry's SHA. Among tags with the same number of components, the highest version SHALL win.

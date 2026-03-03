@@ -1,7 +1,8 @@
 #![allow(unused_crate_dependencies)]
 use gx::commands::{self, tidy};
 use gx::domain::{
-    ActionId, CommitSha, Manifest, RefType, ResolutionError, ResolvedRef, Version, VersionRegistry,
+    ActionId, CommitSha, Manifest, RefType, ResolutionError, ResolvedRef, ShaDescription, Version,
+    VersionRegistry,
 };
 use gx::infrastructure::{
     FileWorkflowScanner, FileWorkflowUpdater, apply_lock_diff, apply_manifest_diff, parse_lock,
@@ -37,6 +38,14 @@ impl VersionRegistry for NoopRegistry {
     }
 
     fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
+        Err(ResolutionError::TokenRequired)
+    }
+
+    fn describe_sha(
+        &self,
+        _id: &ActionId,
+        _sha: &CommitSha,
+    ) -> Result<ShaDescription, ResolutionError> {
         Err(ResolutionError::TokenRequired)
     }
 }
@@ -101,6 +110,27 @@ impl VersionRegistry for MockRegistry {
 
     fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
         Ok(vec![])
+    }
+
+    fn describe_sha(
+        &self,
+        id: &ActionId,
+        sha: &CommitSha,
+    ) -> Result<ShaDescription, ResolutionError> {
+        let key = (id.as_str().to_string(), sha.as_str().to_string());
+        let tags = self
+            .sha_tags
+            .get(&key)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(Version::from)
+            .collect();
+        Ok(ShaDescription {
+            tags,
+            repository: id.base_repo(),
+            date: "2026-01-01T00:00:00Z".to_string(),
+        })
     }
 }
 

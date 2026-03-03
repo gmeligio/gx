@@ -525,6 +525,18 @@ mod tests {
                 .map(Version::from)
                 .collect())
         }
+
+        fn describe_sha(
+            &self,
+            id: &ActionId,
+            _sha: &CommitSha,
+        ) -> Result<crate::domain::ShaDescription, crate::domain::ResolutionError> {
+            Ok(crate::domain::ShaDescription {
+                tags: vec![],
+                repository: id.base_repo(),
+                date: "2026-01-01T00:00:00Z".to_string(),
+            })
+        }
     }
 
     #[test]

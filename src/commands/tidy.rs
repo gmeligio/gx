@@ -578,7 +578,9 @@ fn populate_lock_entry<R: VersionRegistry + Clone>(
     if !lock.has(&key) {
         debug!("Resolving {spec}");
         let result = if let Some(sha) = workflow_shas.get(&key) {
-            resolver.resolve_from_sha(&spec.id, sha)
+            resolver
+                .resolve_from_sha(&spec.id, sha)
+                .or_else(|_| resolver.resolve(spec))
         } else {
             resolver.resolve(spec)
         };
@@ -668,6 +670,13 @@ mod tests {
             Err(crate::domain::ResolutionError::TokenRequired)
         }
         fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, crate::domain::ResolutionError> {
+            Err(crate::domain::ResolutionError::TokenRequired)
+        }
+        fn describe_sha(
+            &self,
+            _id: &ActionId,
+            _sha: &CommitSha,
+        ) -> Result<crate::domain::ShaDescription, crate::domain::ResolutionError> {
             Err(crate::domain::ResolutionError::TokenRequired)
         }
     }
@@ -1018,6 +1027,17 @@ jobs:
         fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, crate::domain::ResolutionError> {
             Ok(self.tags.clone())
         }
+        fn describe_sha(
+            &self,
+            id: &ActionId,
+            _sha: &CommitSha,
+        ) -> Result<crate::domain::ShaDescription, crate::domain::ResolutionError> {
+            Ok(crate::domain::ShaDescription {
+                tags: self.tags.clone(),
+                repository: id.base_repo(),
+                date: "2026-01-01T00:00:00Z".to_string(),
+            })
+        }
     }
 
     #[test]
@@ -1148,6 +1168,17 @@ jobs:
                 _id: &ActionId,
             ) -> Result<Vec<Version>, crate::domain::ResolutionError> {
                 Err(crate::domain::ResolutionError::TokenRequired)
+            }
+            fn describe_sha(
+                &self,
+                id: &ActionId,
+                _sha: &CommitSha,
+            ) -> Result<crate::domain::ShaDescription, crate::domain::ResolutionError> {
+                Ok(crate::domain::ShaDescription {
+                    tags: vec![],
+                    repository: id.base_repo(),
+                    date: "2026-01-01T00:00:00Z".to_string(),
+                })
             }
         }
 
@@ -1582,6 +1613,21 @@ jobs:
                     Version::from("v3.6.1"),
                 ])
             }
+            fn describe_sha(
+                &self,
+                id: &ActionId,
+                _sha: &CommitSha,
+            ) -> Result<crate::domain::ShaDescription, crate::domain::ResolutionError> {
+                Ok(crate::domain::ShaDescription {
+                    tags: vec![
+                        Version::from("v3"),
+                        Version::from("v3.6"),
+                        Version::from("v3.6.1"),
+                    ],
+                    repository: id.base_repo(),
+                    date: "2026-01-01T00:00:00Z".to_string(),
+                })
+            }
         }
 
         let temp_dir = tempfile::TempDir::new().unwrap();
@@ -1636,8 +1682,6 @@ jobs:
     fn test_version_ref_falls_back_to_registry_resolution() {
         use crate::domain::{LockKey, RefType};
 
-        let registry_sha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-
         #[derive(Clone)]
         struct SimpleRegistry(String);
         impl crate::domain::VersionRegistry for SimpleRegistry {
@@ -1666,7 +1710,16 @@ jobs:
             ) -> Result<Vec<Version>, crate::domain::ResolutionError> {
                 Err(crate::domain::ResolutionError::TokenRequired)
             }
+            fn describe_sha(
+                &self,
+                _id: &ActionId,
+                _sha: &CommitSha,
+            ) -> Result<crate::domain::ShaDescription, crate::domain::ResolutionError> {
+                Err(crate::domain::ResolutionError::TokenRequired)
+            }
         }
+
+        let registry_sha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
         let temp_dir = tempfile::TempDir::new().unwrap();
         let repo_root = temp_dir.path();

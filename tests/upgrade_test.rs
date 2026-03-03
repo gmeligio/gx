@@ -3,7 +3,7 @@ use gx::commands::upgrade;
 use gx::commands::upgrade::{UpgradeMode, UpgradeRequest, UpgradeScope};
 use gx::domain::{
     ActionId, CommitSha, Lock, LockKey, Manifest, RefType, ResolutionError, ResolvedAction,
-    ResolvedRef, Version, VersionRegistry,
+    ResolvedRef, ShaDescription, Version, VersionRegistry,
 };
 use gx::infrastructure::{
     FileWorkflowUpdater, apply_lock_diff, apply_manifest_diff, parse_lock, parse_manifest,
@@ -54,6 +54,18 @@ impl VersionRegistry for MockUpgradeRegistry {
             .into_iter()
             .map(Version::from)
             .collect())
+    }
+
+    fn describe_sha(
+        &self,
+        id: &ActionId,
+        _sha: &CommitSha,
+    ) -> Result<ShaDescription, ResolutionError> {
+        Ok(ShaDescription {
+            tags: vec![],
+            repository: id.base_repo(),
+            date: "2026-01-01T00:00:00Z".to_string(),
+        })
     }
 }
 
