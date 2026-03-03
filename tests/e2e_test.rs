@@ -509,9 +509,9 @@ fn e2e_lint_detects_unsynced_manifest() {
 /// where `v4` and `v4.2.1` are tags on the same commit).
 #[derive(Clone, Default)]
 struct ShaAwareRegistry {
-    /// action_id → list of available version tags (for `all_tags`)
+    /// `action_id` → list of available version tags (for `all_tags`)
     tags: std::collections::HashMap<String, Vec<String>>,
-    /// (action_id, sha) → list of tags pointing to that SHA (for `tags_for_sha`)
+    /// `(action_id, sha)` → list of tags pointing to that SHA (for `tags_for_sha`)
     sha_tags: std::collections::HashMap<(String, String), Vec<String>>,
 }
 

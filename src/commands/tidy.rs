@@ -1636,8 +1636,6 @@ jobs:
     fn test_version_ref_falls_back_to_registry_resolution() {
         use crate::domain::{LockKey, RefType};
 
-        let registry_sha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-
         #[derive(Clone)]
         struct SimpleRegistry(String);
         impl crate::domain::VersionRegistry for SimpleRegistry {
@@ -1667,6 +1665,8 @@ jobs:
                 Err(crate::domain::ResolutionError::TokenRequired)
             }
         }
+
+        let registry_sha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
         let temp_dir = tempfile::TempDir::new().unwrap();
         let repo_root = temp_dir.path();

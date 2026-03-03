@@ -52,10 +52,12 @@ pub struct GitRef {
     pub object: GitObject,
 }
 
-/// Git object containing a SHA
+/// Git object containing a SHA and type
 #[derive(Debug, Deserialize)]
 pub struct GitObject {
     pub sha: String,
+    #[serde(rename = "type", default)]
+    pub object_type: String,
 }
 
 /// Structure for git ref entries returned by the refs API
@@ -69,6 +71,13 @@ pub struct GitRefEntry {
 #[derive(Deserialize)]
 struct CommitResponse {
     sha: String,
+}
+
+/// Response from `GET /repos/{owner}/{repo}/git/tags/{sha}` for annotated tags.
+/// The `object.sha` field contains the underlying commit SHA.
+#[derive(Deserialize)]
+struct GitTagResponse {
+    object: GitObject,
 }
 
 /// Response for a release API call
@@ -257,8 +266,9 @@ impl GithubRegistry {
     /// Get all tags that point to a specific commit SHA.
     ///
     /// Returns tag names without the "refs/tags/" prefix (e.g., `["v5", "v5.0.0"]`)
-    /// Note: This only works for lightweight tags. Annotated tags store the tag object SHA,
-    /// not the commit SHA, so they won't match.
+    /// Handles both lightweight tags (where `object.sha` is the commit SHA directly)
+    /// and annotated tags (where `object.sha` is the tag object SHA, requiring
+    /// dereferencing via `git/tags/{tag_sha}` to find the underlying commit SHA).
     ///
     /// # Errors
     ///
@@ -301,7 +311,57 @@ impl GithubRegistry {
                     source,
                 })?;
 
-        Ok(filter_refs_by_sha(&refs, sha))
+        // Collect lightweight tag matches directly
+        let mut tags = filter_refs_by_sha(&refs, sha);
+
+        // Dereference annotated tags to check if they point to the target commit
+        for entry in &refs {
+            if entry.object.object_type == "tag"
+                && entry.object.sha != sha
+                && let Some(tag_name) = self.dereference_tag(token, &base_repo, entry, sha)
+            {
+                tags.push(tag_name);
+            }
+        }
+
+        Ok(tags)
+    }
+
+    /// Dereference an annotated tag to check if it points to the given commit SHA.
+    /// Returns `Some(tag_name)` if the tag's underlying commit matches, `None` otherwise.
+    fn dereference_tag(
+        &self,
+        token: &str,
+        base_repo: &str,
+        entry: &GitRefEntry,
+        commit_sha: &str,
+    ) -> Option<String> {
+        let tag_url = format!(
+            "{GITHUB_API_BASE}/repos/{base_repo}/git/tags/{}",
+            entry.object.sha
+        );
+        let tag_response = self
+            .client
+            .get(&tag_url)
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .ok()?;
+
+        if !tag_response.status().is_success() {
+            return None;
+        }
+
+        let tag_data: GitTagResponse = tag_response.json().ok()?;
+        if tag_data.object.sha == commit_sha {
+            let tag_name = entry
+                .ref_name
+                .strip_prefix("refs/tags/")
+                .unwrap_or(&entry.ref_name)
+                .to_string();
+            Some(tag_name)
+        } else {
+            None
+        }
     }
 
     /// Fetch all version-like tags using the matching-refs endpoint.
@@ -612,12 +672,11 @@ impl Default for GithubRegistry {
     }
 }
 
-/// Filter git ref entries to find tags pointing to a specific commit SHA.
+/// Filter git ref entries to find lightweight tags pointing to a specific commit SHA.
 /// Returns tag names without the "refs/tags/" prefix.
 ///
-/// **Known limitation**: This only matches lightweight tags where `object.sha`
-/// is the commit SHA directly. Annotated tags have `object.sha` pointing to
-/// the tag object, not the commit, so they won't match.
+/// Only matches lightweight tags where `object.sha` is the commit SHA directly.
+/// Annotated tags (`object_type` == "tag") must be dereferenced separately.
 fn filter_refs_by_sha(refs: &[GitRefEntry], sha: &str) -> Vec<String> {
     refs.iter()
         .filter(|r| r.object.sha == sha)
@@ -635,10 +694,15 @@ mod tests {
     use super::*;
 
     fn make_ref_entry(ref_name: &str, sha: &str) -> GitRefEntry {
+        make_ref_entry_typed(ref_name, sha, "commit")
+    }
+
+    fn make_ref_entry_typed(ref_name: &str, sha: &str, object_type: &str) -> GitRefEntry {
         GitRefEntry {
             ref_name: ref_name.to_string(),
             object: GitObject {
                 sha: sha.to_string(),
+                object_type: object_type.to_string(),
             },
         }
     }
@@ -729,26 +793,40 @@ mod tests {
         assert!(tags.is_empty());
     }
 
-    /// Annotated tags have `object.sha` pointing to the tag object, not the
-    /// commit. This test asserts the CORRECT behavior — annotated tags should
-    /// be matched by their underlying commit SHA. It FAILS until the bug is fixed.
+    /// `filter_refs_by_sha` only matches lightweight tags. Annotated tags
+    /// `(object_type == "tag")` are handled separately by `get_tags_for_sha`
+    /// via dereferencing.
     #[test]
-    fn test_filter_refs_annotated_tags_should_match_commit_sha() {
+    fn test_filter_refs_skips_annotated_tags() {
         let commit_sha = "abc123def456789012345678901234567890abcd";
         let tag_object_sha = "fedcba9876543210fedcba9876543210fedcba98";
 
-        // GitHub API returns the tag object SHA for annotated tags, not the commit SHA.
-        // The tag object would need to be dereferenced to find the commit SHA.
         let refs = vec![
-            make_ref_entry("refs/tags/v6", tag_object_sha), // annotated tag
-            make_ref_entry("refs/tags/v6.2.0", tag_object_sha), // annotated tag
+            make_ref_entry_typed("refs/tags/v6", tag_object_sha, "tag"), // annotated
+            make_ref_entry_typed("refs/tags/v6.2.0", tag_object_sha, "tag"), // annotated
+            make_ref_entry("refs/tags/v5", commit_sha),                  // lightweight
         ];
 
+        // filter_refs_by_sha only picks up lightweight matches
         let tags = filter_refs_by_sha(&refs, commit_sha);
-        assert_eq!(
-            tags,
-            vec!["v6".to_string(), "v6.2.0".to_string()],
-            "annotated tags pointing to this commit should be returned"
+        assert_eq!(tags, vec!["v5"]);
+    }
+
+    /// Integration test: `get_tags_for_sha` should return both lightweight
+    /// and annotated tags pointing to the same commit.
+    #[test]
+    #[ignore = "requires GITHUB_TOKEN and network access"]
+    fn test_get_tags_for_sha_includes_annotated_tags() {
+        let token = std::env::var("GITHUB_TOKEN").ok();
+        let client = GithubRegistry::new(token).unwrap();
+        // actions/checkout v6 is an annotated tag
+        // First resolve v6 to get the commit SHA
+        let (sha, _) = client.resolve_ref("actions/checkout", "v6").unwrap();
+        let tags = client.get_tags_for_sha("actions/checkout", &sha).unwrap();
+        // Should include both v6 and more specific versions like v6.x.y
+        assert!(
+            tags.iter().any(|t| t == "v6"),
+            "expected v6 in tags, got: {tags:?}"
         );
     }
 }
