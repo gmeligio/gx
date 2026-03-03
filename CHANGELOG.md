@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.8](https://github.com/gmeligio/gx/compare/v0.5.7...v0.5.8) - 2026-03-03
+
+### Fixed
+
+- use app-slug output instead of /app API for Homebrew publish ([#48](https://github.com/gmeligio/gx/pull/48))
+
+### Other
+
+- add failing e2e tests for SHA-first lock version resolution ([#50](https://github.com/gmeligio/gx/pull/50))
+
 ## [0.5.7](https://github.com/gmeligio/gx/compare/v0.5.6...v0.5.7) - 2026-03-03
 
 ### Added
