@@ -273,18 +273,6 @@ jobs:
                   private-key: ${{ secrets.VERIFIED_COMMIT_KEY }}
                   repositories: homebrew-tap
                   owner: ${{ github.repository_owner }}
-            - name: Get GitHub App user
-              id: app-user
-              run: |
-                  slug="${{ steps.app-token.outputs.app-slug }}"
-                  app_id="${{ secrets.VERIFIED_COMMIT_ID }}"
-                  echo "name=${slug}[bot]" >> "$GITHUB_OUTPUT"
-                  echo "email=${app_id}+${slug}[bot]@users.noreply.github.com" >> "$GITHUB_OUTPUT"
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-              with:
-                  persist-credentials: false
-                  repository: "gmeligio/homebrew-tap"
-                  token: ${{ steps.app-token.outputs.token }}
             # So we have access to the formula
             - name: Fetch homebrew formulae
               uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
@@ -294,10 +282,11 @@ jobs:
                   merge-multiple: true
             # This is extra complex because you can make your Formula name not match your app name
             # so we need to find releases with a *.rb file, and publish with that filename.
-            - name: Commit formula files
+            - name: Lint and prepare formula files
+              id: prepare-formulae
               run: |
-                  git config --global user.name "${{ steps.app-user.outputs.name }}"
-                  git config --global user.email "${{ steps.app-user.outputs.email }}"
+                  file_additions_json="[]"
+                  commit_message=""
 
                   for release in $(echo "$PLAN" | jq --compact-output '.releases[] | select([.artifacts[] | endswith(".rb")] | any)'); do
                     filename=$(echo "$release" | jq '.artifacts[] | select(endswith(".rb"))' --raw-output)
@@ -309,13 +298,83 @@ jobs:
                     # We avoid reformatting user-provided data such as the app description and homepage.
                     brew style --except-cops FormulaAudit/Homepage,FormulaAudit/Desc,FormulaAuditStrict --fix "Formula/${filename}" || true
 
-                    git add "Formula/${filename}"
-                    git commit -m "${name} ${version}"
+                    # Encode file content as base64 (no line wrapping) for the GraphQL mutation
+                    content=$(base64 -w0 < "Formula/${filename}")
+                    addition=$(jq -n --arg path "Formula/${filename}" --arg contents "$content" \
+                      '{path: $path, contents: $contents}')
+                    file_additions_json=$(echo "$file_additions_json" | jq --argjson item "$addition" '. + [$item]')
+
+                    if [ -z "$commit_message" ]; then
+                      commit_message="${name} ${version}"
+                    else
+                      commit_message="${commit_message}, ${name} ${version}"
+                    fi
                   done
-                  git remote set-url origin "https://x-access-token:${PUSH_TOKEN}@github.com/gmeligio/homebrew-tap.git"
-                  git push
+
+                  if [ -z "$commit_message" ]; then
+                    echo "No formula files found, skipping"
+                    echo "has_formulae=false" >> "$GITHUB_OUTPUT"
+                    exit 0
+                  fi
+
+                  echo "$file_additions_json" > "$RUNNER_TEMP/file_additions.json"
+                  echo "has_formulae=true" >> "$GITHUB_OUTPUT"
+                  echo "commit_message=${commit_message}" >> "$GITHUB_OUTPUT"
+                  branch_name="formula/$(echo "$commit_message" | tr ' ,' '--' | tr -s '-')"
+                  echo "branch_name=${branch_name}" >> "$GITHUB_OUTPUT"
+            - name: Create verified commit on homebrew-tap
+              if: ${{ steps.prepare-formulae.outputs.has_formulae == 'true' }}
               env:
-                  PUSH_TOKEN: ${{ steps.app-token.outputs.token }}
+                  HOMEBREW_TAP_TOKEN: ${{ steps.app-token.outputs.token }}
+              run: |
+                  branch_name="${{ steps.prepare-formulae.outputs.branch_name }}"
+                  commit_message="${{ steps.prepare-formulae.outputs.commit_message }}"
+
+                  # Query the main branch HEAD OID (required by createCommitOnBranch)
+                  head_oid=$(GH_TOKEN="$HOMEBREW_TAP_TOKEN" gh api graphql \
+                    -f query='query($owner:String!,$repo:String!){repository(owner:$owner,name:$repo){ref(qualifiedName:"refs/heads/main"){target{oid}}}}' \
+                    -f owner=gmeligio -f repo=homebrew-tap \
+                    --jq '.data.repository.ref.target.oid')
+
+                  # Create the temporary branch from main HEAD
+                  GH_TOKEN="$HOMEBREW_TAP_TOKEN" gh api --method POST \
+                    /repos/gmeligio/homebrew-tap/git/refs \
+                    -f ref="refs/heads/${branch_name}" \
+                    -f sha="$head_oid"
+
+                  # Create a verified commit via GraphQL
+                  request=$(jq -n \
+                    --arg repo "gmeligio/homebrew-tap" \
+                    --arg branch "$branch_name" \
+                    --arg head "$head_oid" \
+                    --arg headline "$commit_message" \
+                    --slurpfile additions "$RUNNER_TEMP/file_additions.json" \
+                    '{
+                      query: "mutation($input:CreateCommitOnBranchInput!){createCommitOnBranch(input:$input){commit{url}}}",
+                      variables: {
+                        input: {
+                          branch: {repositoryNameWithOwner: $repo, branchName: $branch},
+                          expectedHeadOid: $head,
+                          message: {headline: $headline},
+                          fileChanges: {additions: $additions[0]}
+                        }
+                      }
+                    }')
+                  GH_TOKEN="$HOMEBREW_TAP_TOKEN" gh api graphql --input - <<< "$request"
+            - name: Open and merge formula PR
+              if: ${{ steps.prepare-formulae.outputs.has_formulae == 'true' }}
+              env:
+                  HOMEBREW_TAP_TOKEN: ${{ steps.app-token.outputs.token }}
+              run: |
+                  branch_name="${{ steps.prepare-formulae.outputs.branch_name }}"
+                  commit_message="${{ steps.prepare-formulae.outputs.commit_message }}"
+
+                  pr_url=$(GH_TOKEN="$HOMEBREW_TAP_TOKEN" gh pr create \
+                    --repo gmeligio/homebrew-tap \
+                    --head "$branch_name" \
+                    --base main \
+                    --title "$commit_message" \
+                    --body "Automated formula update")
 
     publish-crates:
         needs:
