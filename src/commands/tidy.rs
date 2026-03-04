@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::domain::{
     ActionId, ActionOverride, ActionResolver, ActionSpec, CommitSha, LocatedAction, Lock, LockDiff,
-    LockKey, Manifest, ManifestDiff, TidyPlan, UpdateResult, Version, VersionCorrection,
+    LockKey, Manifest, ManifestDiff, ShaIndex, TidyPlan, UpdateResult, Version, VersionCorrection,
     VersionRegistry, WorkflowActionSet, WorkflowError, WorkflowPatch, WorkflowScanner,
     WorkflowUpdater, select_most_specific_tag,
 };
@@ -38,7 +38,7 @@ pub fn plan<R, P>(
     scanner: &P,
 ) -> Result<TidyPlan, TidyError>
 where
-    R: VersionRegistry + Clone,
+    R: VersionRegistry,
     P: WorkflowScanner,
 {
     let mut located = Vec::new();
@@ -56,9 +56,18 @@ where
     let mut planned_manifest = manifest.clone();
     let mut planned_lock = lock.clone();
 
+    let resolver = ActionResolver::new(registry);
+    let mut sha_index = ShaIndex::new();
+
     // Phase 1: Sync manifest
-    sync_manifest_actions(&mut planned_manifest, &located, &action_set, &registry);
-    upgrade_sha_versions_to_tags(&mut planned_manifest, &registry);
+    sync_manifest_actions(
+        &mut planned_manifest,
+        &located,
+        &action_set,
+        &resolver,
+        &mut sha_index,
+    );
+    upgrade_sha_versions_to_tags(&mut planned_manifest, &resolver, &mut sha_index);
 
     // Phase 2: Sync overrides
     sync_overrides(&mut planned_manifest, &located, &action_set);
@@ -79,8 +88,9 @@ where
     let corrections = update_lock(
         &mut planned_lock,
         &mut planned_manifest,
-        &registry,
+        &resolver,
         &workflow_shas,
+        &mut sha_index,
     )?;
     let keys_to_retain: Vec<LockKey> = build_keys_to_retain(&planned_manifest);
     planned_lock.retain(&keys_to_retain);
@@ -221,11 +231,12 @@ fn diff_locks(before: &Lock, after: &Lock) -> LockDiff {
 }
 
 /// Remove unused actions from manifest and add missing ones.
-fn sync_manifest_actions<R: VersionRegistry + Clone>(
+fn sync_manifest_actions<R: VersionRegistry>(
     manifest: &mut Manifest,
     located: &[LocatedAction],
     action_set: &WorkflowActionSet,
-    registry: &R,
+    resolver: &ActionResolver<R>,
+    sha_index: &mut ShaIndex,
 ) {
     let workflow_actions: HashSet<ActionId> = action_set.action_ids().cloned().collect();
     let manifest_actions: HashSet<ActionId> = manifest.specs().map(|s| s.id.clone()).collect();
@@ -244,7 +255,6 @@ fn sync_manifest_actions<R: VersionRegistry + Clone>(
     let missing: Vec<_> = workflow_actions.difference(&manifest_actions).collect();
     if !missing.is_empty() {
         info!("Adding missing actions to manifest:");
-        let resolver = ActionResolver::new(registry.clone());
         for action_id in missing {
             let version = select_dominant_version(action_id, action_set);
 
@@ -256,7 +266,7 @@ fn sync_manifest_actions<R: VersionRegistry + Clone>(
                 if let Some(located_action) = located_with_version {
                     if let Some(sha) = &located_action.sha {
                         let (corrected, was_corrected) =
-                            resolver.correct_version(action_id, sha, &version);
+                            resolver.correct_version(action_id, sha, &version, sha_index);
                         if was_corrected {
                             info!(
                                 "Corrected {action_id} version to {corrected} (SHA {sha} points to {corrected})",
@@ -280,9 +290,12 @@ fn sync_manifest_actions<R: VersionRegistry + Clone>(
     }
 }
 
-/// Upgrade SHA versions in manifest to tags via registry.
-fn upgrade_sha_versions_to_tags<R: VersionRegistry + Clone>(manifest: &mut Manifest, registry: &R) {
-    let resolver = ActionResolver::new(registry.clone());
+/// Upgrade SHA versions in manifest to tags via `ShaIndex`.
+fn upgrade_sha_versions_to_tags<R: VersionRegistry>(
+    manifest: &mut Manifest,
+    resolver: &ActionResolver<R>,
+    sha_index: &mut ShaIndex,
+) {
     // Collect only SHA specs (avoid cloning the full Vec when most specs are tags)
     let sha_specs: Vec<(ActionId, CommitSha)> = manifest
         .specs()
@@ -292,9 +305,9 @@ fn upgrade_sha_versions_to_tags<R: VersionRegistry + Clone>(manifest: &mut Manif
     let mut upgraded_actions = Vec::new();
 
     for (id, sha) in &sha_specs {
-        match resolver.registry().tags_for_sha(id, sha) {
-            Ok(tags) => {
-                if let Some(best_tag) = select_most_specific_tag(&tags) {
+        match sha_index.get_or_describe(resolver.registry(), id, sha) {
+            Ok(desc) => {
+                if let Some(best_tag) = select_most_specific_tag(&desc.tags) {
                     manifest.set(id.clone(), best_tag.clone());
                     upgraded_actions.push(format!("{id} SHA upgraded to {best_tag}"));
                 }
@@ -514,11 +527,12 @@ fn prune_stale_overrides(manifest: &mut Manifest, located: &[LocatedAction]) {
 /// # Errors
 ///
 /// Returns [`TidyError::ResolutionFailed`] if any actions could not be resolved.
-fn update_lock<R: VersionRegistry + Clone>(
+fn update_lock<R: VersionRegistry>(
     lock: &mut Lock,
     manifest: &mut Manifest,
-    registry: &R,
+    resolver: &ActionResolver<R>,
     workflow_shas: &HashMap<LockKey, CommitSha>,
+    sha_index: &mut ShaIndex,
 ) -> Result<Vec<VersionCorrection>, TidyError> {
     let corrections = Vec::new();
     let mut unresolved = Vec::new();
@@ -540,10 +554,15 @@ fn update_lock<R: VersionRegistry + Clone>(
         return Ok(corrections);
     }
 
-    let resolver = ActionResolver::new(registry.clone());
-
     for spec in &all_specs {
-        populate_lock_entry(lock, &resolver, spec, workflow_shas, &mut unresolved);
+        populate_lock_entry(
+            lock,
+            resolver,
+            spec,
+            workflow_shas,
+            sha_index,
+            &mut unresolved,
+        );
     }
 
     if !unresolved.is_empty() {
@@ -557,11 +576,12 @@ fn update_lock<R: VersionRegistry + Clone>(
 }
 
 /// Resolve a single spec into the lock if missing, then populate version/specifier fields.
-fn populate_lock_entry<R: VersionRegistry + Clone>(
+fn populate_lock_entry<R: VersionRegistry>(
     lock: &mut Lock,
     resolver: &ActionResolver<R>,
     spec: &ActionSpec,
     workflow_shas: &HashMap<LockKey, CommitSha>,
+    sha_index: &mut ShaIndex,
     unresolved: &mut Vec<String>,
 ) {
     let key = LockKey::from(spec);
@@ -579,7 +599,7 @@ fn populate_lock_entry<R: VersionRegistry + Clone>(
         debug!("Resolving {spec}");
         let result = if let Some(sha) = workflow_shas.get(&key) {
             resolver
-                .resolve_from_sha(&spec.id, sha)
+                .resolve_from_sha(&spec.id, sha, sha_index)
                 .or_else(|_| resolver.resolve(spec))
         } else {
             resolver.resolve(spec)

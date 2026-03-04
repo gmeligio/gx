@@ -1,4 +1,5 @@
 use log::{debug, warn};
+use std::collections::HashMap;
 use thiserror::Error;
 
 use super::{ActionId, ActionSpec, CommitSha, RefType, ResolvedAction, Version};
@@ -22,6 +23,47 @@ pub struct ShaDescription {
     pub tags: Vec<Version>,
     pub repository: String,
     pub date: String,
+}
+
+/// Accumulates `ShaDescription` results during a plan run, keyed by `(ActionId, CommitSha)`.
+/// Provides deduplication: `get_or_describe` calls the registry only on first access.
+pub struct ShaIndex {
+    cache: HashMap<(ActionId, CommitSha), ShaDescription>,
+}
+
+impl ShaIndex {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            cache: HashMap::new(),
+        }
+    }
+
+    /// Return the cached description for `(id, sha)`, or call `describe_sha` and cache it.
+    ///
+    /// # Errors
+    ///
+    /// Propagates any error from `describe_sha`. On error, nothing is stored.
+    pub fn get_or_describe<R: VersionRegistry>(
+        &mut self,
+        registry: &R,
+        id: &ActionId,
+        sha: &CommitSha,
+    ) -> Result<&ShaDescription, ResolutionError> {
+        let key = (id.clone(), sha.clone());
+        if let std::collections::hash_map::Entry::Vacant(entry) = self.cache.entry(key.clone()) {
+            let desc = registry.describe_sha(id, sha)?;
+            entry.insert(desc);
+        }
+        // SAFETY: key was just inserted above if it was missing
+        Ok(&self.cache[&key])
+    }
+}
+
+impl Default for ShaIndex {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// The result of resolving a ref to its metadata
@@ -127,8 +169,9 @@ impl<R: VersionRegistry> ActionResolver<R> {
         &self,
         id: &ActionId,
         sha: &CommitSha,
+        sha_index: &mut ShaIndex,
     ) -> Result<ResolvedAction, ResolutionError> {
-        let desc = self.registry.describe_sha(id, sha)?;
+        let desc = sha_index.get_or_describe(&self.registry, id, sha)?;
         let version =
             select_most_specific_tag(&desc.tags).unwrap_or_else(|| Version::from(sha.as_str()));
         let ref_type = if desc.tags.is_empty() {
@@ -140,9 +183,9 @@ impl<R: VersionRegistry> ActionResolver<R> {
             id.clone(),
             version,
             sha.clone(),
-            desc.repository,
+            desc.repository.clone(),
             ref_type,
-            desc.date,
+            desc.date.clone(),
         ))
     }
 
@@ -155,14 +198,16 @@ impl<R: VersionRegistry> ActionResolver<R> {
         id: &ActionId,
         sha: &CommitSha,
         original_version: &Version,
+        sha_index: &mut ShaIndex,
     ) -> (Version, bool) {
-        match self.registry.tags_for_sha(id, sha) {
-            Ok(tags) => {
+        match sha_index.get_or_describe(&self.registry, id, sha) {
+            Ok(desc) => {
+                let tags = &desc.tags;
                 // If the original version is already a valid tag, keep it
                 if tags.contains(original_version) {
                     return (original_version.clone(), false);
                 }
-                if let Some(tag) = select_most_specific_tag(&tags) {
+                if let Some(tag) = select_most_specific_tag(tags) {
                     (tag, true)
                 } else {
                     warn!("No tags found for {id} SHA {sha}, keeping version");
@@ -179,16 +224,6 @@ impl<R: VersionRegistry> ActionResolver<R> {
                 }
                 (original_version.clone(), false)
             }
-        }
-    }
-
-    /// Refine a version for a given SHA (finds the most specific version tag).
-    /// This is the REFINE operation: returns the best version tag for a SHA.
-    /// Returns `Some(version)` if tags are found, `None` if not.
-    pub fn refine_version(&self, id: &ActionId, sha: &CommitSha) -> Option<Version> {
-        match self.registry.tags_for_sha(id, sha) {
-            Ok(tags) => select_most_specific_tag(&tags),
-            Err(_) => None,
         }
     }
 }
@@ -336,7 +371,9 @@ mod tests {
         let id = ActionId::from("actions/checkout");
         let sha = CommitSha::from("abc123def456789012345678901234567890abcd");
         let original_version = Version::from("v4");
-        let (version, was_corrected) = service.correct_version(&id, &sha, &original_version);
+        let mut sha_index = ShaIndex::new();
+        let (version, was_corrected) =
+            service.correct_version(&id, &sha, &original_version, &mut sha_index);
 
         assert_eq!(version.as_str(), "v4");
         assert!(!was_corrected);
@@ -358,7 +395,9 @@ mod tests {
         let id = ActionId::from("actions/checkout");
         let sha = CommitSha::from("abc123def456789012345678901234567890abcd");
         let original_version = Version::from("v4");
-        let (version, was_corrected) = service.correct_version(&id, &sha, &original_version);
+        let mut sha_index = ShaIndex::new();
+        let (version, was_corrected) =
+            service.correct_version(&id, &sha, &original_version, &mut sha_index);
 
         assert_eq!(version.as_str(), "v5.0.0");
         assert!(was_corrected);
@@ -382,9 +421,10 @@ mod tests {
         };
         let service = ActionResolver::new(registry);
         let id = ActionId::from("owner/repo");
+        let mut sha_index = ShaIndex::new();
 
         let result = service
-            .resolve_from_sha(&id, &sha)
+            .resolve_from_sha(&id, &sha, &mut sha_index)
             .expect("Expected Ok result");
 
         assert_eq!(result.version.as_str(), "v3.6.1");
@@ -407,9 +447,10 @@ mod tests {
         };
         let service = ActionResolver::new(registry);
         let id = ActionId::from("owner/repo");
+        let mut sha_index = ShaIndex::new();
 
         let result = service
-            .resolve_from_sha(&id, &sha)
+            .resolve_from_sha(&id, &sha, &mut sha_index)
             .expect("Expected Ok result");
 
         assert_eq!(result.version.as_str(), sha.as_str());
@@ -426,8 +467,9 @@ mod tests {
         let service = ActionResolver::new(registry);
         let id = ActionId::from("owner/repo");
         let sha = CommitSha::from("abc123def456789012345678901234567890abcd");
+        let mut sha_index = ShaIndex::new();
 
-        let result = service.resolve_from_sha(&id, &sha);
+        let result = service.resolve_from_sha(&id, &sha, &mut sha_index);
         assert!(
             matches!(result, Err(ResolutionError::TokenRequired)),
             "describe_sha error should propagate through resolve_from_sha"

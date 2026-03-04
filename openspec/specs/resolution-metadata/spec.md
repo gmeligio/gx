@@ -65,28 +65,6 @@ The `repository` field SHALL reflect the actual GitHub repository queried, not t
 - **WHEN** resolved against `github/codeql-action`
 - **THEN** `repository = "github/codeql-action"`
 
-### Requirement: Version refinement
-The `ActionResolver` SHALL provide version refinement as a standalone operation that returns a version based on SHA tag lookup. This operation SHALL be used for both manifest version correction (Phase 1) and lock version population (Phase 2).
-
-#### Scenario: Version refinement returns best tag for SHA
-- **WHEN** `refine_version(id, sha)` is called with a SHA that points to tags `[v6, v6.0.1]`
-- **THEN** the result is `v6` (shortest/least-specific tag preferred)
-
-#### Scenario: Version refinement used for manifest correction
-- **WHEN** a workflow pins SHA `abc123` with comment `v4`
-- **AND** `refine_version(id, abc123)` returns `v5`
-- **THEN** the manifest version is corrected from `v4` to `v5`
-
-#### Scenario: Version refinement used for lock version field
-- **WHEN** a lock entry is missing its `version` field
-- **AND** `refine_version(id, sha)` returns `v6.0.2`
-- **THEN** the lock entry's `version` is set to `v6.0.2`
-
-#### Scenario: Version refinement degrades gracefully without token
-- **WHEN** `refine_version(id, sha)` is called without a GITHUB_TOKEN
-- **THEN** the operation returns `None` or the original version
-- **AND** the entry remains incomplete (to be retried on next run with token)
-
 ### Requirement: SHA-pinned actions keep the workflow SHA
 When a workflow already has a SHA-pinned action, the lock entry SHALL use the workflow's SHA, not the SHA that `lookup_sha()` returns for the version tag.
 
