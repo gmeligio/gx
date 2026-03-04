@@ -16,7 +16,7 @@ pub use manifest::{ActionOverride, Manifest};
 pub use plan::{LockDiff, LockEntryPatch, ManifestDiff, TidyPlan, UpgradePlan, WorkflowPatch};
 pub use resolution::select_most_specific_tag;
 pub use resolution::{
-    ActionResolver, ResolutionError, ResolvedRef, ShaDescription, VersionRegistry,
+    ActionResolver, ResolutionError, ResolvedRef, ShaDescription, ShaIndex, VersionRegistry,
 };
 pub use workflow::{UpdateResult, WorkflowError, WorkflowScanner, WorkflowUpdater};
 pub use workflow_actions::{LocatedAction, WorkflowActionSet, WorkflowLocation};
