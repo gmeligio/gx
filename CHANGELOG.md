@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.9](https://github.com/gmeligio/gx/compare/v0.5.8...v0.5.9) - 2026-03-04
+
+### Fixed
+
+- ShaIndex to cache Github API calls ([#52](https://github.com/gmeligio/gx/pull/52))
+- use verified commit in homebrew ([#51](https://github.com/gmeligio/gx/pull/51))
+
 ## [0.5.8](https://github.com/gmeligio/gx/compare/v0.5.7...v0.5.8) - 2026-03-03
 
 ### Fixed
