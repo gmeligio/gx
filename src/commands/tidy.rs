@@ -1793,7 +1793,7 @@ jobs:
         );
     }
 
-    /// Recoverable errors (AuthRequired) are warned and skipped; strict errors still fail.
+    /// Recoverable errors (`AuthRequired`) are warned and skipped; strict errors still fail.
     #[test]
     fn test_update_lock_recoverable_errors_are_skipped() {
         use crate::domain::{LockKey, RefType};
