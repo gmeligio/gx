@@ -10,18 +10,11 @@ The workflow SHALL query the GitHub API (`GET /app`) using the app token to obta
 - **THEN** `git config user.name` SHALL be set to `<slug>[bot]` and `git config user.email` SHALL be set to `<app-id>+<slug>[bot]@users.noreply.github.com`
 
 ### Requirement: Authenticate git push via remote URL token injection
-The workflow SHALL set the remote origin URL to `https://x-access-token:<token>@github.com/gmeligio/homebrew-tap.git` before pushing, where `<token>` is the app token.
+The workflow SHALL NOT use `git push` with a token-injected remote URL. Instead, all commits SHALL be created via the GitHub GraphQL API and delivered through a pull request.
 
-#### Scenario: Push succeeds without persist-credentials
-- **WHEN** the commit step runs with `persist-credentials: false` on the checkout
-- **THEN** `git push` SHALL authenticate using the token embedded in the remote URL
-
-### Requirement: Checkout SHALL NOT persist credentials
-The `actions/checkout` step for `homebrew-tap` SHALL use `persist-credentials: false`.
-
-#### Scenario: Credentials are not persisted
-- **WHEN** the checkout step completes
-- **THEN** no credentials SHALL remain in the git credential store
+#### Scenario: No direct git push
+- **WHEN** the formula commit step runs
+- **THEN** the workflow SHALL NOT execute `git push` or set `git remote set-url` with an embedded token
 
 ### Requirement: Remove hardcoded bot identity env vars
 The job-level `GITHUB_USER` and `GITHUB_EMAIL` env vars SHALL be removed.
