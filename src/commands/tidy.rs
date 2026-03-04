@@ -313,11 +313,7 @@ fn upgrade_sha_versions_to_tags<R: VersionRegistry>(
                 }
             }
             Err(e) => {
-                if matches!(e, crate::domain::resolution::ResolutionError::TokenRequired) {
-                    debug!("GITHUB_TOKEN not set. Cannot upgrade {id} SHA {sha}, keeping SHA");
-                } else {
-                    debug!("Could not upgrade {id} SHA {sha}: {e}");
-                }
+                debug!("Could not upgrade {id} SHA {sha}: {e}");
             }
         }
     }
@@ -526,7 +522,8 @@ fn prune_stale_overrides(manifest: &mut Manifest, located: &[LocatedAction]) {
 
 /// # Errors
 ///
-/// Returns [`TidyError::ResolutionFailed`] if any actions could not be resolved.
+/// Returns [`TidyError::ResolutionFailed`] if any actions could not be resolved with a strict error.
+/// Recoverable errors (rate limit, auth required) are warned and skipped.
 fn update_lock<R: VersionRegistry>(
     lock: &mut Lock,
     manifest: &mut Manifest,
@@ -536,6 +533,7 @@ fn update_lock<R: VersionRegistry>(
 ) -> Result<Vec<VersionCorrection>, TidyError> {
     let corrections = Vec::new();
     let mut unresolved = Vec::new();
+    let mut recoverable_count: usize = 0;
 
     // Build all specs in one pass: global + override versions
     let all_specs: Vec<ActionSpec> = manifest
@@ -555,13 +553,19 @@ fn update_lock<R: VersionRegistry>(
     }
 
     for spec in &all_specs {
-        populate_lock_entry(
-            lock,
-            resolver,
-            spec,
-            workflow_shas,
-            sha_index,
-            &mut unresolved,
+        if let Err(e) = populate_lock_entry(lock, resolver, spec, workflow_shas, sha_index) {
+            if e.is_recoverable() {
+                log::warn!("Skipping {spec}: {e}");
+                recoverable_count += 1;
+            } else {
+                unresolved.push(format!("{spec}: {e}"));
+            }
+        }
+    }
+
+    if recoverable_count > 0 {
+        log::warn!(
+            "{recoverable_count} action(s) skipped due to recoverable errors — run `gx tidy` again to retry."
         );
     }
 
@@ -576,14 +580,16 @@ fn update_lock<R: VersionRegistry>(
 }
 
 /// Resolve a single spec into the lock if missing, then populate version/specifier fields.
+///
+/// Returns `Ok(())` on success or when no population was needed.
+/// Returns `Err(ResolutionError)` if resolution fails.
 fn populate_lock_entry<R: VersionRegistry>(
     lock: &mut Lock,
     resolver: &ActionResolver<R>,
     spec: &ActionSpec,
     workflow_shas: &HashMap<LockKey, CommitSha>,
     sha_index: &mut ShaIndex,
-    unresolved: &mut Vec<String>,
-) {
+) -> Result<(), crate::domain::ResolutionError> {
     let key = LockKey::from(spec);
 
     let needs_population = match lock.get(&key) {
@@ -592,7 +598,7 @@ fn populate_lock_entry<R: VersionRegistry>(
     };
 
     if !needs_population {
-        return;
+        return Ok(());
     }
 
     if !lock.has(&key) {
@@ -625,7 +631,7 @@ fn populate_lock_entry<R: VersionRegistry>(
             }
             Err(e) => {
                 debug!("Could not resolve {spec}: {e}");
-                unresolved.push(format!("{spec}: {e}"));
+                return Err(e);
             }
         }
     }
@@ -634,6 +640,8 @@ fn populate_lock_entry<R: VersionRegistry>(
         let expected_specifier = spec.version.specifier();
         lock.set_specifier(&key, expected_specifier);
     }
+
+    Ok(())
 }
 
 fn print_update_results(results: &[UpdateResult]) {
@@ -680,24 +688,24 @@ mod tests {
             _id: &ActionId,
             _version: &Version,
         ) -> Result<crate::domain::ResolvedRef, crate::domain::ResolutionError> {
-            Err(crate::domain::ResolutionError::TokenRequired)
+            Err(crate::domain::ResolutionError::AuthRequired)
         }
         fn tags_for_sha(
             &self,
             _id: &ActionId,
             _sha: &CommitSha,
         ) -> Result<Vec<Version>, crate::domain::ResolutionError> {
-            Err(crate::domain::ResolutionError::TokenRequired)
+            Err(crate::domain::ResolutionError::AuthRequired)
         }
         fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, crate::domain::ResolutionError> {
-            Err(crate::domain::ResolutionError::TokenRequired)
+            Err(crate::domain::ResolutionError::AuthRequired)
         }
         fn describe_sha(
             &self,
             _id: &ActionId,
             _sha: &CommitSha,
         ) -> Result<crate::domain::ShaDescription, crate::domain::ResolutionError> {
-            Err(crate::domain::ResolutionError::TokenRequired)
+            Err(crate::domain::ResolutionError::AuthRequired)
         }
     }
 
@@ -1138,7 +1146,7 @@ jobs:
             "2026-01-01T00:00:00Z".to_string(),
         ));
 
-        // NoopRegistry returns TokenRequired — simulates missing GITHUB_TOKEN
+        // NoopRegistry returns AuthRequired — simulates missing GITHUB_TOKEN
         let scanner = FileWorkflowScanner::new(repo_root);
 
         let tidy_plan = plan(&manifest, &lock, NoopRegistry, &scanner).unwrap();
@@ -1181,13 +1189,13 @@ jobs:
                 _id: &ActionId,
                 _sha: &CommitSha,
             ) -> Result<Vec<Version>, crate::domain::ResolutionError> {
-                Err(crate::domain::ResolutionError::TokenRequired)
+                Err(crate::domain::ResolutionError::AuthRequired)
             }
             fn all_tags(
                 &self,
                 _id: &ActionId,
             ) -> Result<Vec<Version>, crate::domain::ResolutionError> {
-                Err(crate::domain::ResolutionError::TokenRequired)
+                Err(crate::domain::ResolutionError::AuthRequired)
             }
             fn describe_sha(
                 &self,
@@ -1722,20 +1730,20 @@ jobs:
                 _id: &ActionId,
                 _sha: &CommitSha,
             ) -> Result<Vec<Version>, crate::domain::ResolutionError> {
-                Err(crate::domain::ResolutionError::TokenRequired)
+                Err(crate::domain::ResolutionError::AuthRequired)
             }
             fn all_tags(
                 &self,
                 _id: &ActionId,
             ) -> Result<Vec<Version>, crate::domain::ResolutionError> {
-                Err(crate::domain::ResolutionError::TokenRequired)
+                Err(crate::domain::ResolutionError::AuthRequired)
             }
             fn describe_sha(
                 &self,
                 _id: &ActionId,
                 _sha: &CommitSha,
             ) -> Result<crate::domain::ShaDescription, crate::domain::ResolutionError> {
-                Err(crate::domain::ResolutionError::TokenRequired)
+                Err(crate::domain::ResolutionError::AuthRequired)
             }
         }
 
@@ -1782,6 +1790,95 @@ jobs:
             added_entry.unwrap().sha.as_str(),
             registry_sha,
             "Lock SHA must come from registry when no workflow SHA is available"
+        );
+    }
+
+    /// Recoverable errors (AuthRequired) are warned and skipped; strict errors still fail.
+    #[test]
+    fn test_update_lock_recoverable_errors_are_skipped() {
+        use crate::domain::{LockKey, RefType};
+
+        // Registry: checkout fails with AuthRequired (recoverable), setup-node fails with strict
+        #[derive(Clone)]
+        struct MixedRegistry;
+        impl crate::domain::VersionRegistry for MixedRegistry {
+            fn lookup_sha(
+                &self,
+                id: &ActionId,
+                _version: &Version,
+            ) -> Result<crate::domain::ResolvedRef, crate::domain::ResolutionError> {
+                if id.as_str() == "actions/checkout" {
+                    Err(crate::domain::ResolutionError::AuthRequired)
+                } else {
+                    Ok(crate::domain::ResolvedRef::new(
+                        CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+                        id.base_repo(),
+                        RefType::Tag,
+                        "2026-01-01T00:00:00Z".to_string(),
+                    ))
+                }
+            }
+            fn tags_for_sha(
+                &self,
+                _id: &ActionId,
+                _sha: &CommitSha,
+            ) -> Result<Vec<Version>, crate::domain::ResolutionError> {
+                Err(crate::domain::ResolutionError::AuthRequired)
+            }
+            fn all_tags(
+                &self,
+                _id: &ActionId,
+            ) -> Result<Vec<Version>, crate::domain::ResolutionError> {
+                Err(crate::domain::ResolutionError::AuthRequired)
+            }
+            fn describe_sha(
+                &self,
+                _id: &ActionId,
+                _sha: &CommitSha,
+            ) -> Result<crate::domain::ShaDescription, crate::domain::ResolutionError> {
+                Err(crate::domain::ResolutionError::AuthRequired)
+            }
+        }
+
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let repo_root = temp_dir.path();
+        let workflows_dir = repo_root.join(".github").join("workflows");
+        fs::create_dir_all(&workflows_dir).unwrap();
+
+        let workflow = "on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+";
+        fs::write(workflows_dir.join("ci.yml"), workflow).unwrap();
+
+        // Both actions need resolving (empty lock)
+        let lock = Lock::default();
+        let manifest = Manifest::default();
+        let scanner = FileWorkflowScanner::new(repo_root);
+
+        // With MixedRegistry, checkout fails with AuthRequired (recoverable),
+        // setup-node resolves successfully. Plan should succeed (recoverable errors are skipped).
+        let result = plan(&manifest, &lock, MixedRegistry, &scanner);
+        assert!(
+            result.is_ok(),
+            "Plan should succeed when only recoverable errors occur"
+        );
+
+        // setup-node should be in the lock diff (it resolved successfully)
+        let tidy_plan = result.unwrap();
+        let setup_node_key =
+            LockKey::new(ActionId::from("actions/setup-node"), Version::from("v4"));
+        assert!(
+            tidy_plan
+                .lock
+                .added
+                .iter()
+                .any(|(k, _)| *k == setup_node_key),
+            "setup-node should be resolved and added to lock"
         );
     }
 }

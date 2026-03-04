@@ -22,6 +22,22 @@ When workflow files pin an action to a SHA, lock resolution SHALL use that SHA d
 - **WHEN** tidy runs
 - **THEN** no registry call is made for that entry (workflow SHA is not used to overwrite)
 
+#### Scenario: Recoverable error in SHA-first path degrades gracefully
+- **GIVEN** no manifest or lock exists
+- **AND** workflows have `uses: actions/checkout@abc123... # v4`
+- **AND** `describe_sha` returns `RateLimited` or `AuthRequired`
+- **AND** fallback `resolve(spec)` also returns a recoverable error
+- **WHEN** tidy (init) runs
+- **THEN** the action is skipped with a warning (not a hard error)
+- **AND** the lock file is written without that entry
+
+#### Scenario: Strict error in resolution is still a hard failure
+- **GIVEN** no manifest or lock exists
+- **AND** workflows have `uses: nonexistent/action@v1`
+- **AND** resolution returns `ResolveFailed` (404 not found)
+- **WHEN** tidy (init) runs
+- **THEN** the command fails with `TidyError::ResolutionFailed`
+
 ### Requirement: resolve_from_sha derives all lock fields from SHA
 `ActionResolver` SHALL provide a `resolve_from_sha` method that takes an `ActionId`, `CommitSha`, and `&mut ShaIndex` and returns a `ResolvedAction` with version, ref_type, and date derived from the SHA. The method SHALL obtain the `ShaDescription` from the `ShaIndex` (which handles deduplication) rather than calling `describe_sha` on the registry directly.
 
@@ -44,6 +60,11 @@ When workflow files pin an action to a SHA, lock resolution SHALL use that SHA d
 - **WHEN** `resolve_from_sha` is called again for the same SHA
 - **THEN** the `ShaIndex` returns the cached description
 - **AND** no additional registry call is made
+
+#### Scenario: describe_sha error propagates through resolve_from_sha
+- **GIVEN** `describe_sha` returns an error (e.g., `AuthRequired` or `RateLimited`)
+- **WHEN** `resolve_from_sha` is called
+- **THEN** the error is propagated to the caller
 
 ### Requirement: correct_version uses ShaIndex for tag knowledge
 `ActionResolver::correct_version` SHALL accept a `&mut ShaIndex` parameter and obtain tags from it instead of calling `tags_for_sha` on the registry directly.
