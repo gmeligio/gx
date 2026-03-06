@@ -14,13 +14,6 @@ const REQUEST_TIMEOUT_SECS: u64 = 30;
 /// Errors that can occur when interacting with the Github API
 #[derive(Debug, Error)]
 pub enum GithubError {
-    #[error(
-        "GITHUB_TOKEN environment variable is required for this operation.\n\
-         Set it with: export GITHUB_TOKEN=<your-token>\n\
-         Create a token at: https://github.com/settings/tokens"
-    )]
-    TokenRequired,
-
     #[error("failed to create HTTP client")]
     ClientInit(#[source] reqwest::Error),
 
@@ -32,11 +25,17 @@ pub enum GithubError {
         source: reqwest::Error,
     },
 
-    #[error("Github API returned status {status} for {url}")]
-    ApiStatus {
-        status: reqwest::StatusCode,
-        url: String,
-    },
+    #[error("GitHub API rate limit exceeded for {url}")]
+    RateLimited { url: String },
+
+    #[error("GitHub API unauthorized for {url}")]
+    Unauthorized { url: String },
+
+    #[error("GitHub API not found: {url}")]
+    NotFound { url: String },
+
+    #[error("GitHub API returned status {status} for {url}")]
+    ApiError { status: u16, url: String },
 
     #[error("failed to parse response from {url}")]
     ParseResponse {
@@ -145,6 +144,55 @@ impl GithubRegistry {
         Ok(Self { client, token })
     }
 
+    /// Build a GET request, attaching the Authorization header only if a token is set.
+    fn authenticated_get(&self, url: &str) -> reqwest::blocking::RequestBuilder {
+        let req = self.client.get(url);
+        match &self.token {
+            Some(token) => req.header("Authorization", format!("Bearer {token}")),
+            None => req,
+        }
+    }
+
+    /// Classify a non-success HTTP response into the appropriate `GithubError` variant.
+    fn check_status(response: &reqwest::blocking::Response, url: &str) -> GithubError {
+        let status = response.status();
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            return GithubError::RateLimited {
+                url: url.to_string(),
+            };
+        }
+        if status == reqwest::StatusCode::FORBIDDEN {
+            let remaining = response
+                .headers()
+                .get("x-ratelimit-remaining")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(1);
+            if remaining == 0 {
+                return GithubError::RateLimited {
+                    url: url.to_string(),
+                };
+            }
+            return GithubError::Unauthorized {
+                url: url.to_string(),
+            };
+        }
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            return GithubError::Unauthorized {
+                url: url.to_string(),
+            };
+        }
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return GithubError::NotFound {
+                url: url.to_string(),
+            };
+        }
+        GithubError::ApiError {
+            status: status.as_u16(),
+            url: url.to_string(),
+        }
+    }
+
     /// Resolve a ref (tag, branch, or commit) to a full commit SHA and detect the ref type
     ///
     /// Returns a tuple of (`sha`, `ref_type`) by tracking which API path succeeded.
@@ -158,7 +206,7 @@ impl GithubRegistry {
     ///
     /// # Errors
     ///
-    /// Return `GithubError::TokenRequired` if the client does not have a token.
+    /// Returns an error if the API request fails or returns a non-success status.
     pub fn resolve_ref(
         &self,
         owner_repo: &str,
@@ -201,24 +249,17 @@ impl GithubRegistry {
     }
 
     fn fetch_ref(&self, url: &str) -> Result<String, GithubError> {
-        let token = self.token.as_ref().ok_or(GithubError::TokenRequired)?;
-
-        let response = self
-            .client
-            .get(url)
-            .header("Authorization", format!("Bearer {token}"))
-            .send()
-            .map_err(|source| GithubError::Request {
-                operation: "ref",
-                url: url.to_string(),
-                source,
-            })?;
+        let response =
+            self.authenticated_get(url)
+                .send()
+                .map_err(|source| GithubError::Request {
+                    operation: "ref",
+                    url: url.to_string(),
+                    source,
+                })?;
 
         if !response.status().is_success() {
-            return Err(GithubError::ApiStatus {
-                status: response.status(),
-                url: url.to_string(),
-            });
+            return Err(Self::check_status(&response, url));
         }
 
         let git_ref: GitRef = response
@@ -232,24 +273,17 @@ impl GithubRegistry {
     }
 
     fn fetch_commit_sha(&self, url: &str) -> Result<String, GithubError> {
-        let token = self.token.as_ref().ok_or(GithubError::TokenRequired)?;
-
-        let response = self
-            .client
-            .get(url)
-            .header("Authorization", format!("Bearer {token}"))
-            .send()
-            .map_err(|source| GithubError::Request {
-                operation: "commit",
-                url: url.to_string(),
-                source,
-            })?;
+        let response =
+            self.authenticated_get(url)
+                .send()
+                .map_err(|source| GithubError::Request {
+                    operation: "commit",
+                    url: url.to_string(),
+                    source,
+                })?;
 
         if !response.status().is_success() {
-            return Err(GithubError::ApiStatus {
-                status: response.status(),
-                url: url.to_string(),
-            });
+            return Err(Self::check_status(&response, url));
         }
 
         let commit: CommitResponse =
@@ -278,29 +312,22 @@ impl GithubRegistry {
         owner_repo: &str,
         sha: &str,
     ) -> Result<Vec<String>, GithubError> {
-        let token = self.token.as_ref().ok_or(GithubError::TokenRequired)?;
-
         // Handle subpath actions (e.g., "github/codeql-action/upload-sarif")
         let base_repo = owner_repo.split('/').take(2).collect::<Vec<_>>().join("/");
 
         let url = format!("{GITHUB_API_BASE}/repos/{base_repo}/git/refs/tags");
 
-        let response = self
-            .client
-            .get(&url)
-            .header("Authorization", format!("Bearer {token}"))
-            .send()
-            .map_err(|source| GithubError::Request {
-                operation: "tags",
-                url: url.clone(),
-                source,
-            })?;
+        let response =
+            self.authenticated_get(&url)
+                .send()
+                .map_err(|source| GithubError::Request {
+                    operation: "tags",
+                    url: url.clone(),
+                    source,
+                })?;
 
         if !response.status().is_success() {
-            return Err(GithubError::ApiStatus {
-                status: response.status(),
-                url,
-            });
+            return Err(Self::check_status(&response, &url));
         }
 
         let refs: Vec<GitRefEntry> =
@@ -318,7 +345,7 @@ impl GithubRegistry {
         for entry in &refs {
             if entry.object.object_type == "tag"
                 && entry.object.sha != sha
-                && let Some(tag_name) = self.dereference_tag(token, &base_repo, entry, sha)
+                && let Some(tag_name) = self.dereference_tag(&base_repo, entry, sha)
             {
                 tags.push(tag_name);
             }
@@ -331,7 +358,6 @@ impl GithubRegistry {
     /// Returns `Some(tag_name)` if the tag's underlying commit matches, `None` otherwise.
     fn dereference_tag(
         &self,
-        token: &str,
         base_repo: &str,
         entry: &GitRefEntry,
         commit_sha: &str,
@@ -340,12 +366,7 @@ impl GithubRegistry {
             "{GITHUB_API_BASE}/repos/{base_repo}/git/tags/{}",
             entry.object.sha
         );
-        let tag_response = self
-            .client
-            .get(&tag_url)
-            .header("Authorization", format!("Bearer {token}"))
-            .send()
-            .ok()?;
+        let tag_response = self.authenticated_get(&tag_url).send().ok()?;
 
         if !tag_response.status().is_success() {
             return None;
@@ -373,8 +394,6 @@ impl GithubRegistry {
     ///
     /// Returns an error if no token is set, the request fails, or the response cannot be parsed.
     pub fn get_version_tags(&self, owner_repo: &str) -> Result<Vec<String>, GithubError> {
-        let token = self.token.as_ref().ok_or(GithubError::TokenRequired)?;
-
         let base_repo = owner_repo.split('/').take(2).collect::<Vec<_>>().join("/");
 
         let mut all_refs: Vec<GitRefEntry> = Vec::new();
@@ -382,22 +401,17 @@ impl GithubRegistry {
             format!("{GITHUB_API_BASE}/repos/{base_repo}/git/matching-refs/tags/v?per_page=100");
 
         loop {
-            let response = self
-                .client
-                .get(&url)
-                .header("Authorization", format!("Bearer {token}"))
-                .send()
-                .map_err(|source| GithubError::Request {
-                    operation: "version tags",
-                    url: url.clone(),
-                    source,
-                })?;
+            let response =
+                self.authenticated_get(&url)
+                    .send()
+                    .map_err(|source| GithubError::Request {
+                        operation: "version tags",
+                        url: url.clone(),
+                        source,
+                    })?;
 
             if !response.status().is_success() {
-                return Err(GithubError::ApiStatus {
-                    status: response.status(),
-                    url,
-                });
+                return Err(Self::check_status(&response, &url));
             }
 
             let next_url = parse_next_link(response.headers());
@@ -437,25 +451,19 @@ impl GithubRegistry {
     ///
     /// Returns an error if no token is set, the request fails, or the response cannot be parsed.
     fn fetch_commit_date(&self, base_repo: &str, sha: &str) -> Result<Option<String>, GithubError> {
-        let token = self.token.as_ref().ok_or(GithubError::TokenRequired)?;
         let url = format!("{GITHUB_API_BASE}/repos/{base_repo}/commits/{sha}");
 
-        let response = self
-            .client
-            .get(&url)
-            .header("Authorization", format!("Bearer {token}"))
-            .send()
-            .map_err(|source| GithubError::Request {
-                operation: "commit details",
-                url: url.clone(),
-                source,
-            })?;
+        let response =
+            self.authenticated_get(&url)
+                .send()
+                .map_err(|source| GithubError::Request {
+                    operation: "commit details",
+                    url: url.clone(),
+                    source,
+                })?;
 
         if !response.status().is_success() {
-            return Err(GithubError::ApiStatus {
-                status: response.status(),
-                url,
-            });
+            return Err(Self::check_status(&response, &url));
         }
 
         let commit: CommitDetailResponse = response
@@ -469,31 +477,25 @@ impl GithubRegistry {
     ///
     /// # Errors
     ///
-    /// Returns an error if no token is set, the request fails, or the response cannot be parsed.
+    /// Returns an error if the request fails or the response cannot be parsed.
     fn fetch_release_date(
         &self,
         base_repo: &str,
         tag: &str,
     ) -> Result<Option<String>, GithubError> {
-        let token = self.token.as_ref().ok_or(GithubError::TokenRequired)?;
         let url = format!("{GITHUB_API_BASE}/repos/{base_repo}/releases/tags/{tag}");
 
-        let response = self
-            .client
-            .get(&url)
-            .header("Authorization", format!("Bearer {token}"))
-            .send()
-            .map_err(|source| GithubError::Request {
-                operation: "release",
-                url: url.clone(),
-                source,
-            })?;
+        let response =
+            self.authenticated_get(&url)
+                .send()
+                .map_err(|source| GithubError::Request {
+                    operation: "release",
+                    url: url.clone(),
+                    source,
+                })?;
 
         if !response.status().is_success() {
-            return Err(GithubError::ApiStatus {
-                status: response.status(),
-                url,
-            });
+            return Err(Self::check_status(&response, &url));
         }
 
         let release: ReleaseResponse = response
@@ -507,27 +509,21 @@ impl GithubRegistry {
     ///
     /// # Errors
     ///
-    /// Returns an error if no token is set, the request fails, or the response cannot be parsed.
+    /// Returns an error if the request fails or the response cannot be parsed.
     fn fetch_tag_date(&self, base_repo: &str, sha: &str) -> Result<Option<String>, GithubError> {
-        let token = self.token.as_ref().ok_or(GithubError::TokenRequired)?;
         let url = format!("{GITHUB_API_BASE}/repos/{base_repo}/git/tags/{sha}");
 
-        let response = self
-            .client
-            .get(&url)
-            .header("Authorization", format!("Bearer {token}"))
-            .send()
-            .map_err(|source| GithubError::Request {
-                operation: "tag",
-                url: url.clone(),
-                source,
-            })?;
+        let response =
+            self.authenticated_get(&url)
+                .send()
+                .map_err(|source| GithubError::Request {
+                    operation: "tag",
+                    url: url.clone(),
+                    source,
+                })?;
 
         if !response.status().is_success() {
-            return Err(GithubError::ApiStatus {
-                status: response.status(),
-                url,
-            });
+            return Err(Self::check_status(&response, &url));
         }
 
         let tag: TagObjectResponse = response
@@ -596,7 +592,8 @@ impl VersionRegistry for GithubRegistry {
         let (sha, ref_type) =
             self.resolve_ref(id.as_str(), version.as_str())
                 .map_err(|e| match e {
-                    GithubError::TokenRequired => ResolutionError::TokenRequired,
+                    GithubError::RateLimited { .. } => ResolutionError::RateLimited,
+                    GithubError::Unauthorized { .. } => ResolutionError::AuthRequired,
                     _ => ResolutionError::ResolveFailed {
                         spec: ActionSpec::new(id.clone(), version.clone()),
                         reason: e.to_string(),
@@ -645,7 +642,8 @@ impl VersionRegistry for GithubRegistry {
         self.get_tags_for_sha(id.as_str(), sha.as_str())
             .map(|tags| tags.into_iter().map(Version::from).collect())
             .map_err(|e| match e {
-                GithubError::TokenRequired => ResolutionError::TokenRequired,
+                GithubError::RateLimited { .. } => ResolutionError::RateLimited,
+                GithubError::Unauthorized { .. } => ResolutionError::AuthRequired,
                 _ => ResolutionError::NoTagsForSha {
                     action: id.clone(),
                     sha: sha.clone(),
@@ -657,7 +655,8 @@ impl VersionRegistry for GithubRegistry {
         self.get_version_tags(id.as_str())
             .map(|tags| tags.into_iter().map(Version::from).collect())
             .map_err(|e| match e {
-                GithubError::TokenRequired => ResolutionError::TokenRequired,
+                GithubError::RateLimited { .. } => ResolutionError::RateLimited,
+                GithubError::Unauthorized { .. } => ResolutionError::AuthRequired,
                 _ => ResolutionError::ResolveFailed {
                     spec: ActionSpec::new(id.clone(), Version::from("")),
                     reason: e.to_string(),
@@ -676,7 +675,8 @@ impl VersionRegistry for GithubRegistry {
         let date = self
             .fetch_commit_date(&base_repo, sha.as_str())
             .map_err(|e| match e {
-                GithubError::TokenRequired => ResolutionError::TokenRequired,
+                GithubError::RateLimited { .. } => ResolutionError::RateLimited,
+                GithubError::Unauthorized { .. } => ResolutionError::AuthRequired,
                 _ => ResolutionError::ResolveFailed {
                     spec: ActionSpec::new(id.clone(), Version::from(sha.as_str())),
                     reason: e.to_string(),

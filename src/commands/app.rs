@@ -59,6 +59,11 @@ pub enum AppError {
 /// Returns [`AppError::Tidy`] if the tidy command fails.
 pub fn tidy(repo_root: &Path, config: Config) -> Result<(), AppError> {
     let has_manifest = config.manifest_path.exists();
+    if config.settings.github_token.is_none() {
+        log::warn!(
+            "No GITHUB_TOKEN set — using unauthenticated GitHub API (60 requests/hour limit)."
+        );
+    }
     let registry = GithubRegistry::new(config.settings.github_token)?;
     let scanner = FileWorkflowScanner::new(repo_root);
     let updater = FileWorkflowUpdater::new(repo_root);
@@ -98,6 +103,11 @@ pub fn init(repo_root: &Path, config: Config) -> Result<(), AppError> {
         return Err(AppError::AlreadyInitialized);
     }
     log::info!("Reading actions from workflows into the manifest...");
+    if config.settings.github_token.is_none() {
+        log::warn!(
+            "No GITHUB_TOKEN set — using unauthenticated GitHub API (60 requests/hour limit)."
+        );
+    }
     let registry = GithubRegistry::new(config.settings.github_token)?;
     let scanner = FileWorkflowScanner::new(repo_root);
     let updater = FileWorkflowUpdater::new(repo_root);

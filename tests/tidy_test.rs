@@ -26,7 +26,7 @@ impl VersionRegistry for NoopRegistry {
         _id: &ActionId,
         _version: &Version,
     ) -> Result<ResolvedRef, ResolutionError> {
-        Err(ResolutionError::TokenRequired)
+        Err(ResolutionError::AuthRequired)
     }
 
     fn tags_for_sha(
@@ -34,11 +34,11 @@ impl VersionRegistry for NoopRegistry {
         _id: &ActionId,
         _sha: &CommitSha,
     ) -> Result<Vec<Version>, ResolutionError> {
-        Err(ResolutionError::TokenRequired)
+        Err(ResolutionError::AuthRequired)
     }
 
     fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
-        Err(ResolutionError::TokenRequired)
+        Err(ResolutionError::AuthRequired)
     }
 
     fn describe_sha(
@@ -46,7 +46,7 @@ impl VersionRegistry for NoopRegistry {
         _id: &ActionId,
         _sha: &CommitSha,
     ) -> Result<ShaDescription, ResolutionError> {
-        Err(ResolutionError::TokenRequired)
+        Err(ResolutionError::AuthRequired)
     }
 }
 
@@ -803,8 +803,8 @@ jobs:
 
 #[test]
 fn test_gx_tidy_tag_not_resolved_without_token() {
-    // Demonstrates the original bug: without a working registry (no GITHUB_TOKEN),
-    // tidy silently leaves tags unchanged instead of reporting the failure.
+    // With graceful degradation, auth failures are recoverable — tidy succeeds
+    // with a partial result and warns the user to retry after setting a token.
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -824,13 +824,13 @@ jobs:
         .write_all(workflow_content.as_bytes())
         .unwrap();
 
-    // Run tidy with NoopRegistry (simulates missing GITHUB_TOKEN)
+    // Run tidy with NoopRegistry (simulates missing GITHUB_TOKEN via AuthRequired)
     let result = run_tidy_with_registry(&root, NoopRegistry);
 
-    // The command should fail when it cannot resolve actions
+    // AuthRequired is recoverable — tidy warns and succeeds with partial results
     assert!(
-        result.is_err(),
-        "tidy should return an error when actions cannot be resolved"
+        result.is_ok(),
+        "tidy should succeed with recoverable errors (auth required), got: {result:?}"
     );
 }
 

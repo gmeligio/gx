@@ -13,8 +13,19 @@ pub enum ResolutionError {
     #[error("no tags found for {action} at SHA {sha}")]
     NoTagsForSha { action: ActionId, sha: CommitSha },
 
-    #[error("token required for resolution")]
-    TokenRequired,
+    #[error("GitHub API rate limit exceeded")]
+    RateLimited,
+
+    #[error("GitHub API authorization required")]
+    AuthRequired,
+}
+
+impl ResolutionError {
+    /// Returns `true` for errors that are transient and the caller can retry later.
+    #[must_use]
+    pub fn is_recoverable(&self) -> bool {
+        matches!(self, Self::RateLimited | Self::AuthRequired)
+    }
 }
 
 /// Metadata for a known commit SHA: the tags pointing to it, the base repository, and the commit date.
@@ -215,13 +226,7 @@ impl<R: VersionRegistry> ActionResolver<R> {
                 }
             }
             Err(e) => {
-                if matches!(e, ResolutionError::TokenRequired) {
-                    warn!(
-                        "GITHUB_TOKEN not set. Without it, cannot correct version for {id} SHA {sha}.",
-                    );
-                } else {
-                    warn!("Could not correct version for {id} SHA {sha}: {e}");
-                }
+                warn!("Could not correct version for {id} SHA {sha}: {e}");
                 (original_version.clone(), false)
             }
         }
@@ -461,7 +466,7 @@ mod tests {
     #[test]
     fn test_resolve_from_sha_describe_error_propagates() {
         let registry = MockRegistry {
-            resolve_result: Err(ResolutionError::TokenRequired),
+            resolve_result: Err(ResolutionError::AuthRequired),
             tags_result: Ok(vec![]),
         };
         let service = ActionResolver::new(registry);
@@ -471,7 +476,7 @@ mod tests {
 
         let result = service.resolve_from_sha(&id, &sha, &mut sha_index);
         assert!(
-            matches!(result, Err(ResolutionError::TokenRequired)),
+            matches!(result, Err(ResolutionError::AuthRequired)),
             "describe_sha error should propagate through resolve_from_sha"
         );
     }
@@ -536,5 +541,33 @@ mod tests {
             Version::from("v5"),
         ];
         assert_eq!(select_most_specific_tag(&tags), Some(Version::from("v5")));
+    }
+
+    #[test]
+    fn test_is_recoverable_rate_limited() {
+        assert!(ResolutionError::RateLimited.is_recoverable());
+    }
+
+    #[test]
+    fn test_is_recoverable_auth_required() {
+        assert!(ResolutionError::AuthRequired.is_recoverable());
+    }
+
+    #[test]
+    fn test_is_recoverable_resolve_failed_is_not_recoverable() {
+        let err = ResolutionError::ResolveFailed {
+            spec: ActionSpec::new(ActionId::from("actions/checkout"), Version::from("v4")),
+            reason: "not found".to_string(),
+        };
+        assert!(!err.is_recoverable());
+    }
+
+    #[test]
+    fn test_is_recoverable_no_tags_for_sha_is_not_recoverable() {
+        let err = ResolutionError::NoTagsForSha {
+            action: ActionId::from("actions/checkout"),
+            sha: CommitSha::from("abc123def456789012345678901234567890abcd"),
+        };
+        assert!(!err.is_recoverable());
     }
 }
