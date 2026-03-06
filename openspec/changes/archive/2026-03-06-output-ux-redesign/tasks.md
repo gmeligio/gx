@@ -50,8 +50,8 @@
 
 ## 8. Integration Verification
 
-- [ ] 8.1 Manual test: `gx upgrade --latest` shows minimal emoji output with spinner and log file path
-- [ ] 8.2 Manual test: `CI=true gx upgrade --latest` shows verbose inline output with CI notice
-- [ ] 8.3 Manual test: `gx lint` shows emoji-formatted diagnostics or clean message
-- [ ] 8.4 Manual test: `gx tidy` shows minimal output with correct symbols
-- [ ] 8.5 Manual test: pipe `gx upgrade 2>/dev/null` — verify no ANSI codes in stdout when piped
+- [x] 8.1 Manual test: `gx upgrade --latest` shows minimal emoji output with spinner and log file path
+- [x] 8.2 Manual test: `CI=true gx upgrade --latest` shows verbose inline output with CI notice
+- [x] 8.3 Manual test: `gx lint` shows emoji-formatted diagnostics or clean message
+- [x] 8.4 Manual test: `gx tidy` shows minimal output with correct symbols
+- [x] 8.5 Manual test: pipe `gx upgrade 2>/dev/null` — verify no ANSI codes in stdout when piped
