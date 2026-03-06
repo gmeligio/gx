@@ -117,58 +117,26 @@ fn matches_ignore(
     true
 }
 
-/// Format and report diagnostics to the log, returning an error if violations exist.
+/// Build a `LintReport` from diagnostics and return an error if violations exist.
 ///
 /// # Errors
 ///
 /// Returns [`LintError::ViolationsFound`] if there are any error-level diagnostics.
-pub fn format_and_report(diagnostics: &[Diagnostic]) -> Result<(), LintError> {
-    use log::info;
+pub fn format_and_report(
+    diagnostics: Vec<Diagnostic>,
+) -> Result<crate::output::LintReport, LintError> {
+    use crate::output::LintReport;
 
-    if diagnostics.is_empty() {
-        info!("No lint issues found.");
-        return Ok(());
-    }
+    let report = LintReport::from_diagnostics(diagnostics);
 
-    for diag in diagnostics {
-        let level_str = match diag.level {
-            crate::config::Level::Error => "[error]",
-            crate::config::Level::Warn => "[warn]",
-            crate::config::Level::Off => "[off]",
-        };
-        let location = diag
-            .workflow
-            .as_ref()
-            .map(|w| format!("{w}: "))
-            .unwrap_or_default();
-        info!("{} {}{}: {}", level_str, location, diag.rule, diag.message);
-    }
-
-    let error_count = diagnostics
-        .iter()
-        .filter(|d| d.level == crate::config::Level::Error)
-        .count();
-    let warn_count = diagnostics
-        .iter()
-        .filter(|d| d.level == crate::config::Level::Warn)
-        .count();
-    info!(
-        "{} issue(s) ({} error{}, {} warning{})",
-        diagnostics.len(),
-        error_count,
-        if error_count == 1 { "" } else { "s" },
-        warn_count,
-        if warn_count == 1 { "" } else { "s" }
-    );
-
-    if error_count > 0 {
+    if report.error_count > 0 {
         return Err(LintError::ViolationsFound {
-            errors: error_count,
-            warnings: warn_count,
+            errors: report.error_count,
+            warnings: report.warning_count,
         });
     }
 
-    Ok(())
+    Ok(report)
 }
 
 /// Run lint checks by scanning workflows and return diagnostics.

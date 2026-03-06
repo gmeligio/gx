@@ -165,7 +165,7 @@ fn run_tidy_with_registry<R: VersionRegistry + Clone>(
     };
     let lock = parse_lock(&lock_path)?;
 
-    let plan = tidy::plan(&manifest, &lock, registry, &scanner)?;
+    let plan = tidy::plan(&manifest, &lock, registry, &scanner, |_| {})?;
 
     if !plan.is_empty() {
         if has_manifest {

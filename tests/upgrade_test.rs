@@ -110,7 +110,13 @@ fn run_upgrade_file_backed_with_request(
     let lock = parse_lock(&lock_path)?;
     let updater = FileWorkflowUpdater::new(repo_root);
 
-    let plan = upgrade::plan(&manifest, &lock, MockUpgradeRegistry::new(), request)?;
+    let plan = upgrade::plan(
+        &manifest,
+        &lock,
+        MockUpgradeRegistry::new(),
+        request,
+        |_| {},
+    )?;
 
     if !plan.is_empty() {
         apply_manifest_diff(&manifest_path, &plan.manifest)?;
@@ -139,7 +145,13 @@ fn test_upgrade_empty_manifest_is_noop() {
     manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
     let lock = Lock::default();
     let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap();
-    let result = upgrade::plan(&manifest, &lock, MockUpgradeRegistry::new(), &request);
+    let result = upgrade::plan(
+        &manifest,
+        &lock,
+        MockUpgradeRegistry::new(),
+        &request,
+        |_| {},
+    );
     assert!(result.is_ok());
     assert!(result.unwrap().is_empty(), "No tags available means noop");
 }
@@ -176,6 +188,7 @@ fn test_upgrade_non_semver_versions_skipped() {
         &lock,
         MockUpgradeRegistry::new(),
         &UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap(),
+        |_| {},
     );
     assert!(result.is_ok());
 }
@@ -267,6 +280,7 @@ fn test_upgrade_memory_stores_no_side_effects() {
         &lock,
         MockUpgradeRegistry::new(),
         &UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap(),
+        |_| {},
     );
     assert!(result.is_ok());
 
@@ -415,7 +429,13 @@ fn test_upgrade_repins_branch_ref() {
     ));
 
     let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap();
-    let plan = upgrade::plan(&manifest, &lock, MockUpgradeRegistry::new(), &request);
+    let plan = upgrade::plan(
+        &manifest,
+        &lock,
+        MockUpgradeRegistry::new(),
+        &request,
+        |_| {},
+    );
     assert!(plan.is_ok(), "upgrade failed: {:?}", plan.unwrap_err());
     let plan = plan.unwrap();
 
@@ -458,7 +478,13 @@ fn test_upgrade_latest_also_repins_branch_ref() {
     ));
 
     let request = UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::All).unwrap();
-    let plan = upgrade::plan(&manifest, &lock, MockUpgradeRegistry::new(), &request);
+    let plan = upgrade::plan(
+        &manifest,
+        &lock,
+        MockUpgradeRegistry::new(),
+        &request,
+        |_| {},
+    );
     assert!(plan.is_ok());
     let plan = plan.unwrap();
 
@@ -521,7 +547,7 @@ fn test_upgrade_targeted_does_not_repin_branch_ref() {
         UpgradeScope::Single(ActionId::from("actions/checkout")),
     )
     .unwrap();
-    let plan = upgrade::plan(&manifest, &lock, registry, &request);
+    let plan = upgrade::plan(&manifest, &lock, registry, &request, |_| {});
     assert!(plan.is_ok());
     let plan = plan.unwrap();
 
@@ -581,7 +607,7 @@ fn test_upgrade_mixed_semver_and_branch() {
     );
 
     let request = UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::All).unwrap();
-    let plan = upgrade::plan(&manifest, &lock, registry, &request);
+    let plan = upgrade::plan(&manifest, &lock, registry, &request, |_| {});
     assert!(plan.is_ok());
     let plan = plan.unwrap();
 
@@ -623,7 +649,13 @@ fn test_upgrade_skips_bare_sha() {
 
     let lock = Lock::default();
     let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap();
-    let plan = upgrade::plan(&manifest, &lock, MockUpgradeRegistry::new(), &request);
+    let plan = upgrade::plan(
+        &manifest,
+        &lock,
+        MockUpgradeRegistry::new(),
+        &request,
+        |_| {},
+    );
     assert!(plan.is_ok());
     let plan = plan.unwrap();
 
@@ -667,7 +699,7 @@ fn test_upgrade_safe_single_action() {
         UpgradeScope::Single(ActionId::from("actions/checkout")),
     )
     .unwrap();
-    let result = upgrade::plan(&manifest, &lock, registry, &request);
+    let result = upgrade::plan(&manifest, &lock, registry, &request, |_| {});
     assert!(result.is_ok());
 
     // Note: we can't directly verify manifest changes in memory-only mode,
@@ -698,7 +730,7 @@ fn test_upgrade_latest_single_action() {
         UpgradeScope::Single(ActionId::from("actions/checkout")),
     )
     .unwrap();
-    let result = upgrade::plan(&manifest, &lock, registry, &request);
+    let result = upgrade::plan(&manifest, &lock, registry, &request, |_| {});
     assert!(result.is_ok());
 }
 
@@ -712,7 +744,13 @@ fn test_upgrade_single_action_not_found() {
         UpgradeScope::Single(ActionId::from("actions/nonexistent")),
     )
     .unwrap();
-    let result = upgrade::plan(&manifest, &lock, MockUpgradeRegistry::new(), &request);
+    let result = upgrade::plan(
+        &manifest,
+        &lock,
+        MockUpgradeRegistry::new(),
+        &request,
+        |_| {},
+    );
     assert!(
         result.is_err(),
         "Expected error when action not found in manifest"

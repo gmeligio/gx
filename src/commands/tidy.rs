@@ -1,10 +1,9 @@
-use log::{debug, info};
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
 use crate::domain::{
     ActionId, ActionOverride, ActionResolver, ActionSpec, CommitSha, LocatedAction, Lock, LockDiff,
-    LockKey, Manifest, ManifestDiff, ShaIndex, TidyPlan, UpdateResult, Version, VersionCorrection,
+    LockKey, Manifest, ManifestDiff, ShaIndex, TidyPlan, Version, VersionCorrection,
     VersionRegistry, WorkflowActionSet, WorkflowError, WorkflowPatch, WorkflowScanner,
     WorkflowUpdater, select_most_specific_tag,
 };
@@ -36,6 +35,7 @@ pub fn plan<R, P>(
     lock: &Lock,
     registry: R,
     scanner: &P,
+    mut on_progress: impl FnMut(&str),
 ) -> Result<TidyPlan, TidyError>
 where
     R: VersionRegistry,
@@ -66,8 +66,14 @@ where
         &action_set,
         &resolver,
         &mut sha_index,
+        &mut on_progress,
     );
-    upgrade_sha_versions_to_tags(&mut planned_manifest, &resolver, &mut sha_index);
+    upgrade_sha_versions_to_tags(
+        &mut planned_manifest,
+        &resolver,
+        &mut sha_index,
+        &mut on_progress,
+    );
 
     // Phase 2: Sync overrides
     sync_overrides(&mut planned_manifest, &located, &action_set);
@@ -91,6 +97,7 @@ where
         &resolver,
         &workflow_shas,
         &mut sha_index,
+        &mut on_progress,
     )?;
     let keys_to_retain: Vec<LockKey> = build_keys_to_retain(&planned_manifest);
     planned_lock.retain(&keys_to_retain);
@@ -237,56 +244,50 @@ fn sync_manifest_actions<R: VersionRegistry>(
     action_set: &WorkflowActionSet,
     resolver: &ActionResolver<R>,
     sha_index: &mut ShaIndex,
+    on_progress: &mut dyn FnMut(&str),
 ) {
     let workflow_actions: HashSet<ActionId> = action_set.action_ids().cloned().collect();
     let manifest_actions: HashSet<ActionId> = manifest.specs().map(|s| s.id.clone()).collect();
 
     // Remove unused actions from manifest
     let unused: Vec<_> = manifest_actions.difference(&workflow_actions).collect();
-    if !unused.is_empty() {
-        info!("Removing unused actions from manifest:");
-        for action in &unused {
-            info!("- {action}");
-            manifest.remove(action);
-        }
+    for action in &unused {
+        manifest.remove(action);
     }
 
     // Add missing actions to manifest
     let missing: Vec<_> = workflow_actions.difference(&manifest_actions).collect();
-    if !missing.is_empty() {
-        info!("Adding missing actions to manifest:");
-        for action_id in missing {
-            let version = select_dominant_version(action_id, action_set);
+    for action_id in missing {
+        let version = select_dominant_version(action_id, action_set);
 
-            let corrected_version = if version.is_sha() {
-                let located_with_version = located.iter().find(|loc| {
-                    &loc.id == action_id && loc.version == version && loc.sha.is_some()
-                });
+        let corrected_version = if version.is_sha() {
+            let located_with_version = located
+                .iter()
+                .find(|loc| &loc.id == action_id && loc.version == version && loc.sha.is_some());
 
-                if let Some(located_action) = located_with_version {
-                    if let Some(sha) = &located_action.sha {
-                        let (corrected, was_corrected) =
-                            resolver.correct_version(action_id, sha, &version, sha_index);
-                        if was_corrected {
-                            info!(
-                                "Corrected {action_id} version to {corrected} (SHA {sha} points to {corrected})",
-                            );
-                        }
-                        corrected
-                    } else {
-                        version.clone()
+            if let Some(located_action) = located_with_version {
+                if let Some(sha) = &located_action.sha {
+                    let (corrected, was_corrected) =
+                        resolver.correct_version(action_id, sha, &version, sha_index);
+                    if was_corrected {
+                        on_progress(&format!(
+                            "Corrected {action_id} version to {corrected} (SHA {sha} points to {corrected})",
+                        ));
                     }
+                    corrected
                 } else {
                     version.clone()
                 }
             } else {
                 version.clone()
-            };
+            }
+        } else {
+            version.clone()
+        };
 
-            manifest.set((*action_id).clone(), corrected_version.clone());
-            let spec = ActionSpec::new((*action_id).clone(), corrected_version.clone());
-            info!("+ {spec}");
-        }
+        manifest.set((*action_id).clone(), corrected_version.clone());
+        let spec = ActionSpec::new((*action_id).clone(), corrected_version.clone());
+        on_progress(&format!("+ {spec}"));
     }
 }
 
@@ -295,6 +296,7 @@ fn upgrade_sha_versions_to_tags<R: VersionRegistry>(
     manifest: &mut Manifest,
     resolver: &ActionResolver<R>,
     sha_index: &mut ShaIndex,
+    on_progress: &mut dyn FnMut(&str),
 ) {
     // Collect only SHA specs (avoid cloning the full Vec when most specs are tags)
     let sha_specs: Vec<(ActionId, CommitSha)> = manifest
@@ -302,26 +304,18 @@ fn upgrade_sha_versions_to_tags<R: VersionRegistry>(
         .filter(|s| s.version.is_sha())
         .map(|s| (s.id.clone(), CommitSha::from(s.version.as_str())))
         .collect();
-    let mut upgraded_actions = Vec::new();
 
     for (id, sha) in &sha_specs {
         match sha_index.get_or_describe(resolver.registry(), id, sha) {
             Ok(desc) => {
                 if let Some(best_tag) = select_most_specific_tag(&desc.tags) {
                     manifest.set(id.clone(), best_tag.clone());
-                    upgraded_actions.push(format!("{id} SHA upgraded to {best_tag}"));
+                    on_progress(&format!("~ {id} SHA upgraded to {best_tag}"));
                 }
             }
-            Err(e) => {
-                debug!("Could not upgrade {id} SHA {sha}: {e}");
+            Err(_e) => {
+                // Silently skip if SHA cannot be upgraded
             }
-        }
-    }
-
-    if !upgraded_actions.is_empty() {
-        info!("Upgrading SHA versions to tags:");
-        for upgrade in &upgraded_actions {
-            info!("~ {upgrade}");
         }
     }
 }
@@ -335,7 +329,7 @@ pub fn apply_workflow_patches<W: WorkflowUpdater>(
     writer: &W,
     patches: &[WorkflowPatch],
     corrections: &[VersionCorrection],
-) -> Result<(), TidyError> {
+) -> Result<usize, TidyError> {
     let mut results = Vec::new();
     for patch in patches {
         let map: HashMap<ActionId, String> = patch.pins.iter().cloned().collect();
@@ -344,19 +338,8 @@ pub fn apply_workflow_patches<W: WorkflowUpdater>(
             results.push(result);
         }
     }
-    print_update_results(&results);
-    print_corrections(corrections);
-    Ok(())
-}
-
-/// Print version corrections.
-fn print_corrections(corrections: &[VersionCorrection]) {
-    if !corrections.is_empty() {
-        info!("Version corrections:");
-        for c in corrections {
-            info!("{c}");
-        }
-    }
+    let _ = corrections;
+    Ok(results.len())
 }
 
 fn select_version(versions: &[Version]) -> Version {
@@ -444,10 +427,6 @@ fn sync_overrides(
         });
 
         if !already_covered {
-            info!(
-                "Recording override for {} in {} ({})",
-                action.id, action.location.workflow, action.version,
-            );
             manifest.add_override(
                 action.id.clone(),
                 crate::domain::ActionOverride {
@@ -477,7 +456,6 @@ fn prune_stale_overrides(manifest: &mut Manifest, located: &[LocatedAction]) {
                 .iter()
                 .filter(|exc| {
                     if !live_workflows.contains(exc.workflow.as_str()) {
-                        info!("Removing stale override for {id} in {}", exc.workflow);
                         return false;
                     }
                     if let Some(job) = &exc.job {
@@ -486,10 +464,6 @@ fn prune_stale_overrides(manifest: &mut Manifest, located: &[LocatedAction]) {
                                 && a.location.job.as_deref() == Some(job.as_str())
                         });
                         if !job_exists {
-                            info!(
-                                "Removing stale override for {id} in {}/{}",
-                                exc.workflow, job
-                            );
                             return false;
                         }
                     }
@@ -500,10 +474,6 @@ fn prune_stale_overrides(manifest: &mut Manifest, located: &[LocatedAction]) {
                                 && a.location.step == Some(step)
                         });
                         if !step_exists {
-                            info!(
-                                "Removing stale override for {id} in {}:{}/{}",
-                                exc.workflow, job, step
-                            );
                             return false;
                         }
                     }
@@ -523,13 +493,14 @@ fn prune_stale_overrides(manifest: &mut Manifest, located: &[LocatedAction]) {
 /// # Errors
 ///
 /// Returns [`TidyError::ResolutionFailed`] if any actions could not be resolved with a strict error.
-/// Recoverable errors (rate limit, auth required) are warned and skipped.
+/// Recoverable errors (rate limit, auth required) are silently skipped.
 fn update_lock<R: VersionRegistry>(
     lock: &mut Lock,
     manifest: &mut Manifest,
     resolver: &ActionResolver<R>,
     workflow_shas: &HashMap<LockKey, CommitSha>,
     sha_index: &mut ShaIndex,
+    on_progress: &mut dyn FnMut(&str),
 ) -> Result<Vec<VersionCorrection>, TidyError> {
     let corrections = Vec::new();
     let mut unresolved = Vec::new();
@@ -555,7 +526,7 @@ fn update_lock<R: VersionRegistry>(
     for spec in &all_specs {
         if let Err(e) = populate_lock_entry(lock, resolver, spec, workflow_shas, sha_index) {
             if e.is_recoverable() {
-                log::warn!("Skipping {spec}: {e}");
+                on_progress(&format!("Skipping {spec}: {e}"));
                 recoverable_count += 1;
             } else {
                 unresolved.push(format!("{spec}: {e}"));
@@ -564,9 +535,9 @@ fn update_lock<R: VersionRegistry>(
     }
 
     if recoverable_count > 0 {
-        log::warn!(
+        on_progress(&format!(
             "{recoverable_count} action(s) skipped due to recoverable errors — run `gx tidy` again to retry."
-        );
+        ));
     }
 
     if !unresolved.is_empty() {
@@ -602,7 +573,6 @@ fn populate_lock_entry<R: VersionRegistry>(
     }
 
     if !lock.has(&key) {
-        debug!("Resolving {spec}");
         let result = if let Some(sha) = workflow_shas.get(&key) {
             resolver
                 .resolve_from_sha(&spec.id, sha, sha_index)
@@ -630,7 +600,6 @@ fn populate_lock_entry<R: VersionRegistry>(
                 lock.set_version(&key, Some(entry_version));
             }
             Err(e) => {
-                debug!("Could not resolve {spec}: {e}");
                 return Err(e);
             }
         }
@@ -642,21 +611,6 @@ fn populate_lock_entry<R: VersionRegistry>(
     }
 
     Ok(())
-}
-
-fn print_update_results(results: &[UpdateResult]) {
-    if results.is_empty() {
-        info!("Workflows are already up to date.");
-    } else {
-        info!("Updated workflows:");
-        for result in results {
-            info!("{}", result.file.display());
-            for change in &result.changes {
-                info!("~ {change}");
-            }
-        }
-        info!("{} workflow(s) updated.", results.len());
-    }
 }
 
 #[cfg(test)]
@@ -800,7 +754,7 @@ jobs:
         let scanner = FileWorkflowScanner::new(repo_root);
         let updater = FileWorkflowUpdater::new(repo_root);
 
-        let tidy_plan = plan(&manifest, &lock, NoopRegistry, &scanner).unwrap();
+        let tidy_plan = plan(&manifest, &lock, NoopRegistry, &scanner, |_| {}).unwrap();
 
         // Apply the plan — manifest doesn't exist yet so use create, lock exists so use apply
         crate::infrastructure::create_manifest(&manifest_path, &tidy_plan.manifest).unwrap();
@@ -1004,7 +958,7 @@ jobs:
 
         let scanner = FileWorkflowScanner::new(repo_root);
 
-        let tidy_plan = plan(&manifest, &lock, NoopRegistry, &scanner).unwrap();
+        let tidy_plan = plan(&manifest, &lock, NoopRegistry, &scanner, |_| {}).unwrap();
 
         // Manifest diff must NOT change checkout's version — v4 is preserved
         assert!(
@@ -1105,7 +1059,7 @@ jobs:
 
         let scanner = FileWorkflowScanner::new(repo_root);
 
-        let tidy_plan = plan(&manifest, &lock, registry, &scanner).unwrap();
+        let tidy_plan = plan(&manifest, &lock, registry, &scanner, |_| {}).unwrap();
 
         // Manifest should show the SHA upgraded to the most specific tag (v4.0.0)
         let has_upgrade = tidy_plan.manifest.updated.iter().any(|(id, v)| {
@@ -1149,7 +1103,7 @@ jobs:
         // NoopRegistry returns AuthRequired — simulates missing GITHUB_TOKEN
         let scanner = FileWorkflowScanner::new(repo_root);
 
-        let tidy_plan = plan(&manifest, &lock, NoopRegistry, &scanner).unwrap();
+        let tidy_plan = plan(&manifest, &lock, NoopRegistry, &scanner, |_| {}).unwrap();
 
         // SHA stays unchanged when no token is available — no version updates in plan
         assert!(
@@ -1230,7 +1184,7 @@ jobs:
         let lock = Lock::default();
 
         let scanner = FileWorkflowScanner::new(repo_root);
-        let tidy_plan = plan(&manifest, &lock, MetadataOnlyRegistry, &scanner).unwrap();
+        let tidy_plan = plan(&manifest, &lock, MetadataOnlyRegistry, &scanner, |_| {}).unwrap();
 
         // Lock diff must add an entry using the workflow SHA (SHA-first)
         let key = LockKey::new(ActionId::from("actions/checkout"), Version::from("v4"));
@@ -1316,7 +1270,7 @@ jobs:
         let lock = Lock::default();
         let scanner = FileWorkflowScanner::new(repo_root);
 
-        let result = plan(&manifest, &lock, NoopRegistry, &scanner).unwrap();
+        let result = plan(&manifest, &lock, NoopRegistry, &scanner, |_| {}).unwrap();
         assert!(result.is_empty(), "Plan for empty workflows must be empty");
     }
 
@@ -1347,7 +1301,7 @@ jobs:
         let manifest = Manifest::default(); // empty — action is "new"
         let scanner = FileWorkflowScanner::new(repo_root);
 
-        let result = plan(&manifest, &lock, NoopRegistry, &scanner).unwrap();
+        let result = plan(&manifest, &lock, NoopRegistry, &scanner, |_| {}).unwrap();
 
         // Manifest should have added action
         assert!(
@@ -1397,7 +1351,7 @@ jobs:
 
         let scanner = FileWorkflowScanner::new(repo_root);
 
-        let result = plan(&manifest, &lock, NoopRegistry, &scanner).unwrap();
+        let result = plan(&manifest, &lock, NoopRegistry, &scanner, |_| {}).unwrap();
 
         // checkout should be removed from manifest
         assert!(
@@ -1466,7 +1420,7 @@ jobs:
 
         let scanner = FileWorkflowScanner::new(repo_root);
 
-        let result = plan(&manifest, &lock, NoopRegistry, &scanner).unwrap();
+        let result = plan(&manifest, &lock, NoopRegistry, &scanner, |_| {}).unwrap();
 
         // Should have override(s) for the minority version
         assert!(
@@ -1524,7 +1478,7 @@ jobs:
 
         let scanner = FileWorkflowScanner::new(repo_root);
 
-        let result = plan(&manifest, &lock, NoopRegistry, &scanner).unwrap();
+        let result = plan(&manifest, &lock, NoopRegistry, &scanner, |_| {}).unwrap();
 
         // Should have override removal for the stale deploy.yml override
         assert!(
@@ -1572,7 +1526,7 @@ jobs:
 
         let scanner = FileWorkflowScanner::new(repo_root);
 
-        let result = plan(&manifest, &lock, NoopRegistry, &scanner).unwrap();
+        let result = plan(&manifest, &lock, NoopRegistry, &scanner, |_| {}).unwrap();
 
         // Everything is in sync — plan should have no manifest/lock changes
         assert!(
@@ -1678,7 +1632,7 @@ jobs:
         let lock = Lock::default();
 
         let scanner = FileWorkflowScanner::new(repo_root);
-        let tidy_plan = plan(&manifest, &lock, TaggedShaRegistry, &scanner).unwrap();
+        let tidy_plan = plan(&manifest, &lock, TaggedShaRegistry, &scanner, |_| {}).unwrap();
 
         let key = LockKey::new(ActionId::from("jdx/mise-action"), Version::from("v3"));
         let added_entry = tidy_plan
@@ -1771,6 +1725,7 @@ jobs:
             &lock,
             SimpleRegistry(registry_sha.to_string()),
             &scanner,
+            |_| {},
         )
         .unwrap();
 
@@ -1862,7 +1817,7 @@ jobs:
 
         // With MixedRegistry, checkout fails with AuthRequired (recoverable),
         // setup-node resolves successfully. Plan should succeed (recoverable errors are skipped).
-        let result = plan(&manifest, &lock, MixedRegistry, &scanner);
+        let result = plan(&manifest, &lock, MixedRegistry, &scanner, |_| {});
         assert!(
             result.is_ok(),
             "Plan should succeed when only recoverable errors occur"
