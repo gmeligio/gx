@@ -94,7 +94,10 @@ fn secs_to_datetime(secs: u64) -> (u32, u32, u32, u32, u32, u32) {
             days_in_month
         };
         if remaining < days_in_month {
-            month = (i + 1) as u32;
+            #[allow(clippy::cast_possible_truncation)]
+            {
+                month = (i + 1) as u32;
+            }
             break;
         }
         remaining -= days_in_month;

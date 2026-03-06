@@ -115,14 +115,14 @@ pub fn tidy(
             .updated
             .iter()
             .map(|(id, new_v)| {
-                let old_v = original_manifest
-                    .get(id)
-                    .map(std::string::ToString::to_string)
-                    .unwrap_or_else(|| {
+                let old_v = original_manifest.get(id).map_or_else(
+                    || {
                         // Fallback: use new version as "from" if original not found
                         let _ = LockKey::new(id.clone(), new_v.clone());
                         "?".to_string()
-                    });
+                    },
+                    std::string::ToString::to_string,
+                );
                 (id.to_string(), old_v, new_v.to_string())
             })
             .collect(),

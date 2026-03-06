@@ -107,22 +107,28 @@ fn main() -> Result<(), GxError> {
         Commands::Tidy => {
             let spinner = printer.spinner("Running tidy...");
             let mut lf = log_file.take();
-            let report =
-                commands::app::tidy(&repo_root, config, make_cb(&spinner, &mut lf, is_ci))?;
+            let report = commands::app::tidy(
+                &repo_root,
+                config,
+                make_cb(spinner.as_ref(), &mut lf, is_ci),
+            )?;
             finish_spinner(spinner);
             let mut lines = render_tidy(&report);
-            append_log_path(&lf, &mut lines);
+            append_log_path(lf.as_ref(), &mut lines);
             printer.print_lines(&lines);
             log_file = lf;
         }
         Commands::Init => {
             let spinner = printer.spinner("Initializing...");
             let mut lf = log_file.take();
-            let report =
-                commands::app::init(&repo_root, config, make_cb(&spinner, &mut lf, is_ci))?;
+            let report = commands::app::init(
+                &repo_root,
+                config,
+                make_cb(spinner.as_ref(), &mut lf, is_ci),
+            )?;
             finish_spinner(spinner);
             let mut lines = render_init(&report);
-            append_log_path(&lf, &mut lines);
+            append_log_path(lf.as_ref(), &mut lines);
             printer.print_lines(&lines);
             log_file = lf;
         }
@@ -134,11 +140,11 @@ fn main() -> Result<(), GxError> {
                 &repo_root,
                 config,
                 &request,
-                make_cb(&spinner, &mut lf, is_ci),
+                make_cb(spinner.as_ref(), &mut lf, is_ci),
             )?;
             finish_spinner(spinner);
             let mut lines = render_upgrade(&report);
-            append_log_path(&lf, &mut lines);
+            append_log_path(lf.as_ref(), &mut lines);
             printer.print_lines(&lines);
             log_file = lf;
         }
@@ -160,7 +166,7 @@ fn main() -> Result<(), GxError> {
 
 /// Build a progress callback that updates the spinner, writes to the log file, and prints in CI.
 fn make_cb<'a>(
-    spinner: &'a Option<ProgressBar>,
+    spinner: Option<&'a ProgressBar>,
     log_file: &'a mut Option<LogFile>,
     is_ci: bool,
 ) -> impl FnMut(&str) + 'a {
@@ -191,7 +197,7 @@ fn finish_spinner(spinner: Option<ProgressBar>) {
     }
 }
 
-fn append_log_path(log_file: &Option<LogFile>, lines: &mut Vec<OutputLine>) {
+fn append_log_path(log_file: Option<&LogFile>, lines: &mut Vec<OutputLine>) {
     if let Some(lf) = log_file {
         lines.push(OutputLine::LogPath {
             path: lf.path().clone(),

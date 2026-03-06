@@ -13,10 +13,10 @@ rust-version = "1.93"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-console = "0.15"
+console = "0.16"
 gix-discover = "0.46.0"
 glob = "0.3"
-indicatif = "0.17"
+indicatif = "0.18"
 regex = "1"
 reqwest = { version = "0.13", features = ["blocking", "json"] }
 semver = "1"

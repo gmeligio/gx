@@ -45,6 +45,7 @@ impl Printer {
     }
 
     /// Print a list of `OutputLine` values to stdout with optional color.
+    #[allow(clippy::too_many_lines)]
     pub fn print_lines(&self, lines: &[OutputLine]) {
         use console::style;
 
