@@ -1,0 +1,49 @@
+# https://embarkstudios.github.io/cargo-deny/
+
+[advisories]
+ignore = []
+
+[licenses]
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "OpenSSL",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.8
+
+[licenses.private]
+ignore = false
+
+[bans]
+multiple-versions = "deny"
+wildcards = "deny"
+highlight = "all"
+skip = [
+    # Transitive duplicates we can't resolve — all pulled by reqwest's dependency tree
+    { crate = "core-foundation@0.9", reason = "system-configuration pulls old version" },
+    { crate = "getrandom@0.3", reason = "ahash/jobserver still on 0.3" },
+    { crate = "thiserror@1", reason = "jni still on thiserror 1.x" },
+    { crate = "thiserror-impl@1", reason = "jni still on thiserror 1.x" },
+    { crate = "toml_datetime@0.6", reason = "toml_edit still on 0.6" },
+    { crate = "windows-sys@0.60", reason = "socket2/tokio still on 0.60" },
+]
+skip-tree = [
+    # jni pulls windows-sys 0.45 → old windows-targets tree
+    { crate = "windows-sys@0.45", reason = "jni → rustls-platform-verifier transitive" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
