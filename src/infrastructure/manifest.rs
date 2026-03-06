@@ -1,4 +1,3 @@
-use log::info;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
@@ -258,7 +257,6 @@ impl FileManifest {
             path: self.path.clone(),
             source,
         })?;
-        info!("Manifest updated: {}", self.path.display());
         Ok(())
     }
 }

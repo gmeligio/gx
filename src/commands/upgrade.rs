@@ -1,11 +1,10 @@
-use log::{info, warn};
 use thiserror::Error;
 
 use crate::domain::UpgradePlan as DomainUpgradePlan;
 use crate::domain::{
     ActionId, ActionResolver, ActionSpec, Lock, LockDiff, LockKey, Manifest, ManifestDiff,
-    ResolutionError, UpdateResult, UpgradeAction, UpgradeCandidate, Version, VersionRegistry,
-    WorkflowError, WorkflowUpdater, find_upgrade_candidate,
+    ResolutionError, UpgradeAction, UpgradeCandidate, Version, VersionRegistry, WorkflowError,
+    WorkflowUpdater, find_upgrade_candidate,
 };
 
 /// Which actions to upgrade: all or a single action.
@@ -92,13 +91,16 @@ pub fn plan<R>(
     lock: &Lock,
     registry: R,
     request: &UpgradeRequest,
+    mut on_progress: impl FnMut(&str),
 ) -> Result<DomainUpgradePlan, UpgradeError>
 where
     R: VersionRegistry,
 {
     let service = ActionResolver::new(registry);
 
-    let Some((upgrades, repins)) = determine_upgrades(manifest, lock, &service, request)? else {
+    let Some((upgrades, repins)) =
+        determine_upgrades(manifest, lock, &service, request, &mut on_progress)?
+    else {
         return Ok(DomainUpgradePlan {
             manifest: ManifestDiff::default(),
             lock: LockDiff::default(),
@@ -130,11 +132,23 @@ where
             } => new_manifest_version.clone(),
         };
         let spec = ActionSpec::new(upgrade.id.clone(), version_to_resolve);
-        resolve_and_store(&service, &spec, &mut planned_lock, "Could not resolve");
+        resolve_and_store(
+            &service,
+            &spec,
+            &mut planned_lock,
+            "Could not resolve",
+            &mut on_progress,
+        );
     }
 
     for spec in &repins {
-        resolve_and_store(&service, spec, &mut planned_lock, "Could not re-pin");
+        resolve_and_store(
+            &service,
+            spec,
+            &mut planned_lock,
+            "Could not re-pin",
+            &mut on_progress,
+        );
     }
 
     let keys_to_retain: Vec<LockKey> = planned_manifest.specs().map(LockKey::from).collect();
@@ -242,6 +256,7 @@ fn determine_upgrades<R: VersionRegistry>(
     lock: &Lock,
     service: &ActionResolver<R>,
     request: &UpgradeRequest,
+    on_progress: &mut dyn FnMut(&str),
 ) -> Result<DetermineResult, UpgradeError> {
     match &request.mode {
         UpgradeMode::Safe | UpgradeMode::Latest => {
@@ -259,16 +274,16 @@ fn determine_upgrades<R: VersionRegistry>(
                 return Ok(None);
             }
 
-            info!("Checking for upgrades...");
+            on_progress("Checking for upgrades...");
             let mut upgrades = Vec::new();
             let mut repins: Vec<ActionSpec> = Vec::new();
 
             for spec in &specs {
                 if spec.version.precision().is_none() {
                     if spec.version.is_sha() {
-                        info!("Skipping {spec} (bare SHA)");
+                        on_progress(&format!("Skipping {spec} (bare SHA)"));
                     } else {
-                        info!("Re-pinning {spec} (non-semver ref)");
+                        on_progress(&format!("Re-pinning {spec} (non-semver ref)"));
                         repins.push((*spec).clone());
                     }
                     continue;
@@ -299,13 +314,14 @@ fn determine_upgrades<R: VersionRegistry>(
                         }
                     }
                     Err(e) => {
-                        warn!("Could not check upgrades for {spec}: {e}");
+                        on_progress(&format!(
+                            "Warning: could not check upgrades for {spec}: {e}"
+                        ));
                     }
                 }
             }
 
             if upgrades.is_empty() && repins.is_empty() {
-                info!("All actions are up to date.");
                 return Ok(None);
             }
 
@@ -360,13 +376,14 @@ fn resolve_and_store<R: VersionRegistry>(
     spec: &ActionSpec,
     lock: &mut Lock,
     unresolved_msg: &str,
+    on_progress: &mut dyn FnMut(&str),
 ) {
     match service.resolve(spec) {
         Ok(resolved) => {
             lock.set(&resolved);
         }
         Err(e) => {
-            warn!("{unresolved_msg} {spec}: {e}");
+            on_progress(&format!("{unresolved_msg} {spec}: {e}"));
         }
     }
 }
@@ -380,7 +397,7 @@ pub fn apply_upgrade_workflows<W: WorkflowUpdater>(
     writer: &W,
     lock_diff: &LockDiff,
     upgrades: &[UpgradeCandidate],
-) -> Result<(), UpgradeError> {
+) -> Result<usize, UpgradeError> {
     use crate::domain::LockEntry;
 
     let update_map: std::collections::HashMap<ActionId, String> = lock_diff
@@ -397,56 +414,19 @@ pub fn apply_upgrade_workflows<W: WorkflowUpdater>(
         .collect();
 
     if update_map.is_empty() {
-        return Ok(());
+        return Ok(0);
     }
 
     let results = writer.update_all(&update_map)?;
-    print_update_results(&results);
 
-    if !upgrades.is_empty() {
-        info!("Upgrading actions:");
-        for u in upgrades {
-            info!("+ {u}");
-        }
-    }
+    let _ = upgrades;
 
-    Ok(())
-}
-
-fn print_update_results(results: &[UpdateResult]) {
-    if results.is_empty() {
-        info!("Workflows are already up to date.");
-    } else {
-        info!("Updated workflows:");
-        for result in results {
-            info!("{}", result.file.display());
-            for change in &result.changes {
-                info!("~ {change}");
-            }
-        }
-        info!("{} workflow(s) updated.", results.len());
-    }
+    Ok(results.len())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
-
-    #[test]
-    fn test_print_update_results_empty() {
-        let results: Vec<UpdateResult> = vec![];
-        print_update_results(&results);
-    }
-
-    #[test]
-    fn test_print_update_results_with_changes() {
-        let results = vec![UpdateResult {
-            file: PathBuf::from("ci.yml"),
-            changes: vec!["actions/checkout v4 -> v5".to_string()],
-        }];
-        print_update_results(&results);
-    }
 
     #[test]
     fn new_should_reject_pinned_with_all_scope() {
@@ -558,7 +538,7 @@ mod tests {
         let registry = MockPlanRegistry::new();
         let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap();
 
-        let result = plan(&manifest, &lock, registry, &request).unwrap();
+        let result = plan(&manifest, &lock, registry, &request, |_| {}).unwrap();
         assert!(
             result.is_empty(),
             "Plan with no upgradable actions must be empty"
@@ -590,7 +570,7 @@ mod tests {
 
         let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap();
 
-        let result = plan(&manifest, &lock, registry, &request).unwrap();
+        let result = plan(&manifest, &lock, registry, &request, |_| {}).unwrap();
 
         // Should have upgrade candidate
         assert!(
@@ -631,7 +611,7 @@ mod tests {
 
         let request = UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::All).unwrap();
 
-        let result = plan(&manifest, &lock, registry, &request).unwrap();
+        let result = plan(&manifest, &lock, registry, &request, |_| {}).unwrap();
 
         // Should have upgrade candidates
         assert!(

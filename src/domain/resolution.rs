@@ -1,4 +1,3 @@
-use log::{debug, warn};
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -158,7 +157,6 @@ impl<R: VersionRegistry> ActionResolver<R> {
     ///
     /// Returns `ResolutionError` if the registry lookup fails.
     pub fn resolve(&self, spec: &ActionSpec) -> Result<ResolvedAction, ResolutionError> {
-        debug!("Resolving {spec}");
         let resolved_ref = self.registry.lookup_sha(&spec.id, &spec.version)?;
         Ok(ResolvedAction::new(
             spec.id.clone(),
@@ -221,14 +219,10 @@ impl<R: VersionRegistry> ActionResolver<R> {
                 if let Some(tag) = select_most_specific_tag(tags) {
                     (tag, true)
                 } else {
-                    warn!("No tags found for {id} SHA {sha}, keeping version");
                     (original_version.clone(), false)
                 }
             }
-            Err(e) => {
-                warn!("Could not correct version for {id} SHA {sha}: {e}");
-                (original_version.clone(), false)
-            }
+            Err(_e) => (original_version.clone(), false),
         }
     }
 }
