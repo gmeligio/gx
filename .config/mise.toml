@@ -2,6 +2,8 @@
 "github:axodotdev/cargo-dist" = "0.31.0"
 "github:obi1kenobi/cargo-semver-checks" = "0.46.0"
 "github:EmbarkStudios/cargo-deny" = "0.19.0"
+"github:charmbracelet/vhs" = "0.10.0"
+ttyd = "1.7.3"
 
 [settings]
 github.github_attestations = true
@@ -38,3 +40,16 @@ run = "cargo deny check"
 [tasks.semver]
 description = "Check for semver violations against the published crate"
 run = "cargo semver-checks"
+
+[tasks.install]
+description = "Install gx to ~/.cargo/bin"
+run = "cargo install --path . --force"
+
+[tasks.demo]
+description = "Regenerate the demo GIF"
+shell = "bash -c"
+run = """
+GH_TOKEN=$(gh auth token)
+docker build -t gx-demo -f docs/demo.Dockerfile .
+MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd)/docs:/vhs" -e "GITHUB_TOKEN=$GH_TOKEN" gx-demo demo.tape
+"""
