@@ -87,7 +87,7 @@ impl VersionRegistry for MockRegistry {
         Ok(ResolvedRef::new(
             CommitSha::from(Self::fake_sha(id.as_str(), version.as_str())),
             id.base_repo(),
-            RefType::Tag,
+            Some(RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         ))
     }
@@ -165,7 +165,7 @@ fn run_tidy_with_registry<R: VersionRegistry + Clone>(
     };
     let lock = parse_lock(&lock_path)?;
 
-    let plan = tidy::plan(&manifest, &lock, registry, &scanner, |_| {})?;
+    let plan = tidy::plan(&manifest, &lock, &registry, &scanner, |_| {})?;
 
     if !plan.is_empty() {
         if has_manifest {

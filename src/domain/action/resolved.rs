@@ -10,7 +10,7 @@ pub struct ResolvedAction {
     pub version: Version,
     pub sha: CommitSha,
     pub repository: String,
-    pub ref_type: RefType,
+    pub ref_type: Option<RefType>,
     pub date: String,
 }
 
@@ -22,7 +22,7 @@ impl ResolvedAction {
         version: Version,
         sha: CommitSha,
         repository: String,
-        ref_type: RefType,
+        ref_type: Option<RefType>,
         date: String,
     ) -> Self {
         Self {
@@ -95,7 +95,7 @@ mod tests {
             Version::from("v4"),
             CommitSha::from("abc123def456789012345678901234567890abcd"),
             "actions/checkout".to_string(),
-            RefType::Tag,
+            Some(RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         );
         assert_eq!(

@@ -211,10 +211,10 @@ impl GithubRegistry {
         &self,
         owner_repo: &str,
         ref_name: &str,
-    ) -> Result<(String, RefType), GithubError> {
+    ) -> Result<(String, Option<RefType>), GithubError> {
         // If it already looks like a full SHA (40 hex chars), return it as a Commit
         if CommitSha::is_valid(ref_name) {
-            return Ok((ref_name.to_string(), RefType::Commit));
+            return Ok((ref_name.to_string(), Some(RefType::Commit)));
         }
 
         // Handle subpath actions (e.g., "github/codeql-action/upload-sarif")
@@ -231,21 +231,21 @@ impl GithubRegistry {
                 .flatten()
                 .is_some()
             {
-                return Ok((sha, RefType::Release));
+                return Ok((sha, Some(RefType::Release)));
             }
-            return Ok((sha, RefType::Tag));
+            return Ok((sha, Some(RefType::Tag)));
         }
 
         // Try to resolve as a branch
         let url = format!("{GITHUB_API_BASE}/repos/{base_repo}/git/ref/heads/{ref_name}");
         if let Ok(sha) = self.fetch_ref(&url) {
-            return Ok((sha, RefType::Branch));
+            return Ok((sha, Some(RefType::Branch)));
         }
 
         // Try to resolve as a direct commit
         let url = format!("{GITHUB_API_BASE}/repos/{base_repo}/commits/{ref_name}");
         self.fetch_commit_sha(&url)
-            .map(|sha| (sha, RefType::Commit))
+            .map(|sha| (sha, Some(RefType::Commit)))
     }
 
     fn fetch_ref(&self, url: &str) -> Result<String, GithubError> {
@@ -603,7 +603,7 @@ impl VersionRegistry for GithubRegistry {
         let base_repo = id.base_repo();
 
         // Fetch date with priority: release > annotated tag > commit
-        let date = if ref_type == RefType::Tag {
+        let date = if ref_type == Some(RefType::Tag) {
             // For tags, try release first, then tag object, then commit
             self.fetch_release_date(&base_repo, version.as_str())
                 .ok()
@@ -611,7 +611,7 @@ impl VersionRegistry for GithubRegistry {
                 .or_else(|| self.fetch_tag_date(&base_repo, &sha).ok().flatten())
                 .or_else(|| self.fetch_commit_date(&base_repo, &sha).ok().flatten())
                 .unwrap_or_default()
-        } else if ref_type == RefType::Release {
+        } else if ref_type == Some(RefType::Release) {
             // For releases, try release first, then fall back to commit
             self.fetch_release_date(&base_repo, version.as_str())
                 .ok()
@@ -747,7 +747,7 @@ mod tests {
         let sha = "a1b2c3d4e5f6789012345678901234567890abcd";
         let (result_sha, result_type) = client.resolve_ref("actions/checkout", sha).unwrap();
         assert_eq!(result_sha, sha);
-        assert_eq!(result_type, RefType::Commit);
+        assert_eq!(result_type, Some(RefType::Commit));
     }
 
     #[test]
@@ -759,7 +759,7 @@ mod tests {
             .resolve_ref("github/codeql-action/upload-sarif", sha)
             .unwrap();
         assert_eq!(result_sha, sha);
-        assert_eq!(result_type, RefType::Commit);
+        assert_eq!(result_type, Some(RefType::Commit));
     }
 
     #[test]
@@ -771,7 +771,7 @@ mod tests {
         // Full SHA should pass through
         let result = client.lookup_sha(&id, &sha_version).unwrap();
         assert_eq!(result.sha.as_str(), sha_version.as_str());
-        assert_eq!(result.ref_type, RefType::Commit);
+        assert_eq!(result.ref_type, Some(RefType::Commit));
     }
 
     #[test]
@@ -784,7 +784,7 @@ mod tests {
         // Using actions/checkout@v6 as test case (has a GitHub Release)
         let (sha, ref_type) = client.resolve_ref("actions/checkout", "v6").unwrap();
         assert!(!sha.is_empty());
-        assert_eq!(ref_type, RefType::Release);
+        assert_eq!(ref_type, Some(RefType::Release));
     }
 
     #[test]

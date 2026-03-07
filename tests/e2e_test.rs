@@ -65,7 +65,7 @@ impl VersionRegistry for E2eRegistry {
         Ok(ResolvedRef::new(
             CommitSha::from(Self::fake_sha(id.as_str(), version.as_str())),
             id.base_repo(),
-            RefType::Tag,
+            Some(RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         ))
     }
@@ -137,7 +137,7 @@ fn run_init<R: VersionRegistry + Clone>(root: &Path, registry: R) {
     let scanner = FileWorkflowScanner::new(root);
     let updater = FileWorkflowUpdater::new(root);
 
-    let plan = tidy::plan(&manifest, &lock, registry, &scanner, |_| {}).unwrap();
+    let plan = tidy::plan(&manifest, &lock, &registry, &scanner, |_| {}).unwrap();
     if !plan.is_empty() {
         create_manifest(&mp, &plan.manifest).unwrap();
         create_lock(&lp, &plan.lock).unwrap();
@@ -160,7 +160,7 @@ fn run_tidy<R: VersionRegistry + Clone>(root: &Path, registry: R) {
     };
     let lock = parse_lock(&lp).unwrap();
 
-    let plan = tidy::plan(&manifest, &lock, registry, &scanner, |_| {}).unwrap();
+    let plan = tidy::plan(&manifest, &lock, &registry, &scanner, |_| {}).unwrap();
     if !plan.is_empty() {
         if has_manifest {
             apply_manifest_diff(&mp, &plan.manifest).unwrap();
@@ -182,7 +182,7 @@ fn run_upgrade<R: VersionRegistry + Clone>(root: &Path, registry: R, request: &U
     let lock = parse_lock(&lp).unwrap();
     let updater = FileWorkflowUpdater::new(root);
 
-    let plan = upgrade::plan(&manifest, &lock, registry, request, |_| {}).unwrap();
+    let plan = upgrade::plan(&manifest, &lock, &registry, request, |_| {}).unwrap();
     if !plan.is_empty() {
         apply_manifest_diff(&mp, &plan.manifest).unwrap();
         apply_lock_diff(&lp, &plan.lock).unwrap();
@@ -559,7 +559,7 @@ impl VersionRegistry for ShaAwareRegistry {
         Ok(ResolvedRef::new(
             CommitSha::from(Self::fake_sha(id.as_str(), version.as_str())),
             id.base_repo(),
-            RefType::Tag,
+            Some(RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         ))
     }
@@ -630,7 +630,7 @@ impl VersionRegistry for EmptyDateRegistry {
         Ok(ResolvedRef::new(
             CommitSha::from(Self::fake_sha(id.as_str(), version.as_str())),
             id.base_repo(),
-            RefType::Tag,
+            Some(RefType::Tag),
             String::new(),
         ))
     }
@@ -676,7 +676,7 @@ impl VersionRegistry for FailingDescribeRegistry {
         Ok(ResolvedRef::new(
             CommitSha::from(Self::fake_sha(id.as_str(), version.as_str())),
             id.base_repo(),
-            RefType::Tag,
+            Some(RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         ))
     }

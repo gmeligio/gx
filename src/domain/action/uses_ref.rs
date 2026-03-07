@@ -29,21 +29,15 @@ impl fmt::Display for RefType {
     }
 }
 
-impl From<String> for RefType {
-    fn from(s: String) -> Self {
-        RefType::from(s.as_str())
-    }
-}
-
-impl From<&str> for RefType {
-    #[allow(clippy::match_same_arms)]
-    fn from(s: &str) -> Self {
+impl RefType {
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
-            "release" => RefType::Release,
-            "tag" => RefType::Tag,
-            "branch" => RefType::Branch,
-            "commit" => RefType::Commit,
-            _ => RefType::Tag, // default to Tag for unknown
+            "release" => Some(RefType::Release),
+            "tag" => Some(RefType::Tag),
+            "branch" => Some(RefType::Branch),
+            "commit" => Some(RefType::Commit),
+            _ => None,
         }
     }
 }
@@ -122,12 +116,12 @@ mod tests {
     }
 
     #[test]
-    fn test_ref_type_from_string() {
-        assert_eq!(RefType::from("release"), RefType::Release);
-        assert_eq!(RefType::from("tag"), RefType::Tag);
-        assert_eq!(RefType::from("branch"), RefType::Branch);
-        assert_eq!(RefType::from("commit"), RefType::Commit);
-        assert_eq!(RefType::from("unknown"), RefType::Tag); // defaults to Tag
+    fn test_ref_type_parse() {
+        assert_eq!(RefType::parse("release"), Some(RefType::Release));
+        assert_eq!(RefType::parse("tag"), Some(RefType::Tag));
+        assert_eq!(RefType::parse("branch"), Some(RefType::Branch));
+        assert_eq!(RefType::parse("commit"), Some(RefType::Commit));
+        assert_eq!(RefType::parse("unknown"), None);
     }
 
     #[test]
