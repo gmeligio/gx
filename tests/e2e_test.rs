@@ -137,7 +137,7 @@ fn run_init<R: VersionRegistry + Clone>(root: &Path, registry: R) {
     let scanner = FileWorkflowScanner::new(root);
     let updater = FileWorkflowUpdater::new(root);
 
-    let plan = tidy::plan(&manifest, &lock, registry, &scanner).unwrap();
+    let plan = tidy::plan(&manifest, &lock, registry, &scanner, |_| {}).unwrap();
     if !plan.is_empty() {
         create_manifest(&mp, &plan.manifest).unwrap();
         create_lock(&lp, &plan.lock).unwrap();
@@ -160,7 +160,7 @@ fn run_tidy<R: VersionRegistry + Clone>(root: &Path, registry: R) {
     };
     let lock = parse_lock(&lp).unwrap();
 
-    let plan = tidy::plan(&manifest, &lock, registry, &scanner).unwrap();
+    let plan = tidy::plan(&manifest, &lock, registry, &scanner, |_| {}).unwrap();
     if !plan.is_empty() {
         if has_manifest {
             apply_manifest_diff(&mp, &plan.manifest).unwrap();
@@ -182,7 +182,7 @@ fn run_upgrade<R: VersionRegistry + Clone>(root: &Path, registry: R, request: &U
     let lock = parse_lock(&lp).unwrap();
     let updater = FileWorkflowUpdater::new(root);
 
-    let plan = upgrade::plan(&manifest, &lock, registry, request).unwrap();
+    let plan = upgrade::plan(&manifest, &lock, registry, request, |_| {}).unwrap();
     if !plan.is_empty() {
         apply_manifest_diff(&mp, &plan.manifest).unwrap();
         apply_lock_diff(&lp, &plan.lock).unwrap();

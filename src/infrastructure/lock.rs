@@ -1,4 +1,3 @@
-use log::info;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
@@ -179,7 +178,6 @@ impl FileLock {
             path: self.path.clone(),
             source,
         })?;
-        info!("Lock file updated: {}", self.path.display());
         Ok(())
     }
 }
@@ -211,7 +209,6 @@ pub fn parse_lock(path: &Path) -> Result<Lock, LockFileError> {
             path: path.to_path_buf(),
             source: Box::new(source),
         })?;
-        info!("Migrating lock file from v1.0 to v{LOCK_FILE_VERSION}");
         (migrate_v1(v1), true)
     };
 

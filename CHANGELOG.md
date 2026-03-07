@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.10](https://github.com/gmeligio/gx/compare/v0.5.9...v0.5.10) - 2026-03-06
+
+### Added
+
+- simplify output UX ([#57](https://github.com/gmeligio/gx/pull/57))
+- add graceful degradation to errors ([#54](https://github.com/gmeligio/gx/pull/54))
+
+### Fixed
+
+- check vulnerabilities with cargo deny ([#56](https://github.com/gmeligio/gx/pull/56))
+
 ## [0.5.9](https://github.com/gmeligio/gx/compare/v0.5.8...v0.5.9) - 2026-03-04
 
 ### Fixed

@@ -1,5 +1,4 @@
 use glob::glob;
-use log::warn;
 use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -105,7 +104,7 @@ fn find_workflow_files(workflows_dir: &Path) -> Result<Vec<PathBuf>, IoWorkflowE
         for entry in glob(&pattern)? {
             match entry {
                 Ok(path) => workflows.push(path),
-                Err(e) => warn!("Error reading path: {e}"),
+                Err(_e) => {}
             }
         }
     }

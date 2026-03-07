@@ -6,37 +6,33 @@ use gx::commands::app::AppError;
 use gx::commands::lint::LintError;
 use gx::config::{Config, ConfigError};
 use gx::infrastructure::{repo, repo::RepoError};
-use log::{LevelFilter, info};
-use std::io::Write;
+use gx::output::{
+    LogFile, OutputLine, Printer, render_init, render_lint, render_tidy, render_upgrade,
+};
+use indicatif::ProgressBar;
 use thiserror::Error;
 
 /// Top-level error type for the gx CLI binary
 #[derive(Debug, Error)]
 enum GxError {
-    /// The `--latest` flag was combined with an exact version pin.
     #[error(
         "--latest cannot be combined with an exact version pin (ACTION@VERSION). \
          Use --latest ACTION to upgrade to latest, or ACTION@VERSION to pin."
     )]
     LatestWithVersionPin,
 
-    /// The action argument could not be parsed as ACTION@VERSION.
     #[error("invalid format: expected ACTION@VERSION (e.g., actions/checkout@v5), got: {input}")]
     InvalidActionFormat { input: String },
 
-    /// Configuration loading failed.
     #[error(transparent)]
     Config(#[from] ConfigError),
 
-    /// Command orchestration failed.
     #[error(transparent)]
     App(#[from] AppError),
 
-    /// Repository detection failed.
     #[error(transparent)]
     Repo(#[from] RepoError),
 
-    /// An I/O error occurred.
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
@@ -46,27 +42,20 @@ enum GxError {
 #[command(about = "CLI to manage Github Actions dependencies", long_about = None)]
 #[command(version)]
 struct Cli {
-    /// Enable verbose output
-    #[arg(short, long, global = true)]
-    verbose: bool,
-
     #[command(subcommand)]
     command: Commands,
 }
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Ensure the manifest and lock matches the workflow code: add missing actions, remove unused, update workflows
+    /// Ensure the manifest and lock matches the workflow code
     Tidy,
     /// Create manifest and lock files from current workflows
     Init,
     /// Upgrade actions to newer versions
     Upgrade {
-        /// Upgrade a specific action (e.g., actions/checkout or actions/checkout@v5)
         #[arg(value_name = "ACTION")]
         action: Option<String>,
-
-        /// Upgrade to the absolute latest version, including major versions
         #[arg(long)]
         latest: bool,
     },
@@ -77,13 +66,36 @@ enum Commands {
 fn main() -> Result<(), GxError> {
     let cli = Cli::parse();
 
-    init_logging(&cli);
+    let printer = Printer::new();
+    let is_ci = printer.is_ci;
+
+    let cmd_name = match &cli.command {
+        Commands::Tidy => "tidy",
+        Commands::Init => "init",
+        Commands::Upgrade { .. } => "upgrade",
+        Commands::Lint => "lint",
+    };
+
+    // Create log file for local runs (not CI)
+    let mut log_file: Option<LogFile> = if is_ci {
+        None
+    } else {
+        LogFile::new(cmd_name).ok()
+    };
+
+    if is_ci {
+        printer.print_lines(&[OutputLine::CiNotice {
+            message: "CI detected, running in verbose mode".to_string(),
+        }]);
+    }
 
     let cwd = std::env::current_dir()?;
     let repo_root = match repo::find_root(&cwd) {
         Ok(root) => root,
         Err(RepoError::GithubFolder) => {
-            info!(".github folder not found. gx didn't modify any file.");
+            printer.print_lines(&[OutputLine::Summary {
+                text: ".github folder not found. gx didn't modify any file.".to_string(),
+            }]);
             return Ok(());
         }
         Err(e) => return Err(e.into()),
@@ -92,28 +104,110 @@ fn main() -> Result<(), GxError> {
     let config = Config::load(&repo_root)?;
 
     match cli.command {
-        Commands::Tidy => commands::app::tidy(&repo_root, config)?,
-        Commands::Init => commands::app::init(&repo_root, config)?,
+        Commands::Tidy => {
+            let spinner = printer.spinner("Running tidy...");
+            let mut lf = log_file.take();
+            let report = commands::app::tidy(
+                &repo_root,
+                config,
+                make_cb(spinner.as_ref(), &mut lf, is_ci),
+            )?;
+            finish_spinner(spinner);
+            let mut lines = render_tidy(&report);
+            append_log_path(lf.as_ref(), &mut lines);
+            printer.print_lines(&lines);
+            log_file = lf;
+        }
+        Commands::Init => {
+            let spinner = printer.spinner("Initializing...");
+            let mut lf = log_file.take();
+            let report = commands::app::init(
+                &repo_root,
+                config,
+                make_cb(spinner.as_ref(), &mut lf, is_ci),
+            )?;
+            finish_spinner(spinner);
+            let mut lines = render_init(&report);
+            append_log_path(lf.as_ref(), &mut lines);
+            printer.print_lines(&lines);
+            log_file = lf;
+        }
         Commands::Upgrade { action, latest } => {
             let request = resolve_upgrade_mode(action.as_deref(), latest)?;
-            commands::app::upgrade(&repo_root, config, &request)?;
+            let spinner = printer.spinner("Checking actions...");
+            let mut lf = log_file.take();
+            let report = commands::app::upgrade(
+                &repo_root,
+                config,
+                &request,
+                make_cb(spinner.as_ref(), &mut lf, is_ci),
+            )?;
+            finish_spinner(spinner);
+            let mut lines = render_upgrade(&report);
+            append_log_path(lf.as_ref(), &mut lines);
+            printer.print_lines(&lines);
+            log_file = lf;
         }
         Commands::Lint => match commands::app::lint(&repo_root, &config) {
             Err(AppError::Lint(LintError::ViolationsFound { .. })) => {
                 std::process::exit(1);
             }
             Err(err) => return Err(GxError::App(err)),
-            Ok(()) => {}
+            Ok(report) => {
+                let lines = render_lint(&report);
+                printer.print_lines(&lines);
+            }
         },
     }
+
+    drop(log_file);
     Ok(())
+}
+
+/// Build a progress callback that updates the spinner, writes to the log file, and prints in CI.
+fn make_cb<'a>(
+    spinner: Option<&'a ProgressBar>,
+    log_file: &'a mut Option<LogFile>,
+    is_ci: bool,
+) -> impl FnMut(&str) + 'a {
+    move |msg: &str| {
+        if let Some(pb) = spinner {
+            pb.set_message(msg.to_string());
+        }
+        if let Some(lf) = log_file.as_mut() {
+            lf.write(msg);
+        }
+        if is_ci {
+            use std::time::{SystemTime, UNIX_EPOCH};
+            let secs = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            let h = (secs / 3600) % 24;
+            let m = (secs / 60) % 60;
+            let s = secs % 60;
+            println!(" [{h:02}:{m:02}:{s:02}] {msg}");
+        }
+    }
+}
+
+fn finish_spinner(spinner: Option<ProgressBar>) {
+    if let Some(pb) = spinner {
+        pb.finish_and_clear();
+    }
+}
+
+fn append_log_path(log_file: Option<&LogFile>, lines: &mut Vec<OutputLine>) {
+    if let Some(lf) = log_file {
+        lines.push(OutputLine::LogPath {
+            path: lf.path().clone(),
+        });
+    }
 }
 
 /// # Errors
 ///
-/// Returns [`GxError::LatestWithVersionPin`] if `--latest` is combined with `ACTION@VERSION`.
-/// Returns [`GxError::InvalidActionFormat`] if the action string cannot be parsed.
-/// Propagates [`GxError::App`] from [`UpgradeRequest::new`].
+/// Returns errors for invalid upgrade mode combinations.
 fn resolve_upgrade_mode(
     action: Option<&str>,
     latest: bool,
@@ -122,15 +216,11 @@ fn resolve_upgrade_mode(
     use gx::domain::ActionId;
 
     match (action, latest) {
-        // gx upgrade --latest
         (None, true) => {
             Ok(UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::All)
                 .map_err(AppError::from)?)
         }
-
-        // gx upgrade --latest actions/checkout
         (Some(action_str), true) => {
-            // action_str is bare ACTION (no version)
             if action_str.contains('@') {
                 return Err(GxError::LatestWithVersionPin);
             }
@@ -140,11 +230,8 @@ fn resolve_upgrade_mode(
                     .map_err(AppError::from)?,
             )
         }
-
-        // gx upgrade actions/checkout
         (Some(action_str), false) => {
             if action_str.contains('@') {
-                // Bare ACTION@VERSION → Pinned mode
                 let key = gx::domain::LockKey::parse(action_str).ok_or_else(|| {
                     GxError::InvalidActionFormat {
                         input: action_str.to_string(),
@@ -156,7 +243,6 @@ fn resolve_upgrade_mode(
                 )
                 .map_err(AppError::from)?)
             } else {
-                // Bare ACTION → Safe mode, single action
                 let id = ActionId::from(action_str);
                 Ok(
                     UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::Single(id))
@@ -164,32 +250,8 @@ fn resolve_upgrade_mode(
                 )
             }
         }
-
-        // gx upgrade
         (None, false) => Ok(
             UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).map_err(AppError::from)?
         ),
     }
-}
-
-/// Initialize logging based on the verbosity level specified in the CLI
-fn init_logging(cli: &Cli) {
-    let mut builder = env_logger::builder();
-    builder
-        .filter_level(if cli.verbose {
-            LevelFilter::Debug
-        } else {
-            LevelFilter::Info
-        })
-        .format(|buf, record| {
-            let level = record.level();
-            let style = &buf.default_level_style(level);
-            writeln!(buf, "[{style}{level}{style:#}] {}", record.args())
-        });
-
-    if !cli.verbose {
-        builder.format_timestamp(None);
-    }
-
-    builder.init();
 }
