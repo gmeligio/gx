@@ -1,5 +1,7 @@
-[![Build](https://github.com/gmeligio/gx/actions/workflows/build.yml/badge.svg)](https://github.com/gmeligio/gx/actions/workflows/build.yml)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/gmeligio/gx)
+[![Ask NotebookLM](https://img.shields.io/badge/NotebookLM-000000.svg?style=for-the-badge&logo=NotebookLM&logoColor=white)](https://notebooklm.google.com/notebook/0e1bc78e-7f6b-4781-b2b1-17e5afc1dd19)
 [![crates.io](https://img.shields.io/crates/v/gx.svg)](https://crates.io/crates/gx)
+[![crates.io](https://img.shields.io/crates/d/gx)](https://crates.io/crates/gx)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 # gx
