@@ -1,11 +1,35 @@
+pub mod report;
+
+use std::path::Path;
 use thiserror::Error;
 
-use crate::domain::UpgradePlan as DomainUpgradePlan;
+use self::report::UpgradeReport;
+use crate::config::Config;
 use crate::domain::{
     ActionId, ActionResolver, ActionSpec, Lock, LockDiff, LockKey, Manifest, ManifestDiff,
     ResolutionError, UpgradeAction, UpgradeCandidate, Version, VersionRegistry, WorkflowError,
-    WorkflowUpdater, find_upgrade_candidate,
+    WorkflowPatch, WorkflowUpdater, find_upgrade_candidate,
 };
+use crate::infra::{FileWorkflowUpdater, GithubRegistry, apply_lock_diff, apply_manifest_diff};
+
+use crate::domain::AppError;
+use crate::domain::Command;
+
+/// The complete plan produced by an upgrade operation.
+#[derive(Debug)]
+pub struct UpgradePlan {
+    pub manifest: ManifestDiff,
+    pub lock: LockDiff,
+    pub workflows: Vec<WorkflowPatch>,
+    pub upgrades: Vec<UpgradeCandidate>,
+}
+
+impl UpgradePlan {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.manifest.is_empty() && self.lock.is_empty() && self.workflows.is_empty()
+    }
+}
 
 /// Which actions to upgrade: all or a single action.
 #[non_exhaustive]
@@ -92,7 +116,7 @@ pub fn plan<R>(
     registry: R,
     request: &UpgradeRequest,
     mut on_progress: impl FnMut(&str),
-) -> Result<DomainUpgradePlan, UpgradeError>
+) -> Result<UpgradePlan, UpgradeError>
 where
     R: VersionRegistry,
 {
@@ -101,7 +125,7 @@ where
     let Some((upgrades, repins)) =
         determine_upgrades(manifest, lock, &service, request, &mut on_progress)?
     else {
-        return Ok(DomainUpgradePlan {
+        return Ok(UpgradePlan {
             manifest: ManifestDiff::default(),
             lock: LockDiff::default(),
             workflows: vec![],
@@ -158,7 +182,7 @@ where
     let manifest_diff = diff_manifests(manifest, &planned_manifest);
     let lock_diff = diff_locks(lock, &planned_lock);
 
-    Ok(DomainUpgradePlan {
+    Ok(UpgradePlan {
         manifest: manifest_diff,
         lock: lock_diff,
         workflows: vec![], // Workflow patches computed during apply phase
@@ -422,6 +446,140 @@ pub fn apply_upgrade_workflows<W: WorkflowUpdater>(
     let _ = upgrades;
 
     Ok(results.len())
+}
+
+/// Errors from resolving CLI arguments into an [`UpgradeRequest`].
+#[derive(Debug, Error)]
+pub enum ResolveError {
+    /// `--latest` was combined with an exact version pin (`ACTION@VERSION`).
+    #[error(
+        "--latest cannot be combined with an exact version pin (ACTION@VERSION). \
+         Use --latest ACTION to upgrade to latest, or ACTION@VERSION to pin."
+    )]
+    LatestWithVersionPin,
+
+    /// The action string could not be parsed as `ACTION@VERSION`.
+    #[error("invalid format: expected ACTION@VERSION (e.g., actions/checkout@v5), got: {input}")]
+    InvalidActionFormat { input: String },
+}
+
+/// Resolve CLI arguments into an [`UpgradeRequest`].
+///
+/// # Errors
+///
+/// Returns [`ResolveError`] for invalid upgrade mode combinations.
+///
+/// # Panics
+///
+/// Panics if `UpgradeRequest::new` rejects a known-valid mode/scope combination.
+pub fn resolve_upgrade_mode(
+    action: Option<&str>,
+    latest: bool,
+) -> Result<UpgradeRequest, ResolveError> {
+    match (action, latest) {
+        (None, true) => Ok(UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::All)
+            .expect("Latest + All is always valid")),
+        (Some(action_str), true) => {
+            if action_str.contains('@') {
+                return Err(ResolveError::LatestWithVersionPin);
+            }
+            let id = ActionId::from(action_str);
+            Ok(
+                UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::Single(id))
+                    .expect("Latest + Single is always valid"),
+            )
+        }
+        (Some(action_str), false) => {
+            if action_str.contains('@') {
+                let key = LockKey::parse(action_str).ok_or_else(|| {
+                    ResolveError::InvalidActionFormat {
+                        input: action_str.to_string(),
+                    }
+                })?;
+                Ok(UpgradeRequest::new(
+                    UpgradeMode::Pinned(key.version),
+                    UpgradeScope::Single(key.id),
+                )
+                .expect("Pinned + Single is always valid"))
+            } else {
+                let id = ActionId::from(action_str);
+                Ok(
+                    UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::Single(id))
+                        .expect("Safe + Single is always valid"),
+                )
+            }
+        }
+        (None, false) => Ok(UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All)
+            .expect("Safe + All is always valid")),
+    }
+}
+
+/// The upgrade command struct.
+pub struct Upgrade {
+    pub request: UpgradeRequest,
+}
+
+impl Command for Upgrade {
+    type Report = UpgradeReport;
+
+    fn run(
+        &self,
+        repo_root: &Path,
+        config: Config,
+        on_progress: &mut dyn FnMut(&str),
+    ) -> Result<UpgradeReport, AppError> {
+        let has_manifest = config.manifest_path.exists();
+        let registry = GithubRegistry::new(config.settings.github_token)?;
+        let updater = FileWorkflowUpdater::new(repo_root);
+
+        let upgrade_plan = plan(
+            &config.manifest,
+            &config.lock,
+            registry,
+            &self.request,
+            on_progress,
+        )?;
+
+        if upgrade_plan.is_empty() {
+            return Ok(UpgradeReport {
+                up_to_date: true,
+                ..Default::default()
+            });
+        }
+
+        if has_manifest {
+            apply_manifest_diff(&config.manifest_path, &upgrade_plan.manifest)?;
+            apply_lock_diff(&config.lock_path, &upgrade_plan.lock)?;
+        }
+
+        let workflows_updated =
+            apply_upgrade_workflows(&updater, &upgrade_plan.lock, &upgrade_plan.upgrades)?;
+
+        let upgrades = upgrade_plan
+            .upgrades
+            .iter()
+            .map(|u| {
+                let from = u.current.to_string();
+                let to = match &u.action {
+                    UpgradeAction::InRange { candidate } => candidate.to_string(),
+                    UpgradeAction::CrossRange {
+                        new_manifest_version,
+                        ..
+                    } => new_manifest_version.to_string(),
+                };
+                (u.id.to_string(), from, to)
+            })
+            .collect();
+
+        let report = UpgradeReport {
+            upgrades,
+            workflows_updated,
+            up_to_date: false,
+            ..Default::default()
+        };
+
+        Ok(report)
+    }
 }
 
 #[cfg(test)]

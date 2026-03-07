@@ -4,8 +4,8 @@
 # LLM
 .claude/*
 !.claude/CLAUDE.md
-!.claude/skills
 !.claude/commands
+!.claude/skills
 
 # Git worktrees
 .worktrees

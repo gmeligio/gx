@@ -1,13 +1,13 @@
 #![allow(unused_crate_dependencies)]
-use gx::commands::upgrade;
-use gx::commands::upgrade::{UpgradeMode, UpgradeRequest, UpgradeScope};
 use gx::domain::{
     ActionId, CommitSha, Lock, LockKey, Manifest, RefType, ResolutionError, ResolvedAction,
     ResolvedRef, ShaDescription, Version, VersionRegistry,
 };
-use gx::infrastructure::{
+use gx::infra::{
     FileWorkflowUpdater, apply_lock_diff, apply_manifest_diff, parse_lock, parse_manifest,
 };
+use gx::upgrade;
+use gx::upgrade::{UpgradeMode, UpgradeRequest, UpgradeScope};
 use std::fs;
 use std::io::Write;
 use std::path::Path;

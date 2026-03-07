@@ -11,17 +11,17 @@ use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::path::Path;
 
-use gx::commands::upgrade::{UpgradeMode, UpgradeRequest, UpgradeScope};
-use gx::commands::{lint, tidy, upgrade};
 use gx::config::LintConfig;
 use gx::domain::{
     ActionId, ActionSpec, CommitSha, Manifest, RefType, ResolutionError, ResolvedRef,
     ShaDescription, Version, VersionRegistry,
 };
-use gx::infrastructure::{
+use gx::infra::{
     FileWorkflowScanner, FileWorkflowUpdater, apply_lock_diff, apply_manifest_diff, create_lock,
     create_manifest, parse_lock, parse_manifest,
 };
+use gx::upgrade::{UpgradeMode, UpgradeRequest, UpgradeScope};
+use gx::{lint, tidy, upgrade};
 use tempfile::TempDir;
 
 // ---------------------------------------------------------------------------
@@ -199,7 +199,7 @@ fn run_lint(root: &Path) -> Vec<lint::Diagnostic> {
     let scanner = FileWorkflowScanner::new(root);
     let lint_config = LintConfig::default();
 
-    lint::run(&manifest, &lock, &scanner, &lint_config).unwrap()
+    lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {}).unwrap()
 }
 
 // ---------------------------------------------------------------------------

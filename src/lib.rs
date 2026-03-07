@@ -1,7 +1,10 @@
 #![allow(unused_crate_dependencies)]
 
-pub mod commands;
 pub mod config;
 pub mod domain;
-pub mod infrastructure;
+pub mod infra;
+pub mod init;
+pub mod lint;
 pub mod output;
+pub mod tidy;
+pub mod upgrade;

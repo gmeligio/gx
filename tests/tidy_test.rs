@@ -1,13 +1,13 @@
 #![allow(unused_crate_dependencies)]
-use gx::commands::{self, tidy};
 use gx::domain::{
     ActionId, CommitSha, Manifest, RefType, ResolutionError, ResolvedRef, ShaDescription, Version,
     VersionRegistry,
 };
-use gx::infrastructure::{
+use gx::infra::{
     FileWorkflowScanner, FileWorkflowUpdater, apply_lock_diff, apply_manifest_diff, parse_lock,
     parse_manifest,
 };
+use gx::tidy;
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
@@ -143,7 +143,7 @@ fn create_test_repo(temp_dir: &TempDir) -> std::path::PathBuf {
 }
 
 /// Helper to run tidy with appropriate DI based on manifest existence (same logic as app.rs)
-fn run_tidy(repo_root: &Path) -> Result<(), commands::app::AppError> {
+fn run_tidy(repo_root: &Path) -> Result<(), gx::domain::AppError> {
     run_tidy_with_registry(repo_root, MockRegistry::new())
 }
 
@@ -151,7 +151,7 @@ fn run_tidy(repo_root: &Path) -> Result<(), commands::app::AppError> {
 fn run_tidy_with_registry<R: VersionRegistry + Clone>(
     repo_root: &Path,
     registry: R,
-) -> Result<(), commands::app::AppError> {
+) -> Result<(), gx::domain::AppError> {
     let manifest_path = repo_root.join(".github").join("gx.toml");
     let lock_path = repo_root.join(".github").join("gx.lock");
     let scanner = FileWorkflowScanner::new(repo_root);
@@ -175,7 +175,7 @@ fn run_tidy_with_registry<R: VersionRegistry + Clone>(
             } else {
                 // First run: manifest exists but lock doesn't yet — apply manifest diff, create lock
                 apply_manifest_diff(&manifest_path, &plan.manifest)?;
-                gx::infrastructure::create_lock(&lock_path, &plan.lock)?;
+                gx::infra::create_lock(&lock_path, &plan.lock)?;
             }
         }
         tidy::apply_workflow_patches(&updater, &plan.workflows, &plan.corrections)?;
