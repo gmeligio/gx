@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::domain::{Lock, Manifest};
-use crate::infrastructure::{
+use crate::infra::{
     LOCK_FILE_NAME, LockFileError, MANIFEST_FILE_NAME, ManifestError, parse_lint_config,
     parse_lock, parse_manifest,
 };

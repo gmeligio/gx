@@ -2,10 +2,10 @@
 
 use std::fs;
 
-use gx::commands::lint;
 use gx::config::{Level, LintConfig};
 use gx::domain::{ActionId, CommitSha, Lock, Manifest, RefType, ResolvedAction, Version};
-use gx::infrastructure::FileWorkflowScanner;
+use gx::infra::FileWorkflowScanner;
+use gx::lint;
 
 #[test]
 fn lint_clean_repo_no_diagnostics() {
@@ -19,7 +19,9 @@ fn lint_clean_repo_no_diagnostics() {
     let lock = Lock::default();
     let lint_config = LintConfig::default();
 
-    let diagnostics = lint::run(&manifest, &lock, &scanner, &lint_config).expect("Should succeed");
+    let diagnostics =
+        lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {})
+            .expect("Should succeed");
 
     assert!(
         diagnostics.is_empty(),
@@ -54,7 +56,9 @@ jobs:
     let scanner = FileWorkflowScanner::new(repo_root);
     let lint_config = LintConfig::default();
 
-    let diagnostics = lint::run(&manifest, &lock, &scanner, &lint_config).expect("Should succeed");
+    let diagnostics =
+        lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {})
+            .expect("Should succeed");
 
     let unpinned_count = diagnostics.iter().filter(|d| d.rule == "unpinned").count();
     assert!(unpinned_count > 0, "Should detect unpinned actions");
@@ -87,7 +91,9 @@ jobs:
     let scanner = FileWorkflowScanner::new(repo_root);
     let lint_config = LintConfig::default();
 
-    let diagnostics = lint::run(&manifest, &lock, &scanner, &lint_config).expect("Should succeed");
+    let diagnostics =
+        lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {})
+            .expect("Should succeed");
 
     let unsynced_count = diagnostics
         .iter()
@@ -129,7 +135,9 @@ jobs:
         },
     );
 
-    let diagnostics = lint::run(&manifest, &lock, &scanner, &lint_config).expect("Should succeed");
+    let diagnostics =
+        lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {})
+            .expect("Should succeed");
 
     let unpinned_count = diagnostics.iter().filter(|d| d.rule == "unpinned").count();
     assert_eq!(
@@ -175,7 +183,9 @@ jobs:
         },
     );
 
-    let diagnostics = lint::run(&manifest, &lock, &scanner, &lint_config).expect("Should succeed");
+    let diagnostics =
+        lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {})
+            .expect("Should succeed");
 
     let unpinned_count = diagnostics.iter().filter(|d| d.rule == "unpinned").count();
     assert_eq!(
@@ -207,7 +217,9 @@ jobs:
     let scanner = FileWorkflowScanner::new(repo_root);
     let lint_config = LintConfig::default();
 
-    let diagnostics = lint::run(&manifest, &lock, &scanner, &lint_config).expect("Should succeed");
+    let diagnostics =
+        lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {})
+            .expect("Should succeed");
 
     let sha_mismatch = diagnostics
         .iter()
@@ -253,7 +265,9 @@ jobs:
     let scanner = FileWorkflowScanner::new(repo_root);
     let lint_config = LintConfig::default();
 
-    let diagnostics = lint::run(&manifest, &lock, &scanner, &lint_config).expect("Should succeed");
+    let diagnostics =
+        lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {})
+            .expect("Should succeed");
 
     let stale_comment = diagnostics
         .iter()
@@ -298,7 +312,9 @@ jobs:
     let scanner = FileWorkflowScanner::new(repo_root);
     let lint_config = LintConfig::default();
 
-    let diagnostics = lint::run(&manifest, &lock, &scanner, &lint_config).expect("Should succeed");
+    let diagnostics =
+        lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {})
+            .expect("Should succeed");
 
     let has_errors = diagnostics.iter().any(|d| d.level == Level::Error);
     let has_warnings = diagnostics.iter().any(|d| d.level == Level::Warn);
@@ -364,7 +380,9 @@ jobs:
         },
     );
 
-    let diagnostics = lint::run(&manifest, &lock, &scanner, &lint_config).expect("Should succeed");
+    let diagnostics =
+        lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {})
+            .expect("Should succeed");
 
     let has_errors = diagnostics.iter().any(|d| d.level == Level::Error);
     let has_warnings = diagnostics.iter().any(|d| d.level == Level::Warn);
@@ -395,7 +413,9 @@ jobs:
     let scanner = FileWorkflowScanner::new(repo_root);
     let lint_config = LintConfig::default();
 
-    let diagnostics = lint::run(&manifest, &lock, &scanner, &lint_config).expect("Should succeed");
+    let diagnostics =
+        lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {})
+            .expect("Should succeed");
 
     assert!(
         diagnostics.is_empty(),
@@ -445,7 +465,9 @@ jobs:
         },
     );
 
-    let diagnostics = lint::run(&manifest, &lock, &scanner, &lint_config).expect("Should succeed");
+    let diagnostics =
+        lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {})
+            .expect("Should succeed");
 
     let stale_comment_errors = diagnostics
         .iter()
@@ -506,7 +528,9 @@ jobs:
         },
     );
 
-    let diagnostics = lint::run(&manifest, &lock, &scanner, &lint_config).expect("Should succeed");
+    let diagnostics =
+        lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {})
+            .expect("Should succeed");
 
     let ci_unpinned = diagnostics
         .iter()

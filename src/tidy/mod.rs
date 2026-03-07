@@ -1,12 +1,40 @@
+pub mod report;
+
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 use thiserror::Error;
 
+use self::report::TidyReport;
+use crate::config::Config;
 use crate::domain::{
     ActionId, ActionOverride, ActionResolver, ActionSpec, CommitSha, LocatedAction, Lock, LockDiff,
-    LockKey, Manifest, ManifestDiff, ShaIndex, TidyPlan, Version, VersionCorrection,
-    VersionRegistry, WorkflowActionSet, WorkflowError, WorkflowPatch, WorkflowScanner,
-    WorkflowUpdater, select_most_specific_tag,
+    LockKey, Manifest, ManifestDiff, ShaIndex, Version, VersionCorrection, VersionRegistry,
+    WorkflowActionSet, WorkflowError, WorkflowPatch, WorkflowScanner, WorkflowUpdater,
+    select_most_specific_tag,
 };
+use crate::infra::{
+    FileWorkflowScanner, FileWorkflowUpdater, GithubRegistry, apply_lock_diff, apply_manifest_diff,
+    create_lock,
+};
+
+use crate::domain::AppError;
+use crate::domain::Command;
+
+/// The complete plan produced by a tidy operation.
+#[derive(Debug, Default)]
+pub struct TidyPlan {
+    pub manifest: ManifestDiff,
+    pub lock: LockDiff,
+    pub workflows: Vec<WorkflowPatch>,
+    pub corrections: Vec<VersionCorrection>,
+}
+
+impl TidyPlan {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.manifest.is_empty() && self.lock.is_empty() && self.workflows.is_empty()
+    }
+}
 
 /// Errors that can occur during the tidy command
 #[derive(Debug, Error)]
@@ -613,13 +641,96 @@ fn populate_lock_entry<R: VersionRegistry>(
     Ok(())
 }
 
+/// The tidy command struct.
+pub struct Tidy;
+
+impl Command for Tidy {
+    type Report = TidyReport;
+
+    fn run(
+        &self,
+        repo_root: &Path,
+        config: Config,
+        on_progress: &mut dyn FnMut(&str),
+    ) -> Result<TidyReport, AppError> {
+        let has_manifest = config.manifest_path.exists();
+        if config.settings.github_token.is_none() {
+            on_progress(
+                "Warning: No GITHUB_TOKEN set — using unauthenticated GitHub API (60 requests/hour limit).",
+            );
+        }
+        let registry = GithubRegistry::new(config.settings.github_token)?;
+        let scanner = FileWorkflowScanner::new(repo_root);
+        let updater = FileWorkflowUpdater::new(repo_root);
+
+        let original_manifest = config.manifest.clone();
+
+        let tidy_plan = plan(
+            &config.manifest,
+            &config.lock,
+            registry,
+            &scanner,
+            on_progress,
+        )?;
+
+        if tidy_plan.is_empty() {
+            return Ok(TidyReport::default());
+        }
+
+        if has_manifest {
+            apply_manifest_diff(&config.manifest_path, &tidy_plan.manifest)?;
+            if config.lock_path.exists() {
+                apply_lock_diff(&config.lock_path, &tidy_plan.lock)?;
+            } else {
+                create_lock(&config.lock_path, &tidy_plan.lock)?;
+            }
+        }
+
+        let workflows_updated =
+            apply_workflow_patches(&updater, &tidy_plan.workflows, &tidy_plan.corrections)?;
+
+        let report = TidyReport {
+            removed: tidy_plan
+                .manifest
+                .removed
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect(),
+            added: tidy_plan
+                .manifest
+                .added
+                .iter()
+                .map(|(id, v)| (id.to_string(), v.to_string()))
+                .collect(),
+            upgraded: tidy_plan
+                .manifest
+                .updated
+                .iter()
+                .map(|(id, new_v)| {
+                    let old_v = original_manifest.get(id).map_or_else(
+                        || {
+                            // Fallback: use new version as "from" if original not found
+                            let _ = LockKey::new(id.clone(), new_v.clone());
+                            "?".to_string()
+                        },
+                        std::string::ToString::to_string,
+                    );
+                    (id.to_string(), old_v, new_v.to_string())
+                })
+                .collect(),
+            corrections: tidy_plan.corrections.len(),
+            workflows_updated,
+        };
+
+        Ok(report)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::domain::{ActionId, CommitSha, ResolvedAction};
-    use crate::infrastructure::{
-        FileWorkflowScanner, FileWorkflowUpdater, parse_lock, parse_manifest,
-    };
+    use crate::infra::{FileWorkflowScanner, FileWorkflowUpdater, parse_lock, parse_manifest};
     use std::fs;
 
     #[test]
@@ -746,7 +857,7 @@ jobs:
             ],
             ..Default::default()
         };
-        crate::infrastructure::create_lock(&lock_path, &seed_diff).unwrap();
+        crate::infra::create_lock(&lock_path, &seed_diff).unwrap();
 
         // Load manifest and lock via free functions
         let manifest = parse_manifest(&manifest_path).unwrap(); // empty on first run
@@ -757,8 +868,8 @@ jobs:
         let tidy_plan = plan(&manifest, &lock, NoopRegistry, &scanner, |_| {}).unwrap();
 
         // Apply the plan — manifest doesn't exist yet so use create, lock exists so use apply
-        crate::infrastructure::create_manifest(&manifest_path, &tidy_plan.manifest).unwrap();
-        crate::infrastructure::apply_lock_diff(&lock_path, &tidy_plan.lock).unwrap();
+        crate::infra::create_manifest(&manifest_path, &tidy_plan.manifest).unwrap();
+        crate::infra::apply_lock_diff(&lock_path, &tidy_plan.lock).unwrap();
         apply_workflow_patches(&updater, &tidy_plan.workflows, &tidy_plan.corrections).unwrap();
 
         // ---- Assert: manifest has global v6.0.1 + override for windows.yml v5 ----

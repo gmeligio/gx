@@ -1,8 +1,15 @@
-use crate::config::{IgnoreTarget, Level, LintConfig};
+use std::path::Path;
+
+use self::report::LintReport;
+use crate::config::{Config, IgnoreTarget, Level, LintConfig};
 use crate::domain::{
     LocatedAction, Lock, Manifest, WorkflowActionSet, WorkflowError, WorkflowScanner,
 };
+use crate::infra::FileWorkflowScanner;
 use thiserror::Error;
+
+use crate::domain::AppError;
+use crate::domain::Command;
 
 /// Errors that can occur during the lint command
 #[derive(Debug, Error)]
@@ -10,10 +17,6 @@ pub enum LintError {
     /// A workflow parsing or I/O error occurred.
     #[error(transparent)]
     Workflow(#[from] WorkflowError),
-
-    /// Lint violations were found (errors or warnings).
-    #[error("{errors} error(s) and {warnings} warning(s) found")]
-    ViolationsFound { errors: usize, warnings: usize },
 }
 
 /// A single diagnostic reported by a lint rule.
@@ -117,26 +120,10 @@ fn matches_ignore(
     true
 }
 
-/// Build a `LintReport` from diagnostics and return an error if violations exist.
-///
-/// # Errors
-///
-/// Returns [`LintError::ViolationsFound`] if there are any error-level diagnostics.
-pub fn format_and_report(
-    diagnostics: Vec<Diagnostic>,
-) -> Result<crate::output::LintReport, LintError> {
-    use crate::output::LintReport;
-
-    let report = LintReport::from_diagnostics(diagnostics);
-
-    if report.error_count > 0 {
-        return Err(LintError::ViolationsFound {
-            errors: report.error_count,
-            warnings: report.warning_count,
-        });
-    }
-
-    Ok(report)
+/// Build a `LintReport` from diagnostics.
+#[must_use]
+pub fn format_and_report(diagnostics: Vec<Diagnostic>) -> LintReport {
+    LintReport::from_diagnostics(diagnostics)
 }
 
 /// Run lint checks by scanning workflows and return diagnostics.
@@ -147,12 +134,14 @@ pub fn format_and_report(
 /// # Errors
 ///
 /// Returns [`LintError::Workflow`] if a workflow parsing error occurs.
-pub fn run(
+pub fn collect_diagnostics(
     manifest: &Manifest,
     lock: &Lock,
     scanner: &dyn WorkflowScanner,
     lint_config: &LintConfig,
+    on_progress: &mut dyn FnMut(&str),
 ) -> Result<Vec<Diagnostic>, LintError> {
+    on_progress("Scanning workflows...");
     let sha_mismatch_level = lint_config.get_rule("sha-mismatch", Level::Error).level;
     let unpinned_level = lint_config.get_rule("unpinned", Level::Error).level;
     let stale_comment_level = lint_config.get_rule("stale-comment", Level::Warn).level;
@@ -263,6 +252,7 @@ fn matches_ignore_action(diag: &Diagnostic, target: &IgnoreTarget, action: &Loca
     true
 }
 
+pub mod report;
 mod sha_mismatch;
 mod stale_comment;
 mod unpinned;
@@ -272,6 +262,32 @@ use sha_mismatch::ShaMismatchRule;
 use stale_comment::StaleCommentRule;
 use unpinned::UnpinnedRule;
 use unsynced_manifest::UnsyncedManifestRule;
+
+/// The lint command struct.
+pub struct Lint;
+
+impl Command for Lint {
+    type Report = LintReport;
+
+    fn run(
+        &self,
+        repo_root: &Path,
+        config: Config,
+        on_progress: &mut dyn FnMut(&str),
+    ) -> Result<LintReport, AppError> {
+        let scanner = FileWorkflowScanner::new(repo_root);
+
+        let diagnostics = collect_diagnostics(
+            &config.manifest,
+            &config.lock,
+            &scanner,
+            &config.lint_config,
+            on_progress,
+        )?;
+
+        Ok(format_and_report(diagnostics))
+    }
+}
 
 #[cfg(test)]
 mod tests {

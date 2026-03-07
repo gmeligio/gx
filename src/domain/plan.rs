@@ -1,8 +1,6 @@
 use std::path::PathBuf;
 
-use super::{
-    ActionId, ActionOverride, LockEntry, LockKey, UpgradeCandidate, Version, VersionCorrection,
-};
+use super::{ActionId, ActionOverride, LockEntry, LockKey, Version};
 
 /// Describes the changes to apply to a manifest file.
 #[derive(Debug, Default)]
@@ -54,38 +52,6 @@ pub struct WorkflowPatch {
     pub pins: Vec<(ActionId, String)>,
 }
 
-/// The complete plan produced by a tidy operation.
-#[derive(Debug, Default)]
-pub struct TidyPlan {
-    pub manifest: ManifestDiff,
-    pub lock: LockDiff,
-    pub workflows: Vec<WorkflowPatch>,
-    pub corrections: Vec<VersionCorrection>,
-}
-
-impl TidyPlan {
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.manifest.is_empty() && self.lock.is_empty() && self.workflows.is_empty()
-    }
-}
-
-/// The complete plan produced by an upgrade operation.
-#[derive(Debug)]
-pub struct UpgradePlan {
-    pub manifest: ManifestDiff,
-    pub lock: LockDiff,
-    pub workflows: Vec<WorkflowPatch>,
-    pub upgrades: Vec<UpgradeCandidate>,
-}
-
-impl UpgradePlan {
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.manifest.is_empty() && self.lock.is_empty() && self.workflows.is_empty()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -128,38 +94,5 @@ mod tests {
             ..Default::default()
         };
         assert!(!diff.is_empty());
-    }
-
-    #[test]
-    fn tidy_plan_is_empty_when_all_diffs_empty() {
-        let plan = TidyPlan::default();
-        assert!(plan.is_empty());
-    }
-
-    #[test]
-    fn tidy_plan_is_not_empty_when_manifest_has_changes() {
-        let plan = TidyPlan {
-            manifest: ManifestDiff {
-                added: vec![(ActionId::from("actions/checkout"), Version::from("v4"))],
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        assert!(!plan.is_empty());
-    }
-
-    #[test]
-    fn tidy_plan_is_not_empty_when_workflows_have_patches() {
-        let plan = TidyPlan {
-            workflows: vec![WorkflowPatch {
-                path: PathBuf::from("ci.yml"),
-                pins: vec![(
-                    ActionId::from("actions/checkout"),
-                    "abc123 # v4".to_string(),
-                )],
-            }],
-            ..Default::default()
-        };
-        assert!(!plan.is_empty());
     }
 }
