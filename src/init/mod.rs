@@ -39,7 +39,7 @@ impl Command for Init {
         let plan = crate::tidy::plan(
             &config.manifest,
             &config.lock,
-            registry,
+            &registry,
             &scanner,
             on_progress,
         )?;

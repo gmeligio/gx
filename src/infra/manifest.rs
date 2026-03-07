@@ -531,8 +531,10 @@ fn apply_override_additions(
             inline.insert("job", job.as_str().into());
         }
         if let Some(step) = ovr.step {
-            #[allow(clippy::cast_possible_wrap)]
-            inline.insert("step", (step as i64).into());
+            inline.insert(
+                "step",
+                i64::try_from(step).expect("step index overflow").into(),
+            );
         }
         inline.insert("version", ovr.version.as_str().into());
 

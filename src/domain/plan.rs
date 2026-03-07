@@ -87,7 +87,7 @@ mod tests {
                 LockEntry::new(
                     CommitSha::from("abc123"),
                     "actions/checkout".to_string(),
-                    RefType::Tag,
+                    Some(RefType::Tag),
                     "2026-01-01T00:00:00Z".to_string(),
                 ),
             )],

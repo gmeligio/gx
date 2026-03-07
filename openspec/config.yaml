@@ -4,12 +4,12 @@ schema: spec-driven
 # This is shown to AI when creating artifacts.
 # Add your tech stack, conventions, style guides, domain knowledge, etc.
 # Example:
-context: |
-    Tool: gx - a CLI package manager for GitHub Actions (Rust)
+# context: |
+#     Tool: gx - a CLI package manager for GitHub Actions (Rust)
 
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.
 # Example:
-rules:
-    tasks:
-        - Always include a README update task when the change affects user-facing behavior, commands, configuration, or installation
+# rules:
+#     tasks:
+#         - Always include a README update task when the change affects user-facing behavior, commands, configuration, or installation

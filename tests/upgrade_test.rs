@@ -32,7 +32,7 @@ impl VersionRegistry for MockUpgradeRegistry {
         Ok(ResolvedRef::new(
             CommitSha::from(padded),
             id.base_repo(),
-            RefType::Tag,
+            Some(RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         ))
     }
@@ -113,7 +113,7 @@ fn run_upgrade_file_backed_with_request(
     let plan = upgrade::plan(
         &manifest,
         &lock,
-        MockUpgradeRegistry::new(),
+        &MockUpgradeRegistry::new(),
         request,
         |_| {},
     )?;
@@ -148,7 +148,7 @@ fn test_upgrade_empty_manifest_is_noop() {
     let result = upgrade::plan(
         &manifest,
         &lock,
-        MockUpgradeRegistry::new(),
+        &MockUpgradeRegistry::new(),
         &request,
         |_| {},
     );
@@ -186,7 +186,7 @@ fn test_upgrade_non_semver_versions_skipped() {
     let result = upgrade::plan(
         &manifest,
         &lock,
-        MockUpgradeRegistry::new(),
+        &MockUpgradeRegistry::new(),
         &UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap(),
         |_| {},
     );
@@ -278,7 +278,7 @@ fn test_upgrade_memory_stores_no_side_effects() {
     let result = upgrade::plan(
         &manifest,
         &lock,
-        MockUpgradeRegistry::new(),
+        &MockUpgradeRegistry::new(),
         &UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap(),
         |_| {},
     );
@@ -360,7 +360,7 @@ jobs:
         Version::from("v6.0.2"),
         CommitSha::from(checkout_new_sha),
         "actions/checkout".to_string(),
-        RefType::Tag,
+        Some(RefType::Tag),
         String::new(),
     ));
 
@@ -424,7 +424,7 @@ fn test_upgrade_repins_branch_ref() {
         Version::from("main"),
         CommitSha::from(old_sha),
         "my-org/my-action".to_string(),
-        RefType::Branch,
+        Some(RefType::Branch),
         String::new(),
     ));
 
@@ -432,7 +432,7 @@ fn test_upgrade_repins_branch_ref() {
     let plan = upgrade::plan(
         &manifest,
         &lock,
-        MockUpgradeRegistry::new(),
+        &MockUpgradeRegistry::new(),
         &request,
         |_| {},
     );
@@ -473,7 +473,7 @@ fn test_upgrade_latest_also_repins_branch_ref() {
         Version::from("main"),
         CommitSha::from(old_sha),
         "my-org/my-action".to_string(),
-        RefType::Branch,
+        Some(RefType::Branch),
         String::new(),
     ));
 
@@ -481,7 +481,7 @@ fn test_upgrade_latest_also_repins_branch_ref() {
     let plan = upgrade::plan(
         &manifest,
         &lock,
-        MockUpgradeRegistry::new(),
+        &MockUpgradeRegistry::new(),
         &request,
         |_| {},
     );
@@ -523,7 +523,7 @@ fn test_upgrade_targeted_does_not_repin_branch_ref() {
         Version::from("main"),
         CommitSha::from(branch_sha),
         "my-org/my-action".to_string(),
-        RefType::Branch,
+        Some(RefType::Branch),
         String::new(),
     ));
     lock.set(&ResolvedAction::new(
@@ -531,7 +531,7 @@ fn test_upgrade_targeted_does_not_repin_branch_ref() {
         Version::from("v4"),
         CommitSha::from(checkout_sha),
         "actions/checkout".to_string(),
-        RefType::Tag,
+        Some(RefType::Tag),
         String::new(),
     ));
 
@@ -547,7 +547,7 @@ fn test_upgrade_targeted_does_not_repin_branch_ref() {
         UpgradeScope::Single(ActionId::from("actions/checkout")),
     )
     .unwrap();
-    let plan = upgrade::plan(&manifest, &lock, registry, &request, |_| {});
+    let plan = upgrade::plan(&manifest, &lock, &registry, &request, |_| {});
     assert!(plan.is_ok());
     let plan = plan.unwrap();
 
@@ -587,7 +587,7 @@ fn test_upgrade_mixed_semver_and_branch() {
         Version::from("main"),
         CommitSha::from(old_branch_sha),
         "my-org/my-action".to_string(),
-        RefType::Branch,
+        Some(RefType::Branch),
         String::new(),
     ));
     lock.set(&ResolvedAction::new(
@@ -595,7 +595,7 @@ fn test_upgrade_mixed_semver_and_branch() {
         Version::from("v4"),
         CommitSha::from(old_checkout_sha),
         "actions/checkout".to_string(),
-        RefType::Tag,
+        Some(RefType::Tag),
         String::new(),
     ));
 
@@ -607,7 +607,7 @@ fn test_upgrade_mixed_semver_and_branch() {
     );
 
     let request = UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::All).unwrap();
-    let plan = upgrade::plan(&manifest, &lock, registry, &request, |_| {});
+    let plan = upgrade::plan(&manifest, &lock, &registry, &request, |_| {});
     assert!(plan.is_ok());
     let plan = plan.unwrap();
 
@@ -652,7 +652,7 @@ fn test_upgrade_skips_bare_sha() {
     let plan = upgrade::plan(
         &manifest,
         &lock,
-        MockUpgradeRegistry::new(),
+        &MockUpgradeRegistry::new(),
         &request,
         |_| {},
     );
@@ -699,7 +699,7 @@ fn test_upgrade_safe_single_action() {
         UpgradeScope::Single(ActionId::from("actions/checkout")),
     )
     .unwrap();
-    let result = upgrade::plan(&manifest, &lock, registry, &request, |_| {});
+    let result = upgrade::plan(&manifest, &lock, &registry, &request, |_| {});
     assert!(result.is_ok());
 
     // Note: we can't directly verify manifest changes in memory-only mode,
@@ -730,7 +730,7 @@ fn test_upgrade_latest_single_action() {
         UpgradeScope::Single(ActionId::from("actions/checkout")),
     )
     .unwrap();
-    let result = upgrade::plan(&manifest, &lock, registry, &request, |_| {});
+    let result = upgrade::plan(&manifest, &lock, &registry, &request, |_| {});
     assert!(result.is_ok());
 }
 
@@ -747,7 +747,7 @@ fn test_upgrade_single_action_not_found() {
     let result = upgrade::plan(
         &manifest,
         &lock,
-        MockUpgradeRegistry::new(),
+        &MockUpgradeRegistry::new(),
         &request,
         |_| {},
     );

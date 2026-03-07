@@ -4,3 +4,4 @@
 - When in explore mode, NEVER implement code changes directly. Only produce proposals and design artifacts. Use the OpenSpec explore/propose workflow.
 - Always use `mise` to run project tools (cargo-deny, dist, etc). Never install or invoke tools directly. Use mise tasks with the github binary backend when available.
 - When writing tests for bugs, write a FAILING test that asserts the CORRECT/expected behavior, not a passing test that documents broken behavior.
+- Always include a README update task when the change affects user-facing behavior, commands, configuration, or installation

@@ -57,11 +57,10 @@ pub enum TidyError {
 ///
 /// Returns [`TidyError::Workflow`] if workflows cannot be scanned.
 /// Returns [`TidyError::ResolutionFailed`] if actions cannot be resolved.
-#[allow(clippy::needless_pass_by_value)]
 pub fn plan<R, P>(
     manifest: &Manifest,
     lock: &Lock,
-    registry: R,
+    registry: &R,
     scanner: &P,
     mut on_progress: impl FnMut(&str),
 ) -> Result<TidyPlan, TidyError>
@@ -270,7 +269,7 @@ fn sync_manifest_actions<R: VersionRegistry>(
     manifest: &mut Manifest,
     located: &[LocatedAction],
     action_set: &WorkflowActionSet,
-    resolver: &ActionResolver<R>,
+    resolver: &ActionResolver<'_, R>,
     sha_index: &mut ShaIndex,
     on_progress: &mut dyn FnMut(&str),
 ) {
@@ -322,7 +321,7 @@ fn sync_manifest_actions<R: VersionRegistry>(
 /// Upgrade SHA versions in manifest to tags via `ShaIndex`.
 fn upgrade_sha_versions_to_tags<R: VersionRegistry>(
     manifest: &mut Manifest,
-    resolver: &ActionResolver<R>,
+    resolver: &ActionResolver<'_, R>,
     sha_index: &mut ShaIndex,
     on_progress: &mut dyn FnMut(&str),
 ) {
@@ -525,7 +524,7 @@ fn prune_stale_overrides(manifest: &mut Manifest, located: &[LocatedAction]) {
 fn update_lock<R: VersionRegistry>(
     lock: &mut Lock,
     manifest: &mut Manifest,
-    resolver: &ActionResolver<R>,
+    resolver: &ActionResolver<'_, R>,
     workflow_shas: &HashMap<LockKey, CommitSha>,
     sha_index: &mut ShaIndex,
     on_progress: &mut dyn FnMut(&str),
@@ -584,7 +583,7 @@ fn update_lock<R: VersionRegistry>(
 /// Returns `Err(ResolutionError)` if resolution fails.
 fn populate_lock_entry<R: VersionRegistry>(
     lock: &mut Lock,
-    resolver: &ActionResolver<R>,
+    resolver: &ActionResolver<'_, R>,
     spec: &ActionSpec,
     workflow_shas: &HashMap<LockKey, CommitSha>,
     sha_index: &mut ShaIndex,
@@ -668,7 +667,7 @@ impl Command for Tidy {
         let tidy_plan = plan(
             &config.manifest,
             &config.lock,
-            registry,
+            &registry,
             &scanner,
             on_progress,
         )?;
@@ -839,7 +838,7 @@ jobs:
                         version: Some("v6.0.1".to_string()),
                         specifier: Some(String::new()),
                         repository: "actions/checkout".to_string(),
-                        ref_type: crate::domain::RefType::Tag,
+                        ref_type: Some(crate::domain::RefType::Tag),
                         date: "2026-01-01T00:00:00Z".to_string(),
                     },
                 ),
@@ -850,7 +849,7 @@ jobs:
                         version: Some("v5".to_string()),
                         specifier: Some(String::new()),
                         repository: "actions/checkout".to_string(),
-                        ref_type: crate::domain::RefType::Tag,
+                        ref_type: Some(crate::domain::RefType::Tag),
                         date: "2026-01-01T00:00:00Z".to_string(),
                     },
                 ),
@@ -865,7 +864,7 @@ jobs:
         let scanner = FileWorkflowScanner::new(repo_root);
         let updater = FileWorkflowUpdater::new(repo_root);
 
-        let tidy_plan = plan(&manifest, &lock, NoopRegistry, &scanner, |_| {}).unwrap();
+        let tidy_plan = plan(&manifest, &lock, &NoopRegistry, &scanner, |_| {}).unwrap();
 
         // Apply the plan — manifest doesn't exist yet so use create, lock exists so use apply
         crate::infra::create_manifest(&manifest_path, &tidy_plan.manifest).unwrap();
@@ -925,7 +924,7 @@ jobs:
             Some("v4".to_string()),
             None, // Missing specifier
             "actions/checkout".to_string(),
-            RefType::Tag,
+            Some(RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         );
         let mut lock = Lock::new(HashMap::from([(key.clone(), entry)]));
@@ -958,7 +957,7 @@ jobs:
             None, // Missing version
             Some("^4".to_string()),
             "actions/checkout".to_string(),
-            RefType::Tag,
+            Some(RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         );
         let mut lock = Lock::new(HashMap::from([(key.clone(), entry)]));
@@ -990,7 +989,7 @@ jobs:
             Some("v4".to_string()),
             Some("^4".to_string()),
             "actions/checkout".to_string(),
-            RefType::Tag,
+            Some(RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         );
         let lock = Lock::new(HashMap::from([(key.clone(), entry)]));
@@ -1014,7 +1013,7 @@ jobs:
             Some("v6.0.2".to_string()),
             Some("^6".to_string()), // Was correct for v6, wrong for v6.1
             "actions/checkout".to_string(),
-            RefType::Tag,
+            Some(RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         );
         let mut lock = Lock::new(HashMap::from([(key.clone(), entry)]));
@@ -1063,13 +1062,13 @@ jobs:
             Version::from("v4"),
             CommitSha::from("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
             "actions/checkout".to_string(),
-            crate::domain::RefType::Tag,
+            Some(crate::domain::RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         ));
 
         let scanner = FileWorkflowScanner::new(repo_root);
 
-        let tidy_plan = plan(&manifest, &lock, NoopRegistry, &scanner, |_| {}).unwrap();
+        let tidy_plan = plan(&manifest, &lock, &NoopRegistry, &scanner, |_| {}).unwrap();
 
         // Manifest diff must NOT change checkout's version — v4 is preserved
         assert!(
@@ -1106,7 +1105,7 @@ jobs:
             Ok(crate::domain::ResolvedRef::new(
                 CommitSha::from(version.as_str()),
                 id.base_repo(),
-                crate::domain::RefType::Tag,
+                Some(crate::domain::RefType::Tag),
                 "2026-01-01T00:00:00Z".to_string(),
             ))
         }
@@ -1159,7 +1158,7 @@ jobs:
             Version::from(sha),
             CommitSha::from(sha),
             "actions/checkout".to_string(),
-            crate::domain::RefType::Tag,
+            Some(crate::domain::RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         ));
 
@@ -1170,7 +1169,7 @@ jobs:
 
         let scanner = FileWorkflowScanner::new(repo_root);
 
-        let tidy_plan = plan(&manifest, &lock, registry, &scanner, |_| {}).unwrap();
+        let tidy_plan = plan(&manifest, &lock, &registry, &scanner, |_| {}).unwrap();
 
         // Manifest should show the SHA upgraded to the most specific tag (v4.0.0)
         let has_upgrade = tidy_plan.manifest.updated.iter().any(|(id, v)| {
@@ -1207,14 +1206,14 @@ jobs:
             Version::from(sha),
             CommitSha::from(sha),
             "actions/checkout".to_string(),
-            crate::domain::RefType::Tag,
+            Some(crate::domain::RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         ));
 
         // NoopRegistry returns AuthRequired — simulates missing GITHUB_TOKEN
         let scanner = FileWorkflowScanner::new(repo_root);
 
-        let tidy_plan = plan(&manifest, &lock, NoopRegistry, &scanner, |_| {}).unwrap();
+        let tidy_plan = plan(&manifest, &lock, &NoopRegistry, &scanner, |_| {}).unwrap();
 
         // SHA stays unchanged when no token is available — no version updates in plan
         assert!(
@@ -1245,7 +1244,7 @@ jobs:
                     // Registry SHA is irrelevant — resolve_from_sha uses the input SHA
                     CommitSha::from("dddddddddddddddddddddddddddddddddddddddd"),
                     id.base_repo(),
-                    RefType::Tag,
+                    Some(RefType::Tag),
                     "2026-01-01T00:00:00Z".to_string(),
                 ))
             }
@@ -1295,7 +1294,7 @@ jobs:
         let lock = Lock::default();
 
         let scanner = FileWorkflowScanner::new(repo_root);
-        let tidy_plan = plan(&manifest, &lock, MetadataOnlyRegistry, &scanner, |_| {}).unwrap();
+        let tidy_plan = plan(&manifest, &lock, &MetadataOnlyRegistry, &scanner, |_| {}).unwrap();
 
         // Lock diff must add an entry using the workflow SHA (SHA-first)
         let key = LockKey::new(ActionId::from("actions/checkout"), Version::from("v4"));
@@ -1336,7 +1335,7 @@ jobs:
             None,
             None,
             "actions/checkout".to_string(),
-            RefType::Tag,
+            Some(RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         );
         let lock = Lock::new(HashMap::from([(key, entry)]));
@@ -1381,7 +1380,7 @@ jobs:
         let lock = Lock::default();
         let scanner = FileWorkflowScanner::new(repo_root);
 
-        let result = plan(&manifest, &lock, NoopRegistry, &scanner, |_| {}).unwrap();
+        let result = plan(&manifest, &lock, &NoopRegistry, &scanner, |_| {}).unwrap();
         assert!(result.is_empty(), "Plan for empty workflows must be empty");
     }
 
@@ -1405,14 +1404,14 @@ jobs:
             Version::from("v4"),
             CommitSha::from(sha),
             "actions/checkout".to_string(),
-            crate::domain::RefType::Tag,
+            Some(crate::domain::RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         ));
 
         let manifest = Manifest::default(); // empty — action is "new"
         let scanner = FileWorkflowScanner::new(repo_root);
 
-        let result = plan(&manifest, &lock, NoopRegistry, &scanner, |_| {}).unwrap();
+        let result = plan(&manifest, &lock, &NoopRegistry, &scanner, |_| {}).unwrap();
 
         // Manifest should have added action
         assert!(
@@ -1448,7 +1447,7 @@ jobs:
             Version::from("v4"),
             CommitSha::from("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
             "actions/checkout".to_string(),
-            crate::domain::RefType::Tag,
+            Some(crate::domain::RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         ));
         lock.set(&ResolvedAction::new(
@@ -1456,13 +1455,13 @@ jobs:
             Version::from("v3"),
             CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
             "actions/setup-node".to_string(),
-            crate::domain::RefType::Tag,
+            Some(crate::domain::RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         ));
 
         let scanner = FileWorkflowScanner::new(repo_root);
 
-        let result = plan(&manifest, &lock, NoopRegistry, &scanner, |_| {}).unwrap();
+        let result = plan(&manifest, &lock, &NoopRegistry, &scanner, |_| {}).unwrap();
 
         // checkout should be removed from manifest
         assert!(
@@ -1517,7 +1516,7 @@ jobs:
             Version::from("v6.0.1"),
             CommitSha::from("8e8c483db84b4bee98b60c0593521ed34d9990e8"),
             "actions/checkout".to_string(),
-            crate::domain::RefType::Tag,
+            Some(crate::domain::RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         ));
         lock.set(&ResolvedAction::new(
@@ -1525,13 +1524,13 @@ jobs:
             Version::from("v5"),
             CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
             "actions/checkout".to_string(),
-            crate::domain::RefType::Tag,
+            Some(crate::domain::RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         ));
 
         let scanner = FileWorkflowScanner::new(repo_root);
 
-        let result = plan(&manifest, &lock, NoopRegistry, &scanner, |_| {}).unwrap();
+        let result = plan(&manifest, &lock, &NoopRegistry, &scanner, |_| {}).unwrap();
 
         // Should have override(s) for the minority version
         assert!(
@@ -1583,13 +1582,13 @@ jobs:
             Version::from("v4"),
             CommitSha::from("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
             "actions/checkout".to_string(),
-            crate::domain::RefType::Tag,
+            Some(crate::domain::RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         ));
 
         let scanner = FileWorkflowScanner::new(repo_root);
 
-        let result = plan(&manifest, &lock, NoopRegistry, &scanner, |_| {}).unwrap();
+        let result = plan(&manifest, &lock, &NoopRegistry, &scanner, |_| {}).unwrap();
 
         // Should have override removal for the stale deploy.yml override
         assert!(
@@ -1631,13 +1630,13 @@ jobs:
             Version::from("v4"),
             CommitSha::from(sha),
             "actions/checkout".to_string(),
-            crate::domain::RefType::Tag,
+            Some(crate::domain::RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         ));
 
         let scanner = FileWorkflowScanner::new(repo_root);
 
-        let result = plan(&manifest, &lock, NoopRegistry, &scanner, |_| {}).unwrap();
+        let result = plan(&manifest, &lock, &NoopRegistry, &scanner, |_| {}).unwrap();
 
         // Everything is in sync — plan should have no manifest/lock changes
         assert!(
@@ -1681,7 +1680,7 @@ jobs:
                 Ok(crate::domain::ResolvedRef::new(
                     CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
                     id.base_repo(),
-                    RefType::Commit,
+                    Some(RefType::Commit),
                     "2026-01-01T00:00:00Z".to_string(),
                 ))
             }
@@ -1743,7 +1742,7 @@ jobs:
         let lock = Lock::default();
 
         let scanner = FileWorkflowScanner::new(repo_root);
-        let tidy_plan = plan(&manifest, &lock, TaggedShaRegistry, &scanner, |_| {}).unwrap();
+        let tidy_plan = plan(&manifest, &lock, &TaggedShaRegistry, &scanner, |_| {}).unwrap();
 
         let key = LockKey::new(ActionId::from("jdx/mise-action"), Version::from("v3"));
         let added_entry = tidy_plan
@@ -1786,7 +1785,7 @@ jobs:
                 Ok(crate::domain::ResolvedRef::new(
                     CommitSha::from(self.0.as_str()),
                     id.base_repo(),
-                    RefType::Tag,
+                    Some(RefType::Tag),
                     "2026-01-01T00:00:00Z".to_string(),
                 ))
             }
@@ -1834,7 +1833,7 @@ jobs:
         let tidy_plan = plan(
             &manifest,
             &lock,
-            SimpleRegistry(registry_sha.to_string()),
+            &SimpleRegistry(registry_sha.to_string()),
             &scanner,
             |_| {},
         )
@@ -1879,7 +1878,7 @@ jobs:
                     Ok(crate::domain::ResolvedRef::new(
                         CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
                         id.base_repo(),
-                        RefType::Tag,
+                        Some(RefType::Tag),
                         "2026-01-01T00:00:00Z".to_string(),
                     ))
                 }
@@ -1928,7 +1927,7 @@ jobs:
 
         // With MixedRegistry, checkout fails with AuthRequired (recoverable),
         // setup-node resolves successfully. Plan should succeed (recoverable errors are skipped).
-        let result = plan(&manifest, &lock, MixedRegistry, &scanner, |_| {});
+        let result = plan(&manifest, &lock, &MixedRegistry, &scanner, |_| {});
         assert!(
             result.is_ok(),
             "Plan should succeed when only recoverable errors occur"
