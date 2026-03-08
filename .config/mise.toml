@@ -21,6 +21,11 @@ run = "cargo clippy"
 description = "Run all tests"
 run = "cargo test"
 
+[tasks.integ]
+description = "Run integration tests"
+env = { GITHUB_TOKEN = "{{exec(command='gh auth token')}}" }
+run = "cargo test -- --ignored"
+
 [tasks.init]
 description = "Create manifest and lock from workflows"
 run = "cargo run -- init"

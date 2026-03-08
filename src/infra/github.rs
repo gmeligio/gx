@@ -781,8 +781,8 @@ mod tests {
         // It verifies that a tag with an associated release returns RefType::Release
         let token = std::env::var("GITHUB_TOKEN").ok();
         let client = GithubRegistry::new(token).unwrap();
-        // Using actions/checkout@v6 as test case (has a GitHub Release)
-        let (sha, ref_type) = client.resolve_ref("actions/checkout", "v6").unwrap();
+        // Using actions/checkout@v4.2.2 as test case (has a GitHub Release)
+        let (sha, ref_type) = client.resolve_ref("actions/checkout", "v4.2.2").unwrap();
         assert!(!sha.is_empty());
         assert_eq!(ref_type, Some(RefType::Release));
     }
