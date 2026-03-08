@@ -775,12 +775,13 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires GITHUB_TOKEN and network access"]
     fn test_resolve_ref_returns_release_for_tag_with_release() {
         // This test requires a valid GITHUB_TOKEN to call the GitHub API
         // It verifies that a tag with an associated release returns RefType::Release
-        let token = std::env::var("GITHUB_TOKEN").ok();
-        let client = GithubRegistry::new(token).unwrap();
+        let Some(token) = std::env::var("GITHUB_TOKEN").ok() else {
+            return;
+        };
+        let client = GithubRegistry::new(Some(token)).unwrap();
         // Using actions/checkout@v4.2.2 as test case (has a GitHub Release)
         let (sha, ref_type) = client.resolve_ref("actions/checkout", "v4.2.2").unwrap();
         assert!(!sha.is_empty());
@@ -849,10 +850,11 @@ mod tests {
     /// Integration test: `get_tags_for_sha` should return both lightweight
     /// and annotated tags pointing to the same commit.
     #[test]
-    #[ignore = "requires GITHUB_TOKEN and network access"]
     fn test_get_tags_for_sha_includes_annotated_tags() {
-        let token = std::env::var("GITHUB_TOKEN").ok();
-        let client = GithubRegistry::new(token).unwrap();
+        let Some(token) = std::env::var("GITHUB_TOKEN").ok() else {
+            return;
+        };
+        let client = GithubRegistry::new(Some(token)).unwrap();
         // actions/checkout v6 is an annotated tag
         // First resolve v6 to get the commit SHA
         let (sha, _) = client.resolve_ref("actions/checkout", "v6").unwrap();

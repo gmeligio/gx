@@ -1,126 +1,43 @@
 #![allow(unused_crate_dependencies)]
-use gx::domain::{
-    ActionId, CommitSha, Lock, LockKey, Manifest, RefType, ResolutionError, ResolvedAction,
-    ResolvedRef, ShaDescription, Version, VersionRegistry,
+
+mod common;
+
+use common::registries::FakeRegistry;
+use common::setup::{
+    create_test_repo, lock_path, manifest_path, write_lock, write_manifest, write_workflow,
 };
+use gx::domain::{ActionId, CommitSha, Lock, LockKey, Manifest, RefType, ResolvedAction, Version};
 use gx::infra::{
     FileWorkflowUpdater, apply_lock_diff, apply_manifest_diff, parse_lock, parse_manifest,
 };
 use gx::upgrade;
 use gx::upgrade::{UpgradeMode, UpgradeRequest, UpgradeScope};
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 use tempfile::TempDir;
 
-struct MockUpgradeRegistry {
-    tags: std::collections::HashMap<String, Vec<String>>,
-}
-
-impl MockUpgradeRegistry {
-    fn new() -> Self {
-        Self {
-            tags: std::collections::HashMap::new(),
-        }
-    }
-}
-
-impl VersionRegistry for MockUpgradeRegistry {
-    fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<ResolvedRef, ResolutionError> {
-        let sha = format!("{}{}", id.as_str(), version.as_str()).replace('/', "");
-        let padded = format!("{:0<40}", &sha[..sha.len().min(40)]);
-        Ok(ResolvedRef::new(
-            CommitSha::from(padded),
-            id.base_repo(),
-            Some(RefType::Tag),
-            "2026-01-01T00:00:00Z".to_string(),
-        ))
-    }
-
-    fn tags_for_sha(
-        &self,
-        _id: &ActionId,
-        _sha: &CommitSha,
-    ) -> Result<Vec<Version>, ResolutionError> {
-        Ok(vec![])
-    }
-
-    fn all_tags(&self, id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
-        Ok(self
-            .tags
-            .get(id.as_str())
-            .cloned()
-            .unwrap_or_default()
-            .into_iter()
-            .map(Version::from)
-            .collect())
-    }
-
-    fn describe_sha(
-        &self,
-        id: &ActionId,
-        _sha: &CommitSha,
-    ) -> Result<ShaDescription, ResolutionError> {
-        Ok(ShaDescription {
-            tags: vec![],
-            repository: id.base_repo(),
-            date: "2026-01-01T00:00:00Z".to_string(),
-        })
-    }
-}
-
-fn create_test_repo(temp_dir: &TempDir) -> std::path::PathBuf {
-    let root = temp_dir.path();
-    let github_dir = root.join(".github");
-    let workflows_dir = github_dir.join("workflows");
-    fs::create_dir_all(&workflows_dir).unwrap();
-    root.to_path_buf()
-}
-
-fn create_manifest(root: &Path, content: &str) {
-    let manifest_path = root.join(".github").join("gx.toml");
-    fs::write(&manifest_path, content).unwrap();
-}
-
-fn create_lock(root: &Path, content: &str) {
-    let lock_path = root.join(".github").join("gx.lock");
-    fs::write(&lock_path, content).unwrap();
-}
-
-fn create_workflow(root: &Path, name: &str, content: &str) {
-    let workflow_path = root.join(".github").join("workflows").join(name);
-    let mut file = fs::File::create(&workflow_path).unwrap();
-    file.write_all(content.as_bytes()).unwrap();
-}
-
-/// Helper to run upgrade with file-backed stores
+/// Helper to run upgrade with file-backed stores using `FakeRegistry`.
 fn run_upgrade_file_backed(repo_root: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All)?;
     run_upgrade_file_backed_with_request(repo_root, &request)
 }
 
-/// Helper to run upgrade with file-backed stores and a specific request (plan+apply path).
+/// Helper to run upgrade with file-backed stores and a specific request.
 fn run_upgrade_file_backed_with_request(
     repo_root: &Path,
     request: &UpgradeRequest,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let manifest_path = repo_root.join(".github").join("gx.toml");
-    let lock_path = repo_root.join(".github").join("gx.lock");
-    let manifest = parse_manifest(&manifest_path)?;
-    let lock = parse_lock(&lock_path)?;
+    let mp = manifest_path(repo_root);
+    let lp = lock_path(repo_root);
+    let manifest = parse_manifest(&mp)?;
+    let lock = parse_lock(&lp)?;
     let updater = FileWorkflowUpdater::new(repo_root);
 
-    let plan = upgrade::plan(
-        &manifest,
-        &lock,
-        &MockUpgradeRegistry::new(),
-        request,
-        |_| {},
-    )?;
+    let plan = upgrade::plan(&manifest, &lock, &FakeRegistry::new(), request, |_| {})?;
 
     if !plan.is_empty() {
-        apply_manifest_diff(&manifest_path, &plan.manifest)?;
-        apply_lock_diff(&lock_path, &plan.lock)?;
+        apply_manifest_diff(&mp, &plan.manifest)?;
+        apply_lock_diff(&lp, &plan.lock)?;
         upgrade::apply_upgrade_workflows(&updater, &plan.lock, &plan.upgrades)?;
     }
 
@@ -134,24 +51,17 @@ fn test_upgrade_empty_manifest_is_noop() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
-    create_workflow(
+    write_workflow(
         &root,
         "ci.yml",
         "name: CI\njobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n",
     );
 
-    // MockRegistry returns no tags → no upgrade (noop)
     let mut manifest = Manifest::default();
     manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
     let lock = Lock::default();
     let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap();
-    let result = upgrade::plan(
-        &manifest,
-        &lock,
-        &MockUpgradeRegistry::new(),
-        &request,
-        |_| {},
-    );
+    let result = upgrade::plan(&manifest, &lock, &FakeRegistry::new(), &request, |_| {});
     assert!(result.is_ok());
     assert!(result.unwrap().is_empty(), "No tags available means noop");
 }
@@ -161,9 +71,8 @@ fn test_upgrade_empty_file_manifest_is_noop() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
-    // MockRegistry returns no tags → noop.
-    create_manifest(&root, "[actions]\n\"actions/checkout\" = \"v4\"\n");
-    create_workflow(
+    write_manifest(&root, "[actions]\n\"actions/checkout\" = \"v4\"\n");
+    write_workflow(
         &root,
         "ci.yml",
         "name: CI\njobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n",
@@ -172,7 +81,6 @@ fn test_upgrade_empty_file_manifest_is_noop() {
     let result = run_upgrade_file_backed(&root);
     assert!(result.is_ok());
 
-    // Manifest should remain unchanged (early return before save, no upgrades)
     let manifest_content = fs::read_to_string(root.join(".github").join("gx.toml")).unwrap();
     assert!(manifest_content.contains("actions/checkout"));
     assert!(manifest_content.contains("v4"));
@@ -180,13 +88,12 @@ fn test_upgrade_empty_file_manifest_is_noop() {
 
 #[test]
 fn test_upgrade_non_semver_versions_skipped() {
-    // Empty manifest → early return.
     let manifest = Manifest::default();
     let lock = Lock::default();
     let result = upgrade::plan(
         &manifest,
         &lock,
-        &MockUpgradeRegistry::new(),
+        &FakeRegistry::new(),
         &UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap(),
         |_| {},
     );
@@ -198,8 +105,7 @@ fn test_upgrade_preserves_workflow_structure() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
-    // MockRegistry returns no tags → noop.
-    create_manifest(&root, "[actions]\n\"actions/checkout\" = \"v4\"\n");
+    write_manifest(&root, "[actions]\n\"actions/checkout\" = \"v4\"\n");
 
     let workflow_content = "name: CI
 on: push
@@ -210,12 +116,11 @@ jobs:
       - uses: actions/checkout@v4
       - run: echo hello
 ";
-    create_workflow(&root, "ci.yml", workflow_content);
+    write_workflow(&root, "ci.yml", workflow_content);
 
     let result = run_upgrade_file_backed(&root);
     assert!(result.is_ok());
 
-    // Workflow should be unchanged since no upgrades are available
     let after = fs::read_to_string(root.join(".github").join("workflows").join("ci.yml")).unwrap();
     assert_eq!(after, workflow_content);
 }
@@ -225,13 +130,11 @@ fn test_upgrade_no_lock_file_created_when_empty_manifest() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
-    // Empty manifest → early return
-    create_manifest(&root, "[actions]\n");
+    write_manifest(&root, "[actions]\n");
 
     let result = run_upgrade_file_backed(&root);
     assert!(result.is_ok());
 
-    // Manifest should remain unchanged (early return before upgrades, no actions)
     let manifest_content = fs::read_to_string(root.join(".github").join("gx.toml")).unwrap();
     assert!(
         manifest_content.trim() == "[actions]" || manifest_content.trim() == "[actions]\n",
@@ -244,14 +147,13 @@ fn test_upgrade_with_existing_lock_and_empty_manifest() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
-    // Manifest matches the workflow — no drift
-    create_manifest(&root, "[actions]\n\"actions/checkout\" = \"v4\"\n");
-    create_lock(
+    write_manifest(&root, "[actions]\n\"actions/checkout\" = \"v4\"\n");
+    write_lock(
         &root,
         "version = \"1.0\"\n\n[actions]\n\"actions/checkout@v4\" = { sha = \"abc123def456789012345678901234567890abcd\", repository = \"actions/checkout\", ref_type = \"tag\", date = \"\" }\n",
     );
 
-    create_workflow(
+    write_workflow(
         &root,
         "ci.yml",
         "name: CI\njobs:\n  build:\n    steps:\n      - uses: actions/checkout@abc123def456789012345678901234567890abcd # v4\n",
@@ -266,7 +168,7 @@ fn test_upgrade_memory_stores_no_side_effects() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
-    create_workflow(
+    write_workflow(
         &root,
         "ci.yml",
         "name: CI\njobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n",
@@ -278,13 +180,12 @@ fn test_upgrade_memory_stores_no_side_effects() {
     let result = upgrade::plan(
         &manifest,
         &lock,
-        &MockUpgradeRegistry::new(),
+        &FakeRegistry::new(),
         &UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap(),
         |_| {},
     );
     assert!(result.is_ok());
 
-    // No files should be created (plan is pure computation)
     assert!(!root.join(".github").join("gx.toml").exists());
     assert!(!root.join(".github").join("gx.lock").exists());
 }
@@ -294,18 +195,17 @@ fn test_upgrade_multiple_workflows_empty_manifest() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
-    // Manifest matches both workflow actions — no drift. MockRegistry returns no tags → noop.
-    create_manifest(
+    write_manifest(
         &root,
         "[actions]\n\"actions/checkout\" = \"v4\"\n\"docker/build-push-action\" = \"v5\"\n",
     );
 
-    create_workflow(
+    write_workflow(
         &root,
         "ci.yml",
         "name: CI\njobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n",
     );
-    create_workflow(
+    write_workflow(
         &root,
         "deploy.yml",
         "name: Deploy\njobs:\n  deploy:\n    steps:\n      - uses: docker/build-push-action@v5\n",
@@ -326,7 +226,6 @@ fn test_upgrade_preserves_sha_for_non_upgraded_actions() {
     let checkout_old_sha = "8e8c483db84b4bee98b60c0593521ed34d9990e8";
     let checkout_new_sha = "11bd71901bbe5b1630ceea73d27597364c9af683";
 
-    // Workflow with SHA-pinned actions
     let workflow_content = format!(
         "on: push
 jobs:
@@ -337,9 +236,8 @@ jobs:
       - uses: actions/checkout@{checkout_old_sha} # v6.0.1
 "
     );
-    create_workflow(&root, "ci.yml", &workflow_content);
+    write_workflow(&root, "ci.yml", &workflow_content);
 
-    // Manifest has both actions
     let mut manifest = Manifest::default();
     manifest.set(
         ActionId::from("docker/login-action"),
@@ -347,14 +245,10 @@ jobs:
     );
     manifest.set(ActionId::from("actions/checkout"), Version::from("v6.0.1"));
 
-    // Lock starts empty — upgrade::run only resolves SHAs for upgraded actions,
-    // not for actions that stay at their current version.
     let mut lock = Lock::default();
 
-    // Simulate: only checkout gets upgraded to v6.0.2
     manifest.set(ActionId::from("actions/checkout"), Version::from("v6.0.2"));
 
-    // Only the upgraded action gets resolved to a SHA
     lock.set(&ResolvedAction::new(
         ActionId::from("actions/checkout"),
         Version::from("v6.0.2"),
@@ -364,11 +258,9 @@ jobs:
         String::new(),
     ));
 
-    // Retain only current manifest keys (this is what upgrade::run does)
     let keys_to_retain: Vec<LockKey> = manifest.specs().map(LockKey::from).collect();
     lock.retain(&keys_to_retain);
 
-    // Build update map only for upgraded actions (the fix)
     let upgraded_keys = vec![LockKey::new(
         ActionId::from("actions/checkout"),
         Version::from("v6.0.2"),
@@ -377,23 +269,19 @@ jobs:
     let writer = FileWorkflowUpdater::new(&root);
     let _results = writer.update_all(&update_map).unwrap();
 
-    // Verify the workflow
     let updated =
         fs::read_to_string(root.join(".github").join("workflows").join("ci.yml")).unwrap();
 
-    // Checkout should be updated to the new SHA + version
     assert!(
         updated.contains(&format!("actions/checkout@{checkout_new_sha} # v6.0.2")),
         "Expected checkout to be updated to new SHA. Got:\n{updated}"
     );
 
-    // login-action should STILL have its original SHA — NOT a bare version tag
     assert!(
         updated.contains(&format!("docker/login-action@{login_sha} # v3.6.0")),
         "Expected login-action to keep its SHA. Got:\n{updated}"
     );
 
-    // Specifically, this pattern should NOT appear (the bug)
     assert!(
         !updated.contains("docker/login-action@v3.6.0"),
         "Bug: login-action SHA was replaced with bare version tag. Got:\n{updated}"
@@ -407,17 +295,14 @@ fn test_upgrade_repins_branch_ref() {
 
     let old_sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
-    // Workflow with a branch-pinned action (SHA # branch)
     let workflow_content = format!(
         "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: my-org/my-action@{old_sha} # main\n"
     );
-    create_workflow(&root, "ci.yml", &workflow_content);
+    write_workflow(&root, "ci.yml", &workflow_content);
 
-    // Manifest has the branch ref — matches scanner result (version="main") → no drift
     let mut manifest = Manifest::default();
     manifest.set(ActionId::from("my-org/my-action"), Version::from("main"));
 
-    // Lock has the old SHA
     let mut lock = Lock::default();
     lock.set(&ResolvedAction::new(
         ActionId::from("my-org/my-action"),
@@ -429,21 +314,14 @@ fn test_upgrade_repins_branch_ref() {
     ));
 
     let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap();
-    let plan = upgrade::plan(
-        &manifest,
-        &lock,
-        &MockUpgradeRegistry::new(),
-        &request,
-        |_| {},
-    );
+    let plan = upgrade::plan(&manifest, &lock, &FakeRegistry::new(), &request, |_| {});
     assert!(plan.is_ok(), "upgrade failed: {:?}", plan.unwrap_err());
     let plan = plan.unwrap();
 
     let updater = FileWorkflowUpdater::new(&root);
     upgrade::apply_upgrade_workflows(&updater, &plan.lock, &plan.upgrades).unwrap();
 
-    // Verify workflow was updated with the new SHA from MockUpgradeRegistry
-    let expected_sha = format!("{:0<40}", "my-orgmy-actionmain");
+    let expected_sha = FakeRegistry::fake_sha("my-org/my-action", "main");
     let updated_workflow =
         fs::read_to_string(root.join(".github").join("workflows").join("ci.yml")).unwrap();
     assert!(
@@ -462,7 +340,7 @@ fn test_upgrade_latest_also_repins_branch_ref() {
     let workflow_content = format!(
         "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: my-org/my-action@{old_sha} # main\n"
     );
-    create_workflow(&root, "ci.yml", &workflow_content);
+    write_workflow(&root, "ci.yml", &workflow_content);
 
     let mut manifest = Manifest::default();
     manifest.set(ActionId::from("my-org/my-action"), Version::from("main"));
@@ -478,20 +356,14 @@ fn test_upgrade_latest_also_repins_branch_ref() {
     ));
 
     let request = UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::All).unwrap();
-    let plan = upgrade::plan(
-        &manifest,
-        &lock,
-        &MockUpgradeRegistry::new(),
-        &request,
-        |_| {},
-    );
+    let plan = upgrade::plan(&manifest, &lock, &FakeRegistry::new(), &request, |_| {});
     assert!(plan.is_ok());
     let plan = plan.unwrap();
 
     let updater = FileWorkflowUpdater::new(&root);
     upgrade::apply_upgrade_workflows(&updater, &plan.lock, &plan.upgrades).unwrap();
 
-    let expected_sha = format!("{:0<40}", "my-orgmy-actionmain");
+    let expected_sha = FakeRegistry::fake_sha("my-org/my-action", "main");
     let updated_workflow =
         fs::read_to_string(root.join(".github").join("workflows").join("ci.yml")).unwrap();
     assert!(
@@ -511,7 +383,7 @@ fn test_upgrade_targeted_does_not_repin_branch_ref() {
     let workflow_content = format!(
         "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: my-org/my-action@{branch_sha} # main\n      - uses: actions/checkout@{checkout_sha} # v4\n"
     );
-    create_workflow(&root, "ci.yml", &workflow_content);
+    write_workflow(&root, "ci.yml", &workflow_content);
 
     let mut manifest = Manifest::default();
     manifest.set(ActionId::from("my-org/my-action"), Version::from("main"));
@@ -535,12 +407,7 @@ fn test_upgrade_targeted_does_not_repin_branch_ref() {
         String::new(),
     ));
 
-    // Registry returns v5 as a valid tag for checkout
-    let mut registry = MockUpgradeRegistry::new();
-    registry.tags.insert(
-        "actions/checkout".to_string(),
-        vec!["v4".to_string(), "v5".to_string()],
-    );
+    let registry = FakeRegistry::new().with_all_tags("actions/checkout", vec!["v4", "v5"]);
 
     let request = UpgradeRequest::new(
         UpgradeMode::Pinned(Version::from("v5")),
@@ -557,7 +424,6 @@ fn test_upgrade_targeted_does_not_repin_branch_ref() {
     let updated_workflow =
         fs::read_to_string(root.join(".github").join("workflows").join("ci.yml")).unwrap();
 
-    // Branch ref should be UNCHANGED
     assert!(
         updated_workflow.contains(&format!("my-org/my-action@{branch_sha} # main")),
         "Branch ref should not be re-pinned in targeted mode. Got:\n{updated_workflow}"
@@ -575,7 +441,7 @@ fn test_upgrade_mixed_semver_and_branch() {
     let workflow_content = format!(
         "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: my-org/my-action@{old_branch_sha} # main\n      - uses: actions/checkout@{old_checkout_sha} # v4\n"
     );
-    create_workflow(&root, "ci.yml", &workflow_content);
+    write_workflow(&root, "ci.yml", &workflow_content);
 
     let mut manifest = Manifest::default();
     manifest.set(ActionId::from("my-org/my-action"), Version::from("main"));
@@ -599,12 +465,7 @@ fn test_upgrade_mixed_semver_and_branch() {
         String::new(),
     ));
 
-    // Registry has both v4 and v5 available for checkout
-    let mut registry = MockUpgradeRegistry::new();
-    registry.tags.insert(
-        "actions/checkout".to_string(),
-        vec!["v4".to_string(), "v5".to_string()],
-    );
+    let registry = FakeRegistry::new().with_all_tags("actions/checkout", vec!["v4", "v5"]);
 
     let request = UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::All).unwrap();
     let plan = upgrade::plan(&manifest, &lock, &registry, &request, |_| {});
@@ -617,15 +478,13 @@ fn test_upgrade_mixed_semver_and_branch() {
     let updated_workflow =
         fs::read_to_string(root.join(".github").join("workflows").join("ci.yml")).unwrap();
 
-    // Branch ref should be re-pinned with new SHA
-    let expected_branch_sha = format!("{:0<40}", "my-orgmy-actionmain");
+    let expected_branch_sha = FakeRegistry::fake_sha("my-org/my-action", "main");
     assert!(
         updated_workflow.contains(&format!("my-org/my-action@{expected_branch_sha} # main")),
         "Branch ref should be re-pinned. Got:\n{updated_workflow}"
     );
 
-    // Checkout should be upgraded to v5 with new SHA
-    let expected_checkout_sha = format!("{:0<40}", "actionscheckoutv5");
+    let expected_checkout_sha = FakeRegistry::fake_sha("actions/checkout", "v5");
     assert!(
         updated_workflow.contains(&format!("actions/checkout@{expected_checkout_sha} # v5")),
         "Checkout should be upgraded to v5. Got:\n{updated_workflow}"
@@ -642,20 +501,14 @@ fn test_upgrade_skips_bare_sha() {
     let workflow_content = format!(
         "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: my-org/my-action@{bare_sha}\n"
     );
-    create_workflow(&root, "ci.yml", &workflow_content);
+    write_workflow(&root, "ci.yml", &workflow_content);
 
     let mut manifest = Manifest::default();
     manifest.set(ActionId::from("my-org/my-action"), Version::from(bare_sha));
 
     let lock = Lock::default();
     let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap();
-    let plan = upgrade::plan(
-        &manifest,
-        &lock,
-        &MockUpgradeRegistry::new(),
-        &request,
-        |_| {},
-    );
+    let plan = upgrade::plan(&manifest, &lock, &FakeRegistry::new(), &request, |_| {});
     assert!(plan.is_ok());
     let plan = plan.unwrap();
 
@@ -664,7 +517,6 @@ fn test_upgrade_skips_bare_sha() {
         upgrade::apply_upgrade_workflows(&updater, &plan.lock, &plan.upgrades).unwrap();
     }
 
-    // Workflow should be unchanged — bare SHA has nothing to re-pin
     let updated_workflow =
         fs::read_to_string(root.join(".github").join("workflows").join("ci.yml")).unwrap();
     assert!(
@@ -673,25 +525,17 @@ fn test_upgrade_skips_bare_sha() {
     );
 }
 
-// --- Tests for scoped upgrades (Safe+Single and Latest+Single) ---
+// --- Tests for scoped upgrades ---
 
 #[test]
 fn test_upgrade_safe_single_action() {
-    // Manifest with two actions
     let mut manifest = Manifest::default();
     manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
     manifest.set(ActionId::from("actions/setup-node"), Version::from("v3"));
 
-    // Registry has v5 for checkout and v4 for setup-node
-    let mut registry = MockUpgradeRegistry::new();
-    registry.tags.insert(
-        "actions/checkout".to_string(),
-        vec!["v4".to_string(), "v5".to_string()],
-    );
-    registry.tags.insert(
-        "actions/setup-node".to_string(),
-        vec!["v3".to_string(), "v4".to_string()],
-    );
+    let registry = FakeRegistry::new()
+        .with_all_tags("actions/checkout", vec!["v4", "v5"])
+        .with_all_tags("actions/setup-node", vec!["v3", "v4"]);
 
     let lock = Lock::default();
     let request = UpgradeRequest::new(
@@ -701,11 +545,6 @@ fn test_upgrade_safe_single_action() {
     .unwrap();
     let result = upgrade::plan(&manifest, &lock, &registry, &request, |_| {});
     assert!(result.is_ok());
-
-    // Note: we can't directly verify manifest changes in memory-only mode,
-    // but the test should succeed without error. To fully test scoped upgrades,
-    // we'd need file-backed store tests, which would require workflow files
-    // and more setup. For now, we verify the request construction succeeds.
 }
 
 #[test]
@@ -714,15 +553,9 @@ fn test_upgrade_latest_single_action() {
     manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
     manifest.set(ActionId::from("actions/setup-node"), Version::from("v3"));
 
-    let mut registry = MockUpgradeRegistry::new();
-    registry.tags.insert(
-        "actions/checkout".to_string(),
-        vec!["v4".to_string(), "v5".to_string(), "v6".to_string()],
-    );
-    registry.tags.insert(
-        "actions/setup-node".to_string(),
-        vec!["v3".to_string(), "v4".to_string()],
-    );
+    let registry = FakeRegistry::new()
+        .with_all_tags("actions/checkout", vec!["v4", "v5", "v6"])
+        .with_all_tags("actions/setup-node", vec!["v3", "v4"]);
 
     let lock = Lock::default();
     let request = UpgradeRequest::new(
@@ -736,7 +569,7 @@ fn test_upgrade_latest_single_action() {
 
 #[test]
 fn test_upgrade_single_action_not_found() {
-    let manifest = Manifest::default(); // Empty manifest
+    let manifest = Manifest::default();
 
     let lock = Lock::default();
     let request = UpgradeRequest::new(
@@ -744,13 +577,7 @@ fn test_upgrade_single_action_not_found() {
         UpgradeScope::Single(ActionId::from("actions/nonexistent")),
     )
     .unwrap();
-    let result = upgrade::plan(
-        &manifest,
-        &lock,
-        &MockUpgradeRegistry::new(),
-        &request,
-        |_| {},
-    );
+    let result = upgrade::plan(&manifest, &lock, &FakeRegistry::new(), &request, |_| {});
     assert!(
         result.is_err(),
         "Expected error when action not found in manifest"
@@ -759,12 +586,6 @@ fn test_upgrade_single_action_not_found() {
 
 #[test]
 fn test_cli_rejection_latest_with_version() {
-    // This test verifies that `gx upgrade --latest actions/checkout@v5` is rejected.
-    // The rejection happens in resolve_upgrade_mode in main.rs.
-    // We can't directly test the CLI here, but we can test the logic indirectly
-    // by ensuring the CLI argument would contain '@' and our validation would catch it.
-
-    // Simulating what the CLI parser would pass:
     let action_str = "actions/checkout@v5";
     let contains_at = action_str.contains('@');
     assert!(contains_at, "Test setup: action string should contain @");

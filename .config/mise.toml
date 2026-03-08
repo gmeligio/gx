@@ -18,13 +18,18 @@ description = "Lint the code"
 run = "cargo clippy --tests"
 
 [tasks.test]
-description = "Run all tests"
-run = "cargo test"
+description = "Run unit tests"
+run = "cargo test --lib"
 
 [tasks.integ]
 description = "Run integration tests"
+shell = "bash -c"
+run = "cargo test $(for f in tests/integ_*.rs; do echo --test $(basename $f .rs); done) --test code_health"
+
+[tasks.e2e]
+description = "Run e2e tests (requires GITHUB_TOKEN)"
 env = { GITHUB_TOKEN = "{{exec(command='gh auth token')}}" }
-run = "cargo test -- --ignored"
+run = "cargo test --test e2e_pipeline"
 
 [tasks.init]
 description = "Create manifest and lock from workflows"

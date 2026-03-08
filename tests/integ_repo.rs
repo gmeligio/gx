@@ -4,7 +4,6 @@ use std::fs;
 use tempfile::TempDir;
 
 fn init_git_repo(root: &std::path::Path) {
-    // Create minimal git directory structure
     fs::create_dir(root.join(".git")).unwrap();
     fs::write(root.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
     fs::create_dir_all(root.join(".git/objects")).unwrap();
