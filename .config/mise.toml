@@ -28,8 +28,11 @@ run = "cargo test $(for f in tests/integ_*.rs; do echo --test $(basename $f .rs)
 
 [tasks.e2e]
 description = "Run e2e tests (requires GITHUB_TOKEN)"
-env = { GITHUB_TOKEN = "{{exec(command='gh auth token')}}" }
-run = "cargo test --test e2e_pipeline"
+shell = "bash -c"
+run = """
+export GITHUB_TOKEN="${GITHUB_TOKEN:-$(gh auth token)}"
+cargo test $(for f in tests/e2e_*.rs; do echo --test $(basename $f .rs); done)
+"""
 
 [tasks.init]
 description = "Create manifest and lock from workflows"

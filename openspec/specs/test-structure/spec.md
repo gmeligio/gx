@@ -70,7 +70,7 @@ Three mise tasks SHALL exist for running different test categories.
 
 #### Scenario: E2e tests task
 - **WHEN** `mise run e2e` is executed
-- **THEN** it runs `cargo test --test e2e_pipeline` with `GITHUB_TOKEN` set
+- **THEN** it runs `cargo test` targeting all `e2e_*.rs` files with `GITHUB_TOKEN` set
 
 ### Requirement: CI SHALL have three parallel test jobs
 
