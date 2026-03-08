@@ -23,15 +23,14 @@ run = "cargo test --lib"
 
 [tasks.integ]
 description = "Run integration tests"
-shell = "bash -c"
-run = "cargo test $(for f in tests/integ_*.rs; do echo --test $(basename $f .rs); done) --test code_health"
+run = "cargo test --test integ_* --test code_health"
 
 [tasks.e2e]
 description = "Run e2e tests (requires GITHUB_TOKEN)"
 shell = "bash -c"
 run = """
 export GITHUB_TOKEN="${GITHUB_TOKEN:-$(gh auth token)}"
-cargo test $(for f in tests/e2e_*.rs; do echo --test $(basename $f .rs); done)
+cargo test --test 'e2e_*'
 """
 
 [tasks.init]
