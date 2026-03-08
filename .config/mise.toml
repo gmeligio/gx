@@ -13,9 +13,9 @@ github.slsa = true
 description = "Build the CLI"
 run = "cargo build"
 
-[tasks.lint]
+[tasks.clippy]
 description = "Lint the code"
-run = "cargo clippy"
+run = "cargo clippy --tests"
 
 [tasks.test]
 description = "Run all tests"
