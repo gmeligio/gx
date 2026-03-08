@@ -8,10 +8,10 @@ fn count_ignore_attributes(dir: &Path) -> usize {
             let path = entry.path();
             if path.is_dir() {
                 count += count_ignore_attributes(&path);
-            } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
-                if let Ok(content) = fs::read_to_string(&path) {
-                    count += content.matches("#[ignore").count();
-                }
+            } else if path.extension().and_then(|e| e.to_str()) == Some("rs")
+                && let Ok(content) = fs::read_to_string(&path)
+            {
+                count += content.matches("#[ignore").count();
             }
         }
     }

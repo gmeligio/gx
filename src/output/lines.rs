@@ -201,7 +201,7 @@ mod tests {
             version: "v4".to_string(),
         };
         let result = line.format_line(false);
-        assert!(result.contains("+"));
+        assert!(result.contains('+'));
         assert!(result.contains("actions/setup-node"));
         assert!(result.contains("v4"));
     }
