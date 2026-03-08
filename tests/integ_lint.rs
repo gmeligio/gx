@@ -258,7 +258,7 @@ jobs:
         Version::from("v4"),
         CommitSha::from("def456789012345678901234567890abcd123456"),
         "actions/checkout".to_string(),
-        RefType::Tag,
+        Some(RefType::Tag),
         "2026-01-01T00:00:00Z".to_string(),
     ));
 
@@ -305,7 +305,7 @@ jobs:
         Version::from("v3"),
         CommitSha::from("def456789012345678901234567890abcd123456"),
         "actions/setup-node".to_string(),
-        RefType::Tag,
+        Some(RefType::Tag),
         "2026-01-01T00:00:00Z".to_string(),
     ));
 
@@ -351,7 +351,7 @@ jobs:
         Version::from("v3"),
         CommitSha::from("def456789012345678901234567890abcd123456"),
         "actions/setup-node".to_string(),
-        RefType::Tag,
+        Some(RefType::Tag),
         "2026-01-01T00:00:00Z".to_string(),
     ));
 
@@ -450,7 +450,7 @@ jobs:
         Version::from("v4"),
         CommitSha::from("def456789012345678901234567890abcd123456"),
         "actions/checkout".to_string(),
-        RefType::Tag,
+        Some(RefType::Tag),
         "2026-01-01T00:00:00Z".to_string(),
     ));
 

@@ -14,7 +14,7 @@ pub struct LockEntry {
     /// The GitHub repository that was queried
     pub repository: String,
     /// The type of reference that was resolved
-    pub ref_type: RefType,
+    pub ref_type: Option<RefType>,
     /// RFC 3339 timestamp of the commit (meaning depends on `ref_type`)
     pub date: String,
 }
@@ -22,7 +22,12 @@ pub struct LockEntry {
 impl LockEntry {
     /// Create a new lock entry.
     #[must_use]
-    pub fn new(sha: CommitSha, repository: String, ref_type: RefType, date: String) -> Self {
+    pub fn new(
+        sha: CommitSha,
+        repository: String,
+        ref_type: Option<RefType>,
+        date: String,
+    ) -> Self {
         Self {
             sha,
             version: None,
@@ -40,7 +45,7 @@ impl LockEntry {
         version: Option<String>,
         specifier: Option<String>,
         repository: String,
-        ref_type: RefType,
+        ref_type: Option<RefType>,
         date: String,
     ) -> Self {
         Self {
@@ -63,23 +68,27 @@ impl LockEntry {
     /// - date is non-empty
     #[must_use]
     pub fn is_complete(&self, manifest_version: &Version) -> bool {
-        // Check version is present and non-empty
-        let version_ok = self.version.as_ref().is_some_and(|v| !v.is_empty());
+        let Self {
+            sha: _, // CommitSha is always valid by construction
+            version,
+            specifier,
+            repository,
+            ref_type,
+            date,
+        } = self;
 
-        // Check repository is non-empty
-        let repository_ok = !self.repository.is_empty();
+        let version_ok = version.as_ref().is_some_and(|v| !v.is_empty());
+        let repository_ok = !repository.is_empty();
+        let date_ok = !date.is_empty();
+        let ref_type_ok = ref_type.is_some();
 
-        // Check date is non-empty
-        let date_ok = !self.date.is_empty();
-
-        // Check specifier matches the manifest version's derivation
         let expected_specifier = manifest_version.specifier();
-        let specifier_ok = match &self.specifier {
-            Some(s) if s.is_empty() => false, // Empty string is treated as missing
-            actual => actual == &expected_specifier, // Must match expected
+        let specifier_ok = match specifier {
+            Some(s) if s.is_empty() => false,
+            actual => actual == &expected_specifier,
         };
 
-        version_ok && repository_ok && date_ok && specifier_ok
+        version_ok && repository_ok && date_ok && ref_type_ok && specifier_ok
     }
 
     /// Set the version field on this entry.
@@ -194,7 +203,7 @@ mod tests {
             Version::from(version),
             CommitSha::from(sha),
             ActionId::from(action).base_repo(),
-            RefType::Tag,
+            Some(RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         )
     }
@@ -335,10 +344,23 @@ mod tests {
             Some("v4".to_string()),
             Some("^4".to_string()),
             "actions/checkout".to_string(),
-            RefType::Tag,
+            Some(RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         );
         assert!(entry.is_complete(&Version::from("v4")));
+    }
+
+    #[test]
+    fn test_is_complete_missing_ref_type() {
+        let entry = LockEntry::with_version_and_specifier(
+            CommitSha::from("abc123def456789012345678901234567890abcd"),
+            Some("v4".to_string()),
+            Some("^4".to_string()),
+            "actions/checkout".to_string(),
+            None,
+            "2026-01-01T00:00:00Z".to_string(),
+        );
+        assert!(!entry.is_complete(&Version::from("v4")));
     }
 
     #[test]
@@ -348,7 +370,7 @@ mod tests {
             Some("v4".to_string()),
             None,
             "actions/checkout".to_string(),
-            RefType::Tag,
+            Some(RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         );
         assert!(!entry.is_complete(&Version::from("v4")));
@@ -361,7 +383,7 @@ mod tests {
             Some("v4".to_string()),
             Some(String::new()),
             "actions/checkout".to_string(),
-            RefType::Tag,
+            Some(RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         );
         assert!(!entry.is_complete(&Version::from("v4")));
@@ -375,7 +397,7 @@ mod tests {
             Some("v6.0.2".to_string()),
             Some("^6".to_string()), // Should be ^6.1 for v6.1
             "actions/checkout".to_string(),
-            RefType::Tag,
+            Some(RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         );
         assert!(!entry.is_complete(&Version::from("v6.1")));
@@ -388,7 +410,7 @@ mod tests {
             None,
             Some("^4".to_string()),
             "actions/checkout".to_string(),
-            RefType::Tag,
+            Some(RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         );
         assert!(!entry.is_complete(&Version::from("v4")));
@@ -401,7 +423,7 @@ mod tests {
             Some("v4".to_string()),
             Some("^4".to_string()),
             "actions/checkout".to_string(),
-            RefType::Tag,
+            Some(RefType::Tag),
             String::new(),
         );
         assert!(!entry.is_complete(&Version::from("v4")));
@@ -415,7 +437,7 @@ mod tests {
             Some("main".to_string()),
             None,
             "actions/checkout".to_string(),
-            RefType::Branch,
+            Some(RefType::Branch),
             "2026-01-01T00:00:00Z".to_string(),
         );
         assert!(entry.is_complete(&Version::from("main")));
@@ -428,7 +450,7 @@ mod tests {
             Some("v4.1.0".to_string()),
             Some("~4.1.0".to_string()),
             "actions/checkout".to_string(),
-            RefType::Tag,
+            Some(RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         );
         assert!(entry.is_complete(&Version::from("v4.1.0")));
@@ -441,7 +463,7 @@ mod tests {
             Some("v4.1".to_string()),
             Some("^4.1".to_string()),
             "actions/checkout".to_string(),
-            RefType::Tag,
+            Some(RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         );
         assert!(entry.is_complete(&Version::from("v4.1")));

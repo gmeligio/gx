@@ -93,7 +93,7 @@ fn migrate_v1(data: LockDataV1) -> LockData {
                 version: None,
                 specifier: None,
                 repository,
-                ref_type: "tag".to_string(),
+                ref_type: String::new(),
                 date: String::new(),
             };
             (key, entry)
@@ -116,7 +116,7 @@ fn lock_from_data(data: LockData) -> Lock {
                     entry_data.version,
                     entry_data.specifier,
                     entry_data.repository,
-                    RefType::from(entry_data.ref_type),
+                    RefType::parse(&entry_data.ref_type),
                     entry_data.date,
                 );
                 (key, entry)
@@ -144,7 +144,17 @@ fn serialize_lock(lock: &Lock) -> String {
 
         let table = format!(
             "sha = \"{}\", version = \"{}\", specifier = \"{}\", repository = \"{}\", ref_type = \"{}\", date = \"{}\"",
-            entry.sha, version, specifier, entry.repository, entry.ref_type, entry.date
+            entry.sha,
+            version,
+            specifier,
+            entry.repository,
+            entry.ref_type.as_ref().map_or("unknown", |r| match r {
+                RefType::Release => "release",
+                RefType::Tag => "tag",
+                RefType::Branch => "branch",
+                RefType::Commit => "commit",
+            }),
+            entry.date
         );
 
         let _ = writeln!(out, "\"{key}\" = {{ {table} }}");
@@ -232,7 +242,15 @@ fn build_lock_inline_table(key: &LockKey, entry: &LockEntry) -> toml_edit::Inlin
     inline.insert("version", version.into());
     inline.insert("specifier", specifier.into());
     inline.insert("repository", entry.repository.as_str().into());
-    inline.insert("ref_type", entry.ref_type.to_string().as_str().into());
+    inline.insert(
+        "ref_type",
+        entry
+            .ref_type
+            .as_ref()
+            .map_or("unknown".to_string(), std::string::ToString::to_string)
+            .as_str()
+            .into(),
+    );
     inline.insert("date", entry.date.as_str().into());
     inline
 }
@@ -259,7 +277,17 @@ pub fn create_lock(path: &Path, diff: &LockDiff) -> Result<(), LockFileError> {
 
         let table = format!(
             "sha = \"{}\", version = \"{}\", specifier = \"{}\", repository = \"{}\", ref_type = \"{}\", date = \"{}\"",
-            entry.sha, version, specifier, entry.repository, entry.ref_type, entry.date
+            entry.sha,
+            version,
+            specifier,
+            entry.repository,
+            entry.ref_type.as_ref().map_or("unknown", |r| match r {
+                RefType::Release => "release",
+                RefType::Tag => "tag",
+                RefType::Branch => "branch",
+                RefType::Commit => "commit",
+            }),
+            entry.date
         );
 
         let _ = writeln!(out, "\"{key}\" = {{ {table} }}");
@@ -362,7 +390,7 @@ mod tests {
             Version::from(version),
             CommitSha::from(sha),
             ActionId::from(action).base_repo(),
-            RefType::Tag,
+            Some(RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         )
     }
@@ -581,7 +609,7 @@ mod tests {
                     Some("v3.1.0".to_string()),
                     Some("^3".to_string()),
                     "actions/setup-node".to_string(),
-                    RefType::Tag,
+                    Some(RefType::Tag),
                     "2026-01-01T00:00:00Z".to_string(),
                 ),
             )],
@@ -702,7 +730,7 @@ mod tests {
                     Some("v3.1.0".to_string()),
                     Some("^3".to_string()),
                     "actions/setup-node".to_string(),
-                    RefType::Tag,
+                    Some(RefType::Tag),
                     "2026-01-01T00:00:00Z".to_string(),
                 ),
             )],
@@ -732,7 +760,7 @@ mod tests {
                         Some("v4.1.0".to_string()),
                         Some("^4".to_string()),
                         "actions/checkout".to_string(),
-                        RefType::Tag,
+                        Some(RefType::Tag),
                         "2026-01-01T00:00:00Z".to_string(),
                     ),
                 ),
@@ -743,7 +771,7 @@ mod tests {
                         Some("v3.2.0".to_string()),
                         Some("^3".to_string()),
                         "actions/setup-node".to_string(),
-                        RefType::Tag,
+                        Some(RefType::Tag),
                         "2026-01-01T00:00:00Z".to_string(),
                     ),
                 ),
@@ -754,7 +782,7 @@ mod tests {
                         Some("v3.0.0".to_string()),
                         Some("^3".to_string()),
                         "actions/cache".to_string(),
-                        RefType::Tag,
+                        Some(RefType::Tag),
                         "2026-01-01T00:00:00Z".to_string(),
                     ),
                 ),
@@ -791,7 +819,7 @@ mod tests {
             Some("v4.2.0".to_string()),
             Some("^4".to_string()),
             "actions/checkout".to_string(),
-            RefType::Release,
+            Some(RefType::Release),
             "2026-01-15T10:30:00Z".to_string(),
         );
 

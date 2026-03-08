@@ -1,6 +1,4 @@
-- You are running on Windows 11.
-- This is a Rust project. After completing each task, run `mise run lint` and `mise run test`. Fix all issues before moving to the next task.
-- Follow the OpenSpec workflow: use /opsx:explore → /opsx:propose → /opsx:apply. Do not skip steps or start implementing before a proposal is approved.
-- When in explore mode, NEVER implement code changes directly. Only produce proposals and design artifacts. Use the OpenSpec explore/propose workflow.
-- Always use `mise` to run project tools (cargo-deny, dist, etc). Never install or invoke tools directly. Use mise tasks with the github binary backend when available.
-- When writing tests for bugs, write a FAILING test that asserts the CORRECT/expected behavior, not a passing test that documents broken behavior.
+- Use worktree parallel agents when possible.
+- Always use `mise run <task>` to run project tools, never invoke cargo/clippy/etc directly.
+- Bug-fix tests must FAIL asserting correct behavior, not pass documenting broken behavior.
+- Update README when changes affect user-facing behavior, commands, config, or installation.

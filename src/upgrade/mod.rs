@@ -109,11 +109,10 @@ pub enum UpgradeError {
 /// Returns [`UpgradeError::ActionNotInManifest`] if the target action is not in the manifest.
 /// Returns [`UpgradeError::TagNotFound`] if the pinned version tag does not exist.
 /// Returns [`UpgradeError::TagFetchFailed`] if tags cannot be fetched from the registry.
-#[allow(clippy::needless_pass_by_value)]
 pub fn plan<R>(
     manifest: &Manifest,
     lock: &Lock,
-    registry: R,
+    registry: &R,
     request: &UpgradeRequest,
     mut on_progress: impl FnMut(&str),
 ) -> Result<UpgradePlan, UpgradeError>
@@ -278,7 +277,7 @@ type DetermineResult = Option<(Vec<UpgradeCandidate>, Vec<ActionSpec>)>;
 fn determine_upgrades<R: VersionRegistry>(
     manifest: &Manifest,
     lock: &Lock,
-    service: &ActionResolver<R>,
+    service: &ActionResolver<'_, R>,
     request: &UpgradeRequest,
     on_progress: &mut dyn FnMut(&str),
 ) -> Result<DetermineResult, UpgradeError> {
@@ -396,7 +395,7 @@ fn determine_upgrades<R: VersionRegistry>(
 }
 
 fn resolve_and_store<R: VersionRegistry>(
-    service: &ActionResolver<R>,
+    service: &ActionResolver<'_, R>,
     spec: &ActionSpec,
     lock: &mut Lock,
     unresolved_msg: &str,
@@ -535,7 +534,7 @@ impl Command for Upgrade {
         let upgrade_plan = plan(
             &config.manifest,
             &config.lock,
-            registry,
+            &registry,
             &self.request,
             on_progress,
         )?;
@@ -640,7 +639,7 @@ mod tests {
             Ok(ResolvedRef::new(
                 CommitSha::from(padded),
                 id.base_repo(),
-                RefType::Tag,
+                Some(RefType::Tag),
                 "2026-01-01T00:00:00Z".to_string(),
             ))
         }
@@ -688,7 +687,7 @@ mod tests {
             Version::from("v4"),
             CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
             "actions/checkout".to_string(),
-            RefType::Tag,
+            Some(RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         ));
 
@@ -696,7 +695,7 @@ mod tests {
         let registry = MockPlanRegistry::new();
         let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap();
 
-        let result = plan(&manifest, &lock, registry, &request, |_| {}).unwrap();
+        let result = plan(&manifest, &lock, &registry, &request, |_| {}).unwrap();
         assert!(
             result.is_empty(),
             "Plan with no upgradable actions must be empty"
@@ -714,7 +713,7 @@ mod tests {
             Version::from("v4"),
             CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
             "actions/checkout".to_string(),
-            RefType::Tag,
+            Some(RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         ));
         lock.set_version(
@@ -728,7 +727,7 @@ mod tests {
 
         let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap();
 
-        let result = plan(&manifest, &lock, registry, &request, |_| {}).unwrap();
+        let result = plan(&manifest, &lock, &registry, &request, |_| {}).unwrap();
 
         // Should have upgrade candidate
         assert!(
@@ -755,7 +754,7 @@ mod tests {
             Version::from("v3"),
             CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
             "actions/checkout".to_string(),
-            RefType::Tag,
+            Some(RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         ));
         lock.set_version(
@@ -769,7 +768,7 @@ mod tests {
 
         let request = UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::All).unwrap();
 
-        let result = plan(&manifest, &lock, registry, &request, |_| {}).unwrap();
+        let result = plan(&manifest, &lock, &registry, &request, |_| {}).unwrap();
 
         // Should have upgrade candidates
         assert!(

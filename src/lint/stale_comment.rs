@@ -67,7 +67,7 @@ mod tests {
             Version::from(version),
             CommitSha::from(sha),
             ActionId::from(action).base_repo(),
-            crate::domain::RefType::Tag,
+            Some(crate::domain::RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         ));
         lock

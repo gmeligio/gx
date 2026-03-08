@@ -81,14 +81,19 @@ impl Default for ShaIndex {
 pub struct ResolvedRef {
     pub sha: CommitSha,
     pub repository: String,
-    pub ref_type: RefType,
+    pub ref_type: Option<RefType>,
     pub date: String,
 }
 
 impl ResolvedRef {
     /// Create a new resolved reference.
     #[must_use]
-    pub fn new(sha: CommitSha, repository: String, ref_type: RefType, date: String) -> Self {
+    pub fn new(
+        sha: CommitSha,
+        repository: String,
+        ref_type: Option<RefType>,
+        date: String,
+    ) -> Self {
         Self {
             sha,
             repository,
@@ -135,20 +140,20 @@ pub trait VersionRegistry {
 }
 
 /// Resolves actions to their correct version and commit SHA
-pub struct ActionResolver<R: VersionRegistry> {
-    registry: R,
+pub struct ActionResolver<'a, R: VersionRegistry> {
+    registry: &'a R,
 }
 
-impl<R: VersionRegistry> ActionResolver<R> {
+impl<'a, R: VersionRegistry> ActionResolver<'a, R> {
     #[must_use]
-    pub fn new(registry: R) -> Self {
+    pub fn new(registry: &'a R) -> Self {
         Self { registry }
     }
 
     /// Access the underlying version registry
     #[must_use]
     pub fn registry(&self) -> &R {
-        &self.registry
+        self.registry
     }
 
     /// Resolve an action spec to a commit SHA.
@@ -180,13 +185,13 @@ impl<R: VersionRegistry> ActionResolver<R> {
         sha: &CommitSha,
         sha_index: &mut ShaIndex,
     ) -> Result<ResolvedAction, ResolutionError> {
-        let desc = sha_index.get_or_describe(&self.registry, id, sha)?;
+        let desc = sha_index.get_or_describe(self.registry, id, sha)?;
         let version =
             select_most_specific_tag(&desc.tags).unwrap_or_else(|| Version::from(sha.as_str()));
         let ref_type = if desc.tags.is_empty() {
-            RefType::Commit
+            Some(RefType::Commit)
         } else {
-            RefType::Tag
+            Some(RefType::Tag)
         };
         Ok(ResolvedAction::new(
             id.clone(),
@@ -209,7 +214,7 @@ impl<R: VersionRegistry> ActionResolver<R> {
         original_version: &Version,
         sha_index: &mut ShaIndex,
     ) -> (Version, bool) {
-        match sha_index.get_or_describe(&self.registry, id, sha) {
+        match sha_index.get_or_describe(self.registry, id, sha) {
             Ok(desc) => {
                 let tags = &desc.tags;
                 // If the original version is already a valid tag, keep it
@@ -318,12 +323,12 @@ mod tests {
             resolve_result: Ok(ResolvedRef::new(
                 CommitSha::from("abc123def456789012345678901234567890abcd"),
                 "actions/checkout".to_string(),
-                RefType::Tag,
+                Some(RefType::Tag),
                 "2026-01-01T00:00:00Z".to_string(),
             )),
             tags_result: Ok(vec![]),
         };
-        let service = ActionResolver::new(mock_registry);
+        let service = ActionResolver::new(&mock_registry);
 
         let spec = ActionSpec::new(ActionId::from("actions/checkout"), Version::from("v4"));
         let result = service.resolve(&spec);
@@ -346,7 +351,7 @@ mod tests {
             }),
             tags_result: Ok(vec![]),
         };
-        let service = ActionResolver::new(registry);
+        let service = ActionResolver::new(&registry);
 
         let spec = ActionSpec::new(ActionId::from("actions/checkout"), Version::from("v4"));
         let result = service.resolve(&spec);
@@ -360,12 +365,12 @@ mod tests {
             resolve_result: Ok(ResolvedRef::new(
                 CommitSha::from("abc123def456789012345678901234567890abcd"),
                 "actions/checkout".to_string(),
-                RefType::Tag,
+                Some(RefType::Tag),
                 "2026-01-01T00:00:00Z".to_string(),
             )),
             tags_result: Ok(vec![Version::from("v4"), Version::from("v4.0.0")]),
         };
-        let service = ActionResolver::new(registry);
+        let service = ActionResolver::new(&registry);
 
         let id = ActionId::from("actions/checkout");
         let sha = CommitSha::from("abc123def456789012345678901234567890abcd");
@@ -384,12 +389,12 @@ mod tests {
             resolve_result: Ok(ResolvedRef::new(
                 CommitSha::from("abc123def456789012345678901234567890abcd"),
                 "actions/checkout".to_string(),
-                RefType::Tag,
+                Some(RefType::Tag),
                 "2026-01-01T00:00:00Z".to_string(),
             )),
             tags_result: Ok(vec![Version::from("v5"), Version::from("v5.0.0")]),
         };
-        let service = ActionResolver::new(registry);
+        let service = ActionResolver::new(&registry);
 
         let id = ActionId::from("actions/checkout");
         let sha = CommitSha::from("abc123def456789012345678901234567890abcd");
@@ -409,7 +414,7 @@ mod tests {
             resolve_result: Ok(ResolvedRef::new(
                 sha.clone(),
                 "owner/repo".to_string(),
-                RefType::Commit,
+                Some(RefType::Commit),
                 "2026-01-01T00:00:00Z".to_string(),
             )),
             tags_result: Ok(vec![
@@ -418,7 +423,7 @@ mod tests {
                 Version::from("v3.6.1"),
             ]),
         };
-        let service = ActionResolver::new(registry);
+        let service = ActionResolver::new(&registry);
         let id = ActionId::from("owner/repo");
         let mut sha_index = ShaIndex::new();
 
@@ -428,7 +433,7 @@ mod tests {
 
         assert_eq!(result.version.as_str(), "v3.6.1");
         assert_eq!(result.sha, sha);
-        assert_eq!(result.ref_type, RefType::Tag);
+        assert_eq!(result.ref_type, Some(RefType::Tag));
         assert_eq!(result.repository, "owner/repo");
     }
 
@@ -439,12 +444,12 @@ mod tests {
             resolve_result: Ok(ResolvedRef::new(
                 sha.clone(),
                 "owner/repo".to_string(),
-                RefType::Commit,
+                Some(RefType::Commit),
                 "2026-01-01T00:00:00Z".to_string(),
             )),
             tags_result: Ok(vec![]),
         };
-        let service = ActionResolver::new(registry);
+        let service = ActionResolver::new(&registry);
         let id = ActionId::from("owner/repo");
         let mut sha_index = ShaIndex::new();
 
@@ -454,7 +459,7 @@ mod tests {
 
         assert_eq!(result.version.as_str(), sha.as_str());
         assert_eq!(result.sha, sha);
-        assert_eq!(result.ref_type, RefType::Commit);
+        assert_eq!(result.ref_type, Some(RefType::Commit));
     }
 
     #[test]
@@ -463,7 +468,7 @@ mod tests {
             resolve_result: Err(ResolutionError::AuthRequired),
             tags_result: Ok(vec![]),
         };
-        let service = ActionResolver::new(registry);
+        let service = ActionResolver::new(&registry);
         let id = ActionId::from("owner/repo");
         let sha = CommitSha::from("abc123def456789012345678901234567890abcd");
         let mut sha_index = ShaIndex::new();

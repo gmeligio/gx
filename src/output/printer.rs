@@ -2,8 +2,6 @@ use console::Term;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use std::time::Duration;
 
-use crate::config::Level;
-
 use super::lines::OutputLine;
 
 /// Terminal output handler: detects CI/TTY/color and prints `OutputLine` values.
@@ -45,110 +43,9 @@ impl Printer {
     }
 
     /// Print a list of `OutputLine` values to stdout with optional color.
-    #[allow(clippy::too_many_lines)]
     pub fn print_lines(&self, lines: &[OutputLine]) {
-        use console::style;
-
         for line in lines {
-            match line {
-                OutputLine::Upgraded { action, from, to } => {
-                    let arrow = if self.use_color {
-                        style("↑").cyan().to_string()
-                    } else {
-                        "↑".to_string()
-                    };
-                    println!(" {arrow} {action:<30} {from} → {to}");
-                }
-                OutputLine::Added { action, version } => {
-                    let plus = if self.use_color {
-                        style("+").green().to_string()
-                    } else {
-                        "+".to_string()
-                    };
-                    println!(" {plus} {action:<30} {version}");
-                }
-                OutputLine::Removed { action } => {
-                    let minus = if self.use_color {
-                        style("−").red().to_string()
-                    } else {
-                        "−".to_string()
-                    };
-                    println!(" {minus} {action}");
-                }
-                OutputLine::Changed { action, detail } => {
-                    println!(" ~ {action:<30} {detail}");
-                }
-                OutputLine::Skipped { action, reason } => {
-                    println!(" - {action:<30} ({reason})");
-                }
-                OutputLine::Warning { message } => {
-                    let prefix = if self.use_color {
-                        style("⚠").yellow().to_string()
-                    } else {
-                        "⚠".to_string()
-                    };
-                    println!(" {prefix} {message}");
-                }
-                OutputLine::LintDiag {
-                    level,
-                    workflow,
-                    rule,
-                    message,
-                } => {
-                    let (symbol, colored_symbol) = match level {
-                        Level::Error => {
-                            let s = if self.use_color {
-                                style("✗").red().to_string()
-                            } else {
-                                "✗".to_string()
-                            };
-                            ("✗", s)
-                        }
-                        Level::Warn => {
-                            let s = if self.use_color {
-                                style("⚠").yellow().to_string()
-                            } else {
-                                "⚠".to_string()
-                            };
-                            ("⚠", s)
-                        }
-                        Level::Off => ("", String::new()),
-                    };
-                    let _ = symbol;
-                    let location = workflow
-                        .as_ref()
-                        .map(|w| format!("{w}: "))
-                        .unwrap_or_default();
-                    println!(" {colored_symbol} {location}{rule}: {message}");
-                }
-                OutputLine::Summary { text } => {
-                    let check = if self.use_color {
-                        style("✓").green().to_string()
-                    } else {
-                        "✓".to_string()
-                    };
-                    println!("\n {check} {text}");
-                }
-                OutputLine::LogPath { path } => {
-                    let icon = if self.use_color {
-                        style("📋").to_string()
-                    } else {
-                        "📋".to_string()
-                    };
-                    println!(" {icon} {}", path.display());
-                }
-                OutputLine::CiNotice { message } => {
-                    let prefix = if self.use_color {
-                        style("ℹ").blue().to_string()
-                    } else {
-                        "ℹ".to_string()
-                    };
-                    println!(" {prefix} {message}");
-                }
-                OutputLine::Blank => {
-                    println!();
-                }
-            }
+            println!("{}", line.format_line(self.use_color));
         }
     }
 }
