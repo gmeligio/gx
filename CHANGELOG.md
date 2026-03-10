@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0](https://github.com/gmeligio/gx/compare/v0.5.10...v0.6.0) - 2026-03-10
+
+### Added
+
+- [**breaking**] use semver specifier in manifest ([#63](https://github.com/gmeligio/gx/pull/63))
+
+### Fixed
+
+- fix clippy and ignored tests ([#61](https://github.com/gmeligio/gx/pull/61))
+
+### Other
+
+- prepare for worktree parallel agent ([#60](https://github.com/gmeligio/gx/pull/60))
+- do not upload checksum files ([#59](https://github.com/gmeligio/gx/pull/59))
+- update REAMDE.md ([#58](https://github.com/gmeligio/gx/pull/58))
+
 ## [0.5.10](https://github.com/gmeligio/gx/compare/v0.5.9...v0.5.10) - 2026-03-06
 
 ### Added
