@@ -1,4 +1,4 @@
-use crate::domain::CommandReport;
+use crate::command::CommandReport;
 use crate::output::OutputLine;
 
 /// Report from the init command.
@@ -36,7 +36,7 @@ impl CommandReport for InitReport {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{CommandReport, InitReport, OutputLine};
 
     #[test]
     fn render_init_no_actions() {

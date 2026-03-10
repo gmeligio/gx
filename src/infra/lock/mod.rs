@@ -1,0 +1,294 @@
+use crate::domain::{Lock, LockDiff, Parsed, RefType};
+use convert::{LockData, build_lock_inline_table, lock_from_data, serialize_lock};
+use serde::Deserialize;
+use std::fmt::Write;
+use std::fs;
+use std::path::{Path, PathBuf};
+use thiserror::Error;
+use toml_edit::DocumentMut;
+
+mod convert;
+mod migration;
+
+pub const LOCK_FILE_NAME: &str = "gx.lock";
+pub const LOCK_FILE_VERSION: &str = "1.4";
+
+/// Errors that can occur when working with lock files
+#[derive(Debug, Error)]
+pub enum LockFileError {
+    #[error("failed to read lock file: {}", path.display())]
+    Read {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("failed to parse lock file: {}", path.display())]
+    Parse {
+        path: PathBuf,
+        #[source]
+        source: Box<toml::de::Error>,
+    },
+
+    #[error("failed to write lock file: {}", path.display())]
+    Write {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("failed to serialize lock file to TOML")]
+    Serialize(#[source] toml::ser::Error),
+
+    #[error("invalid lock file: {0}")]
+    Validation(String),
+
+    #[error("unsupported lock file version: {0}")]
+    UnsupportedVersion(String),
+}
+
+/// File-backed lock store. Reads from and writes to `.github/gx.lock`.
+pub struct FileLock {
+    path: PathBuf,
+}
+
+impl FileLock {
+    #[must_use]
+    pub fn new(path: &Path) -> Self {
+        Self {
+            path: path.to_path_buf(),
+        }
+    }
+}
+
+impl FileLock {
+    /// Save the given `Lock` to this file.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LockFileError::Write`] if the file cannot be written.
+    pub fn save(&self, lock: &Lock) -> Result<(), LockFileError> {
+        let content = serialize_lock(lock);
+        fs::write(&self.path, content).map_err(|source| LockFileError::Write {
+            path: self.path.clone(),
+            source,
+        })?;
+        Ok(())
+    }
+}
+
+/// Load a lock from a file path. Returns `Parsed<Lock>` with `migrated = false` if the file
+/// does not exist. Dispatches to the appropriate parser/migrator based on the version field.
+/// This is a pure function — it does NOT rewrite the file.
+///
+/// # Errors
+///
+/// Returns [`LockFileError::Read`] if the file cannot be read.
+/// Returns [`LockFileError::Parse`] if the TOML is invalid.
+/// Returns [`LockFileError::UnsupportedVersion`] for unknown future versions.
+pub fn parse_lock(path: &Path) -> Result<Parsed<Lock>, LockFileError> {
+    #[derive(Deserialize)]
+    struct VersionOnly {
+        #[serde(default)]
+        version: String,
+    }
+
+    if !path.exists() {
+        return Ok(Parsed {
+            value: Lock::default(),
+            migrated: false,
+        });
+    }
+
+    let content = fs::read_to_string(path).map_err(|source| LockFileError::Read {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    // Try to detect v1.0 format (plain string SHA values, no version field with inline tables)
+    // by attempting v1.0 parse first (HashMap<String, String> for actions)
+    if let Ok(v1) = toml::from_str::<migration::LockDataV1>(&content) {
+        // Only use v1 parser if actions are actually strings (v1.0 format)
+        // The v1.0 format has no version field or version = "" and plain string values
+        if !v1.actions.is_empty() && !content.contains("sha =") {
+            let data = migration::migrate_v1(v1);
+            let lock = lock_from_data(data);
+            return Ok(Parsed {
+                value: lock,
+                migrated: true,
+            });
+        }
+    }
+
+    // Parse the version field to dispatch
+    let version_only: VersionOnly =
+        toml::from_str(&content).map_err(|source| LockFileError::Parse {
+            path: path.to_path_buf(),
+            source: Box::new(source),
+        })?;
+
+    match version_only.version.as_str() {
+        "" | "1.0" => {
+            // v1.0 format (no version field or explicit 1.0)
+            let v1: migration::LockDataV1 =
+                toml::from_str(&content).map_err(|source| LockFileError::Parse {
+                    path: path.to_path_buf(),
+                    source: Box::new(source),
+                })?;
+            let data = migration::migrate_v1(v1);
+            let lock = lock_from_data(data);
+            Ok(Parsed {
+                value: lock,
+                migrated: true,
+            })
+        }
+        "1.1" | "1.2" | "1.3" => {
+            // v1.3 format: specifier field, @v6 style keys
+            let v1_3: migration::LockDataV1_3 =
+                toml::from_str(&content).map_err(|source| LockFileError::Parse {
+                    path: path.to_path_buf(),
+                    source: Box::new(source),
+                })?;
+            let data = migration::migrate_v1_3(v1_3);
+            let lock = lock_from_data(data);
+            Ok(Parsed {
+                value: lock,
+                migrated: true,
+            })
+        }
+        "1.4" => {
+            // Current format — direct parse
+            let data: LockData =
+                toml::from_str(&content).map_err(|source| LockFileError::Parse {
+                    path: path.to_path_buf(),
+                    source: Box::new(source),
+                })?;
+            let lock = lock_from_data(data);
+            Ok(Parsed {
+                value: lock,
+                migrated: false,
+            })
+        }
+        v => Err(LockFileError::UnsupportedVersion(v.to_string())),
+    }
+}
+
+/// Create a new lock file from a `LockDiff`.
+///
+/// This builds a fresh lock file from the `added` entries.
+/// Used for the `init` command when no lock file exists yet.
+///
+/// # Errors
+///
+/// Returns [`LockFileError::Write`] if the file cannot be written.
+pub fn create_lock(path: &Path, diff: &LockDiff) -> Result<(), LockFileError> {
+    // Build sorted entries
+    let mut entries: Vec<_> = diff.added.iter().collect();
+    entries.sort_by_key(|(k, _)| k.to_string());
+
+    let mut out = format!("version = \"{LOCK_FILE_VERSION}\"\n\n[actions]\n");
+    for (key, entry) in entries {
+        let version = entry.version.as_deref().unwrap_or(key.version.as_str());
+
+        let table = format!(
+            "sha = \"{}\", version = \"{}\", comment = \"{}\", repository = \"{}\", ref_type = \"{}\", date = \"{}\"",
+            entry.sha,
+            version,
+            entry.comment,
+            entry.repository,
+            entry.ref_type.as_ref().map_or("unknown", |r| match r {
+                RefType::Release => "release",
+                RefType::Tag => "tag",
+                RefType::Branch => "branch",
+                RefType::Commit => "commit",
+            }),
+            entry.date
+        );
+
+        let _ = writeln!(out, "\"{key}\" = {{ {table} }}");
+    }
+
+    fs::write(path, out).map_err(|source| LockFileError::Write {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    Ok(())
+}
+
+/// Apply a `LockDiff` to an existing lock file using `toml_edit` for surgical patching.
+///
+/// The file must already exist. For creating a new lock from scratch, use `create_lock`.
+///
+/// # Errors
+///
+/// Returns [`LockFileError::Read`] if the file cannot be read.
+/// Returns [`LockFileError::Write`] if the file cannot be written.
+/// Returns [`LockFileError::Parse`] if the file cannot be parsed as TOML.
+pub fn apply_lock_diff(path: &Path, diff: &LockDiff) -> Result<(), LockFileError> {
+    if diff.is_empty() {
+        return Ok(());
+    }
+
+    let content = fs::read_to_string(path).map_err(|source| LockFileError::Read {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    let mut doc: DocumentMut = content
+        .parse()
+        .map_err(|e| LockFileError::Validation(format!("toml_edit parse error: {e}")))?;
+
+    // Ensure [actions] table exists
+    if doc.get("actions").is_none() {
+        doc["actions"] = toml_edit::Item::Table(toml_edit::Table::new());
+    }
+    let Some(actions) = doc["actions"].as_table_mut() else {
+        return Err(LockFileError::Validation(
+            "[actions] is not a table".to_string(),
+        ));
+    };
+
+    // Remove entries
+    for key in &diff.removed {
+        actions.remove(&key.to_string());
+    }
+
+    // Add entries
+    for (key, entry) in &diff.added {
+        actions.insert(
+            &key.to_string(),
+            toml_edit::value(build_lock_inline_table(key, entry)),
+        );
+    }
+
+    // Update existing entries (patch specific fields)
+    for (key, patch) in &diff.updated {
+        let key_str = key.to_string();
+        if let Some(item) = actions.get_mut(&key_str)
+            && let Some(inline) = item.as_inline_table_mut()
+        {
+            if let Some(version) = &patch.version {
+                match version {
+                    Some(v) => inline.insert("version", v.as_str().into()),
+                    None => inline.remove("version"),
+                };
+            }
+            if let Some(comment) = &patch.comment {
+                inline.insert("comment", comment.as_str().into());
+            }
+        }
+    }
+
+    actions.sort_values();
+
+    fs::write(path, doc.to_string()).map_err(|source| LockFileError::Write {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    Ok(())
+}
+
+#[cfg(test)]
+#[path = "tests.rs"]
+mod tests;

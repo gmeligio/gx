@@ -41,7 +41,7 @@ impl LintRule for UnpinnedRule {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{Level, LintRule, UnpinnedRule};
 
     #[test]
     fn unpinned_rule_has_correct_metadata() {

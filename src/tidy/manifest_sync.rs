@@ -1,0 +1,181 @@
+use crate::domain::{
+    ActionId, ActionResolver, ActionSpec, CommitSha, LocatedAction, Manifest, ShaIndex, Specifier,
+    SyncEvent, Version, VersionRegistry, WorkflowActionSet, select_most_specific_tag,
+};
+use std::collections::HashSet;
+
+/// Remove unused actions from manifest and add missing ones.
+/// Returns events for each added action (and version corrections).
+pub(super) fn sync_manifest_actions<R: VersionRegistry>(
+    manifest: &mut Manifest,
+    located: &[LocatedAction],
+    action_set: &WorkflowActionSet,
+    resolver: &ActionResolver<'_, R>,
+    sha_index: &mut ShaIndex,
+) -> Vec<SyncEvent> {
+    let mut events = Vec::new();
+
+    let workflow_actions: HashSet<ActionId> = action_set.action_ids().cloned().collect();
+    let manifest_actions: HashSet<ActionId> = manifest.specs().map(|s| s.id.clone()).collect();
+
+    // Remove unused actions from manifest
+    let unused: Vec<_> = manifest_actions.difference(&workflow_actions).collect();
+    for action in &unused {
+        manifest.remove(action);
+    }
+
+    // Add missing actions to manifest
+    let missing: Vec<_> = workflow_actions.difference(&manifest_actions).collect();
+    for action_id in missing {
+        let version = select_dominant_version(action_id, action_set);
+
+        let corrected_version = if version.is_sha() {
+            let located_with_version = located
+                .iter()
+                .find(|loc| &loc.id == action_id && loc.version == version && loc.sha.is_some());
+
+            if let Some(located_action) = located_with_version {
+                if let Some(sha) = &located_action.sha {
+                    let (corrected, was_corrected) =
+                        resolver.correct_version(action_id, sha, &version, sha_index);
+                    if was_corrected {
+                        events.push(SyncEvent::VersionCorrected {
+                            id: (*action_id).clone(),
+                            corrected: corrected.clone(),
+                            sha_points_to: corrected.clone(),
+                        });
+                    }
+                    corrected
+                } else {
+                    version.clone()
+                }
+            } else {
+                version.clone()
+            }
+        } else {
+            version.clone()
+        };
+
+        let spec_version = Specifier::from_v1(corrected_version.as_str());
+        manifest.set((*action_id).clone(), spec_version.clone());
+        let spec = ActionSpec::new((*action_id).clone(), spec_version.clone());
+        events.push(SyncEvent::ActionAdded(spec));
+    }
+
+    events
+}
+
+/// Upgrade SHA versions in manifest to tags via `ShaIndex`.
+/// Returns events for each SHA that was upgraded.
+pub(super) fn upgrade_sha_versions_to_tags<R: VersionRegistry>(
+    manifest: &mut Manifest,
+    resolver: &ActionResolver<'_, R>,
+    sha_index: &mut ShaIndex,
+) -> Vec<SyncEvent> {
+    let mut events = Vec::new();
+
+    // Collect only SHA specs (avoid cloning the full Vec when most specs are tags)
+    let sha_specs: Vec<(ActionId, CommitSha)> = manifest
+        .specs()
+        .filter(|s| s.version.is_sha())
+        .map(|s| (s.id.clone(), CommitSha::from(s.version.as_str())))
+        .collect();
+
+    for (id, sha) in &sha_specs {
+        match sha_index.get_or_describe(resolver.registry(), id, sha) {
+            Ok(desc) => {
+                if let Some(best_tag) = select_most_specific_tag(&desc.tags) {
+                    manifest.set(id.clone(), Specifier::from_v1(best_tag.as_str()));
+                    events.push(SyncEvent::ShaUpgraded {
+                        id: id.clone(),
+                        tag: best_tag.clone(),
+                    });
+                }
+            }
+            Err(_e) => {
+                // Silently skip if SHA cannot be upgraded
+            }
+        }
+    }
+
+    events
+}
+
+pub(super) fn select_version(versions: &[Version]) -> Version {
+    Version::highest(versions).unwrap_or_else(|| versions[0].clone())
+}
+
+pub(super) fn select_dominant_version(
+    action_id: &ActionId,
+    action_set: &WorkflowActionSet,
+) -> Version {
+    action_set.dominant_version(action_id).unwrap_or_else(|| {
+        let versions: Vec<Version> = action_set.versions_for(action_id).cloned().collect();
+        select_version(&versions)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Version, select_version, upgrade_sha_versions_to_tags};
+    use crate::domain::resolution::testutil::{AuthRequiredRegistry, FakeRegistry};
+    use crate::domain::{ActionId, ActionResolver, Manifest, ShaIndex, Specifier};
+
+    #[test]
+    fn test_select_version_single() {
+        let versions = vec![Version::from("v4")];
+        assert_eq!(select_version(&versions), Version::from("v4"));
+    }
+
+    #[test]
+    fn test_select_version_picks_highest() {
+        let versions = vec![
+            Version::from("v3"),
+            Version::from("v4"),
+            Version::from("v2"),
+        ];
+        assert_eq!(select_version(&versions), Version::from("v4"));
+    }
+
+    // ---------------------------------------------------------------------------
+    // SHA-to-tag upgrade tests (migrated from tidy/tests.rs)
+    // ---------------------------------------------------------------------------
+
+    /// Manifest SHA specifier is upgraded to the most specific tag via the registry.
+    #[test]
+    fn test_sha_to_tag_upgrade_via_registry() {
+        let sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let mut manifest = Manifest::default();
+        manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1(sha));
+
+        let registry = FakeRegistry::new().with_all_tags("actions/checkout", vec!["v4", "v4.0.0"]);
+        let resolver = ActionResolver::new(&registry);
+        let mut sha_index = ShaIndex::new();
+        upgrade_sha_versions_to_tags(&mut manifest, &resolver, &mut sha_index);
+
+        assert_eq!(
+            manifest.get(&ActionId::from("actions/checkout")),
+            Some(&Specifier::from_v1("v4.0.0")),
+            "SHA must be upgraded to most specific tag"
+        );
+    }
+
+    /// Without a token, SHA stays unchanged — registry returns `AuthRequired` gracefully.
+    #[test]
+    fn test_sha_to_tag_upgrade_graceful_without_token() {
+        let sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let mut manifest = Manifest::default();
+        manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1(sha));
+
+        let resolver = ActionResolver::new(&AuthRequiredRegistry);
+        let mut sha_index = ShaIndex::new();
+        upgrade_sha_versions_to_tags(&mut manifest, &resolver, &mut sha_index);
+
+        // SHA must stay unchanged when no token available
+        assert_eq!(
+            manifest.get(&ActionId::from("actions/checkout")),
+            Some(&Specifier::from_v1(sha)),
+            "SHA must stay unchanged without a token"
+        );
+    }
+}

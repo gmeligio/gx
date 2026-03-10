@@ -1,3 +1,5 @@
+pub use super::specifier::Specifier;
+use super::specifier::higher_version;
 use std::fmt;
 
 /// Unique identifier for an action (e.g., "actions/checkout")
@@ -210,59 +212,9 @@ impl From<&str> for CommitSha {
     }
 }
 
-/// Compares two versions and returns the higher one.
-/// If both are valid semver, uses semver comparison.
-/// If only one is valid semver, that one wins.
-/// If neither is valid semver, returns the first one.
-fn higher_version<'a>(a: &'a Version, b: &'a Version) -> &'a Version {
-    let parsed_a = parse_semver(a.as_str());
-    let parsed_b = parse_semver(b.as_str());
-
-    match (parsed_a, parsed_b) {
-        (Some(va), Some(vb)) => {
-            if va >= vb {
-                a
-            } else {
-                b
-            }
-        }
-        (_, None) => a,
-        (None, Some(_)) => b,
-    }
-}
-
-/// Attempts to parse a version string into a semver Version.
-/// Handles common formats like "v4", "v4.1", "v4.1.2", "4.1.2"
-fn parse_semver(version: &str) -> Option<semver::Version> {
-    // Strip leading 'v' or 'V' if present
-    let normalized = version
-        .strip_prefix('v')
-        .or_else(|| version.strip_prefix('V'))
-        .unwrap_or(version);
-
-    // Try parsing as-is
-    if let Ok(v) = semver::Version::parse(normalized) {
-        return Some(v);
-    }
-
-    // Try adding .0 for versions like "4.1"
-    let with_patch = format!("{normalized}.0");
-    if let Ok(v) = semver::Version::parse(&with_patch) {
-        return Some(v);
-    }
-
-    // Try adding .0.0 for versions like "4"
-    let with_minor_patch = format!("{normalized}.0.0");
-    if let Ok(v) = semver::Version::parse(&with_minor_patch) {
-        return Some(v);
-    }
-
-    None
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{ActionId, CommitSha, Version, VersionPrecision};
 
     #[test]
     fn test_action_id_base_repo() {
@@ -340,100 +292,6 @@ mod tests {
         assert!(!Version::from("develop").is_semver_like());
         assert!(!Version::from("abc123def456789012345678901234567890abcd").is_semver_like());
         assert!(!Version::from("").is_semver_like());
-    }
-
-    #[test]
-    fn test_highest_version() {
-        let versions = vec![
-            Version::from("v3"),
-            Version::from("v4"),
-            Version::from("v2"),
-        ];
-        assert_eq!(
-            Version::highest(&versions).map(|v| v.0),
-            Some("v4".to_string())
-        );
-    }
-
-    #[test]
-    fn test_highest_version_empty() {
-        let versions: Vec<Version> = vec![];
-        assert!(Version::highest(&versions).is_none());
-    }
-
-    #[test]
-    fn test_highest_version_detailed() {
-        assert_eq!(
-            Version::highest(&[Version::from("v4.1"), Version::from("v4.0")]),
-            Some(Version::from("v4.1"))
-        );
-        assert_eq!(
-            Version::highest(&[Version::from("v4.0.1"), Version::from("v4.0.0")]),
-            Some(Version::from("v4.0.1"))
-        );
-    }
-
-    #[test]
-    fn test_highest_version_one_semver() {
-        assert_eq!(
-            Version::highest(&[Version::from("v4"), Version::from("main")]),
-            Some(Version::from("v4"))
-        );
-        assert_eq!(
-            Version::highest(&[Version::from("main"), Version::from("v4")]),
-            Some(Version::from("v4"))
-        );
-    }
-
-    #[test]
-    fn test_highest_version_neither_semver() {
-        assert_eq!(
-            Version::highest(&[Version::from("main"), Version::from("develop")]),
-            Some(Version::from("main"))
-        );
-    }
-
-    #[test]
-    fn test_parse_semver_full() {
-        let v = parse_semver("1.2.3").unwrap();
-        assert_eq!(v.major, 1);
-        assert_eq!(v.minor, 2);
-        assert_eq!(v.patch, 3);
-    }
-
-    #[test]
-    fn test_parse_semver_with_v_prefix() {
-        let v = parse_semver("v1.2.3").unwrap();
-        assert_eq!(v.major, 1);
-        assert_eq!(v.minor, 2);
-        assert_eq!(v.patch, 3);
-    }
-
-    #[test]
-    fn test_parse_semver_major_only() {
-        let v = parse_semver("v4").unwrap();
-        assert_eq!(v.major, 4);
-        assert_eq!(v.minor, 0);
-        assert_eq!(v.patch, 0);
-    }
-
-    #[test]
-    fn test_parse_semver_major_minor() {
-        let v = parse_semver("v4.1").unwrap();
-        assert_eq!(v.major, 4);
-        assert_eq!(v.minor, 1);
-        assert_eq!(v.patch, 0);
-    }
-
-    #[test]
-    fn test_parse_semver_branch_returns_none() {
-        assert!(parse_semver("main").is_none());
-        assert!(parse_semver("develop").is_none());
-    }
-
-    #[test]
-    fn test_parse_semver_sha_returns_none() {
-        assert!(parse_semver("a1b2c3d4e5f6").is_none());
     }
 
     #[test]
@@ -569,6 +427,15 @@ mod tests {
         assert_eq!(
             Version::from("v3-alpha").specifier(),
             Some("^3-alpha".to_string())
+        );
+    }
+
+    #[test]
+    fn test_version_specifier_uses_parse_semver() {
+        // Ensure that Version::highest and parse_semver integration works correctly
+        assert_eq!(
+            Version::highest(&[Version::from("v4"), Version::from("main")]),
+            Some(Version::from("v4"))
         );
     }
 }

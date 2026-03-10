@@ -1,7 +1,6 @@
 use std::fs::{File, create_dir_all};
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
-
 use time::OffsetDateTime;
 
 /// Writes timestamped log entries to a file in the OS temp directory.

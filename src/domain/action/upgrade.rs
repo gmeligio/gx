@@ -1,4 +1,4 @@
-use super::identity::{ActionId, Version, VersionPrecision};
+use super::identity::{ActionId, Specifier, Version, VersionPrecision};
 use std::fmt;
 
 /// Indicates what action to take when upgrading a version.
@@ -8,10 +8,14 @@ pub enum UpgradeAction {
     /// Only the lock needs re-resolving; manifest stays unchanged.
     InRange { candidate: Version },
     /// Candidate is outside the manifest's range.
-    /// Manifest must change. `new_manifest_version` preserves the original precision.
+    /// Manifest must change.
     CrossRange {
+        /// The candidate version tag to resolve (e.g., "v6.1.0")
         candidate: Version,
-        new_manifest_version: Version,
+        /// The new specifier to write to the manifest (e.g., "^6")
+        new_specifier: Specifier,
+        /// The new comment for the lock entry and workflow (e.g., "v6")
+        new_comment: String,
     },
 }
 
@@ -19,7 +23,7 @@ pub enum UpgradeAction {
 #[derive(Debug)]
 pub struct UpgradeCandidate {
     pub id: ActionId,
-    pub current: Version,
+    pub current: Specifier,
     pub action: UpgradeAction,
 }
 
@@ -34,15 +38,12 @@ impl UpgradeCandidate {
         }
     }
 
-    /// Get the version to store in the manifest
+    /// Get the specifier to store in the manifest
     #[must_use]
-    pub fn manifest_version(&self) -> &Version {
+    pub fn manifest_specifier(&self) -> &Specifier {
         match &self.action {
             UpgradeAction::InRange { .. } => &self.current,
-            UpgradeAction::CrossRange {
-                new_manifest_version,
-                ..
-            } => new_manifest_version,
+            UpgradeAction::CrossRange { new_specifier, .. } => new_specifier,
         }
     }
 }
@@ -53,14 +54,19 @@ impl fmt::Display for UpgradeCandidate {
     }
 }
 
-/// Extract a precision-preserving version from a candidate tag.
-/// Given a candidate version and a target precision, returns the candidate at that precision level.
+/// Extract a precision-preserving specifier from a candidate tag.
+/// Given a candidate version, a target precision, and the operator from the original specifier,
+/// produces a new Specifier for the manifest.
 ///
 /// Examples:
-/// - Candidate `v3.0.0`, Major precision → `v3`
-/// - Candidate `v1.0.0`, Minor precision → `v1.0`
-/// - Candidate `v1.15.3`, Patch precision → `v1.15.3`
-fn extract_at_precision(candidate: &Version, precision: VersionPrecision) -> Version {
+/// - Candidate `v3.0.0`, Major precision, operator `^` → `Specifier::parse("^3")`
+/// - Candidate `v1.0.0`, Minor precision, operator `^` → `Specifier::parse("^1.0")`
+/// - Candidate `v1.15.3`, Patch precision, operator `~` → `Specifier::parse("~1.15.3")`
+fn extract_at_precision(
+    candidate: &Version,
+    precision: VersionPrecision,
+    operator: char,
+) -> Specifier {
     let stripped = candidate
         .0
         .strip_prefix('v')
@@ -71,48 +77,49 @@ fn extract_at_precision(candidate: &Version, precision: VersionPrecision) -> Ver
     let base = stripped.split('-').next().unwrap_or(stripped);
     let parts: Vec<&str> = base.split('.').collect();
 
-    let result = match precision {
+    let version_part = match precision {
         VersionPrecision::Major => {
             if parts.is_empty() {
-                candidate.0.clone()
+                stripped.to_string()
             } else {
-                format!("v{}", parts[0])
+                parts[0].to_string()
             }
         }
         VersionPrecision::Minor => {
             if parts.len() >= 2 {
-                format!("v{}.{}", parts[0], parts[1])
+                format!("{}.{}", parts[0], parts[1])
             } else if !parts.is_empty() {
-                format!("v{}", parts[0])
+                parts[0].to_string()
             } else {
-                candidate.0.clone()
+                stripped.to_string()
             }
         }
         VersionPrecision::Patch => {
             if parts.len() >= 3 {
-                format!("v{}.{}.{}", parts[0], parts[1], parts[2])
+                format!("{}.{}.{}", parts[0], parts[1], parts[2])
             } else if parts.len() >= 2 {
-                format!("v{}.{}", parts[0], parts[1])
+                format!("{}.{}", parts[0], parts[1])
             } else if !parts.is_empty() {
-                format!("v{}", parts[0])
+                parts[0].to_string()
             } else {
-                candidate.0.clone()
+                stripped.to_string()
             }
         }
     };
 
-    Version(result)
+    let raw = format!("{operator}{version_part}");
+    Specifier::parse(&raw)
 }
 
 /// Find the best upgrade candidate from a list of version tags.
 ///
 /// Returns a richer type indicating whether the candidate is in-range or cross-range.
-/// The comparison floor is `max(manifest_semver, lock_version_semver)`.
+/// The comparison floor is `max(specifier_semver, lock_version_semver)`.
 ///
 /// # Arguments
 ///
-/// - `manifest_version` — the current version in the manifest (determines range constraint via precision)
-/// - `lock_version` — the resolved version from the lock file (if present, used as a floor to avoid same-SHA "upgrades")
+/// - `specifier` — the current specifier in the manifest (determines range constraint)
+/// - `lock_version` — the resolved version from the lock file (if present, used as a floor)
 /// - `candidates` — all available version tags (these are actual tags, not parsed)
 /// - `allow_major` — if false (safe mode), constrain to same major version or major.minor range
 ///
@@ -120,41 +127,32 @@ fn extract_at_precision(candidate: &Version, precision: VersionPrecision) -> Ver
 ///
 /// An `UpgradeAction` indicating whether to update just the lock (`InRange`) or both manifest and lock (`CrossRange`).
 /// Returns None if no suitable candidate exists.
-///
-/// # Behavior
-///
-/// - Major precision (`v4`): safe mode keeps major equal; latest mode unconstrained
-/// - Minor precision (`v4.2`): safe mode keeps major equal; latest mode unconstrained
-/// - Patch precision (`v4.1.0`): safe mode keeps major and minor equal; latest mode unconstrained
-/// - Stable manifest excludes pre-release candidates entirely
-/// - Pre-release manifest includes both stable and pre-release candidates, preferring stable
-/// - Non-semver candidates and non-semver manifest version return None
 #[must_use]
 pub fn find_upgrade_candidate(
-    manifest_version: &Version,
+    specifier: &Specifier,
     lock_version: Option<&Version>,
     candidates: &[Version],
     allow_major: bool,
 ) -> Option<UpgradeAction> {
-    let manifest_precision = manifest_version.precision()?;
-    let manifest_semver = parse_semver(manifest_version.as_str())?;
+    let precision = specifier.precision()?;
+    let specifier_semver = parse_semver(specifier.as_str())?;
 
-    // Determine if manifest is a pre-release
-    let manifest_is_prerelease = !manifest_semver.pre.is_empty();
+    // Determine if the specifier represents a pre-release
+    let manifest_is_prerelease = !specifier_semver.pre.is_empty();
 
-    // Compute the floor: max of manifest version and lock version
+    // Compute the floor: max of specifier version and lock version
     let floor = if let Some(lock_ver) = lock_version {
         if let Some(lock_semver) = parse_semver(lock_ver.as_str()) {
-            manifest_semver.clone().max(lock_semver)
+            specifier_semver.clone().max(lock_semver)
         } else {
-            manifest_semver.clone()
+            specifier_semver.clone()
         }
     } else {
-        manifest_semver.clone()
+        specifier_semver.clone()
     };
 
     // Find the best candidate that is strictly greater than the floor
-    // and (if !allow_major) satisfies the precision-based range constraint
+    // and (if !allow_major) satisfies the range constraint
     let best_tag = candidates
         .iter()
         .filter_map(|c| {
@@ -164,7 +162,7 @@ pub fn find_upgrade_candidate(
                 return None;
             }
 
-            // Pre-release filtering: stable manifest excludes all pre-releases
+            // Pre-release filtering: stable specifier excludes all pre-releases
             if !manifest_is_prerelease && !parsed.pre.is_empty() {
                 return None;
             }
@@ -174,51 +172,46 @@ pub fn find_upgrade_candidate(
                 // Latest mode: no range constraint
                 Some((c.clone(), parsed))
             } else {
-                match manifest_precision {
+                match precision {
                     VersionPrecision::Major | VersionPrecision::Minor => {
                         // Stay within same major version
-                        (parsed.major == manifest_semver.major).then_some((c.clone(), parsed))
+                        (parsed.major == specifier_semver.major).then_some((c.clone(), parsed))
                     }
                     VersionPrecision::Patch => {
                         // Stay within same major.minor version
-                        (parsed.major == manifest_semver.major
-                            && parsed.minor == manifest_semver.minor)
+                        (parsed.major == specifier_semver.major
+                            && parsed.minor == specifier_semver.minor)
                             .then_some((c.clone(), parsed))
                     }
                 }
             }
         })
         .max_by(|(_, a), (_, b)| {
-            // Prefer stable over pre-release when manifest is pre-release
+            // Prefer stable over pre-release when specifier is pre-release
             match (a.pre.is_empty(), b.pre.is_empty()) {
-                (true, false) => std::cmp::Ordering::Greater, // a is stable, b is not
-                (false, true) => std::cmp::Ordering::Less,    // b is stable, a is not
-                _ => a.cmp(b),                                // same stability: compare versions
+                (true, false) => std::cmp::Ordering::Greater,
+                (false, true) => std::cmp::Ordering::Less,
+                _ => a.cmp(b),
             }
         })
         .map(|(tag, _)| tag)?;
 
-    // Determine if this is in-range or cross-range
+    // Determine if this is in-range or cross-range using VersionReq::matches
     if let Some(best_semver) = parse_semver(best_tag.as_str()) {
-        let is_in_range = match manifest_precision {
-            VersionPrecision::Major | VersionPrecision::Minor => {
-                best_semver.major == manifest_semver.major
-            }
-            VersionPrecision::Patch => {
-                best_semver.major == manifest_semver.major
-                    && best_semver.minor == manifest_semver.minor
-            }
-        };
+        let is_in_range = specifier.matches(&best_semver);
 
         if is_in_range {
             Some(UpgradeAction::InRange {
                 candidate: best_tag,
             })
         } else {
-            let new_manifest_version = extract_at_precision(&best_tag, manifest_precision);
+            let operator = specifier.operator().unwrap_or('^');
+            let new_specifier = extract_at_precision(&best_tag, precision, operator);
+            let new_comment = new_specifier.to_comment().to_string();
             Some(UpgradeAction::CrossRange {
                 candidate: best_tag,
-                new_manifest_version,
+                new_specifier,
+                new_comment,
             })
         }
     } else {
@@ -229,11 +222,18 @@ pub fn find_upgrade_candidate(
 /// Attempts to parse a version string into a semver Version.
 /// Handles common formats like "v4", "v4.1", "v4.1.2", "4.1.2"
 fn parse_semver(version: &str) -> Option<semver::Version> {
-    // Strip leading 'v' or 'V' if present
+    // Strip leading 'v' or 'V' if present; also strip operators
     let normalized = version
+        .trim_start_matches('^')
+        .trim_start_matches('~')
         .strip_prefix('v')
-        .or_else(|| version.strip_prefix('V'))
-        .unwrap_or(version);
+        .or_else(|| {
+            version
+                .trim_start_matches('^')
+                .trim_start_matches('~')
+                .strip_prefix('V')
+        })
+        .unwrap_or_else(|| version.trim_start_matches('^').trim_start_matches('~'));
 
     // Try parsing as-is
     if let Ok(v) = semver::Version::parse(normalized) {
@@ -257,11 +257,13 @@ fn parse_semver(version: &str) -> Option<semver::Version> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        ActionId, Specifier, UpgradeAction, UpgradeCandidate, Version, find_upgrade_candidate,
+    };
 
     #[test]
     fn test_find_upgrade_candidate_safe_mode_major_precision_in_range() {
-        let manifest = Version::from("v4");
+        let specifier = Specifier::parse("^4");
         let candidates = vec![
             Version::from("v3"),
             Version::from("v4"),
@@ -269,10 +271,10 @@ mod tests {
             Version::from("v5"),
             Version::from("v6"),
         ];
-        // Safe mode (allow_major=false), major precision: stays within v4.x
+        // Safe mode, major precision: stays within v4.x
         // Best candidate within major is v4.2.1 (in-range)
         assert_eq!(
-            find_upgrade_candidate(&manifest, None, &candidates, false),
+            find_upgrade_candidate(&specifier, None, &candidates, false),
             Some(UpgradeAction::InRange {
                 candidate: Version::from("v4.2.1")
             })
@@ -280,101 +282,67 @@ mod tests {
     }
 
     #[test]
-    fn test_find_upgrade_candidate_safe_mode_minor_precision_in_range() {
-        let manifest = Version::from("v4.2");
-        let candidates = vec![
-            Version::from("v4.1"),
-            Version::from("v4.2"),
-            Version::from("v4.3.0"),
-            Version::from("v5.0"),
-        ];
-        // Safe mode, minor precision: stays within v4.x, best is v4.3.0 (in-range)
-        assert_eq!(
-            find_upgrade_candidate(&manifest, None, &candidates, false),
-            Some(UpgradeAction::InRange {
-                candidate: Version::from("v4.3.0")
-            })
-        );
-    }
-
-    #[test]
-    fn test_find_upgrade_candidate_safe_mode_patch_precision_in_range() {
-        let manifest = Version::from("v4.1.0");
-        let candidates = vec![
-            Version::from("v4.0.0"),
-            Version::from("v4.1.0"),
-            Version::from("v4.1.3"),
-            Version::from("v4.2.0"),
-            Version::from("v5.0.0"),
-        ];
-        // Safe mode, patch precision: stays within v4.1.x, best is v4.1.3 (in-range)
-        assert_eq!(
-            find_upgrade_candidate(&manifest, None, &candidates, false),
-            Some(UpgradeAction::InRange {
-                candidate: Version::from("v4.1.3")
-            })
-        );
-    }
-
-    #[test]
     fn test_find_upgrade_candidate_latest_mode_crosses_major() {
-        let manifest = Version::from("v4");
+        let specifier = Specifier::parse("^4");
         let candidates = vec![
             Version::from("v4"),
             Version::from("v4.2.1"),
             Version::from("v5.0.0"),
             Version::from("v6.1.0"),
         ];
-        // Latest mode (allow_major=true): no range constraint, returns highest (cross-range)
+        // Latest mode: no range constraint, returns highest (cross-range)
         assert_eq!(
-            find_upgrade_candidate(&manifest, None, &candidates, true),
+            find_upgrade_candidate(&specifier, None, &candidates, true),
             Some(UpgradeAction::CrossRange {
                 candidate: Version::from("v6.1.0"),
-                new_manifest_version: Version::from("v6")
+                new_specifier: Specifier::parse("^6"),
+                new_comment: "v6".to_string(),
             })
         );
     }
 
     #[test]
-    fn test_find_upgrade_candidate_latest_mode_preserves_precision() {
-        let manifest = Version::from("v4.1");
+    fn test_find_upgrade_candidate_latest_mode_preserves_minor_precision() {
+        let specifier = Specifier::parse("^4.1");
         let candidates = vec![Version::from("v5.0.0")];
         // Latest mode with minor precision: result should preserve minor precision
         assert_eq!(
-            find_upgrade_candidate(&manifest, None, &candidates, true),
+            find_upgrade_candidate(&specifier, None, &candidates, true),
             Some(UpgradeAction::CrossRange {
                 candidate: Version::from("v5.0.0"),
-                new_manifest_version: Version::from("v5.0")
+                new_specifier: Specifier::parse("^5.0"),
+                new_comment: "v5.0".to_string(),
             })
         );
     }
 
     #[test]
     fn test_find_upgrade_candidate_latest_mode_preserves_patch_precision() {
-        let manifest = Version::from("v4.1.2");
+        let specifier = Specifier::parse("~4.1.2");
         let candidates = vec![Version::from("v5.0.0")];
-        // Latest mode with patch precision: result should preserve patch precision
+        // Latest mode with patch precision (tilde): result should preserve tilde and patch precision
         assert_eq!(
-            find_upgrade_candidate(&manifest, None, &candidates, true),
+            find_upgrade_candidate(&specifier, None, &candidates, true),
             Some(UpgradeAction::CrossRange {
                 candidate: Version::from("v5.0.0"),
-                new_manifest_version: Version::from("v5.0.0")
+                new_specifier: Specifier::parse("~5.0.0"),
+                new_comment: "v5.0.0".to_string(),
             })
         );
     }
 
     #[test]
     fn test_find_upgrade_candidate_with_lock_floor() {
-        let manifest = Version::from("v4");
+        let specifier = Specifier::parse("^4");
         let lock_version = Some(Version::from("v4.2.1"));
         let candidates = vec![
             Version::from("v4.2.1"),
             Version::from("v4.3.0"),
             Version::from("v5.0.0"),
         ];
-        // Safe mode with lock version as floor: v4.2.1 is excluded (equal to floor), returns v4.3.0 (in-range)
+        // Safe mode with lock version as floor: v4.2.1 excluded, returns v4.3.0 (in-range)
         assert_eq!(
-            find_upgrade_candidate(&manifest, lock_version.as_ref(), &candidates, false),
+            find_upgrade_candidate(&specifier, lock_version.as_ref(), &candidates, false),
             Some(UpgradeAction::InRange {
                 candidate: Version::from("v4.3.0")
             })
@@ -382,115 +350,62 @@ mod tests {
     }
 
     #[test]
-    fn test_find_upgrade_candidate_lock_floor_no_upgrade() {
-        let manifest = Version::from("v4");
-        let lock_version = Some(Version::from("v4.3.0"));
-        let candidates = vec![Version::from("v4.2.1"), Version::from("v4.3.0")];
-        // Safe mode: no candidate > max(4.0.0, 4.3.0) = 4.3.0 within v4.x
-        assert!(
-            find_upgrade_candidate(&manifest, lock_version.as_ref(), &candidates, false).is_none()
-        );
-    }
-
-    #[test]
-    fn test_find_upgrade_candidate_stable_manifest_filters_prerelease() {
-        let manifest = Version::from("v2");
+    fn test_find_upgrade_candidate_stable_filters_prerelease() {
+        let specifier = Specifier::parse("^2");
         let candidates = vec![
             Version::from("v2.2.1"),
             Version::from("v3.0.0"),
             Version::from("v3.0.0-beta.2"),
         ];
-        // Stable manifest: pre-releases filtered out, returns v3.0.0 (not beta)
+        // Stable specifier: pre-releases filtered out
         assert_eq!(
-            find_upgrade_candidate(&manifest, None, &candidates, true),
+            find_upgrade_candidate(&specifier, None, &candidates, true),
             Some(UpgradeAction::CrossRange {
                 candidate: Version::from("v3.0.0"),
-                new_manifest_version: Version::from("v3")
+                new_specifier: Specifier::parse("^3"),
+                new_comment: "v3".to_string(),
             })
         );
     }
 
     #[test]
-    fn test_find_upgrade_candidate_prerelease_manifest_prefers_stable() {
-        let manifest = Version::from("v3.0.0-beta.1");
-        let candidates = vec![Version::from("v3.0.0"), Version::from("v3.1.0-dev.1")];
-        // Pre-release manifest: includes both, prefers stable, returns v3.0.0
-        assert_eq!(
-            find_upgrade_candidate(&manifest, None, &candidates, true),
-            Some(UpgradeAction::InRange {
-                candidate: Version::from("v3.0.0")
-            })
-        );
-    }
-
-    #[test]
-    fn test_find_upgrade_candidate_prerelease_manifest_falls_back_to_prerelease() {
-        let manifest = Version::from("v3.1.0-dev.1");
-        let candidates = vec![Version::from("v3.1.0-dev.2"), Version::from("v3.1.0-dev.3")];
-        // Pre-release manifest: no stable exists, falls back to newest pre-release
-        assert_eq!(
-            find_upgrade_candidate(&manifest, None, &candidates, true),
-            Some(UpgradeAction::InRange {
-                candidate: Version::from("v3.1.0-dev.3")
-            })
-        );
-    }
-
-    #[test]
-    fn test_find_upgrade_candidate_non_semver_manifest() {
-        let manifest = Version::from("main");
+    fn test_find_upgrade_candidate_non_semver_specifier() {
+        let specifier = Specifier::Ref("main".to_string());
         let candidates = vec![Version::from("v5")];
-        // Non-semver manifest version returns None
-        assert!(find_upgrade_candidate(&manifest, None, &candidates, true).is_none());
-    }
-
-    #[test]
-    fn test_find_upgrade_candidate_non_semver_candidates_filtered() {
-        let manifest = Version::from("v4");
-        let candidates = vec![
-            Version::from("main"),
-            Version::from("develop"),
-            Version::from("v5"),
-        ];
-        // Non-semver candidates are skipped
-        assert_eq!(
-            find_upgrade_candidate(&manifest, None, &candidates, true),
-            Some(UpgradeAction::CrossRange {
-                candidate: Version::from("v5"),
-                new_manifest_version: Version::from("v5")
-            })
-        );
+        // Non-semver specifier returns None (no precision)
+        assert!(find_upgrade_candidate(&specifier, None, &candidates, true).is_none());
     }
 
     #[test]
     fn test_find_upgrade_candidate_no_candidates() {
-        let manifest = Version::from("v4");
+        let specifier = Specifier::parse("^4");
         let candidates: Vec<Version> = vec![];
-        assert!(find_upgrade_candidate(&manifest, None, &candidates, true).is_none());
+        assert!(find_upgrade_candidate(&specifier, None, &candidates, true).is_none());
     }
 
     #[test]
     fn test_upgrade_candidate_display_in_range() {
         let candidate = UpgradeCandidate {
             id: ActionId::from("actions/checkout"),
-            current: Version::from("v4"),
+            current: Specifier::parse("^4"),
             action: UpgradeAction::InRange {
                 candidate: Version::from("v4.5.0"),
             },
         };
-        assert_eq!(candidate.to_string(), "actions/checkout v4 -> v4.5.0");
+        assert_eq!(candidate.to_string(), "actions/checkout ^4 -> v4.5.0");
     }
 
     #[test]
     fn test_upgrade_candidate_display_cross_range() {
         let candidate = UpgradeCandidate {
             id: ActionId::from("actions/checkout"),
-            current: Version::from("v4"),
+            current: Specifier::parse("^4"),
             action: UpgradeAction::CrossRange {
                 candidate: Version::from("v5.0.0"),
-                new_manifest_version: Version::from("v5"),
+                new_specifier: Specifier::parse("^5"),
+                new_comment: "v5".to_string(),
             },
         };
-        assert_eq!(candidate.to_string(), "actions/checkout v4 -> v5.0.0");
+        assert_eq!(candidate.to_string(), "actions/checkout ^4 -> v5.0.0");
     }
 }

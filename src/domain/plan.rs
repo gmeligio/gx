@@ -1,13 +1,12 @@
+use super::{ActionId, ActionOverride, LockEntry, LockKey, Specifier};
 use std::path::PathBuf;
-
-use super::{ActionId, ActionOverride, LockEntry, LockKey, Version};
 
 /// Describes the changes to apply to a manifest file.
 #[derive(Debug, Default)]
 pub struct ManifestDiff {
-    pub added: Vec<(ActionId, Version)>,
+    pub added: Vec<(ActionId, Specifier)>,
     pub removed: Vec<ActionId>,
-    pub updated: Vec<(ActionId, Version)>,
+    pub updated: Vec<(ActionId, Specifier)>,
     pub overrides_added: Vec<(ActionId, ActionOverride)>,
     pub overrides_removed: Vec<(ActionId, Vec<ActionOverride>)>,
 }
@@ -27,7 +26,7 @@ impl ManifestDiff {
 #[derive(Debug)]
 pub struct LockEntryPatch {
     pub version: Option<Option<String>>,
-    pub specifier: Option<Option<String>>,
+    pub comment: Option<String>,
 }
 
 /// Describes the changes to apply to a lock file.
@@ -54,7 +53,8 @@ pub struct WorkflowPatch {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{ActionId, LockDiff, LockEntry, LockKey, ManifestDiff, Specifier};
+    use crate::domain::{CommitSha, RefType};
 
     #[test]
     fn manifest_diff_is_empty_when_default() {
@@ -65,7 +65,7 @@ mod tests {
     #[test]
     fn manifest_diff_is_not_empty_after_adding_entry() {
         let diff = ManifestDiff {
-            added: vec![(ActionId::from("actions/checkout"), Version::from("v4"))],
+            added: vec![(ActionId::from("actions/checkout"), Specifier::parse("^4"))],
             ..Default::default()
         };
         assert!(!diff.is_empty());
@@ -79,11 +79,9 @@ mod tests {
 
     #[test]
     fn lock_diff_is_not_empty_after_adding_entry() {
-        use crate::domain::{CommitSha, RefType};
-
         let diff = LockDiff {
             added: vec![(
-                LockKey::new(ActionId::from("actions/checkout"), Version::from("v4")),
+                LockKey::new(ActionId::from("actions/checkout"), Specifier::parse("^4")),
                 LockEntry::new(
                     CommitSha::from("abc123"),
                     "actions/checkout".to_string(),

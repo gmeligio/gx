@@ -1,15 +1,22 @@
-use std::path::Path;
+pub mod report;
+mod sha_mismatch;
+mod stale_comment;
+mod unpinned;
+mod unsynced_manifest;
 
-use self::report::LintReport;
+use crate::command::Command;
 use crate::config::{Config, IgnoreTarget, Level, LintConfig};
 use crate::domain::{
     LocatedAction, Lock, Manifest, WorkflowActionSet, WorkflowError, WorkflowScanner,
 };
 use crate::infra::FileWorkflowScanner;
+use report::LintReport;
+use sha_mismatch::ShaMismatchRule;
+use stale_comment::StaleCommentRule;
+use std::path::Path;
 use thiserror::Error;
-
-use crate::domain::AppError;
-use crate::domain::Command;
+use unpinned::UnpinnedRule;
+use unsynced_manifest::UnsyncedManifestRule;
 
 /// Errors that can occur during the lint command
 #[derive(Debug, Error)]
@@ -252,29 +259,19 @@ fn matches_ignore_action(diag: &Diagnostic, target: &IgnoreTarget, action: &Loca
     true
 }
 
-pub mod report;
-mod sha_mismatch;
-mod stale_comment;
-mod unpinned;
-mod unsynced_manifest;
-
-use sha_mismatch::ShaMismatchRule;
-use stale_comment::StaleCommentRule;
-use unpinned::UnpinnedRule;
-use unsynced_manifest::UnsyncedManifestRule;
-
 /// The lint command struct.
 pub struct Lint;
 
 impl Command for Lint {
     type Report = LintReport;
+    type Error = LintError;
 
     fn run(
         &self,
         repo_root: &Path,
         config: Config,
         on_progress: &mut dyn FnMut(&str),
-    ) -> Result<LintReport, AppError> {
+    ) -> Result<LintReport, LintError> {
         let scanner = FileWorkflowScanner::new(repo_root);
 
         let diagnostics = collect_diagnostics(
@@ -291,7 +288,7 @@ impl Command for Lint {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{Diagnostic, Level};
 
     #[test]
     fn diagnostic_can_be_created() {

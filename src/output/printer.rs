@@ -1,8 +1,7 @@
+use super::lines::OutputLine;
 use console::Term;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use std::time::Duration;
-
-use super::lines::OutputLine;
 
 /// Terminal output handler: detects CI/TTY/color and prints `OutputLine` values.
 pub struct Printer {

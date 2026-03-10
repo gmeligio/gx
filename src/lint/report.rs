@@ -1,6 +1,6 @@
+use super::Diagnostic;
+use crate::command::CommandReport;
 use crate::config::Level;
-use crate::domain::CommandReport;
-use crate::lint::Diagnostic;
 use crate::output::OutputLine;
 
 /// Report from the lint command.

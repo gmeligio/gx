@@ -1,15 +1,13 @@
-use std::collections::BTreeMap;
-use std::env;
-use std::path::{Path, PathBuf};
-
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
-
 use crate::domain::{Lock, Manifest};
 use crate::infra::{
     LOCK_FILE_NAME, LockFileError, MANIFEST_FILE_NAME, ManifestError, parse_lint_config,
     parse_lock, parse_manifest,
 };
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::env;
+use std::path::{Path, PathBuf};
+use thiserror::Error;
 
 /// Errors that can occur when loading configuration.
 #[derive(Debug, Error)]
@@ -93,6 +91,10 @@ pub struct Config {
     pub lint_config: LintConfig,
     pub manifest_path: PathBuf,
     pub lock_path: PathBuf,
+    /// Whether the manifest was auto-migrated from v1 format on load.
+    pub manifest_migrated: bool,
+    /// Whether the lock file was auto-migrated from an older format on load.
+    pub lock_migrated: bool,
 }
 
 impl Settings {
@@ -116,10 +118,14 @@ impl Config {
     pub fn load(repo_root: &Path) -> Result<Self, ConfigError> {
         let manifest_path = repo_root.join(".github").join(MANIFEST_FILE_NAME);
         let lock_path = repo_root.join(".github").join(LOCK_FILE_NAME);
+        let parsed_manifest = parse_manifest(&manifest_path)?;
+        let parsed_lock = parse_lock(&lock_path)?;
         Ok(Self {
             settings: Settings::from_env(),
-            manifest: parse_manifest(&manifest_path)?,
-            lock: parse_lock(&lock_path)?,
+            manifest: parsed_manifest.value,
+            manifest_migrated: parsed_manifest.migrated,
+            lock: parsed_lock.value,
+            lock_migrated: parsed_lock.migrated,
             lint_config: parse_lint_config(&manifest_path)?,
             manifest_path,
             lock_path,
@@ -129,7 +135,10 @@ impl Config {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        Config, Deserialize, IgnoreTarget, Level, LintConfig, Lock, Manifest, PathBuf, RuleConfig,
+        Settings,
+    };
 
     #[derive(Deserialize)]
     struct LevelWrapper {
@@ -153,6 +162,8 @@ mod tests {
             lint_config: LintConfig::default(),
             manifest_path: PathBuf::from("gx.toml"),
             lock_path: PathBuf::from("gx.lock"),
+            manifest_migrated: false,
+            lock_migrated: false,
         };
         assert_eq!(config.settings.github_token, Some("test_token".to_string()));
     }

@@ -19,7 +19,7 @@ use tempfile::TempDir;
 fn run_tidy_with_registry<R: VersionRegistry + Clone>(
     repo_root: &Path,
     registry: &R,
-) -> Result<(), gx::domain::AppError> {
+) -> Result<(), gx::tidy::TidyRunError> {
     let manifest_path = repo_root.join(".github").join("gx.toml");
     let lock_path = repo_root.join(".github").join("gx.lock");
     let scanner = FileWorkflowScanner::new(repo_root);
@@ -27,11 +27,11 @@ fn run_tidy_with_registry<R: VersionRegistry + Clone>(
     let has_manifest = manifest_path.exists();
 
     let manifest = if has_manifest {
-        parse_manifest(&manifest_path)?
+        parse_manifest(&manifest_path)?.value
     } else {
         Manifest::default()
     };
-    let lock = parse_lock(&lock_path)?;
+    let lock = parse_lock(&lock_path)?.value;
 
     let plan = tidy::plan(&manifest, &lock, registry, &scanner, |_| {})?;
 
@@ -51,7 +51,7 @@ fn run_tidy_with_registry<R: VersionRegistry + Clone>(
     Ok(())
 }
 
-fn run_tidy(repo_root: &Path) -> Result<(), gx::domain::AppError> {
+fn run_tidy(repo_root: &Path) -> Result<(), gx::tidy::TidyRunError> {
     run_tidy_with_registry(repo_root, &FakeRegistry::new())
 }
 
@@ -133,9 +133,9 @@ jobs:
 
     let manifest_content = fs::read_to_string(&manifest_path).unwrap();
     assert!(manifest_content.contains("actions/checkout"));
-    assert!(manifest_content.contains("v4"));
+    assert!(manifest_content.contains("^4"));
     assert!(manifest_content.contains("actions/setup-node"));
-    assert!(manifest_content.contains("v3"));
+    assert!(manifest_content.contains("^3"));
 }
 
 #[test]
@@ -429,7 +429,7 @@ jobs:
     let manifest_content = fs::read_to_string(&manifest_path).unwrap();
 
     assert!(manifest_content.contains("[actions]"));
-    assert!(manifest_content.contains("\"actions/checkout\" = \"v4\""));
+    assert!(manifest_content.contains("\"actions/checkout\" = \"^4\""));
 
     assert!(!manifest_content.contains("[workflows"));
 }
@@ -467,7 +467,7 @@ jobs:
     let manifest_path = root.join(".github").join("gx.toml");
     let manifest_content = fs::read_to_string(&manifest_path).unwrap();
 
-    assert!(manifest_content.contains("\"actions/checkout\" = \"v4\""));
+    assert!(manifest_content.contains("\"actions/checkout\" = \"^4\""));
     assert!(!manifest_content.contains("[workflows"));
 }
 
@@ -532,8 +532,8 @@ jobs:
     let manifest_path = root.join(".github").join("gx.toml");
     let manifest_content = fs::read_to_string(&manifest_path).unwrap();
 
-    assert!(manifest_content.contains("\"actions/checkout\" = \"v4\""));
-    assert!(manifest_content.contains("\"actions/setup-node\" = \"v3\""));
+    assert!(manifest_content.contains("\"actions/checkout\" = \"^4\""));
+    assert!(manifest_content.contains("\"actions/setup-node\" = \"^3\""));
 
     assert!(!manifest_content.contains("abc123def456"));
     assert!(!manifest_content.contains("xyz789"));
@@ -586,12 +586,12 @@ jobs:
     let manifest_content = fs::read_to_string(&manifest_path).unwrap();
 
     assert!(
-        manifest_content.contains("\"actions/checkout\" = \"v6.0.1\""),
-        "Expected v6.0.1 in manifest, got: {manifest_content}"
+        manifest_content.contains("\"actions/checkout\" = \"~6.0.1\""),
+        "Expected ~6.0.1 in manifest, got: {manifest_content}"
     );
     assert!(
-        manifest_content.contains("\"docker/login-action\" = \"v3.6.0\""),
-        "Expected v3.6.0 in manifest, got: {manifest_content}"
+        manifest_content.contains("\"docker/login-action\" = \"~3.6.0\""),
+        "Expected ~3.6.0 in manifest, got: {manifest_content}"
     );
 
     assert!(!manifest_content.contains("8e8c483db84b4bee98b60c0593521ed34d9990e8"));

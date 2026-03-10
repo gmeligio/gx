@@ -1,4 +1,4 @@
-use crate::domain::CommandReport;
+use crate::command::CommandReport;
 use crate::output::OutputLine;
 
 /// Report from the tidy command.
@@ -75,7 +75,7 @@ impl CommandReport for TidyReport {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{CommandReport, OutputLine, TidyReport};
 
     #[test]
     fn render_tidy_nothing_changed() {

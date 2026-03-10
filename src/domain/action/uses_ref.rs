@@ -105,7 +105,7 @@ pub struct InterpretedRef {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{CommitSha, RefType, UsesRef};
 
     #[test]
     fn test_ref_type_display() {

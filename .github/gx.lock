@@ -1,12 +1,12 @@
-version = "1.3"
+version = "1.4"
 
 [actions]
-"actions-rust-lang/rustfmt@v1" = { sha = "4066006ec54a31931b9b1fddfd38f2fdf2d27143", version = "v1.1.2", specifier = "^1", repository = "actions-rust-lang/rustfmt", ref_type = "tag", date = "2025-12-14T19:52:54Z" }
-"actions-rust-lang/setup-rust-toolchain@v1.15.2" = { sha = "1780873c7b576612439a134613cc4cc74ce5538c", version = "v1.15.2", specifier = "~1.15.2", repository = "actions-rust-lang/setup-rust-toolchain", ref_type = "tag", date = "2025-10-04T13:50:05Z" }
-"actions/checkout@v6" = { sha = "de0fac2e4500dabe0009e67214ff5f5447ce83dd", version = "v6.0.2", specifier = "^6", repository = "actions/checkout", ref_type = "tag", date = "2026-01-09T19:42:23Z" }
-"actions/create-github-app-token@v2" = { sha = "29824e69f54612133e76f7eaac726eef6c875baf", version = "v2.2.1", specifier = "^2", repository = "actions/create-github-app-token", ref_type = "tag", date = "2025-12-05T22:53:03Z" }
-"actions/download-artifact@v7" = { sha = "37930b1c2abaa49bbe596cd826c3c89aef350131", version = "v7.0.0", specifier = "^7", repository = "actions/download-artifact", ref_type = "tag", date = "2025-12-12T17:58:13Z" }
-"actions/upload-artifact@v6" = { sha = "b7c566a772e6b6bfb58ed0dc250532a479d7789f", version = "v6.0.0", specifier = "^6", repository = "actions/upload-artifact", ref_type = "tag", date = "2025-12-12T17:58:04Z" }
-"jdx/mise-action@v3" = { sha = "6d1e696aa24c1aa1bcc1adea0212707c71ab78a8", version = "v3.6.1", specifier = "^3", repository = "jdx/mise-action", ref_type = "tag", date = "2026-01-20T12:32:53Z" }
-"release-plz/action@v0.5" = { sha = "efc7a2b896608c31370cd499ba1518cda3ac5660", version = "v0.5", specifier = "^0.5", repository = "release-plz/action", ref_type = "tag", date = "2026-02-16T09:40:41Z" }
-"rust-lang/crates-io-auth-action@v1.0.3" = { sha = "b7e9a28eded4986ec6b1fa40eeee8f8f165559ec", version = "v1.0.3", specifier = "~1.0.3", repository = "rust-lang/crates-io-auth-action", ref_type = "tag", date = "2025-11-06T13:23:38Z" }
+"actions-rust-lang/rustfmt@^1" = { sha = "4066006ec54a31931b9b1fddfd38f2fdf2d27143", version = "v1.1.2", comment = "v1", repository = "actions-rust-lang/rustfmt", ref_type = "tag", date = "2025-12-14T19:52:54Z" }
+"actions-rust-lang/setup-rust-toolchain@~1.15.2" = { sha = "1780873c7b576612439a134613cc4cc74ce5538c", version = "v1.15.2", comment = "v1.15.2", repository = "actions-rust-lang/setup-rust-toolchain", ref_type = "tag", date = "2025-10-04T13:50:05Z" }
+"actions/checkout@^6" = { sha = "de0fac2e4500dabe0009e67214ff5f5447ce83dd", version = "v6.0.2", comment = "v6", repository = "actions/checkout", ref_type = "tag", date = "2026-01-09T19:42:23Z" }
+"actions/create-github-app-token@^2" = { sha = "29824e69f54612133e76f7eaac726eef6c875baf", version = "v2.2.1", comment = "v2", repository = "actions/create-github-app-token", ref_type = "tag", date = "2025-12-05T22:53:03Z" }
+"actions/download-artifact@^7" = { sha = "37930b1c2abaa49bbe596cd826c3c89aef350131", version = "v7.0.0", comment = "v7", repository = "actions/download-artifact", ref_type = "tag", date = "2025-12-12T17:58:13Z" }
+"actions/upload-artifact@^6" = { sha = "b7c566a772e6b6bfb58ed0dc250532a479d7789f", version = "v6.0.0", comment = "v6", repository = "actions/upload-artifact", ref_type = "tag", date = "2025-12-12T17:58:04Z" }
+"jdx/mise-action@^3" = { sha = "6d1e696aa24c1aa1bcc1adea0212707c71ab78a8", version = "v3.6.1", comment = "v3", repository = "jdx/mise-action", ref_type = "tag", date = "2026-01-20T12:32:53Z" }
+"release-plz/action@^0.5" = { sha = "1528104d2ca23787631a1c1f022abb64b34c1e11", version = "v0.5", comment = "v0.5", repository = "release-plz/action", ref_type = "tag", date = "2026-03-07T16:39:43Z" }
+"rust-lang/crates-io-auth-action@~1.0.3" = { sha = "b7e9a28eded4986ec6b1fa40eeee8f8f165559ec", version = "v1.0.3", comment = "v1.0.3", repository = "rust-lang/crates-io-auth-action", ref_type = "tag", date = "2025-11-06T13:23:38Z" }

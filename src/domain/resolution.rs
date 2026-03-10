@@ -1,7 +1,6 @@
-use std::collections::HashMap;
+use super::action::tag_selection::{ShaIndex, select_most_specific_tag};
+use super::{ActionId, ActionSpec, CommitSha, RefType, ResolvedAction, Specifier, Version};
 use thiserror::Error;
-
-use super::{ActionId, ActionSpec, CommitSha, RefType, ResolvedAction, Version};
 
 /// Errors that can occur during version resolution
 #[derive(Debug, Clone, Error)]
@@ -33,47 +32,6 @@ pub struct ShaDescription {
     pub tags: Vec<Version>,
     pub repository: String,
     pub date: String,
-}
-
-/// Accumulates `ShaDescription` results during a plan run, keyed by `(ActionId, CommitSha)`.
-/// Provides deduplication: `get_or_describe` calls the registry only on first access.
-pub struct ShaIndex {
-    cache: HashMap<(ActionId, CommitSha), ShaDescription>,
-}
-
-impl ShaIndex {
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            cache: HashMap::new(),
-        }
-    }
-
-    /// Return the cached description for `(id, sha)`, or call `describe_sha` and cache it.
-    ///
-    /// # Errors
-    ///
-    /// Propagates any error from `describe_sha`. On error, nothing is stored.
-    pub fn get_or_describe<R: VersionRegistry>(
-        &mut self,
-        registry: &R,
-        id: &ActionId,
-        sha: &CommitSha,
-    ) -> Result<&ShaDescription, ResolutionError> {
-        let key = (id.clone(), sha.clone());
-        if let std::collections::hash_map::Entry::Vacant(entry) = self.cache.entry(key.clone()) {
-            let desc = registry.describe_sha(id, sha)?;
-            entry.insert(desc);
-        }
-        // SAFETY: key was just inserted above if it was missing
-        Ok(&self.cache[&key])
-    }
-}
-
-impl Default for ShaIndex {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 /// The result of resolving a ref to its metadata
@@ -162,7 +120,8 @@ impl<'a, R: VersionRegistry> ActionResolver<'a, R> {
     ///
     /// Returns `ResolutionError` if the registry lookup fails.
     pub fn resolve(&self, spec: &ActionSpec) -> Result<ResolvedAction, ResolutionError> {
-        let resolved_ref = self.registry.lookup_sha(&spec.id, &spec.version)?;
+        let lookup_version = Version::from(spec.version.to_comment());
+        let resolved_ref = self.registry.lookup_sha(&spec.id, &lookup_version)?;
         Ok(ResolvedAction::new(
             spec.id.clone(),
             spec.version.clone(),
@@ -195,7 +154,7 @@ impl<'a, R: VersionRegistry> ActionResolver<'a, R> {
         };
         Ok(ResolvedAction::new(
             id.clone(),
-            version,
+            Specifier::from_v1(version.as_str()),
             sha.clone(),
             desc.repository.clone(),
             ref_type,
@@ -232,49 +191,16 @@ impl<'a, R: VersionRegistry> ActionResolver<'a, R> {
     }
 }
 
-/// Parse a version string (with optional 'v' prefix) into numeric components.
-/// Returns `None` if any component is non-numeric.
-fn parse_version_components(s: &str) -> Option<Vec<u64>> {
-    let stripped = s.trim_start_matches('v');
-    stripped.split('.').map(|p| p.parse::<u64>().ok()).collect()
-}
-
-/// Select the most specific version tag from a list.
-/// Prefers semver-like tags with more components (patch over minor over major),
-/// then highest version value among equal component counts, with non-semver tags last.
-#[must_use]
-pub fn select_most_specific_tag(tags: &[Version]) -> Option<Version> {
-    if tags.is_empty() {
-        return None;
-    }
-
-    let mut indexed: Vec<(&Version, Option<Vec<u64>>)> = tags
-        .iter()
-        .map(|t| (t, parse_version_components(t.as_str())))
-        .collect();
-
-    // Sort: semver-like tags first (more components preferred: v4.1.0 > v4.1 > v4),
-    // then highest version value wins among equal component counts, non-semver tags last.
-    indexed.sort_by(|(_, av), (_, bv)| match (av, bv) {
-        (None, None) => std::cmp::Ordering::Equal,
-        (Some(_), None) => std::cmp::Ordering::Less,
-        (None, Some(_)) => std::cmp::Ordering::Greater,
-        (Some(av), Some(bv)) => {
-            let a_len = av.len();
-            let b_len = bv.len();
-            match b_len.cmp(&a_len) {
-                std::cmp::Ordering::Equal => bv.cmp(av), // higher version wins (descending)
-                other => other,                          // more components wins (descending)
-            }
-        }
-    });
-
-    indexed.first().map(|(t, _)| (*t).clone())
-}
+#[cfg(test)]
+#[path = "resolution_testutil.rs"]
+pub(crate) mod testutil;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        ActionId, ActionResolver, ActionSpec, CommitSha, RefType, ResolutionError, ResolvedRef,
+        ShaDescription, ShaIndex, Specifier, Version, VersionRegistry,
+    };
 
     struct MockRegistry {
         resolve_result: Result<ResolvedRef, ResolutionError>,
@@ -330,12 +256,12 @@ mod tests {
         };
         let service = ActionResolver::new(&mock_registry);
 
-        let spec = ActionSpec::new(ActionId::from("actions/checkout"), Version::from("v4"));
+        let spec = ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
         let result = service.resolve(&spec);
 
         let resolved = result.expect("Expected Ok result");
         assert_eq!(resolved.id.as_str(), "actions/checkout");
-        assert_eq!(resolved.version.as_str(), "v4");
+        assert_eq!(resolved.version.to_comment(), "v4");
         assert_eq!(
             resolved.sha.as_str(),
             "abc123def456789012345678901234567890abcd"
@@ -346,14 +272,14 @@ mod tests {
     fn test_resolve_failure() {
         let registry = MockRegistry {
             resolve_result: Err(ResolutionError::ResolveFailed {
-                spec: ActionSpec::new(ActionId::from("actions/checkout"), Version::from("v4")),
+                spec: ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4")),
                 reason: "not found".to_string(),
             }),
             tags_result: Ok(vec![]),
         };
         let service = ActionResolver::new(&registry);
 
-        let spec = ActionSpec::new(ActionId::from("actions/checkout"), Version::from("v4"));
+        let spec = ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
         let result = service.resolve(&spec);
 
         assert!(result.is_err());
@@ -431,7 +357,7 @@ mod tests {
             .resolve_from_sha(&id, &sha, &mut sha_index)
             .expect("Expected Ok result");
 
-        assert_eq!(result.version.as_str(), "v3.6.1");
+        assert_eq!(result.version.to_comment(), "v3.6.1");
         assert_eq!(result.sha, sha);
         assert_eq!(result.ref_type, Some(RefType::Tag));
         assert_eq!(result.repository, "owner/repo");
@@ -481,68 +407,6 @@ mod tests {
     }
 
     #[test]
-    fn test_select_most_specific_tag_empty() {
-        assert_eq!(select_most_specific_tag(&[]), None);
-    }
-
-    #[test]
-    fn test_select_most_specific_tag_single() {
-        let tags = vec![Version::from("v4")];
-        assert_eq!(select_most_specific_tag(&tags), Some(Version::from("v4")));
-    }
-
-    #[test]
-    fn test_select_most_specific_tag_prefers_patch_over_major() {
-        let tags = vec![Version::from("v4.1.0"), Version::from("v4")];
-        assert_eq!(
-            select_most_specific_tag(&tags),
-            Some(Version::from("v4.1.0"))
-        );
-    }
-
-    #[test]
-    fn test_select_most_specific_tag_prefers_minor_over_major() {
-        let tags = vec![Version::from("v4.1"), Version::from("v4")];
-        assert_eq!(select_most_specific_tag(&tags), Some(Version::from("v4.1")));
-    }
-
-    #[test]
-    fn test_select_most_specific_tag_three_tiers() {
-        let tags = vec![
-            Version::from("v3"),
-            Version::from("v3.6"),
-            Version::from("v3.6.1"),
-        ];
-        assert_eq!(
-            select_most_specific_tag(&tags),
-            Some(Version::from("v3.6.1"))
-        );
-    }
-
-    #[test]
-    fn test_select_most_specific_tag_non_semver_sorted_last() {
-        let tags = vec![Version::from("latest"), Version::from("v4")];
-        assert_eq!(select_most_specific_tag(&tags), Some(Version::from("v4")));
-    }
-
-    #[test]
-    fn test_select_most_specific_tag_all_non_semver_returns_first() {
-        let tags = vec![Version::from("latest"), Version::from("stable")];
-        // No semver tags — returns the first one
-        assert!(select_most_specific_tag(&tags).is_some());
-    }
-
-    #[test]
-    fn test_select_most_specific_tag_higher_major_wins_among_same_precision() {
-        let tags = vec![
-            Version::from("v3"),
-            Version::from("v4"),
-            Version::from("v5"),
-        ];
-        assert_eq!(select_most_specific_tag(&tags), Some(Version::from("v5")));
-    }
-
-    #[test]
     fn test_is_recoverable_rate_limited() {
         assert!(ResolutionError::RateLimited.is_recoverable());
     }
@@ -555,7 +419,7 @@ mod tests {
     #[test]
     fn test_is_recoverable_resolve_failed_is_not_recoverable() {
         let err = ResolutionError::ResolveFailed {
-            spec: ActionSpec::new(ActionId::from("actions/checkout"), Version::from("v4")),
+            spec: ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4")),
             reason: "not found".to_string(),
         };
         assert!(!err.is_recoverable());

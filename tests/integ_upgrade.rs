@@ -6,7 +6,9 @@ use common::registries::FakeRegistry;
 use common::setup::{
     create_test_repo, lock_path, manifest_path, write_lock, write_manifest, write_workflow,
 };
-use gx::domain::{ActionId, CommitSha, Lock, LockKey, Manifest, RefType, ResolvedAction, Version};
+use gx::domain::{
+    ActionId, CommitSha, Lock, LockKey, Manifest, RefType, ResolvedAction, Specifier, Version,
+};
 use gx::infra::{
     FileWorkflowUpdater, apply_lock_diff, apply_manifest_diff, parse_lock, parse_manifest,
 };
@@ -29,8 +31,8 @@ fn run_upgrade_file_backed_with_request(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mp = manifest_path(repo_root);
     let lp = lock_path(repo_root);
-    let manifest = parse_manifest(&mp)?;
-    let lock = parse_lock(&lp)?;
+    let manifest = parse_manifest(&mp)?.value;
+    let lock = parse_lock(&lp)?.value;
     let updater = FileWorkflowUpdater::new(repo_root);
 
     let plan = upgrade::plan(&manifest, &lock, &FakeRegistry::new(), request, |_| {})?;
@@ -58,7 +60,7 @@ fn test_upgrade_empty_manifest_is_noop() {
     );
 
     let mut manifest = Manifest::default();
-    manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
+    manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
     let lock = Lock::default();
     let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap();
     let result = upgrade::plan(&manifest, &lock, &FakeRegistry::new(), &request, |_| {});
@@ -150,7 +152,7 @@ fn test_upgrade_with_existing_lock_and_empty_manifest() {
     write_manifest(&root, "[actions]\n\"actions/checkout\" = \"v4\"\n");
     write_lock(
         &root,
-        "version = \"1.0\"\n\n[actions]\n\"actions/checkout@v4\" = { sha = \"abc123def456789012345678901234567890abcd\", repository = \"actions/checkout\", ref_type = \"tag\", date = \"\" }\n",
+        "version = \"1.3\"\n\n[actions]\n\"actions/checkout@v4\" = { sha = \"abc123def456789012345678901234567890abcd\", repository = \"actions/checkout\", ref_type = \"tag\", date = \"\" }\n",
     );
 
     write_workflow(
@@ -175,7 +177,7 @@ fn test_upgrade_memory_stores_no_side_effects() {
     );
 
     let mut manifest = Manifest::default();
-    manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
+    manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
     let lock = Lock::default();
     let result = upgrade::plan(
         &manifest,
@@ -241,17 +243,23 @@ jobs:
     let mut manifest = Manifest::default();
     manifest.set(
         ActionId::from("docker/login-action"),
-        Version::from("v3.6.0"),
+        Specifier::from_v1("v3.6.0"),
     );
-    manifest.set(ActionId::from("actions/checkout"), Version::from("v6.0.1"));
+    manifest.set(
+        ActionId::from("actions/checkout"),
+        Specifier::from_v1("v6.0.1"),
+    );
 
     let mut lock = Lock::default();
 
-    manifest.set(ActionId::from("actions/checkout"), Version::from("v6.0.2"));
+    manifest.set(
+        ActionId::from("actions/checkout"),
+        Specifier::from_v1("v6.0.2"),
+    );
 
     lock.set(&ResolvedAction::new(
         ActionId::from("actions/checkout"),
-        Version::from("v6.0.2"),
+        Specifier::from_v1("v6.0.2"),
         CommitSha::from(checkout_new_sha),
         "actions/checkout".to_string(),
         Some(RefType::Tag),
@@ -263,7 +271,7 @@ jobs:
 
     let upgraded_keys = vec![LockKey::new(
         ActionId::from("actions/checkout"),
-        Version::from("v6.0.2"),
+        Specifier::from_v1("v6.0.2"),
     )];
     let update_map = lock.build_update_map(&upgraded_keys);
     let writer = FileWorkflowUpdater::new(&root);
@@ -301,12 +309,15 @@ fn test_upgrade_repins_branch_ref() {
     write_workflow(&root, "ci.yml", &workflow_content);
 
     let mut manifest = Manifest::default();
-    manifest.set(ActionId::from("my-org/my-action"), Version::from("main"));
+    manifest.set(
+        ActionId::from("my-org/my-action"),
+        Specifier::from_v1("main"),
+    );
 
     let mut lock = Lock::default();
     lock.set(&ResolvedAction::new(
         ActionId::from("my-org/my-action"),
-        Version::from("main"),
+        Specifier::from_v1("main"),
         CommitSha::from(old_sha),
         "my-org/my-action".to_string(),
         Some(RefType::Branch),
@@ -343,12 +354,15 @@ fn test_upgrade_latest_also_repins_branch_ref() {
     write_workflow(&root, "ci.yml", &workflow_content);
 
     let mut manifest = Manifest::default();
-    manifest.set(ActionId::from("my-org/my-action"), Version::from("main"));
+    manifest.set(
+        ActionId::from("my-org/my-action"),
+        Specifier::from_v1("main"),
+    );
 
     let mut lock = Lock::default();
     lock.set(&ResolvedAction::new(
         ActionId::from("my-org/my-action"),
-        Version::from("main"),
+        Specifier::from_v1("main"),
         CommitSha::from(old_sha),
         "my-org/my-action".to_string(),
         Some(RefType::Branch),
@@ -386,13 +400,16 @@ fn test_upgrade_targeted_does_not_repin_branch_ref() {
     write_workflow(&root, "ci.yml", &workflow_content);
 
     let mut manifest = Manifest::default();
-    manifest.set(ActionId::from("my-org/my-action"), Version::from("main"));
-    manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
+    manifest.set(
+        ActionId::from("my-org/my-action"),
+        Specifier::from_v1("main"),
+    );
+    manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
 
     let mut lock = Lock::default();
     lock.set(&ResolvedAction::new(
         ActionId::from("my-org/my-action"),
-        Version::from("main"),
+        Specifier::from_v1("main"),
         CommitSha::from(branch_sha),
         "my-org/my-action".to_string(),
         Some(RefType::Branch),
@@ -400,7 +417,7 @@ fn test_upgrade_targeted_does_not_repin_branch_ref() {
     ));
     lock.set(&ResolvedAction::new(
         ActionId::from("actions/checkout"),
-        Version::from("v4"),
+        Specifier::from_v1("v4"),
         CommitSha::from(checkout_sha),
         "actions/checkout".to_string(),
         Some(RefType::Tag),
@@ -444,13 +461,16 @@ fn test_upgrade_mixed_semver_and_branch() {
     write_workflow(&root, "ci.yml", &workflow_content);
 
     let mut manifest = Manifest::default();
-    manifest.set(ActionId::from("my-org/my-action"), Version::from("main"));
-    manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
+    manifest.set(
+        ActionId::from("my-org/my-action"),
+        Specifier::from_v1("main"),
+    );
+    manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
 
     let mut lock = Lock::default();
     lock.set(&ResolvedAction::new(
         ActionId::from("my-org/my-action"),
-        Version::from("main"),
+        Specifier::from_v1("main"),
         CommitSha::from(old_branch_sha),
         "my-org/my-action".to_string(),
         Some(RefType::Branch),
@@ -458,7 +478,7 @@ fn test_upgrade_mixed_semver_and_branch() {
     ));
     lock.set(&ResolvedAction::new(
         ActionId::from("actions/checkout"),
-        Version::from("v4"),
+        Specifier::from_v1("v4"),
         CommitSha::from(old_checkout_sha),
         "actions/checkout".to_string(),
         Some(RefType::Tag),
@@ -504,7 +524,10 @@ fn test_upgrade_skips_bare_sha() {
     write_workflow(&root, "ci.yml", &workflow_content);
 
     let mut manifest = Manifest::default();
-    manifest.set(ActionId::from("my-org/my-action"), Version::from(bare_sha));
+    manifest.set(
+        ActionId::from("my-org/my-action"),
+        Specifier::from_v1(bare_sha),
+    );
 
     let lock = Lock::default();
     let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap();
@@ -530,8 +553,11 @@ fn test_upgrade_skips_bare_sha() {
 #[test]
 fn test_upgrade_safe_single_action() {
     let mut manifest = Manifest::default();
-    manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
-    manifest.set(ActionId::from("actions/setup-node"), Version::from("v3"));
+    manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
+    manifest.set(
+        ActionId::from("actions/setup-node"),
+        Specifier::from_v1("v3"),
+    );
 
     let registry = FakeRegistry::new()
         .with_all_tags("actions/checkout", vec!["v4", "v5"])
@@ -550,8 +576,11 @@ fn test_upgrade_safe_single_action() {
 #[test]
 fn test_upgrade_latest_single_action() {
     let mut manifest = Manifest::default();
-    manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
-    manifest.set(ActionId::from("actions/setup-node"), Version::from("v3"));
+    manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
+    manifest.set(
+        ActionId::from("actions/setup-node"),
+        Specifier::from_v1("v3"),
+    );
 
     let registry = FakeRegistry::new()
         .with_all_tags("actions/checkout", vec!["v4", "v5", "v6"])

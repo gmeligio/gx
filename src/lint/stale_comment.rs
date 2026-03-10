@@ -1,6 +1,6 @@
 use super::{Diagnostic, LintContext, LintRule};
 use crate::config::Level;
-use crate::domain::LockKey;
+use crate::domain::{LockKey, Specifier};
 
 /// stale-comment rule: detects when a version comment doesn't match the lock file.
 pub struct StaleCommentRule;
@@ -13,7 +13,10 @@ impl StaleCommentRule {
     ) -> Option<Diagnostic> {
         let sha = action.sha.as_ref()?;
 
-        let key = LockKey::new(action.id.clone(), action.version.clone());
+        let key = LockKey::new(
+            action.id.clone(),
+            Specifier::from_v1(action.version.as_str()),
+        );
         let lock_entry = lock.get(&key)?;
 
         if lock_entry.sha == *sha {
@@ -54,9 +57,9 @@ impl LintRule for StaleCommentRule {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{Level, LintRule, StaleCommentRule};
     use crate::domain::{
-        ActionId, CommitSha, LocatedAction, Lock, Manifest, ResolvedAction, Version,
+        ActionId, CommitSha, LocatedAction, Lock, Manifest, ResolvedAction, Specifier, Version,
         WorkflowActionSet, WorkflowLocation,
     };
 
@@ -64,7 +67,7 @@ mod tests {
         let mut lock = Lock::default();
         lock.set(&ResolvedAction::new(
             ActionId::from(action),
-            Version::from(version),
+            Specifier::from_v1(version),
             CommitSha::from(sha),
             ActionId::from(action).base_repo(),
             Some(crate::domain::RefType::Tag),
@@ -111,7 +114,7 @@ mod tests {
         let manifest = Manifest::default();
         let action_set = WorkflowActionSet::new();
 
-        let ctx = super::super::LintContext {
+        let ctx = crate::lint::LintContext {
             manifest: &manifest,
             lock: &lock,
             workflows: &workflows,
@@ -139,7 +142,7 @@ mod tests {
         let manifest = Manifest::default();
         let action_set = WorkflowActionSet::new();
 
-        let ctx = super::super::LintContext {
+        let ctx = crate::lint::LintContext {
             manifest: &manifest,
             lock: &lock,
             workflows: &workflows,
@@ -170,7 +173,7 @@ mod tests {
         let manifest = Manifest::default();
         let action_set = WorkflowActionSet::new();
 
-        let ctx = super::super::LintContext {
+        let ctx = crate::lint::LintContext {
             manifest: &manifest,
             lock: &lock,
             workflows: &workflows,
