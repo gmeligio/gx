@@ -1,6 +1,5 @@
-use std::collections::{HashMap, HashSet};
-
 use super::action::{ActionId, CommitSha, InterpretedRef, Version};
+use std::collections::{HashMap, HashSet};
 
 /// Aggregates action versions discovered across all workflows.
 /// This handles the domain logic of deciding which version "wins"
@@ -129,7 +128,10 @@ pub struct LocatedAction {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        ActionId, CommitSha, InterpretedRef, LocatedAction, Version, WorkflowActionSet,
+        WorkflowLocation,
+    };
 
     fn make_interpreted(name: &str, version: &str, sha: Option<&str>) -> InterpretedRef {
         InterpretedRef {

@@ -1,6 +1,6 @@
 use super::{Diagnostic, LintContext, LintRule};
 use crate::config::Level;
-use crate::domain::LockKey;
+use crate::domain::{LockKey, Specifier};
 
 /// sha-mismatch rule: detects when a workflow SHA doesn't match the lock file.
 pub struct ShaMismatchRule;
@@ -15,7 +15,10 @@ impl ShaMismatchRule {
             return None;
         }
 
-        let key = LockKey::new(action.id.clone(), action.version.clone());
+        let key = LockKey::new(
+            action.id.clone(),
+            Specifier::from_v1(action.version.as_str()),
+        );
         if lock.has(&key) {
             return None;
         }
@@ -52,7 +55,7 @@ impl LintRule for ShaMismatchRule {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{Level, LintRule, ShaMismatchRule};
 
     #[test]
     fn sha_mismatch_rule_has_correct_metadata() {

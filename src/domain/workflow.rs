@@ -1,8 +1,7 @@
+use super::ActionId;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use thiserror::Error;
-
-use crate::domain::ActionId;
 
 /// Errors that can occur when working with workflow files
 #[derive(Debug, Error)]

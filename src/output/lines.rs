@@ -1,8 +1,6 @@
-use std::path::PathBuf;
-
-use console::style;
-
 use crate::config::Level;
+use console::style;
+use std::path::PathBuf;
 
 /// Semantic output line variants produced by render functions.
 /// Colors are applied at print boundary — no ANSI codes here.
@@ -144,9 +142,8 @@ impl OutputLine {
 
 #[cfg(test)]
 mod tests {
+    use super::{Level, OutputLine};
     use std::path::PathBuf;
-
-    use super::*;
 
     #[test]
     fn format_line_upgraded_no_color() {

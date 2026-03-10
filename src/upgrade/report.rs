@@ -1,4 +1,4 @@
-use crate::domain::CommandReport;
+use crate::command::CommandReport;
 use crate::output::OutputLine;
 
 /// Report from the upgrade command.
@@ -71,7 +71,7 @@ impl CommandReport for UpgradeReport {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{CommandReport, OutputLine, UpgradeReport};
 
     #[test]
     fn render_upgrade_up_to_date() {

@@ -25,7 +25,7 @@ jobs:
                   private-key: ${{ secrets.VERIFIED_COMMIT_KEY }}
                   repositories: ${{ github.event.repository.name }}
                   owner: ${{ github.repository_owner }}
-            - uses: release-plz/action@efc7a2b896608c31370cd499ba1518cda3ac5660 # v0.5
+            - uses: release-plz/action@1528104d2ca23787631a1c1f022abb64b34c1e11 # v0.5
               with:
                   command: release
               env:
@@ -54,7 +54,7 @@ jobs:
                   private-key: ${{ secrets.VERIFIED_COMMIT_KEY }}
                   repositories: ${{ github.event.repository.name }}
                   owner: ${{ github.repository_owner }}
-            - uses: release-plz/action@efc7a2b896608c31370cd499ba1518cda3ac5660 # v0.5
+            - uses: release-plz/action@1528104d2ca23787631a1c1f022abb64b34c1e11 # v0.5
               with:
                   command: release-pr
               env:

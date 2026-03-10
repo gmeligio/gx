@@ -1,10 +1,14 @@
 #![allow(unused_crate_dependencies)]
 
 use clap::{Parser, Subcommand};
+use gx::command::{Command, CommandReport};
 use gx::config::{Config, ConfigError};
-use gx::domain::{AppError, Command, CommandReport};
 use gx::infra::{repo, repo::RepoError};
+use gx::init::InitError;
+use gx::lint::LintError;
 use gx::output::{LogFile, OutputLine, Printer};
+use gx::tidy::TidyRunError;
+use gx::upgrade::UpgradeRunError;
 use gx::{init, lint, tidy, upgrade};
 use indicatif::ProgressBar;
 use thiserror::Error;
@@ -19,7 +23,16 @@ enum GxError {
     Config(#[from] ConfigError),
 
     #[error(transparent)]
-    App(#[from] AppError),
+    Init(#[from] InitError),
+
+    #[error(transparent)]
+    Tidy(#[from] TidyRunError),
+
+    #[error(transparent)]
+    Upgrade(#[from] UpgradeRunError),
+
+    #[error(transparent)]
+    Lint(#[from] LintError),
 
     #[error(transparent)]
     Repo(#[from] RepoError),

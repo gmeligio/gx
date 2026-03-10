@@ -1,13 +1,15 @@
-use super::identity::{ActionId, CommitSha, Version};
+use super::identity::{ActionId, CommitSha, Specifier, Version};
 use super::spec::LockKey;
 use super::uses_ref::RefType;
 use std::fmt;
 
-/// A fully resolved action with its commit SHA and metadata
+/// A fully resolved action with its commit SHA and metadata.
+/// The `version` field holds the manifest specifier (e.g., `"^6"`).
+/// The resolved tag (e.g., `"v6.0.2"`) is stored in the lock entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedAction {
     pub id: ActionId,
-    pub version: Version,
+    pub version: Specifier,
     pub sha: CommitSha,
     pub repository: String,
     pub ref_type: Option<RefType>,
@@ -19,7 +21,7 @@ impl ResolvedAction {
     #[must_use]
     pub fn new(
         id: ActionId,
-        version: Version,
+        version: Specifier,
         sha: CommitSha,
         repository: String,
         ref_type: Option<RefType>,
@@ -35,10 +37,11 @@ impl ResolvedAction {
         }
     }
 
-    /// Format as "SHA # version" for workflow updates
+    /// Format as "SHA # comment" for workflow updates.
+    /// The comment is derived from the specifier (e.g., `"^6"` → `"v6"`).
     #[must_use]
     pub fn to_workflow_ref(&self) -> String {
-        format!("{} # {}", self.sha, self.version)
+        format!("{} # {}", self.sha, self.version.to_comment())
     }
 
     /// Create a new `ResolvedAction` with the SHA replaced.
@@ -79,20 +82,20 @@ impl From<&ResolvedAction> for LockKey {
     fn from(resolved: &ResolvedAction) -> Self {
         Self::new(
             ActionId::from(resolved.id.as_str()),
-            Version::from(resolved.version.as_str()),
+            resolved.version.clone(),
         )
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{ActionId, CommitSha, RefType, ResolvedAction, Specifier};
 
     #[test]
     fn test_resolved_action_to_workflow_ref() {
         let resolved = ResolvedAction::new(
             ActionId::from("actions/checkout"),
-            Version::from("v4"),
+            Specifier::parse("^4"),
             CommitSha::from("abc123def456789012345678901234567890abcd"),
             "actions/checkout".to_string(),
             Some(RefType::Tag),

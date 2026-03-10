@@ -1,8 +1,4 @@
 #![allow(dead_code)]
-use std::fs;
-use std::io::Write as IoWrite;
-use std::path::{Path, PathBuf};
-
 use gx::config::LintConfig;
 use gx::domain::{Lock, Manifest, VersionRegistry};
 use gx::infra::{
@@ -11,6 +7,9 @@ use gx::infra::{
 };
 use gx::upgrade::UpgradeRequest;
 use gx::{lint, tidy, upgrade};
+use std::fs;
+use std::io::Write as IoWrite;
+use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
 /// Create a repo directory structure with `.github/workflows/` directory.
@@ -80,13 +79,13 @@ pub fn run_tidy<R: VersionRegistry + Clone>(root: &Path, registry: &R) {
     let has_manifest = mp.exists();
 
     let manifest = if has_manifest {
-        parse_manifest(&mp).unwrap()
+        parse_manifest(&mp).unwrap().value
     } else {
         Manifest::default()
     };
     let lock = parse_lock(&lp).unwrap();
 
-    let plan = tidy::plan(&manifest, &lock, registry, &scanner, |_| {}).unwrap();
+    let plan = tidy::plan(&manifest, &lock.value, registry, &scanner, |_| {}).unwrap();
     if !plan.is_empty() {
         if has_manifest {
             apply_manifest_diff(&mp, &plan.manifest).unwrap();
@@ -112,7 +111,7 @@ pub fn run_upgrade<R: VersionRegistry + Clone>(
     let lock = parse_lock(&lp).unwrap();
     let updater = FileWorkflowUpdater::new(root);
 
-    let plan = upgrade::plan(&manifest, &lock, registry, request, |_| {}).unwrap();
+    let plan = upgrade::plan(&manifest.value, &lock.value, registry, request, |_| {}).unwrap();
     if !plan.is_empty() {
         apply_manifest_diff(&mp, &plan.manifest).unwrap();
         apply_lock_diff(&lp, &plan.lock).unwrap();
@@ -128,5 +127,12 @@ pub fn run_lint(root: &Path) -> Vec<lint::Diagnostic> {
     let lock = parse_lock(&lp).unwrap();
     let scanner = FileWorkflowScanner::new(root);
     let lint_config = LintConfig::default();
-    lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {}).unwrap()
+    lint::collect_diagnostics(
+        &manifest.value,
+        &lock.value,
+        &scanner,
+        &lint_config,
+        &mut |_| {},
+    )
+    .unwrap()
 }

@@ -1,7 +1,6 @@
-use std::collections::HashSet;
-
 use super::{Diagnostic, LintContext, LintRule};
 use crate::config::Level;
+use std::collections::HashSet;
 
 /// unsynced-manifest rule: detects when manifest and workflows have different action sets.
 pub struct UnsyncedManifestRule;
@@ -43,7 +42,7 @@ impl LintRule for UnsyncedManifestRule {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{Level, LintRule, UnsyncedManifestRule};
 
     #[test]
     fn unsynced_manifest_rule_has_correct_metadata() {

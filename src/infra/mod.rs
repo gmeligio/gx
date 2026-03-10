@@ -2,7 +2,8 @@ pub mod github;
 pub mod lock;
 pub mod manifest;
 pub mod repo;
-pub mod workflow;
+pub mod workflow_scan;
+pub mod workflow_update;
 
 pub use github::{GithubError, GithubRegistry};
 pub use lock::{
@@ -13,4 +14,5 @@ pub use manifest::{
     parse_manifest,
 };
 pub use repo::{RepoError, find_root};
-pub use workflow::{FileWorkflowScanner, FileWorkflowUpdater};
+pub use workflow_scan::FileWorkflowScanner;
+pub use workflow_update::FileWorkflowUpdater;

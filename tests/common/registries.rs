@@ -1,11 +1,10 @@
 #![allow(dead_code)]
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-
 use gx::domain::{
     ActionId, ActionSpec, CommitSha, RefType, ResolutionError, ResolvedRef, ShaDescription,
-    Version, VersionRegistry,
+    Specifier, Version, VersionRegistry,
 };
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 /// A versatile mock registry that resolves any version to a deterministic SHA.
 ///
@@ -222,7 +221,7 @@ impl VersionRegistry for FailingDescribeRegistry {
         sha: &CommitSha,
     ) -> Result<ShaDescription, ResolutionError> {
         Err(ResolutionError::ResolveFailed {
-            spec: ActionSpec::new(id.clone(), Version::from(sha.as_str())),
+            spec: ActionSpec::new(id.clone(), Specifier::from_v1(sha.as_str())),
             reason: "Github API returned status 422 Unprocessable Entity".to_string(),
         })
     }

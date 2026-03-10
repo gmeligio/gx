@@ -1,11 +1,10 @@
 #![allow(unused_crate_dependencies)]
 
-use std::fs;
-
 use gx::config::{Level, LintConfig};
-use gx::domain::{ActionId, CommitSha, Lock, Manifest, RefType, ResolvedAction, Version};
+use gx::domain::{ActionId, CommitSha, Lock, Manifest, RefType, ResolvedAction, Specifier};
 use gx::infra::FileWorkflowScanner;
 use gx::lint;
+use std::fs;
 
 #[test]
 fn lint_clean_repo_no_diagnostics() {
@@ -49,8 +48,11 @@ jobs:
     fs::write(workflows_dir.join("ci.yml"), workflow_content).unwrap();
 
     let mut manifest = Manifest::default();
-    manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
-    manifest.set(ActionId::from("actions/setup-node"), Version::from("v3"));
+    manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
+    manifest.set(
+        ActionId::from("actions/setup-node"),
+        Specifier::from_v1("v3"),
+    );
 
     let lock = Lock::default();
     let scanner = FileWorkflowScanner::new(repo_root);
@@ -121,7 +123,7 @@ jobs:
     fs::write(workflows_dir.join("ci.yml"), workflow_content).unwrap();
 
     let mut manifest = Manifest::default();
-    manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
+    manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
 
     let lock = Lock::default();
     let scanner = FileWorkflowScanner::new(repo_root);
@@ -165,7 +167,7 @@ jobs:
     fs::write(workflows_dir.join("ci.yml"), workflow_content).unwrap();
 
     let mut manifest = Manifest::default();
-    manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
+    manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
 
     let lock = Lock::default();
     let scanner = FileWorkflowScanner::new(repo_root);
@@ -250,12 +252,12 @@ jobs:
     fs::write(workflows_dir.join("ci.yml"), workflow_content).unwrap();
 
     let mut manifest = Manifest::default();
-    manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
+    manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
 
     let mut lock = Lock::default();
     lock.set(&ResolvedAction::new(
         ActionId::from("actions/checkout"),
-        Version::from("v4"),
+        Specifier::from_v1("v4"),
         CommitSha::from("def456789012345678901234567890abcd123456"),
         "actions/checkout".to_string(),
         Some(RefType::Tag),
@@ -296,13 +298,16 @@ jobs:
     fs::write(workflows_dir.join("ci.yml"), workflow_content).unwrap();
 
     let mut manifest = Manifest::default();
-    manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
-    manifest.set(ActionId::from("actions/setup-node"), Version::from("v3"));
+    manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
+    manifest.set(
+        ActionId::from("actions/setup-node"),
+        Specifier::from_v1("v3"),
+    );
 
     let mut lock = Lock::default();
     lock.set(&ResolvedAction::new(
         ActionId::from("actions/setup-node"),
-        Version::from("v3"),
+        Specifier::from_v1("v3"),
         CommitSha::from("def456789012345678901234567890abcd123456"),
         "actions/setup-node".to_string(),
         Some(RefType::Tag),
@@ -342,13 +347,16 @@ jobs:
     fs::write(workflows_dir.join("ci.yml"), workflow_content).unwrap();
 
     let mut manifest = Manifest::default();
-    manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
-    manifest.set(ActionId::from("actions/setup-node"), Version::from("v3"));
+    manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
+    manifest.set(
+        ActionId::from("actions/setup-node"),
+        Specifier::from_v1("v3"),
+    );
 
     let mut lock = Lock::default();
     lock.set(&ResolvedAction::new(
         ActionId::from("actions/setup-node"),
-        Version::from("v3"),
+        Specifier::from_v1("v3"),
         CommitSha::from("def456789012345678901234567890abcd123456"),
         "actions/setup-node".to_string(),
         Some(RefType::Tag),
@@ -442,12 +450,12 @@ jobs:
     fs::write(workflows_dir.join("ci.yml"), workflow_content).unwrap();
 
     let mut manifest = Manifest::default();
-    manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
+    manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
 
     let mut lock = Lock::default();
     lock.set(&ResolvedAction::new(
         ActionId::from("actions/checkout"),
-        Version::from("v4"),
+        Specifier::from_v1("v4"),
         CommitSha::from("def456789012345678901234567890abcd123456"),
         "actions/checkout".to_string(),
         Some(RefType::Tag),
@@ -509,8 +517,11 @@ jobs:
     fs::write(workflows_dir.join("test.yml"), test_content).unwrap();
 
     let mut manifest = Manifest::default();
-    manifest.set(ActionId::from("actions/checkout"), Version::from("v4"));
-    manifest.set(ActionId::from("actions/setup-node"), Version::from("v3"));
+    manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
+    manifest.set(
+        ActionId::from("actions/setup-node"),
+        Specifier::from_v1("v3"),
+    );
 
     let lock = Lock::default();
     let scanner = FileWorkflowScanner::new(repo_root);
