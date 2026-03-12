@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Regenerate the demo GIF"
+GH_TOKEN=$(gh auth token)
+docker build -t gx-demo -f docs/demo.Dockerfile .
+MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd)/docs:/vhs" -e "GITHUB_TOKEN=$GH_TOKEN" gx-demo demo.tape

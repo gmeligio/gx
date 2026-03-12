@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Run e2e tests"
+export GITHUB_TOKEN="${GITHUB_TOKEN:-$(gh auth token)}"
+cargo test --test 'e2e_*'

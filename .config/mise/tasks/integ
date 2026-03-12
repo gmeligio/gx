@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+#MISE description="Run integration tests"
+cargo test --test integ_* --test code_health

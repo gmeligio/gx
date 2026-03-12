@@ -2,8 +2,6 @@
 "github:axodotdev/cargo-dist" = "0.31.0"
 "github:obi1kenobi/cargo-semver-checks" = "0.46.0"
 "github:EmbarkStudios/cargo-deny" = "0.19.0"
-"github:charmbracelet/vhs" = "0.10.0"
-ttyd = "1.7.3"
 
 [settings]
 github.github_attestations = true
