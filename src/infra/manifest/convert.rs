@@ -1,6 +1,10 @@
-use super::ManifestError;
-use crate::config::RuleConfig;
-use crate::domain::{ActionId, ActionOverride, ActionSpec, Manifest, Specifier};
+use super::Error as ManifestError;
+use crate::config::Rule;
+use crate::domain::action::identity::ActionId;
+use crate::domain::action::spec::Spec as ActionSpec;
+use crate::domain::action::specifier::Specifier;
+use crate::domain::manifest::Manifest;
+use crate::domain::manifest::overrides::ActionOverride;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write;
@@ -47,7 +51,7 @@ pub(super) struct ManifestData {
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub(super) struct LintData {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub(super) rules: BTreeMap<String, RuleConfig>,
+    pub(super) rules: BTreeMap<String, Rule>,
 }
 
 // ---- conversion ----
@@ -226,8 +230,9 @@ pub(super) fn format_manifest_toml(data: &ManifestData) -> String {
 #[cfg(test)]
 mod tests {
     use super::Manifest;
-    use crate::domain::{ActionId, Specifier};
-    use crate::infra::manifest::{FileManifest, parse_manifest};
+    use crate::domain::action::identity::ActionId;
+    use crate::domain::action::specifier::Specifier;
+    use crate::infra::manifest::{Store, parse};
     use std::fs;
     use std::io::Write;
     use tempfile::NamedTempFile;
@@ -235,7 +240,7 @@ mod tests {
     #[test]
     fn test_file_manifest_save_and_load_roundtrip() {
         let file = NamedTempFile::new().unwrap();
-        let store = FileManifest::new(file.path());
+        let store = Store::new(file.path());
 
         let mut manifest = Manifest::default();
         manifest.set(ActionId::from("actions/checkout"), Specifier::parse("^4"));
@@ -243,7 +248,7 @@ mod tests {
 
         store.save(&manifest).unwrap();
 
-        let loaded = parse_manifest(file.path()).unwrap();
+        let loaded = parse(file.path()).unwrap();
         assert_eq!(
             loaded.value.get(&ActionId::from("actions/checkout")),
             Some(&Specifier::parse("^4"))
@@ -265,7 +270,7 @@ mod tests {
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
-        let loaded = parse_manifest(file.path()).unwrap();
+        let loaded = parse(file.path()).unwrap();
         assert_eq!(
             loaded.value.get(&ActionId::from("actions/checkout")),
             Some(&Specifier::from_v1("v4"))
@@ -275,7 +280,7 @@ mod tests {
     #[test]
     fn test_file_manifest_save_sorts_actions_alphabetically() {
         let file = NamedTempFile::new().unwrap();
-        let store = FileManifest::new(file.path());
+        let store = Store::new(file.path());
 
         let mut manifest = Manifest::default();
         manifest.set(
@@ -307,7 +312,7 @@ mod tests {
     #[test]
     fn test_save_writes_gx_section() {
         let file = NamedTempFile::new().unwrap();
-        let store = FileManifest::new(file.path());
+        let store = Store::new(file.path());
 
         let mut manifest = Manifest::default();
         manifest.set(ActionId::from("actions/checkout"), Specifier::parse("^4"));

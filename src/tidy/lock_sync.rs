@@ -1,10 +1,14 @@
 use std::collections::HashMap;
 
-use super::TidyError;
-use crate::domain::{
-    ActionResolver, ActionSpec, CommitSha, Lock, LockKey, Manifest, ResolutionError,
-    ResolvedAction, ShaIndex, SyncEvent, VersionCorrection, VersionRegistry,
-};
+use super::Error as TidyError;
+use crate::domain::action::identity::CommitSha;
+use crate::domain::action::resolved::{Resolved as ResolvedAction, VersionCorrection};
+use crate::domain::action::spec::{LockKey, Spec as ActionSpec};
+use crate::domain::action::tag_selection::ShaIndex;
+use crate::domain::event::Event as SyncEvent;
+use crate::domain::lock::Lock;
+use crate::domain::manifest::Manifest;
+use crate::domain::resolution::{ActionResolver, Error as ResolutionError, VersionRegistry};
 
 /// Resolve all specs in the manifest into the lock.
 ///
@@ -138,11 +142,16 @@ fn populate_lock_entry<R: VersionRegistry>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::action::identity::{ActionId, CommitSha, Version};
+    use crate::domain::action::spec::LockKey;
+    use crate::domain::action::specifier::Specifier;
+    use crate::domain::action::tag_selection::ShaIndex;
+    use crate::domain::action::uses_ref::RefType;
+    use crate::domain::lock::Lock;
+    use crate::domain::manifest::Manifest;
     use crate::domain::resolution::testutil::FakeRegistry;
-    use crate::domain::resolution::{ResolutionError, ResolvedRef, ShaDescription};
-    use crate::domain::{
-        ActionId, ActionResolver, CommitSha, Lock, LockKey, Manifest, RefType, ShaIndex, Specifier,
-        Version, VersionRegistry,
+    use crate::domain::resolution::{
+        ActionResolver, Error as ResolutionError, ResolvedRef, ShaDescription, VersionRegistry,
     };
 
     // ---------------------------------------------------------------------------

@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+#MISE description="Sync manifest/lock with workflows"
+cargo run -- tidy

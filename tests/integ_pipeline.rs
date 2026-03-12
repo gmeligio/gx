@@ -9,8 +9,10 @@ mod common;
 
 use common::registries::{EmptyDateRegistry, FailingDescribeRegistry, FakeRegistry};
 use common::setup::{create_test_repo, lock_path, run_init, write_workflow};
-use gx::domain::{ActionId, Specifier};
-use gx::infra::parse_lock;
+use gx::domain::action::identity::ActionId;
+use gx::domain::action::spec::LockKey;
+use gx::domain::action::specifier::Specifier;
+use gx::infra::lock;
 use tempfile::TempDir;
 
 /// `init` on a SHA-pinned workflow where `describe_sha` returns no tags must use the SHA as version.
@@ -33,9 +35,8 @@ fn test_init_sha_first_describe_sha_no_tags() {
     // FakeRegistry.describe_sha returns empty tags → SHA used as version in lock entry
     run_init(&root, &FakeRegistry::new());
 
-    let lock = parse_lock(&lock_path(&root)).unwrap().value;
-    let key =
-        gx::domain::LockKey::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
+    let lock = lock::parse(&lock_path(&root)).unwrap().value;
+    let key = LockKey::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
     let entry = lock.get(&key).expect("Lock must have checkout@v4 entry");
 
     assert_eq!(
@@ -70,9 +71,8 @@ fn test_init_sha_first_describe_sha_empty_date() {
 
     run_init(&root, &EmptyDateRegistry);
 
-    let lock = parse_lock(&lock_path(&root)).unwrap().value;
-    let key =
-        gx::domain::LockKey::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
+    let lock = lock::parse(&lock_path(&root)).unwrap().value;
+    let key = LockKey::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
     let entry = lock.get(&key).expect("Lock must have checkout@v4 entry");
 
     assert_eq!(
@@ -107,9 +107,8 @@ fn test_init_sha_first_describe_sha_fails_falls_back_to_resolve() {
     // describe_sha fails, but init must succeed by falling back to resolve(spec)
     run_init(&root, &FailingDescribeRegistry);
 
-    let lock = parse_lock(&lock_path(&root)).unwrap().value;
-    let key =
-        gx::domain::LockKey::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
+    let lock = lock::parse(&lock_path(&root)).unwrap().value;
+    let key = LockKey::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
     let entry = lock.get(&key).expect("Lock must have checkout@v4 entry");
 
     assert!(!entry.sha.as_str().is_empty(), "Lock entry must have a SHA");

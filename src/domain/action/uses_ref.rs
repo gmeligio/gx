@@ -1,19 +1,19 @@
 use super::identity::{ActionId, CommitSha, Version};
 use std::fmt;
 
-/// The type of reference that was resolved
+/// The type of reference that was resolved.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum RefType {
-    /// Tag with a GitHub Release
+    /// Tag with a GitHub Release.
     #[serde(rename = "release")]
     Release,
-    /// Tag without a GitHub Release (may be annotated or lightweight)
+    /// Tag without a GitHub Release (may be annotated or lightweight).
     #[serde(rename = "tag")]
     Tag,
-    /// Branch reference
+    /// Branch reference.
     #[serde(rename = "branch")]
     Branch,
-    /// Direct commit SHA
+    /// Direct commit SHA.
     #[serde(rename = "commit")]
     Commit,
 }
@@ -21,10 +21,10 @@ pub enum RefType {
 impl fmt::Display for RefType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            RefType::Release => write!(f, "release"),
-            RefType::Tag => write!(f, "tag"),
-            RefType::Branch => write!(f, "branch"),
-            RefType::Commit => write!(f, "commit"),
+            Self::Release => write!(f, "release"),
+            Self::Tag => write!(f, "tag"),
+            Self::Branch => write!(f, "branch"),
+            Self::Commit => write!(f, "commit"),
         }
     }
 }
@@ -33,30 +33,30 @@ impl RefType {
     #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
         match s {
-            "release" => Some(RefType::Release),
-            "tag" => Some(RefType::Tag),
-            "branch" => Some(RefType::Branch),
-            "commit" => Some(RefType::Commit),
+            "release" => Some(Self::Release),
+            "tag" => Some(Self::Tag),
+            "branch" => Some(Self::Branch),
+            "commit" => Some(Self::Commit),
             _ => None,
         }
     }
 }
 
 /// Data from a `uses:` line in a workflow file.
-/// Contains no interpretation - just the exact strings parsed from YAML.
+/// Contains no interpretation -- just the exact strings parsed from YAML.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UsesRef {
-    /// The action name (e.g., "actions/checkout")
+    /// The action name (e.g., `"actions/checkout"`).
     pub action_name: String,
-    /// The ref portion after @ (could be tag, SHA, or branch)
+    /// The ref portion after `@` (could be tag, SHA, or branch).
     pub uses_ref: String,
-    /// The comment after #, if present (e.g., "v4" or "v4.0.1")
+    /// The comment after `#`, if present (e.g., `"v4"` or `"v4.0.1"`).
     pub comment: Option<String>,
 }
 
 impl UsesRef {
     #[must_use]
-    pub fn new(action_name: String, uses_ref: String, comment: Option<String>) -> Self {
+    pub const fn new(action_name: String, uses_ref: String, comment: Option<String>) -> Self {
         Self {
             action_name,
             uses_ref,
@@ -72,20 +72,20 @@ impl UsesRef {
     /// - If no comment, use `uses_ref` as version (could be tag like "v4" or SHA)
     #[must_use]
     pub fn interpret(&self) -> InterpretedRef {
-        let (version, sha) = if let Some(comment) = &self.comment {
-            // Has a comment - use normalized comment as version
-            let version = Version::normalized(comment);
-            // If ref is a SHA, store it
-            let sha = if CommitSha::is_valid(&self.uses_ref) {
-                Some(CommitSha::from(self.uses_ref.as_str()))
-            } else {
-                None
-            };
-            (version, sha)
-        } else {
-            // No comment, use the ref as-is, no SHA stored
-            (Version::from(self.uses_ref.as_str()), None)
-        };
+        let (version, sha) = self.comment.as_ref().map_or_else(
+            || {
+                // No comment, use the ref as-is, no SHA stored
+                (Version::from(self.uses_ref.as_str()), None)
+            },
+            |comment| {
+                // Has a comment - use normalized comment as version
+                let version = Version::normalized(comment);
+                // If ref is a SHA, store it
+                let sha = CommitSha::is_valid(&self.uses_ref)
+                    .then(|| CommitSha::from(self.uses_ref.as_str()));
+                (version, sha)
+            },
+        );
 
         InterpretedRef {
             id: ActionId::from(self.action_name.as_str()),
@@ -98,8 +98,11 @@ impl UsesRef {
 /// Result of interpreting a workflow reference.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InterpretedRef {
+    /// The parsed action identifier.
     pub id: ActionId,
+    /// The resolved version.
     pub version: Version,
+    /// The commit SHA, if the ref was a full SHA.
     pub sha: Option<CommitSha>,
 }
 
@@ -108,7 +111,7 @@ mod tests {
     use super::{CommitSha, RefType, UsesRef};
 
     #[test]
-    fn test_ref_type_display() {
+    fn ref_type_display() {
         assert_eq!(RefType::Release.to_string(), "release");
         assert_eq!(RefType::Tag.to_string(), "tag");
         assert_eq!(RefType::Branch.to_string(), "branch");
@@ -116,7 +119,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ref_type_parse() {
+    fn ref_type_parse() {
         assert_eq!(RefType::parse("release"), Some(RefType::Release));
         assert_eq!(RefType::parse("tag"), Some(RefType::Tag));
         assert_eq!(RefType::parse("branch"), Some(RefType::Branch));
@@ -125,14 +128,14 @@ mod tests {
     }
 
     #[test]
-    fn test_ref_type_equality() {
+    fn ref_type_equality() {
         assert_eq!(RefType::Release, RefType::Release);
         assert_ne!(RefType::Release, RefType::Tag);
     }
 
     #[test]
-    fn test_uses_ref_interpret_tag_only() {
-        let uses_ref = UsesRef::new("actions/checkout".to_string(), "v4".to_string(), None);
+    fn uses_ref_interpret_tag_only() {
+        let uses_ref = UsesRef::new("actions/checkout".to_owned(), "v4".to_owned(), None);
         let interpreted = uses_ref.interpret();
 
         assert_eq!(interpreted.id.as_str(), "actions/checkout");
@@ -141,11 +144,11 @@ mod tests {
     }
 
     #[test]
-    fn test_uses_ref_interpret_sha_with_comment() {
+    fn uses_ref_interpret_sha_with_comment() {
         let uses_ref = UsesRef::new(
-            "actions/checkout".to_string(),
-            "abc123def456789012345678901234567890abcd".to_string(),
-            Some("v4".to_string()),
+            "actions/checkout".to_owned(),
+            "abc123def456789012345678901234567890abcd".to_owned(),
+            Some("v4".to_owned()),
         );
         let interpreted = uses_ref.interpret();
 
@@ -158,11 +161,11 @@ mod tests {
     }
 
     #[test]
-    fn test_uses_ref_interpret_normalizes_version() {
+    fn uses_ref_interpret_normalizes_version() {
         let uses_ref = UsesRef::new(
-            "actions/checkout".to_string(),
-            "abc123def456789012345678901234567890abcd".to_string(),
-            Some("4".to_string()), // No 'v' prefix
+            "actions/checkout".to_owned(),
+            "abc123def456789012345678901234567890abcd".to_owned(),
+            Some("4".to_owned()), // No 'v' prefix
         );
         let interpreted = uses_ref.interpret();
 
@@ -170,10 +173,10 @@ mod tests {
     }
 
     #[test]
-    fn test_uses_ref_interpret_sha_without_comment() {
+    fn uses_ref_interpret_sha_without_comment() {
         let uses_ref = UsesRef::new(
-            "actions/checkout".to_string(),
-            "abc123def456789012345678901234567890abcd".to_string(),
+            "actions/checkout".to_owned(),
+            "abc123def456789012345678901234567890abcd".to_owned(),
             None,
         );
         let interpreted = uses_ref.interpret();
@@ -187,12 +190,12 @@ mod tests {
     }
 
     #[test]
-    fn test_uses_ref_interpret_short_ref_with_comment() {
+    fn uses_ref_interpret_short_ref_with_comment() {
         // Short ref (not 40 chars) with comment - ref is NOT a SHA
         let uses_ref = UsesRef::new(
-            "actions/checkout".to_string(),
-            "abc123".to_string(),
-            Some("v4".to_string()),
+            "actions/checkout".to_owned(),
+            "abc123".to_owned(),
+            Some("v4".to_owned()),
         );
         let interpreted = uses_ref.interpret();
 

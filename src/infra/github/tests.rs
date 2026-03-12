@@ -1,6 +1,8 @@
+use super::Registry as GithubRegistry;
 use super::filter_refs_by_sha;
-use crate::domain::{RefType, Version, VersionRegistry};
-use crate::infra::github::GithubRegistry;
+use crate::domain::action::identity::Version;
+use crate::domain::action::uses_ref::RefType;
+use crate::domain::resolution::VersionRegistry;
 use crate::infra::github::responses::{GitObject, GitRefEntry};
 
 fn make_ref_entry(ref_name: &str, sha: &str) -> GitRefEntry {
@@ -9,10 +11,10 @@ fn make_ref_entry(ref_name: &str, sha: &str) -> GitRefEntry {
 
 fn make_ref_entry_typed(ref_name: &str, sha: &str, object_type: &str) -> GitRefEntry {
     GitRefEntry {
-        ref_name: ref_name.to_string(),
+        ref_name: ref_name.to_owned(),
         object: GitObject {
-            sha: sha.to_string(),
-            object_type: object_type.to_string(),
+            sha: sha.to_owned(),
+            object_type: object_type.to_owned(),
         },
     }
 }
@@ -41,7 +43,7 @@ fn test_subpath_action_extracts_base_repo() {
 #[test]
 fn test_version_resolver_trait() {
     let client = GithubRegistry::new(None).unwrap();
-    let id = crate::domain::ActionId::from("actions/checkout");
+    let id = crate::domain::action::identity::ActionId::from("actions/checkout");
     let sha_version = Version::from("a1b2c3d4e5f6789012345678901234567890abcd");
 
     // Full SHA should pass through

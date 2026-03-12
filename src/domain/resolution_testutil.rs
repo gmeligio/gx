@@ -1,10 +1,9 @@
-use super::{
-    ActionId, CommitSha, RefType, ResolutionError, ResolvedRef, ShaDescription, Version,
-    VersionRegistry,
-};
+use super::{Error as ResolutionError, ResolvedRef, ShaDescription, VersionRegistry};
+use crate::domain::action::identity::{ActionId, CommitSha, Version};
+use crate::domain::action::uses_ref::RefType;
 
 /// Registry that always fails with `AuthRequired` on every method.
-pub(crate) struct AuthRequiredRegistry;
+pub struct AuthRequiredRegistry;
 
 impl VersionRegistry for AuthRequiredRegistry {
     fn lookup_sha(
@@ -37,14 +36,14 @@ impl VersionRegistry for AuthRequiredRegistry {
 }
 
 /// Flexible fake registry for tests. Configure via builder methods.
-pub(crate) struct FakeRegistry {
+pub struct FakeRegistry {
     tags: std::collections::HashMap<String, (String, Vec<Version>)>,
     fixed_sha: Option<String>,
     fail_tags: bool,
 }
 
 impl FakeRegistry {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             tags: std::collections::HashMap::new(),
             fixed_sha: None,
@@ -53,21 +52,21 @@ impl FakeRegistry {
     }
 
     /// Configure all tag methods for `id` to return `tags`.
-    pub(crate) fn with_all_tags(mut self, id: &str, tags: Vec<&str>) -> Self {
-        let sha = tags.first().map_or("", |t| *t).to_string();
+    pub fn with_all_tags(mut self, id: &str, tags: Vec<&str>) -> Self {
+        let sha = tags.first().map_or("", |t| *t).to_owned();
         self.tags.insert(
-            id.to_string(),
+            id.to_owned(),
             (sha, tags.into_iter().map(Version::from).collect()),
         );
         self
     }
 
     /// Configure tags for `id` with a specific SHA for `lookup_sha`.
-    pub(crate) fn with_sha_tags(mut self, id: &str, sha: &str, tags: Vec<&str>) -> Self {
+    pub fn with_sha_tags(mut self, id: &str, sha: &str, tags: Vec<&str>) -> Self {
         self.tags.insert(
-            id.to_string(),
+            id.to_owned(),
             (
-                sha.to_string(),
+                sha.to_owned(),
                 tags.into_iter().map(Version::from).collect(),
             ),
         );
@@ -75,13 +74,13 @@ impl FakeRegistry {
     }
 
     /// Make `lookup_sha` always return this SHA for any action.
-    pub(crate) fn with_fixed_sha(mut self, sha: &str) -> Self {
-        self.fixed_sha = Some(sha.to_string());
+    pub fn with_fixed_sha(mut self, sha: &str) -> Self {
+        self.fixed_sha = Some(sha.to_owned());
         self
     }
 
     /// Make `tags_for_sha` and `all_tags` return `AuthRequired`.
-    pub(crate) fn fail_tags(mut self) -> Self {
+    pub fn fail_tags(mut self) -> Self {
         self.fail_tags = true;
         self
     }
@@ -89,18 +88,19 @@ impl FakeRegistry {
 
 impl VersionRegistry for FakeRegistry {
     fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<ResolvedRef, ResolutionError> {
-        let sha = if let Some(fixed) = &self.fixed_sha {
-            fixed.clone()
-        } else if let Some((sha, _)) = self.tags.get(id.as_str()) {
-            sha.clone()
-        } else {
-            version.as_str().to_string()
-        };
+        let sha = self.fixed_sha.as_ref().map_or_else(
+            || {
+                self.tags
+                    .get(id.as_str())
+                    .map_or_else(|| version.as_str().to_owned(), |(sha, _)| sha.clone())
+            },
+            Clone::clone,
+        );
         Ok(ResolvedRef::new(
             CommitSha::from(sha),
             id.base_repo(),
             Some(RefType::Tag),
-            "2026-01-01T00:00:00Z".to_string(),
+            "2026-01-01T00:00:00Z".to_owned(),
         ))
     }
 
@@ -146,7 +146,7 @@ impl VersionRegistry for FakeRegistry {
         Ok(ShaDescription {
             tags,
             repository: id.base_repo(),
-            date: "2026-01-01T00:00:00Z".to_string(),
+            date: "2026-01-01T00:00:00Z".to_owned(),
         })
     }
 }

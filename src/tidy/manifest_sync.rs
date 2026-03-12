@@ -1,7 +1,11 @@
-use crate::domain::{
-    ActionId, ActionResolver, ActionSpec, CommitSha, LocatedAction, Manifest, ShaIndex, Specifier,
-    SyncEvent, Version, VersionRegistry, WorkflowActionSet, select_most_specific_tag,
-};
+use crate::domain::action::identity::{ActionId, CommitSha, Version};
+use crate::domain::action::spec::Spec as ActionSpec;
+use crate::domain::action::specifier::Specifier;
+use crate::domain::action::tag_selection::{ShaIndex, select_most_specific_tag};
+use crate::domain::event::Event as SyncEvent;
+use crate::domain::manifest::Manifest;
+use crate::domain::resolution::{ActionResolver, VersionRegistry};
+use crate::domain::workflow_actions::{ActionSet as WorkflowActionSet, Located as LocatedAction};
 use std::collections::HashSet;
 
 /// Remove unused actions from manifest and add missing ones.
@@ -34,24 +38,26 @@ pub(super) fn sync_manifest_actions<R: VersionRegistry>(
                 .iter()
                 .find(|loc| &loc.id == action_id && loc.version == version && loc.sha.is_some());
 
-            if let Some(located_action) = located_with_version {
-                if let Some(sha) = &located_action.sha {
-                    let (corrected, was_corrected) =
-                        resolver.correct_version(action_id, sha, &version, sha_index);
-                    if was_corrected {
-                        events.push(SyncEvent::VersionCorrected {
-                            id: (*action_id).clone(),
-                            corrected: corrected.clone(),
-                            sha_points_to: corrected.clone(),
-                        });
-                    }
-                    corrected
-                } else {
-                    version.clone()
-                }
-            } else {
-                version.clone()
-            }
+            located_with_version.map_or_else(
+                || version.clone(),
+                |located_action| {
+                    located_action.sha.as_ref().map_or_else(
+                        || version.clone(),
+                        |sha| {
+                            let (corrected, was_corrected) =
+                                resolver.correct_version(action_id, sha, &version, sha_index);
+                            if was_corrected {
+                                events.push(SyncEvent::VersionCorrected {
+                                    id: (*action_id).clone(),
+                                    corrected: corrected.clone(),
+                                    sha_points_to: corrected.clone(),
+                                });
+                            }
+                            corrected
+                        },
+                    )
+                },
+            )
         } else {
             version.clone()
         };
@@ -101,10 +107,16 @@ pub(super) fn upgrade_sha_versions_to_tags<R: VersionRegistry>(
     events
 }
 
+/// Select the highest version from a non-empty slice of versions.
 pub(super) fn select_version(versions: &[Version]) -> Version {
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "function is only called with non-empty slices"
+    )]
     Version::highest(versions).unwrap_or_else(|| versions[0].clone())
 }
 
+/// Select the dominant version from usage counts and available versions.
 pub(super) fn select_dominant_version(
     action_id: &ActionId,
     action_set: &WorkflowActionSet,
@@ -118,8 +130,12 @@ pub(super) fn select_dominant_version(
 #[cfg(test)]
 mod tests {
     use super::{Version, select_version, upgrade_sha_versions_to_tags};
+    use crate::domain::action::identity::ActionId;
+    use crate::domain::action::specifier::Specifier;
+    use crate::domain::action::tag_selection::ShaIndex;
+    use crate::domain::manifest::Manifest;
+    use crate::domain::resolution::ActionResolver;
     use crate::domain::resolution::testutil::{AuthRequiredRegistry, FakeRegistry};
-    use crate::domain::{ActionId, ActionResolver, Manifest, ShaIndex, Specifier};
 
     #[test]
     fn test_select_version_single() {

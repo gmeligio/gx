@@ -1,4 +1,22 @@
-## ADDED Requirements
+### Requirement: Lint configuration in Cargo.toml
+The `[lints.clippy]` section in `Cargo.toml` SHALL include individually selected restriction lints in addition to the existing group-level denials (`pedantic`, `perf`, `nursery`). The blanket `restriction = "deny"` SHALL NOT be used. The section SHALL also deny `module_name_repetitions` and `pub_use` restriction lints.
+
+#### Scenario: Cargo.toml has individual restriction lints
+- **WHEN** a developer inspects `[lints.clippy]` in `Cargo.toml`
+- **THEN** they SHALL see individual restriction lint entries (e.g., `unwrap_used = "deny"`)
+- **AND** they SHALL NOT see `restriction = "deny"`
+
+#### Scenario: Clippy CI check passes
+- **WHEN** `mise run clippy` is executed in CI
+- **THEN** the check SHALL pass with all configured lints enforced
+
+#### Scenario: Type with module name prefix triggers lint
+- **WHEN** a developer defines `pub struct TidyPlan` in the `tidy` module
+- **THEN** `cargo clippy` SHALL report an error for `clippy::module_name_repetitions`
+
+#### Scenario: pub use re-export triggers lint
+- **WHEN** a developer adds `pub use submodule::SomeType` in a `mod.rs`
+- **THEN** `cargo clippy` SHALL report an error for `clippy::pub_use`
 
 ### Requirement: Layer dependency direction enforcement
 The system SHALL include a code health test that verifies domain modules (`src/domain/**/*.rs`) do not import from command modules (`crate::tidy`, `crate::upgrade`, `crate::lint`, `crate::init`) or infrastructure modules (`crate::infra`).

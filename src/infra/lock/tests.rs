@@ -1,5 +1,10 @@
-use super::{LOCK_FILE_VERSION, LockFileError, apply_lock_diff, create_lock, parse_lock};
-use crate::domain::{ActionId, CommitSha, LockDiff, LockEntry, LockKey, RefType, Specifier};
+use super::{Error as LockFileError, LOCK_FILE_VERSION, apply_lock_diff, create, parse};
+use crate::domain::action::identity::{ActionId, CommitSha};
+use crate::domain::action::spec::LockKey;
+use crate::domain::action::specifier::Specifier;
+use crate::domain::action::uses_ref::RefType;
+use crate::domain::lock::entry::Entry as LockEntry;
+use crate::domain::plan::LockDiff;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
@@ -10,7 +15,7 @@ fn make_key(action: &str, specifier: &str) -> LockKey {
 }
 
 #[test]
-fn test_parse_lock_unknown_version_errors() {
+fn test_parse_unknown_version_errors() {
     let content = r#"version = "2.0"
 
 [actions]
@@ -18,25 +23,25 @@ fn test_parse_lock_unknown_version_errors() {
     let mut file = NamedTempFile::new().unwrap();
     file.write_all(content.as_bytes()).unwrap();
 
-    let result = parse_lock(file.path());
+    let result = parse(file.path());
     assert!(matches!(result, Err(LockFileError::UnsupportedVersion(_))));
 }
 
 #[test]
-fn test_parse_lock_missing_returns_empty() {
-    let parsed = parse_lock(Path::new("/nonexistent/gx.lock")).unwrap();
+fn test_parse_missing_returns_empty() {
+    let parsed = parse(Path::new("/nonexistent/gx.lock")).unwrap();
     assert!(!parsed.value.has(&make_key("actions/checkout", "^4")));
     assert!(!parsed.migrated);
 }
 
 #[test]
-fn test_parse_lock_reads_file() {
+fn test_parse_reads_file() {
     let content = format!(
         "version = \"{LOCK_FILE_VERSION}\"\n\n[actions]\n\"actions/checkout@^4\" = {{ sha = \"abc123\", version = \"v4.0.0\", comment = \"v4\", repository = \"actions/checkout\", ref_type = \"tag\", date = \"\" }}\n"
     );
     let mut file = NamedTempFile::new().unwrap();
     file.write_all(content.as_bytes()).unwrap();
-    let parsed = parse_lock(file.path()).unwrap();
+    let parsed = parse(file.path()).unwrap();
     assert!(parsed.value.has(&make_key("actions/checkout", "^4")));
 }
 
@@ -70,11 +75,11 @@ fn test_apply_lock_add_one_entry() {
             make_key("actions/setup-node", "^3"),
             LockEntry::with_version_and_comment(
                 CommitSha::from("def456789012345678901234567890abcdef1234"),
-                Some("v3.1.0".to_string()),
-                "v3".to_string(),
-                "actions/setup-node".to_string(),
+                Some("v3.1.0".to_owned()),
+                "v3".to_owned(),
+                "actions/setup-node".to_owned(),
                 Some(RefType::Tag),
-                "2026-01-01T00:00:00Z".to_string(),
+                "2026-01-01T00:00:00Z".to_owned(),
             ),
         )],
         ..Default::default()
@@ -82,7 +87,7 @@ fn test_apply_lock_add_one_entry() {
     apply_lock_diff(file.path(), &diff).unwrap();
 
     // Round-trip
-    let loaded = parse_lock(file.path()).unwrap();
+    let loaded = parse(file.path()).unwrap();
     assert!(
         loaded.value.has(&make_key("actions/checkout", "^4")),
         "Existing entry preserved"
@@ -95,7 +100,7 @@ fn test_apply_lock_add_one_entry() {
         entry.sha,
         CommitSha::from("def456789012345678901234567890abcdef1234")
     );
-    assert_eq!(entry.version, Some("v3.1.0".to_string()));
+    assert_eq!(entry.version, Some("v3.1.0".to_owned()));
     assert_eq!(entry.comment, "v3");
     assert_eq!(entry.repository, "actions/setup-node");
 }
@@ -114,7 +119,7 @@ fn test_apply_lock_remove_one_entry() {
     };
     apply_lock_diff(file.path(), &diff).unwrap();
 
-    let loaded = parse_lock(file.path()).unwrap();
+    let loaded = parse(file.path()).unwrap();
     assert!(!loaded.value.has(&make_key("actions/checkout", "^4")));
     assert!(loaded.value.has(&make_key("actions/setup-node", "^3")));
 }
@@ -130,8 +135,8 @@ fn test_apply_lock_update_version_field() {
     let diff = LockDiff {
         updated: vec![(
             make_key("actions/checkout", "^4"),
-            crate::domain::LockEntryPatch {
-                version: Some(Some("v4.1.0".to_string())),
+            crate::domain::plan::LockEntryPatch {
+                version: Some(Some("v4.1.0".to_owned())),
                 comment: None,
             },
         )],
@@ -139,12 +144,12 @@ fn test_apply_lock_update_version_field() {
     };
     apply_lock_diff(file.path(), &diff).unwrap();
 
-    let loaded = parse_lock(file.path()).unwrap();
+    let loaded = parse(file.path()).unwrap();
     let entry = loaded
         .value
         .get(&make_key("actions/checkout", "^4"))
         .unwrap();
-    assert_eq!(entry.version, Some("v4.1.0".to_string()));
+    assert_eq!(entry.version, Some("v4.1.0".to_owned()));
     assert_eq!(entry.comment, "v4", "Comment must be unchanged");
 }
 
@@ -159,23 +164,23 @@ fn test_apply_lock_update_comment_field() {
     let diff = LockDiff {
         updated: vec![(
             make_key("actions/checkout", "^4"),
-            crate::domain::LockEntryPatch {
+            crate::domain::plan::LockEntryPatch {
                 version: None,
-                comment: Some("v4.1".to_string()),
+                comment: Some("v4.1".to_owned()),
             },
         )],
         ..Default::default()
     };
     apply_lock_diff(file.path(), &diff).unwrap();
 
-    let loaded = parse_lock(file.path()).unwrap();
+    let loaded = parse(file.path()).unwrap();
     let entry = loaded
         .value
         .get(&make_key("actions/checkout", "^4"))
         .unwrap();
     assert_eq!(
         entry.version,
-        Some("v4".to_string()),
+        Some("v4".to_owned()),
         "Version must be unchanged"
     );
     assert_eq!(entry.comment, "v4.1");
@@ -194,11 +199,11 @@ fn test_apply_lock_roundtrip() {
             make_key("actions/setup-node", "^3"),
             LockEntry::with_version_and_comment(
                 CommitSha::from("def456789012345678901234567890abcdef1234"),
-                Some("v3.1.0".to_string()),
-                "v3".to_string(),
-                "actions/setup-node".to_string(),
+                Some("v3.1.0".to_owned()),
+                "v3".to_owned(),
+                "actions/setup-node".to_owned(),
                 Some(RefType::Tag),
-                "2026-01-01T00:00:00Z".to_string(),
+                "2026-01-01T00:00:00Z".to_owned(),
             ),
         )],
         removed: vec![make_key("actions/old-action", "^1")],
@@ -206,16 +211,16 @@ fn test_apply_lock_roundtrip() {
     };
     apply_lock_diff(file.path(), &diff).unwrap();
 
-    let loaded = parse_lock(file.path()).unwrap();
+    let loaded = parse(file.path()).unwrap();
     assert!(loaded.value.has(&make_key("actions/checkout", "^4")));
     assert!(loaded.value.has(&make_key("actions/setup-node", "^3")));
     assert!(!loaded.value.has(&make_key("actions/old-action", "^1")));
 }
 
-// ========== create_lock tests ==========
+// ========== create tests ==========
 
 #[test]
-fn test_create_lock_from_diff_with_3_entries() {
+fn test_create_from_diff_with_3_entries() {
     let file = NamedTempFile::new().unwrap();
 
     let diff = LockDiff {
@@ -224,46 +229,46 @@ fn test_create_lock_from_diff_with_3_entries() {
                 make_key("actions/checkout", "^4"),
                 LockEntry::with_version_and_comment(
                     CommitSha::from("abc123def456789012345678901234567890abcd"),
-                    Some("v4.1.0".to_string()),
-                    "v4".to_string(),
-                    "actions/checkout".to_string(),
+                    Some("v4.1.0".to_owned()),
+                    "v4".to_owned(),
+                    "actions/checkout".to_owned(),
                     Some(RefType::Tag),
-                    "2026-01-01T00:00:00Z".to_string(),
+                    "2026-01-01T00:00:00Z".to_owned(),
                 ),
             ),
             (
                 make_key("actions/setup-node", "^3"),
                 LockEntry::with_version_and_comment(
                     CommitSha::from("def456789012345678901234567890abcdef1234"),
-                    Some("v3.2.0".to_string()),
-                    "v3".to_string(),
-                    "actions/setup-node".to_string(),
+                    Some("v3.2.0".to_owned()),
+                    "v3".to_owned(),
+                    "actions/setup-node".to_owned(),
                     Some(RefType::Tag),
-                    "2026-01-01T00:00:00Z".to_string(),
+                    "2026-01-01T00:00:00Z".to_owned(),
                 ),
             ),
             (
                 make_key("actions/cache", "^3"),
                 LockEntry::with_version_and_comment(
                     CommitSha::from("111222333444555666777888999000aaabbbcccddd"),
-                    Some("v3.0.0".to_string()),
-                    "v3".to_string(),
-                    "actions/cache".to_string(),
+                    Some("v3.0.0".to_owned()),
+                    "v3".to_owned(),
+                    "actions/cache".to_owned(),
                     Some(RefType::Tag),
-                    "2026-01-01T00:00:00Z".to_string(),
+                    "2026-01-01T00:00:00Z".to_owned(),
                 ),
             ),
         ],
         ..Default::default()
     };
-    create_lock(file.path(), &diff).unwrap();
+    create(file.path(), &diff).unwrap();
 
     let content = fs::read_to_string(file.path()).unwrap();
     assert!(content.contains(&format!("version = \"{LOCK_FILE_VERSION}\"")));
     assert!(content.contains("[actions]"));
 
     // Round-trip
-    let loaded = parse_lock(file.path()).unwrap();
+    let loaded = parse(file.path()).unwrap();
     assert!(loaded.value.has(&make_key("actions/checkout", "^4")));
     assert!(loaded.value.has(&make_key("actions/setup-node", "^3")));
     assert!(loaded.value.has(&make_key("actions/cache", "^3")));
@@ -275,31 +280,31 @@ fn test_create_lock_from_diff_with_3_entries() {
         entry.sha,
         CommitSha::from("abc123def456789012345678901234567890abcd")
     );
-    assert_eq!(entry.version, Some("v4.1.0".to_string()));
+    assert_eq!(entry.version, Some("v4.1.0".to_owned()));
     assert_eq!(entry.comment, "v4");
 }
 
 #[test]
-fn test_create_lock_roundtrip_matches_domain_state() {
+fn test_create_roundtrip_matches_domain_state() {
     let file = NamedTempFile::new().unwrap();
 
     let key = make_key("actions/checkout", "^4");
     let entry = LockEntry::with_version_and_comment(
         CommitSha::from("abc123def456789012345678901234567890abcd"),
-        Some("v4.2.0".to_string()),
-        "v4".to_string(),
-        "actions/checkout".to_string(),
+        Some("v4.2.0".to_owned()),
+        "v4".to_owned(),
+        "actions/checkout".to_owned(),
         Some(RefType::Release),
-        "2026-01-15T10:30:00Z".to_string(),
+        "2026-01-15T10:30:00Z".to_owned(),
     );
 
     let diff = LockDiff {
         added: vec![(key.clone(), entry.clone())],
         ..Default::default()
     };
-    create_lock(file.path(), &diff).unwrap();
+    create(file.path(), &diff).unwrap();
 
-    let loaded = parse_lock(file.path()).unwrap();
+    let loaded = parse(file.path()).unwrap();
     let loaded_entry = loaded.value.get(&key).expect("Entry must exist");
     assert_eq!(loaded_entry.sha, entry.sha);
     assert_eq!(loaded_entry.version, entry.version);

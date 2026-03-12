@@ -1,35 +1,37 @@
-mod entry;
+pub mod entry;
 
+use super::action::identity::ActionId;
+use super::action::resolved::Resolved;
+use super::action::spec::LockKey;
 use super::plan::LockDiff;
-use super::{ActionId, LockKey, ResolvedAction};
-pub use entry::LockEntry;
+use entry::Entry;
 use std::collections::{HashMap, HashSet};
 
 /// Domain entity representing the resolved lock state: maps action@version → lock entry.
 /// Contains all domain logic for querying and mutating the lock. No I/O.
 #[derive(Debug, Default, Clone)]
 pub struct Lock {
-    pub(crate) actions: HashMap<LockKey, LockEntry>,
+    pub(crate) actions: HashMap<LockKey, Entry>,
 }
 
 impl Lock {
     /// Create a `Lock` from an existing map of keys to entries.
     #[must_use]
-    pub fn new(actions: HashMap<LockKey, LockEntry>) -> Self {
+    pub fn new(actions: HashMap<LockKey, Entry>) -> Self {
         Self { actions }
     }
 
     /// Get the locked entry for a lock key.
     #[must_use]
-    pub fn get(&self, key: &LockKey) -> Option<&LockEntry> {
+    pub fn get(&self, key: &LockKey) -> Option<&Entry> {
         self.actions.get(key)
     }
 
     /// Set or update a locked action with its resolved metadata.
-    pub fn set(&mut self, resolved: &ResolvedAction) {
+    pub fn set(&mut self, resolved: &Resolved) {
         let key = LockKey::from(resolved);
         let comment = resolved.version.to_comment().to_string();
-        let entry = LockEntry::with_version_and_comment(
+        let entry = Entry::with_version_and_comment(
             resolved.sha.clone(),
             None,
             comment,
@@ -83,7 +85,7 @@ impl Lock {
     }
 
     /// Iterate over all (key, entry) entries.
-    pub fn entries(&self) -> impl Iterator<Item = (&LockKey, &LockEntry)> {
+    pub fn entries(&self) -> impl Iterator<Item = (&LockKey, &Entry)> {
         self.actions.iter()
     }
 
@@ -102,7 +104,7 @@ impl Lock {
         let before_keys: HashSet<LockKey> = self.entries().map(|(k, _)| k.clone()).collect();
         let after_keys: HashSet<LockKey> = other.entries().map(|(k, _)| k.clone()).collect();
 
-        let mut added: Vec<(LockKey, LockEntry)> = after_keys
+        let mut added: Vec<(LockKey, Entry)> = after_keys
             .difference(&before_keys)
             .filter_map(|k| other.get(k).map(|e| (k.clone(), e.clone())))
             .collect();
@@ -129,15 +131,17 @@ impl Lock {
 
 #[cfg(test)]
 mod tests {
-    use super::{ActionId, Lock, LockEntry, LockKey, ResolvedAction};
-    use crate::domain::{CommitSha, RefType, Specifier};
+    use super::{ActionId, Entry, Lock, LockKey, Resolved};
+    use crate::domain::action::identity::CommitSha;
+    use crate::domain::action::specifier::Specifier;
+    use crate::domain::action::uses_ref::RefType;
 
     fn make_key(action: &str, specifier: &str) -> LockKey {
         LockKey::new(ActionId::from(action), Specifier::parse(specifier))
     }
 
-    fn make_resolved(action: &str, specifier: &str, sha: &str) -> ResolvedAction {
-        ResolvedAction::new(
+    fn make_resolved(action: &str, specifier: &str, sha: &str) -> Resolved {
+        Resolved::new(
             ActionId::from(action),
             Specifier::parse(specifier),
             CommitSha::from(sha),
@@ -147,8 +151,8 @@ mod tests {
         )
     }
 
-    fn make_entry(sha: &str) -> LockEntry {
-        LockEntry::with_version_and_comment(
+    fn make_entry(sha: &str) -> Entry {
+        Entry::with_version_and_comment(
             CommitSha::from(sha),
             Some("v4.0.0".to_string()),
             "v4".to_string(),
@@ -226,7 +230,7 @@ mod tests {
     #[test]
     fn test_build_update_map() {
         let mut lock = Lock::default();
-        let mut entry1 = LockEntry::new(
+        let mut entry1 = Entry::new(
             CommitSha::from("abc123def456789012345678901234567890abcd"),
             "actions/checkout".to_string(),
             Some(RefType::Tag),
@@ -236,7 +240,7 @@ mod tests {
         lock.actions
             .insert(make_key("actions/checkout", "^4"), entry1);
 
-        let mut entry2 = LockEntry::new(
+        let mut entry2 = Entry::new(
             CommitSha::from("def456789012345678901234567890abcd123456"),
             "actions/setup-node".to_string(),
             Some(RefType::Tag),

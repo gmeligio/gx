@@ -1,9 +1,9 @@
 use crate::command::CommandReport;
-use crate::output::OutputLine;
+use crate::output::lines::Line as OutputLine;
 
 /// Report from the upgrade command.
 #[derive(Debug, Default)]
-pub struct UpgradeReport {
+pub struct Report {
     /// Actions that were upgraded: (action, `from_version`, `to_version`)
     pub upgrades: Vec<(String, String, String)>,
     /// Actions that were skipped: (action, reason)
@@ -16,7 +16,7 @@ pub struct UpgradeReport {
     pub up_to_date: bool,
 }
 
-impl CommandReport for UpgradeReport {
+impl CommandReport for Report {
     fn render(&self) -> Vec<OutputLine> {
         if self.up_to_date {
             return vec![OutputLine::Summary {
@@ -71,11 +71,11 @@ impl CommandReport for UpgradeReport {
 
 #[cfg(test)]
 mod tests {
-    use super::{CommandReport, OutputLine, UpgradeReport};
+    use super::{CommandReport, OutputLine, Report};
 
     #[test]
     fn render_upgrade_up_to_date() {
-        let report = UpgradeReport {
+        let report = Report {
             up_to_date: true,
             ..Default::default()
         };
@@ -88,7 +88,7 @@ mod tests {
 
     #[test]
     fn render_upgrade_with_upgrades() {
-        let report = UpgradeReport {
+        let report = Report {
             upgrades: vec![
                 (
                     "actions/checkout".to_string(),

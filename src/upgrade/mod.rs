@@ -7,23 +7,20 @@ use std::path::Path;
 
 use crate::command::Command;
 use crate::config::Config;
-use crate::domain::UpgradeAction;
-use crate::infra::{
-    FileWorkflowUpdater, GithubError, GithubRegistry, LockFileError, ManifestError,
-    apply_lock_diff, apply_manifest_diff,
-};
-use report::UpgradeReport;
+use crate::domain::action::upgrade::Action;
+use crate::infra::github::Registry;
+use crate::infra::lock::Error as LockFileError;
+use crate::infra::manifest::Error as ManifestError;
+use crate::infra::workflow_update::FileUpdater;
+use report::Report as UpgradeReport;
 use thiserror::Error;
-
-pub use cli::{ResolveError, resolve_upgrade_mode};
-pub use plan::{apply_upgrade_workflows, plan};
-pub use types::{UpgradeError, UpgradeMode, UpgradePlan, UpgradeRequest, UpgradeScope};
+use types::{Error as UpgradeError, Request as UpgradeRequest};
 
 /// Errors that can occur during the upgrade command's run phase (I/O + domain)
 #[derive(Debug, Error)]
-pub enum UpgradeRunError {
+pub enum RunError {
     #[error(transparent)]
-    Github(#[from] GithubError),
+    Github(#[from] crate::infra::github::Error),
     #[error(transparent)]
     Manifest(#[from] ManifestError),
     #[error(transparent)]
@@ -39,19 +36,19 @@ pub struct Upgrade {
 
 impl Command for Upgrade {
     type Report = UpgradeReport;
-    type Error = UpgradeRunError;
+    type Error = RunError;
 
     fn run(
         &self,
         repo_root: &Path,
         config: Config,
         on_progress: &mut dyn FnMut(&str),
-    ) -> Result<UpgradeReport, UpgradeRunError> {
+    ) -> Result<UpgradeReport, RunError> {
         let has_manifest = config.manifest_path.exists();
-        let registry = GithubRegistry::new(config.settings.github_token)?;
-        let updater = FileWorkflowUpdater::new(repo_root);
+        let registry = Registry::new(config.settings.github_token)?;
+        let updater = FileUpdater::new(repo_root);
 
-        let upgrade_plan = plan(
+        let upgrade_plan = plan::plan(
             &config.manifest,
             &config.lock,
             &registry,
@@ -67,12 +64,15 @@ impl Command for Upgrade {
         }
 
         if has_manifest {
-            apply_manifest_diff(&config.manifest_path, &upgrade_plan.manifest)?;
-            apply_lock_diff(&config.lock_path, &upgrade_plan.lock)?;
+            crate::infra::manifest::patch::apply_manifest_diff(
+                &config.manifest_path,
+                &upgrade_plan.manifest,
+            )?;
+            crate::infra::lock::apply_lock_diff(&config.lock_path, &upgrade_plan.lock)?;
         }
 
         let workflows_updated =
-            apply_upgrade_workflows(&updater, &upgrade_plan.lock, &upgrade_plan.upgrades)?;
+            plan::apply_upgrade_workflows(&updater, &upgrade_plan.lock, &upgrade_plan.upgrades)?;
 
         if config.manifest_migrated {
             on_progress("migrated gx.toml → semver specifiers");
@@ -87,8 +87,8 @@ impl Command for Upgrade {
             .map(|u| {
                 let from = u.current.to_string();
                 let to = match &u.action {
-                    UpgradeAction::InRange { candidate } => candidate.to_string(),
-                    UpgradeAction::CrossRange { new_specifier, .. } => new_specifier.to_string(),
+                    Action::InRange { candidate } => candidate.to_string(),
+                    Action::CrossRange { new_specifier, .. } => new_specifier.to_string(),
                 };
                 (u.id.to_string(), from, to)
             })

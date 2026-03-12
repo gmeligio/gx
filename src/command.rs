@@ -1,9 +1,10 @@
 use crate::config::Config;
-use crate::output::OutputLine;
+use crate::output::lines::Line as OutputLine;
 use std::fmt::Debug;
 use std::path::Path;
 
 /// Trait for report types returned by commands.
+#[allow(clippy::module_name_repetitions)]
 pub trait CommandReport: Debug + Default {
     /// Render the report into output lines.
     fn render(&self) -> Vec<OutputLine>;

@@ -1,9 +1,17 @@
-use super::types::{UpgradeError, UpgradeMode, UpgradePlan, UpgradeRequest, UpgradeScope};
-use crate::domain::{
-    ActionId, ActionResolver, ActionSpec, Lock, LockDiff, LockKey, Manifest, ManifestDiff,
-    UpgradeAction, UpgradeCandidate, Version, VersionRegistry, WorkflowUpdater,
-    find_upgrade_candidate,
+use super::types::{
+    Error as UpgradeError, Mode as UpgradeMode, Plan as UpgradePlan, Request as UpgradeRequest,
+    Scope as UpgradeScope,
 };
+use crate::domain::action::identity::{ActionId, Version};
+use crate::domain::action::spec::{LockKey, Spec as ActionSpec};
+use crate::domain::action::upgrade::{
+    Action as UpgradeAction, Candidate as UpgradeCandidate, find_upgrade_candidate,
+};
+use crate::domain::lock::Lock;
+use crate::domain::manifest::Manifest;
+use crate::domain::plan::{LockDiff, ManifestDiff};
+use crate::domain::resolution::{ActionResolver, VersionRegistry};
+use crate::domain::workflow::Updater as WorkflowUpdater;
 
 /// Compute an `UpgradePlan` describing all changes without modifying the original manifest or lock.
 ///
@@ -12,12 +20,12 @@ use crate::domain::{
 /// Returns [`UpgradeError::ActionNotInManifest`] if the target action is not in the manifest.
 /// Returns [`UpgradeError::TagNotFound`] if the pinned version tag does not exist.
 /// Returns [`UpgradeError::TagFetchFailed`] if tags cannot be fetched from the registry.
-pub fn plan<R>(
+pub fn plan<R, F: FnMut(&str)>(
     manifest: &Manifest,
     lock: &Lock,
     registry: &R,
     request: &UpgradeRequest,
-    mut on_progress: impl FnMut(&str),
+    mut on_progress: F,
 ) -> Result<UpgradePlan, UpgradeError>
 where
     R: VersionRegistry,
@@ -49,7 +57,7 @@ where
         let (version_to_resolve, comment) = match &upgrade.action {
             UpgradeAction::InRange { .. } => (
                 upgrade.current.clone(),
-                upgrade.current.to_comment().to_string(),
+                upgrade.current.to_comment().to_owned(),
             ),
             UpgradeAction::CrossRange {
                 new_specifier,
@@ -69,7 +77,7 @@ where
     }
 
     for spec in &repins {
-        let comment = spec.version.to_comment().to_string();
+        let comment = spec.version.to_comment().to_owned();
         resolve_and_store(
             &service,
             spec,
@@ -95,6 +103,7 @@ where
     })
 }
 
+/// Result type for the `determine_upgrades` function.
 type DetermineResult = Option<(Vec<UpgradeCandidate>, Vec<ActionSpec>)>;
 
 /// # Errors
@@ -179,13 +188,10 @@ fn determine_upgrades<R: VersionRegistry>(
             Ok(Some((upgrades, repins)))
         }
         UpgradeMode::Pinned(version) => {
-            let id = match &request.scope {
-                UpgradeScope::Single(id) => id,
-                UpgradeScope::All => {
-                    unreachable!("Pinned + All should be rejected in UpgradeRequest::new")
-                }
+            let UpgradeScope::Single(id) = &request.scope else {
+                // Pinned mode requires Single scope (validated in Request::new)
+                return Ok(None);
             };
-
             let current = manifest
                 .get(id)
                 .ok_or_else(|| UpgradeError::ActionNotInManifest(id.clone()))?;
@@ -222,6 +228,7 @@ fn determine_upgrades<R: VersionRegistry>(
     }
 }
 
+/// Resolve an action and store the result in the upgrade plan.
 pub(super) fn resolve_and_store<R: VersionRegistry>(
     service: &ActionResolver<'_, R>,
     spec: &ActionSpec,
@@ -234,7 +241,7 @@ pub(super) fn resolve_and_store<R: VersionRegistry>(
         Ok(resolved) => {
             let key = LockKey::from(spec);
             lock.set(&resolved);
-            lock.set_comment(&key, comment.to_string());
+            lock.set_comment(&key, comment.to_owned());
         }
         Err(e) => {
             on_progress(&format!("{unresolved_msg} {spec}: {e}"));
@@ -252,7 +259,7 @@ pub fn apply_upgrade_workflows<W: WorkflowUpdater>(
     lock_diff: &LockDiff,
     upgrades: &[UpgradeCandidate],
 ) -> Result<usize, UpgradeError> {
-    use crate::domain::LockEntry;
+    use crate::domain::lock::entry::Entry as LockEntry;
 
     let update_map: std::collections::HashMap<ActionId, String> = lock_diff
         .added
@@ -273,18 +280,22 @@ pub fn apply_upgrade_workflows<W: WorkflowUpdater>(
 
     let results = writer.update_all(&update_map)?;
 
-    let _ = upgrades;
+    let _: &[UpgradeCandidate] = upgrades;
 
     Ok(results.len())
 }
 
 #[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "tests use unwrap freely")]
 mod tests {
     use super::{
         ActionId, Lock, LockKey, Manifest, UpgradeMode, UpgradeRequest, UpgradeScope, plan,
     };
+    use crate::domain::action::identity::CommitSha;
+    use crate::domain::action::resolved::Resolved as ResolvedAction;
+    use crate::domain::action::specifier::Specifier;
+    use crate::domain::action::uses_ref::RefType;
     use crate::domain::resolution::testutil::FakeRegistry;
-    use crate::domain::{CommitSha, RefType, ResolvedAction, Specifier};
 
     #[test]
     fn test_plan_no_upgradable_actions_returns_empty() {
@@ -296,9 +307,9 @@ mod tests {
             ActionId::from("actions/checkout"),
             Specifier::parse("^4"),
             CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-            "actions/checkout".to_string(),
+            "actions/checkout".to_owned(),
             Some(RefType::Tag),
-            "2026-01-01T00:00:00Z".to_string(),
+            "2026-01-01T00:00:00Z".to_owned(),
         ));
 
         // Registry returns no tags → nothing to upgrade
@@ -322,13 +333,13 @@ mod tests {
             ActionId::from("actions/checkout"),
             Specifier::parse("^4"),
             CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-            "actions/checkout".to_string(),
+            "actions/checkout".to_owned(),
             Some(RefType::Tag),
-            "2026-01-01T00:00:00Z".to_string(),
+            "2026-01-01T00:00:00Z".to_owned(),
         ));
         lock.set_version(
             &LockKey::new(ActionId::from("actions/checkout"), Specifier::parse("^4")),
-            Some("v4.1.0".to_string()),
+            Some("v4.1.0".to_owned()),
         );
 
         // Registry has v4.2.0 available (in-range upgrade from v4)
@@ -363,13 +374,13 @@ mod tests {
             ActionId::from("actions/checkout"),
             Specifier::parse("^3"),
             CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-            "actions/checkout".to_string(),
+            "actions/checkout".to_owned(),
             Some(RefType::Tag),
-            "2026-01-01T00:00:00Z".to_string(),
+            "2026-01-01T00:00:00Z".to_owned(),
         ));
         lock.set_version(
             &LockKey::new(ActionId::from("actions/checkout"), Specifier::parse("^3")),
-            Some("v3.0.0".to_string()),
+            Some("v3.0.0".to_owned()),
         );
 
         // Registry has v4 available (cross-range)

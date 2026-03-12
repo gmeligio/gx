@@ -1,4 +1,4 @@
-use super::lines::OutputLine;
+use super::lines::Line as OutputLine;
 use console::Term;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use std::time::Duration;

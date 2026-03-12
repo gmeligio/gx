@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+#MISE description="Install gx to ~/.cargo/bin"
+cargo install --path . --force

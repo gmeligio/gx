@@ -1,8 +1,7 @@
-use crate::domain::{Lock, Manifest};
-use crate::infra::{
-    LOCK_FILE_NAME, LockFileError, MANIFEST_FILE_NAME, ManifestError, parse_lint_config,
-    parse_lock, parse_manifest,
-};
+use crate::domain::lock::Lock;
+use crate::domain::manifest::Manifest;
+use crate::infra::lock::{Error as LockFileError, LOCK_FILE_NAME};
+use crate::infra::manifest::{Error as ManifestError, MANIFEST_FILE_NAME, parse_lint_config};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::env;
@@ -11,14 +10,14 @@ use thiserror::Error;
 
 /// Errors that can occur when loading configuration.
 #[derive(Debug, Error)]
-pub enum ConfigError {
+pub enum Error {
     /// The manifest file cannot be parsed.
     #[error(transparent)]
     Manifest(#[from] ManifestError),
 
     /// The lock file cannot be parsed.
     #[error(transparent)]
-    Lock(#[from] LockFileError),
+    Lock(#[from] LockFileError), // LockFileError is now crate::infra::lock::Error
 }
 
 /// Runtime settings loaded from environment variables.
@@ -54,7 +53,7 @@ pub struct IgnoreTarget {
 
 /// Configuration for a single lint rule.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RuleConfig {
+pub struct Rule {
     /// Severity level (error, warn, off)
     pub level: Level,
     /// Targets to ignore (intersection semantics)
@@ -64,18 +63,18 @@ pub struct RuleConfig {
 
 /// Configuration for all lint rules.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct LintConfig {
+pub struct Lint {
     /// Per-rule configuration, keyed by rule name
     #[serde(default)]
-    pub rules: BTreeMap<String, RuleConfig>,
+    pub rules: BTreeMap<String, Rule>,
 }
 
-impl LintConfig {
+impl Lint {
     /// Get the effective configuration for a rule, applying defaults if not explicitly configured.
     /// Each rule has its own default level; unconfigured rules use their defaults.
     #[must_use]
-    pub fn get_rule(&self, name: &str, default_level: Level) -> RuleConfig {
-        self.rules.get(name).cloned().unwrap_or(RuleConfig {
+    pub fn get_rule(&self, name: &str, default_level: Level) -> Rule {
+        self.rules.get(name).cloned().unwrap_or(Rule {
             level: default_level,
             ignore: Vec::new(),
         })
@@ -88,7 +87,7 @@ pub struct Config {
     pub settings: Settings,
     pub manifest: Manifest,
     pub lock: Lock,
-    pub lint_config: LintConfig,
+    pub lint_config: Lint,
     pub manifest_path: PathBuf,
     pub lock_path: PathBuf,
     /// Whether the manifest was auto-migrated from v1 format on load.
@@ -115,11 +114,11 @@ impl Config {
     ///
     /// Returns [`ConfigError::Manifest`] if the manifest file cannot be parsed.
     /// Returns [`ConfigError::Lock`] if the lock file cannot be parsed.
-    pub fn load(repo_root: &Path) -> Result<Self, ConfigError> {
+    pub fn load(repo_root: &Path) -> Result<Self, Error> {
         let manifest_path = repo_root.join(".github").join(MANIFEST_FILE_NAME);
         let lock_path = repo_root.join(".github").join(LOCK_FILE_NAME);
-        let parsed_manifest = parse_manifest(&manifest_path)?;
-        let parsed_lock = parse_lock(&lock_path)?;
+        let parsed_manifest = crate::infra::manifest::parse(&manifest_path)?;
+        let parsed_lock = crate::infra::lock::parse(&lock_path)?;
         Ok(Self {
             settings: Settings::from_env(),
             manifest: parsed_manifest.value,
@@ -136,8 +135,7 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::{
-        Config, Deserialize, IgnoreTarget, Level, LintConfig, Lock, Manifest, PathBuf, RuleConfig,
-        Settings,
+        Config, Deserialize, IgnoreTarget, Level, Lint, Lock, Manifest, PathBuf, Rule, Settings,
     };
 
     #[derive(Deserialize)]
@@ -159,7 +157,7 @@ mod tests {
             },
             manifest: Manifest::default(),
             lock: Lock::default(),
-            lint_config: LintConfig::default(),
+            lint_config: Lint::default(),
             manifest_path: PathBuf::from("gx.toml"),
             lock_path: PathBuf::from("gx.lock"),
             manifest_migrated: false,
@@ -212,7 +210,7 @@ mod tests {
         let toml_str = r#"
             level = "error"
         "#;
-        let config: RuleConfig = toml::from_str(toml_str).unwrap();
+        let config: Rule = toml::from_str(toml_str).unwrap();
         assert_eq!(config.level, Level::Error);
         assert!(config.ignore.is_empty());
     }
@@ -226,7 +224,7 @@ mod tests {
                 { workflow = ".github/workflows/ci.yml" },
             ]
         "#;
-        let config: RuleConfig = toml::from_str(toml_str).unwrap();
+        let config: Rule = toml::from_str(toml_str).unwrap();
         assert_eq!(config.level, Level::Warn);
         assert_eq!(config.ignore.len(), 2);
         assert_eq!(
@@ -263,7 +261,7 @@ job = "build"
             unpinned = { level = "error", ignore = [{ action = "actions/internal-tool" }] }
             stale-comment = { level = "off" }
         "#;
-        let config: LintConfig = toml::from_str(toml_str).unwrap();
+        let config: Lint = toml::from_str(toml_str).unwrap();
         assert_eq!(config.rules.len(), 3);
         assert_eq!(config.rules["sha-mismatch"].level, Level::Error);
         assert_eq!(config.rules["unpinned"].level, Level::Error);
@@ -273,13 +271,13 @@ job = "build"
 
     #[test]
     fn lint_config_default_is_empty() {
-        let config = LintConfig::default();
+        let config = Lint::default();
         assert!(config.rules.is_empty());
     }
 
     #[test]
     fn lint_config_get_rule_uses_default_when_unconfigured() {
-        let config = LintConfig::default();
+        let config = Lint::default();
         let rule = config.get_rule("sha-mismatch", Level::Error);
         assert_eq!(rule.level, Level::Error);
         assert!(rule.ignore.is_empty());
@@ -287,10 +285,10 @@ job = "build"
 
     #[test]
     fn lint_config_get_rule_returns_configured_value() {
-        let mut config = LintConfig::default();
+        let mut config = Lint::default();
         config.rules.insert(
             "unpinned".to_string(),
-            RuleConfig {
+            Rule {
                 level: Level::Warn,
                 ignore: vec![IgnoreTarget {
                     action: Some("actions/checkout".to_string()),
@@ -306,10 +304,10 @@ job = "build"
 
     #[test]
     fn lint_config_get_rule_respects_off_level() {
-        let mut config = LintConfig::default();
+        let mut config = Lint::default();
         config.rules.insert(
             "stale-comment".to_string(),
-            RuleConfig {
+            Rule {
                 level: Level::Off,
                 ignore: vec![],
             },

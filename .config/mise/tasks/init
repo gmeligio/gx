@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+#MISE description="Create manifest and lock from workflows"
+cargo run -- init

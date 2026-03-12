@@ -1,9 +1,9 @@
 use crate::command::CommandReport;
-use crate::output::OutputLine;
+use crate::output::lines::Line as OutputLine;
 
 /// Report from the tidy command.
 #[derive(Debug, Default)]
-pub struct TidyReport {
+pub struct Report {
     /// Actions removed: action names
     pub removed: Vec<String>,
     /// Actions added: (action, version)
@@ -16,7 +16,7 @@ pub struct TidyReport {
     pub workflows_updated: usize,
 }
 
-impl CommandReport for TidyReport {
+impl CommandReport for Report {
     fn render(&self) -> Vec<OutputLine> {
         let has_changes =
             !self.removed.is_empty() || !self.added.is_empty() || !self.upgraded.is_empty();
@@ -75,11 +75,11 @@ impl CommandReport for TidyReport {
 
 #[cfg(test)]
 mod tests {
-    use super::{CommandReport, OutputLine, TidyReport};
+    use super::{CommandReport, OutputLine, Report};
 
     #[test]
     fn render_tidy_nothing_changed() {
-        let report = TidyReport::default();
+        let report = Report::default();
         let lines = report.render();
         assert_eq!(lines.len(), 1);
         assert!(
@@ -89,7 +89,7 @@ mod tests {
 
     #[test]
     fn render_tidy_with_changes() {
-        let report = TidyReport {
+        let report = Report {
             removed: vec!["actions/unused".to_string()],
             added: vec![
                 ("actions/new".to_string(), "v2".to_string()),

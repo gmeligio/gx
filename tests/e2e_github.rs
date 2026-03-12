@@ -5,8 +5,10 @@
 //! These tests require a `GITHUB_TOKEN` environment variable and network access.
 //! Run via `mise run e2e`.
 
-use gx::domain::{ActionId, CommitSha, RefType, VersionRegistry};
-use gx::infra::GithubRegistry;
+use gx::domain::action::identity::{ActionId, CommitSha};
+use gx::domain::action::uses_ref::RefType;
+use gx::domain::resolution::VersionRegistry;
+use gx::infra::github::Registry as GithubRegistry;
 
 fn github_registry() -> GithubRegistry {
     let token = std::env::var("GITHUB_TOKEN").ok();

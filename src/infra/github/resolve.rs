@@ -1,13 +1,15 @@
-use super::GithubError;
+use super::Error as GithubError;
+use super::Registry;
 use super::responses::{
     CommitDetailResponse, CommitResponse, GitRef, GitRefEntry, GitTagResponse, ReleaseResponse,
     TagObjectResponse,
 };
-use crate::domain::{CommitSha, RefType};
+use crate::domain::action::identity::CommitSha;
+use crate::domain::action::uses_ref::RefType;
 
 const GITHUB_API_BASE: &str = "https://api.github.com";
 
-impl super::GithubRegistry {
+impl Registry {
     /// Resolve a ref (tag, branch, or commit) to a full commit SHA and detect the ref type
     ///
     /// Returns a tuple of (`sha`, `ref_type`) by tracking which API path succeeded.

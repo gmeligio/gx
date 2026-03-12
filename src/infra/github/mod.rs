@@ -1,6 +1,9 @@
-use crate::domain::{
-    ActionId, ActionSpec, CommitSha, RefType, ResolutionError, ResolvedRef, ShaDescription,
-    Specifier, Version, VersionRegistry,
+use crate::domain::action::identity::{ActionId, CommitSha, Version};
+use crate::domain::action::spec::Spec as ActionSpec;
+use crate::domain::action::specifier::Specifier;
+use crate::domain::action::uses_ref::RefType;
+use crate::domain::resolution::{
+    Error as ResolutionError, ResolvedRef, ShaDescription, VersionRegistry,
 };
 use std::time::Duration;
 use thiserror::Error;
@@ -13,7 +16,7 @@ const REQUEST_TIMEOUT_SECS: u64 = 30;
 
 /// Errors that can occur when interacting with the Github API
 #[derive(Debug, Error)]
-pub enum GithubError {
+pub enum Error {
     #[error("failed to create HTTP client")]
     ClientInit(#[source] reqwest::Error),
 
@@ -46,12 +49,12 @@ pub enum GithubError {
 }
 
 #[derive(Clone)]
-pub struct GithubRegistry {
+pub struct Registry {
     pub(super) client: reqwest::blocking::Client,
     pub(super) token: Option<String>,
 }
 
-impl GithubRegistry {
+impl Registry {
     /// Create a new Github client with a custom token
     ///
     /// # Errors
@@ -63,12 +66,12 @@ impl GithubRegistry {
     ///
     /// This method panics if called from within an async runtime. See docs on
     /// [`reqwest::blocking`][crate::blocking] for details.
-    pub fn new(token: Option<String>) -> Result<Self, GithubError> {
+    pub fn new(token: Option<String>) -> Result<Self, Error> {
         let client = reqwest::blocking::Client::builder()
             .user_agent(USER_AGENT)
             .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
             .build()
-            .map_err(GithubError::ClientInit)?;
+            .map_err(Error::ClientInit)?;
 
         Ok(Self { client, token })
     }
@@ -82,11 +85,11 @@ impl GithubRegistry {
         }
     }
 
-    /// Classify a non-success HTTP response into the appropriate `GithubError` variant.
-    pub(super) fn check_status(response: &reqwest::blocking::Response, url: &str) -> GithubError {
+    /// Classify a non-success HTTP response into the appropriate `Error` variant.
+    pub(super) fn check_status(response: &reqwest::blocking::Response, url: &str) -> Error {
         let status = response.status();
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            return GithubError::RateLimited {
+            return Error::RateLimited {
                 url: url.to_string(),
             };
         }
@@ -98,38 +101,38 @@ impl GithubRegistry {
                 .and_then(|v| v.parse::<u64>().ok())
                 .unwrap_or(1);
             if remaining == 0 {
-                return GithubError::RateLimited {
+                return Error::RateLimited {
                     url: url.to_string(),
                 };
             }
-            return GithubError::Unauthorized {
+            return Error::Unauthorized {
                 url: url.to_string(),
             };
         }
         if status == reqwest::StatusCode::UNAUTHORIZED {
-            return GithubError::Unauthorized {
+            return Error::Unauthorized {
                 url: url.to_string(),
             };
         }
         if status == reqwest::StatusCode::NOT_FOUND {
-            return GithubError::NotFound {
+            return Error::NotFound {
                 url: url.to_string(),
             };
         }
-        GithubError::ApiError {
+        Error::ApiError {
             status: status.as_u16(),
             url: url.to_string(),
         }
     }
 }
 
-impl VersionRegistry for GithubRegistry {
+impl VersionRegistry for Registry {
     fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<ResolvedRef, ResolutionError> {
         let (sha, ref_type) =
             self.resolve_ref(id.as_str(), version.as_str())
                 .map_err(|e| match e {
-                    GithubError::RateLimited { .. } => ResolutionError::RateLimited,
-                    GithubError::Unauthorized { .. } => ResolutionError::AuthRequired,
+                    Error::RateLimited { .. } => ResolutionError::RateLimited,
+                    Error::Unauthorized { .. } => ResolutionError::AuthRequired,
                     _ => ResolutionError::ResolveFailed {
                         spec: ActionSpec::new(id.clone(), Specifier::from_v1(version.as_str())),
                         reason: e.to_string(),
@@ -178,8 +181,8 @@ impl VersionRegistry for GithubRegistry {
         self.get_tags_for_sha(id.as_str(), sha.as_str())
             .map(|tags| tags.into_iter().map(Version::from).collect())
             .map_err(|e| match e {
-                GithubError::RateLimited { .. } => ResolutionError::RateLimited,
-                GithubError::Unauthorized { .. } => ResolutionError::AuthRequired,
+                Error::RateLimited { .. } => ResolutionError::RateLimited,
+                Error::Unauthorized { .. } => ResolutionError::AuthRequired,
                 _ => ResolutionError::NoTagsForSha {
                     action: id.clone(),
                     sha: sha.clone(),
@@ -191,8 +194,8 @@ impl VersionRegistry for GithubRegistry {
         self.get_version_tags(id.as_str())
             .map(|tags| tags.into_iter().map(Version::from).collect())
             .map_err(|e| match e {
-                GithubError::RateLimited { .. } => ResolutionError::RateLimited,
-                GithubError::Unauthorized { .. } => ResolutionError::AuthRequired,
+                Error::RateLimited { .. } => ResolutionError::RateLimited,
+                Error::Unauthorized { .. } => ResolutionError::AuthRequired,
                 _ => ResolutionError::ResolveFailed {
                     spec: ActionSpec::new(id.clone(), Specifier::Ref(String::new())),
                     reason: e.to_string(),
@@ -211,8 +214,8 @@ impl VersionRegistry for GithubRegistry {
         let date = self
             .fetch_commit_date(&base_repo, sha.as_str())
             .map_err(|e| match e {
-                GithubError::RateLimited { .. } => ResolutionError::RateLimited,
-                GithubError::Unauthorized { .. } => ResolutionError::AuthRequired,
+                Error::RateLimited { .. } => ResolutionError::RateLimited,
+                Error::Unauthorized { .. } => ResolutionError::AuthRequired,
                 _ => ResolutionError::ResolveFailed {
                     spec: ActionSpec::new(id.clone(), Specifier::Sha(sha.as_str().to_string())),
                     reason: e.to_string(),
@@ -236,7 +239,7 @@ impl VersionRegistry for GithubRegistry {
     }
 }
 
-impl Default for GithubRegistry {
+impl Default for Registry {
     fn default() -> Self {
         Self::new(None).expect("Failed to create Github client")
     }

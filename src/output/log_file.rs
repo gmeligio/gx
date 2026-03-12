@@ -1,11 +1,13 @@
 use std::fs::{File, create_dir_all};
-use std::io::{BufWriter, Write};
+use std::io::{BufWriter, Write as _};
 use std::path::PathBuf;
 use time::OffsetDateTime;
 
 /// Writes timestamped log entries to a file in the OS temp directory.
 pub struct LogFile {
+    /// Buffered writer for the log file.
     writer: BufWriter<File>,
+    /// Path to the log file.
     path: PathBuf,
 }
 
@@ -32,13 +34,13 @@ impl LogFile {
     /// Write a timestamped message to the log file.
     pub fn write(&mut self, msg: &str) {
         let ts = wall_clock_hms();
-        let _ = writeln!(self.writer, "[{ts}] {msg}");
-        let _ = self.writer.flush();
+        drop(writeln!(self.writer, "[{ts}] {msg}"));
+        drop(self.writer.flush());
     }
 
     /// Return the path of this log file.
     #[must_use]
-    pub fn path(&self) -> &PathBuf {
+    pub const fn path(&self) -> &PathBuf {
         &self.path
     }
 }
@@ -49,7 +51,7 @@ fn chrono_now() -> String {
     format!(
         "{:04}-{:02}-{:02}T{:02}-{:02}-{:02}",
         dt.year(),
-        dt.month() as u8,
+        u8::from(dt.month()),
         dt.day(),
         dt.hour(),
         dt.minute(),

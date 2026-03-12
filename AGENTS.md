@@ -1,4 +1,4 @@
 - Use parallel worktree agents when possible.
 - Always use `mise run <task>` to run project tools, never invoke cargo/clippy/etc directly.
 - Bug-fix tests must FAIL asserting correct behavior, not pass documenting broken behavior.
-- Update README when changes affect user-facing behavior, commands, config, or installation.
+- Update README and docs/demo.tape when changes affect user-facing behavior, commands, config, or installation.

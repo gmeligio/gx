@@ -1,4 +1,7 @@
-use crate::domain::{Lock, LockDiff, Parsed, RefType};
+use crate::domain::Parsed;
+use crate::domain::action::uses_ref::RefType;
+use crate::domain::lock::Lock;
+use crate::domain::plan::LockDiff;
 use convert::{LockData, build_lock_inline_table, lock_from_data, serialize_lock};
 use serde::Deserialize;
 use std::fmt::Write;
@@ -15,7 +18,7 @@ pub const LOCK_FILE_VERSION: &str = "1.4";
 
 /// Errors that can occur when working with lock files
 #[derive(Debug, Error)]
-pub enum LockFileError {
+pub enum Error {
     #[error("failed to read lock file: {}", path.display())]
     Read {
         path: PathBuf,
@@ -48,11 +51,11 @@ pub enum LockFileError {
 }
 
 /// File-backed lock store. Reads from and writes to `.github/gx.lock`.
-pub struct FileLock {
+pub struct Store {
     path: PathBuf,
 }
 
-impl FileLock {
+impl Store {
     #[must_use]
     pub fn new(path: &Path) -> Self {
         Self {
@@ -61,15 +64,15 @@ impl FileLock {
     }
 }
 
-impl FileLock {
+impl Store {
     /// Save the given `Lock` to this file.
     ///
     /// # Errors
     ///
-    /// Returns [`LockFileError::Write`] if the file cannot be written.
-    pub fn save(&self, lock: &Lock) -> Result<(), LockFileError> {
+    /// Returns [`Error::Write`] if the file cannot be written.
+    pub fn save(&self, lock: &Lock) -> Result<(), Error> {
         let content = serialize_lock(lock);
-        fs::write(&self.path, content).map_err(|source| LockFileError::Write {
+        fs::write(&self.path, content).map_err(|source| Error::Write {
             path: self.path.clone(),
             source,
         })?;
@@ -83,10 +86,10 @@ impl FileLock {
 ///
 /// # Errors
 ///
-/// Returns [`LockFileError::Read`] if the file cannot be read.
-/// Returns [`LockFileError::Parse`] if the TOML is invalid.
-/// Returns [`LockFileError::UnsupportedVersion`] for unknown future versions.
-pub fn parse_lock(path: &Path) -> Result<Parsed<Lock>, LockFileError> {
+/// Returns [`Error::Read`] if the file cannot be read.
+/// Returns [`Error::Parse`] if the TOML is invalid.
+/// Returns [`Error::UnsupportedVersion`] for unknown future versions.
+pub fn parse(path: &Path) -> Result<Parsed<Lock>, Error> {
     #[derive(Deserialize)]
     struct VersionOnly {
         #[serde(default)]
@@ -100,7 +103,7 @@ pub fn parse_lock(path: &Path) -> Result<Parsed<Lock>, LockFileError> {
         });
     }
 
-    let content = fs::read_to_string(path).map_err(|source| LockFileError::Read {
+    let content = fs::read_to_string(path).map_err(|source| Error::Read {
         path: path.to_path_buf(),
         source,
     })?;
@@ -121,17 +124,16 @@ pub fn parse_lock(path: &Path) -> Result<Parsed<Lock>, LockFileError> {
     }
 
     // Parse the version field to dispatch
-    let version_only: VersionOnly =
-        toml::from_str(&content).map_err(|source| LockFileError::Parse {
-            path: path.to_path_buf(),
-            source: Box::new(source),
-        })?;
+    let version_only: VersionOnly = toml::from_str(&content).map_err(|source| Error::Parse {
+        path: path.to_path_buf(),
+        source: Box::new(source),
+    })?;
 
     match version_only.version.as_str() {
         "" | "1.0" => {
             // v1.0 format (no version field or explicit 1.0)
             let v1: migration::LockDataV1 =
-                toml::from_str(&content).map_err(|source| LockFileError::Parse {
+                toml::from_str(&content).map_err(|source| Error::Parse {
                     path: path.to_path_buf(),
                     source: Box::new(source),
                 })?;
@@ -145,7 +147,7 @@ pub fn parse_lock(path: &Path) -> Result<Parsed<Lock>, LockFileError> {
         "1.1" | "1.2" | "1.3" => {
             // v1.3 format: specifier field, @v6 style keys
             let v1_3: migration::LockDataV1_3 =
-                toml::from_str(&content).map_err(|source| LockFileError::Parse {
+                toml::from_str(&content).map_err(|source| Error::Parse {
                     path: path.to_path_buf(),
                     source: Box::new(source),
                 })?;
@@ -158,18 +160,17 @@ pub fn parse_lock(path: &Path) -> Result<Parsed<Lock>, LockFileError> {
         }
         "1.4" => {
             // Current format — direct parse
-            let data: LockData =
-                toml::from_str(&content).map_err(|source| LockFileError::Parse {
-                    path: path.to_path_buf(),
-                    source: Box::new(source),
-                })?;
+            let data: LockData = toml::from_str(&content).map_err(|source| Error::Parse {
+                path: path.to_path_buf(),
+                source: Box::new(source),
+            })?;
             let lock = lock_from_data(data);
             Ok(Parsed {
                 value: lock,
                 migrated: false,
             })
         }
-        v => Err(LockFileError::UnsupportedVersion(v.to_string())),
+        v => Err(Error::UnsupportedVersion(v.to_string())),
     }
 }
 
@@ -180,8 +181,8 @@ pub fn parse_lock(path: &Path) -> Result<Parsed<Lock>, LockFileError> {
 ///
 /// # Errors
 ///
-/// Returns [`LockFileError::Write`] if the file cannot be written.
-pub fn create_lock(path: &Path, diff: &LockDiff) -> Result<(), LockFileError> {
+/// Returns [`Error::Write`] if the file cannot be written.
+pub fn create(path: &Path, diff: &LockDiff) -> Result<(), Error> {
     // Build sorted entries
     let mut entries: Vec<_> = diff.added.iter().collect();
     entries.sort_by_key(|(k, _)| k.to_string());
@@ -208,7 +209,7 @@ pub fn create_lock(path: &Path, diff: &LockDiff) -> Result<(), LockFileError> {
         let _ = writeln!(out, "\"{key}\" = {{ {table} }}");
     }
 
-    fs::write(path, out).map_err(|source| LockFileError::Write {
+    fs::write(path, out).map_err(|source| Error::Write {
         path: path.to_path_buf(),
         source,
     })?;
@@ -217,35 +218,33 @@ pub fn create_lock(path: &Path, diff: &LockDiff) -> Result<(), LockFileError> {
 
 /// Apply a `LockDiff` to an existing lock file using `toml_edit` for surgical patching.
 ///
-/// The file must already exist. For creating a new lock from scratch, use `create_lock`.
+/// The file must already exist. For creating a new lock from scratch, use `create`.
 ///
 /// # Errors
 ///
-/// Returns [`LockFileError::Read`] if the file cannot be read.
-/// Returns [`LockFileError::Write`] if the file cannot be written.
-/// Returns [`LockFileError::Parse`] if the file cannot be parsed as TOML.
-pub fn apply_lock_diff(path: &Path, diff: &LockDiff) -> Result<(), LockFileError> {
+/// Returns [`Error::Read`] if the file cannot be read.
+/// Returns [`Error::Write`] if the file cannot be written.
+/// Returns [`Error::Parse`] if the file cannot be parsed as TOML.
+pub fn apply_lock_diff(path: &Path, diff: &LockDiff) -> Result<(), Error> {
     if diff.is_empty() {
         return Ok(());
     }
 
-    let content = fs::read_to_string(path).map_err(|source| LockFileError::Read {
+    let content = fs::read_to_string(path).map_err(|source| Error::Read {
         path: path.to_path_buf(),
         source,
     })?;
 
     let mut doc: DocumentMut = content
         .parse()
-        .map_err(|e| LockFileError::Validation(format!("toml_edit parse error: {e}")))?;
+        .map_err(|e| Error::Validation(format!("toml_edit parse error: {e}")))?;
 
     // Ensure [actions] table exists
     if doc.get("actions").is_none() {
         doc["actions"] = toml_edit::Item::Table(toml_edit::Table::new());
     }
     let Some(actions) = doc["actions"].as_table_mut() else {
-        return Err(LockFileError::Validation(
-            "[actions] is not a table".to_string(),
-        ));
+        return Err(Error::Validation("[actions] is not a table".to_string()));
     };
 
     // Remove entries
@@ -281,7 +280,7 @@ pub fn apply_lock_diff(path: &Path, diff: &LockDiff) -> Result<(), LockFileError
 
     actions.sort_values();
 
-    fs::write(path, doc.to_string()).map_err(|source| LockFileError::Write {
+    fs::write(path, doc.to_string()).map_err(|source| Error::Write {
         path: path.to_path_buf(),
         source,
     })?;

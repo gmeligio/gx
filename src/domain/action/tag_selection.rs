@@ -1,5 +1,5 @@
-use crate::domain::resolution::{ResolutionError, ShaDescription, VersionRegistry};
-use crate::domain::{ActionId, CommitSha, Version};
+use super::identity::{ActionId, CommitSha, Version};
+use crate::domain::resolution::{Error as ResolutionError, ShaDescription, VersionRegistry};
 use std::collections::HashMap;
 
 /// Accumulates `ShaDescription` results during a plan run, keyed by `(ActionId, CommitSha)`.
