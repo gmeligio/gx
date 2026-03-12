@@ -1,4 +1,5 @@
-use crate::domain::{UsesRef, WorkflowError};
+use crate::domain::action::uses_ref::UsesRef;
+use crate::domain::workflow::Error as WorkflowError;
 use glob::glob;
 use regex::Regex;
 use serde::Deserialize;
@@ -55,7 +56,7 @@ impl From<IoWorkflowError> for WorkflowError {
 #[derive(Debug, Clone)]
 struct ExtractedAction {
     uses_ref: UsesRef,
-    location: crate::domain::WorkflowLocation,
+    location: crate::domain::workflow_actions::Location,
 }
 
 /// Minimal workflow structure for YAML parsing
@@ -102,12 +103,12 @@ fn find_workflow_files(workflows_dir: &Path) -> Result<Vec<PathBuf>, IoWorkflowE
 }
 
 /// Parser for extracting action information from workflow files
-pub struct FileWorkflowScanner {
+pub struct FileScanner {
     repo_root: PathBuf,
     workflows_dir: PathBuf,
 }
 
-impl FileWorkflowScanner {
+impl FileScanner {
     #[must_use]
     pub fn new(repo_root: &Path) -> Self {
         Self {
@@ -194,7 +195,7 @@ impl FileWorkflowScanner {
 
                     actions.push(ExtractedAction {
                         uses_ref: UsesRef::new(action_name, uses_ref, comment),
-                        location: crate::domain::WorkflowLocation {
+                        location: crate::domain::workflow_actions::Location {
                             workflow: workflow_rel_path.to_string(),
                             job: Some(job_id.clone()),
                             step: Some(step_idx),
@@ -215,10 +216,10 @@ impl FileWorkflowScanner {
     pub fn scan_file(
         &self,
         workflow_path: &Path,
-    ) -> Result<crate::domain::WorkflowActionSet, WorkflowError> {
+    ) -> Result<crate::domain::workflow_actions::ActionSet, WorkflowError> {
         let rel = self.rel_path(workflow_path);
         let actions = Self::extract_actions(workflow_path, &rel)?;
-        let mut action_set = crate::domain::WorkflowActionSet::new();
+        let mut action_set = crate::domain::workflow_actions::ActionSet::new();
         for action in &actions {
             action_set.add(&action.uses_ref.interpret());
         }
@@ -229,14 +230,14 @@ impl FileWorkflowScanner {
     fn located_from_file(
         workflow_path: &Path,
         workflow_rel_path: &str,
-    ) -> Result<Vec<crate::domain::LocatedAction>, WorkflowError> {
+    ) -> Result<Vec<crate::domain::workflow_actions::Located>, WorkflowError> {
         let actions =
             Self::extract_actions(workflow_path, workflow_rel_path).map_err(WorkflowError::from)?;
         Ok(actions
             .into_iter()
             .map(|action| {
                 let interpreted = action.uses_ref.interpret();
-                crate::domain::LocatedAction {
+                crate::domain::workflow_actions::Located {
                     id: interpreted.id,
                     version: interpreted.version,
                     sha: interpreted.sha,
@@ -247,10 +248,12 @@ impl FileWorkflowScanner {
     }
 }
 
-impl crate::domain::WorkflowScanner for FileWorkflowScanner {
+impl crate::domain::workflow::Scanner for FileScanner {
     fn scan(
         &self,
-    ) -> Box<dyn Iterator<Item = Result<crate::domain::LocatedAction, WorkflowError>> + '_> {
+    ) -> Box<
+        dyn Iterator<Item = Result<crate::domain::workflow_actions::Located, WorkflowError>> + '_,
+    > {
         let workflows = match self.find_workflows() {
             Ok(w) => w,
             Err(e) => return Box::new(std::iter::once(Err(e))),
@@ -261,7 +264,9 @@ impl crate::domain::WorkflowScanner for FileWorkflowScanner {
             match Self::located_from_file(&workflow_path, &rel) {
                 Ok(actions) => Box::new(actions.into_iter().map(Ok))
                     as Box<
-                        dyn Iterator<Item = Result<crate::domain::LocatedAction, WorkflowError>>,
+                        dyn Iterator<
+                            Item = Result<crate::domain::workflow_actions::Located, WorkflowError>,
+                        >,
                     >,
                 Err(e) => Box::new(std::iter::once(Err(e))),
             }

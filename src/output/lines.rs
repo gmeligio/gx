@@ -5,7 +5,7 @@ use std::path::PathBuf;
 /// Semantic output line variants produced by render functions.
 /// Colors are applied at print boundary — no ANSI codes here.
 #[derive(Debug, Clone, PartialEq)]
-pub enum OutputLine {
+pub enum Line {
     /// An action was upgraded from one version to another.
     Upgraded {
         action: String,
@@ -39,12 +39,12 @@ pub enum OutputLine {
     Blank,
 }
 
-impl OutputLine {
+impl Line {
     /// Format this line into a printable string, optionally with ANSI color.
     #[must_use]
     pub fn format_line(&self, use_color: bool) -> String {
         match self {
-            OutputLine::Upgraded { action, from, to } => {
+            Line::Upgraded { action, from, to } => {
                 let arrow = if use_color {
                     style("↑").cyan().to_string()
                 } else {
@@ -52,7 +52,7 @@ impl OutputLine {
                 };
                 format!(" {arrow} {action:<30} {from} → {to}")
             }
-            OutputLine::Added { action, version } => {
+            Line::Added { action, version } => {
                 let plus = if use_color {
                     style("+").green().to_string()
                 } else {
@@ -60,7 +60,7 @@ impl OutputLine {
                 };
                 format!(" {plus} {action:<30} {version}")
             }
-            OutputLine::Removed { action } => {
+            Line::Removed { action } => {
                 let minus = if use_color {
                     style("−").red().to_string()
                 } else {
@@ -68,13 +68,13 @@ impl OutputLine {
                 };
                 format!(" {minus} {action}")
             }
-            OutputLine::Changed { action, detail } => {
+            Line::Changed { action, detail } => {
                 format!(" ~ {action:<30} {detail}")
             }
-            OutputLine::Skipped { action, reason } => {
+            Line::Skipped { action, reason } => {
                 format!(" - {action:<30} ({reason})")
             }
-            OutputLine::Warning { message } => {
+            Line::Warning { message } => {
                 let prefix = if use_color {
                     style("⚠").yellow().to_string()
                 } else {
@@ -82,7 +82,7 @@ impl OutputLine {
                 };
                 format!(" {prefix} {message}")
             }
-            OutputLine::LintDiag {
+            Line::LintDiag {
                 level,
                 workflow,
                 rule,
@@ -111,7 +111,7 @@ impl OutputLine {
                     .unwrap_or_default();
                 format!(" {colored_symbol} {location}{rule}: {message}")
             }
-            OutputLine::Summary { text } => {
+            Line::Summary { text } => {
                 let check = if use_color {
                     style("✓").green().to_string()
                 } else {
@@ -119,7 +119,7 @@ impl OutputLine {
                 };
                 format!("\n {check} {text}")
             }
-            OutputLine::LogPath { path } => {
+            Line::LogPath { path } => {
                 let icon = if use_color {
                     style("📋").to_string()
                 } else {
@@ -127,7 +127,7 @@ impl OutputLine {
                 };
                 format!(" {icon} {}", path.display())
             }
-            OutputLine::CiNotice { message } => {
+            Line::CiNotice { message } => {
                 let prefix = if use_color {
                     style("ℹ").blue().to_string()
                 } else {
@@ -135,19 +135,19 @@ impl OutputLine {
                 };
                 format!(" {prefix} {message}")
             }
-            OutputLine::Blank => String::new(),
+            Line::Blank => String::new(),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Level, OutputLine};
+    use super::{Level, Line};
     use std::path::PathBuf;
 
     #[test]
     fn format_line_upgraded_no_color() {
-        let line = OutputLine::Upgraded {
+        let line = Line::Upgraded {
             action: "actions/checkout".to_string(),
             from: "v3".to_string(),
             to: "v4".to_string(),
@@ -161,7 +161,7 @@ mod tests {
 
     #[test]
     fn format_line_lint_diag_no_color() {
-        let line = OutputLine::LintDiag {
+        let line = Line::LintDiag {
             level: Level::Error,
             workflow: Some("ci.yml".to_string()),
             rule: "pinned-version".to_string(),
@@ -176,7 +176,7 @@ mod tests {
 
     #[test]
     fn format_line_summary_no_color() {
-        let line = OutputLine::Summary {
+        let line = Line::Summary {
             text: "All done".to_string(),
         };
         let result = line.format_line(false);
@@ -186,14 +186,14 @@ mod tests {
 
     #[test]
     fn format_line_blank_no_color() {
-        let line = OutputLine::Blank;
+        let line = Line::Blank;
         let result = line.format_line(false);
         assert_eq!(result, "");
     }
 
     #[test]
     fn format_line_added_no_color() {
-        let line = OutputLine::Added {
+        let line = Line::Added {
             action: "actions/setup-node".to_string(),
             version: "v4".to_string(),
         };
@@ -205,7 +205,7 @@ mod tests {
 
     #[test]
     fn format_line_log_path_no_color() {
-        let line = OutputLine::LogPath {
+        let line = Line::LogPath {
             path: PathBuf::from("/tmp/gx/test.log"),
         };
         let result = line.format_line(false);

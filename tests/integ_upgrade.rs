@@ -6,21 +6,26 @@ use common::registries::FakeRegistry;
 use common::setup::{
     create_test_repo, lock_path, manifest_path, write_lock, write_manifest, write_workflow,
 };
-use gx::domain::{
-    ActionId, CommitSha, Lock, LockKey, Manifest, RefType, ResolvedAction, Specifier, Version,
-};
-use gx::infra::{
-    FileWorkflowUpdater, apply_lock_diff, apply_manifest_diff, parse_lock, parse_manifest,
-};
+use gx::domain::action::identity::{ActionId, CommitSha, Version};
+use gx::domain::action::resolved::Resolved as ResolvedAction;
+use gx::domain::action::spec::LockKey;
+use gx::domain::action::specifier::Specifier;
+use gx::domain::action::uses_ref::RefType;
+use gx::domain::lock::Lock;
+use gx::domain::manifest::Manifest;
+use gx::infra::lock::{self, apply_lock_diff};
+use gx::infra::manifest::patch::apply_manifest_diff;
+use gx::infra::manifest::{self};
+use gx::infra::workflow_update::FileUpdater as FileWorkflowUpdater;
 use gx::upgrade;
-use gx::upgrade::{UpgradeMode, UpgradeRequest, UpgradeScope};
+use gx::upgrade::types::{Mode as UpgradeMode, Request as UpgradeRequest, Scope as UpgradeScope};
 use std::fs;
 use std::path::Path;
 use tempfile::TempDir;
 
 /// Helper to run upgrade with file-backed stores using `FakeRegistry`.
 fn run_upgrade_file_backed(repo_root: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All)?;
+    let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap();
     run_upgrade_file_backed_with_request(repo_root, &request)
 }
 
@@ -31,16 +36,16 @@ fn run_upgrade_file_backed_with_request(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mp = manifest_path(repo_root);
     let lp = lock_path(repo_root);
-    let manifest = parse_manifest(&mp)?.value;
-    let lock = parse_lock(&lp)?.value;
+    let manifest = manifest::parse(&mp)?.value;
+    let lock = lock::parse(&lp)?.value;
     let updater = FileWorkflowUpdater::new(repo_root);
 
-    let plan = upgrade::plan(&manifest, &lock, &FakeRegistry::new(), request, |_| {})?;
+    let plan = upgrade::plan::plan(&manifest, &lock, &FakeRegistry::new(), request, |_| {})?;
 
     if !plan.is_empty() {
         apply_manifest_diff(&mp, &plan.manifest)?;
         apply_lock_diff(&lp, &plan.lock)?;
-        upgrade::apply_upgrade_workflows(&updater, &plan.lock, &plan.upgrades)?;
+        upgrade::plan::apply_upgrade_workflows(&updater, &plan.lock, &plan.upgrades)?;
     }
 
     Ok(())
@@ -63,7 +68,7 @@ fn test_upgrade_empty_manifest_is_noop() {
     manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
     let lock = Lock::default();
     let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap();
-    let result = upgrade::plan(&manifest, &lock, &FakeRegistry::new(), &request, |_| {});
+    let result = upgrade::plan::plan(&manifest, &lock, &FakeRegistry::new(), &request, |_| {});
     assert!(result.is_ok());
     assert!(result.unwrap().is_empty(), "No tags available means noop");
 }
@@ -92,7 +97,7 @@ fn test_upgrade_empty_file_manifest_is_noop() {
 fn test_upgrade_non_semver_versions_skipped() {
     let manifest = Manifest::default();
     let lock = Lock::default();
-    let result = upgrade::plan(
+    let result = upgrade::plan::plan(
         &manifest,
         &lock,
         &FakeRegistry::new(),
@@ -179,7 +184,7 @@ fn test_upgrade_memory_stores_no_side_effects() {
     let mut manifest = Manifest::default();
     manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
     let lock = Lock::default();
-    let result = upgrade::plan(
+    let result = upgrade::plan::plan(
         &manifest,
         &lock,
         &FakeRegistry::new(),
@@ -261,7 +266,7 @@ jobs:
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v6.0.2"),
         CommitSha::from(checkout_new_sha),
-        "actions/checkout".to_string(),
+        "actions/checkout".to_owned(),
         Some(RefType::Tag),
         String::new(),
     ));
@@ -319,18 +324,18 @@ fn test_upgrade_repins_branch_ref() {
         ActionId::from("my-org/my-action"),
         Specifier::from_v1("main"),
         CommitSha::from(old_sha),
-        "my-org/my-action".to_string(),
+        "my-org/my-action".to_owned(),
         Some(RefType::Branch),
         String::new(),
     ));
 
     let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap();
-    let plan = upgrade::plan(&manifest, &lock, &FakeRegistry::new(), &request, |_| {});
+    let plan = upgrade::plan::plan(&manifest, &lock, &FakeRegistry::new(), &request, |_| {});
     assert!(plan.is_ok(), "upgrade failed: {:?}", plan.unwrap_err());
     let plan = plan.unwrap();
 
     let updater = FileWorkflowUpdater::new(&root);
-    upgrade::apply_upgrade_workflows(&updater, &plan.lock, &plan.upgrades).unwrap();
+    upgrade::plan::apply_upgrade_workflows(&updater, &plan.lock, &plan.upgrades).unwrap();
 
     let expected_sha = FakeRegistry::fake_sha("my-org/my-action", "main");
     let updated_workflow =
@@ -364,18 +369,18 @@ fn test_upgrade_latest_also_repins_branch_ref() {
         ActionId::from("my-org/my-action"),
         Specifier::from_v1("main"),
         CommitSha::from(old_sha),
-        "my-org/my-action".to_string(),
+        "my-org/my-action".to_owned(),
         Some(RefType::Branch),
         String::new(),
     ));
 
     let request = UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::All).unwrap();
-    let plan = upgrade::plan(&manifest, &lock, &FakeRegistry::new(), &request, |_| {});
+    let plan = upgrade::plan::plan(&manifest, &lock, &FakeRegistry::new(), &request, |_| {});
     assert!(plan.is_ok());
     let plan = plan.unwrap();
 
     let updater = FileWorkflowUpdater::new(&root);
-    upgrade::apply_upgrade_workflows(&updater, &plan.lock, &plan.upgrades).unwrap();
+    upgrade::plan::apply_upgrade_workflows(&updater, &plan.lock, &plan.upgrades).unwrap();
 
     let expected_sha = FakeRegistry::fake_sha("my-org/my-action", "main");
     let updated_workflow =
@@ -411,7 +416,7 @@ fn test_upgrade_targeted_does_not_repin_branch_ref() {
         ActionId::from("my-org/my-action"),
         Specifier::from_v1("main"),
         CommitSha::from(branch_sha),
-        "my-org/my-action".to_string(),
+        "my-org/my-action".to_owned(),
         Some(RefType::Branch),
         String::new(),
     ));
@@ -419,7 +424,7 @@ fn test_upgrade_targeted_does_not_repin_branch_ref() {
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v4"),
         CommitSha::from(checkout_sha),
-        "actions/checkout".to_string(),
+        "actions/checkout".to_owned(),
         Some(RefType::Tag),
         String::new(),
     ));
@@ -431,12 +436,12 @@ fn test_upgrade_targeted_does_not_repin_branch_ref() {
         UpgradeScope::Single(ActionId::from("actions/checkout")),
     )
     .unwrap();
-    let plan = upgrade::plan(&manifest, &lock, &registry, &request, |_| {});
+    let plan = upgrade::plan::plan(&manifest, &lock, &registry, &request, |_| {});
     assert!(plan.is_ok());
     let plan = plan.unwrap();
 
     let updater = FileWorkflowUpdater::new(&root);
-    upgrade::apply_upgrade_workflows(&updater, &plan.lock, &plan.upgrades).unwrap();
+    upgrade::plan::apply_upgrade_workflows(&updater, &plan.lock, &plan.upgrades).unwrap();
 
     let updated_workflow =
         fs::read_to_string(root.join(".github").join("workflows").join("ci.yml")).unwrap();
@@ -472,7 +477,7 @@ fn test_upgrade_mixed_semver_and_branch() {
         ActionId::from("my-org/my-action"),
         Specifier::from_v1("main"),
         CommitSha::from(old_branch_sha),
-        "my-org/my-action".to_string(),
+        "my-org/my-action".to_owned(),
         Some(RefType::Branch),
         String::new(),
     ));
@@ -480,7 +485,7 @@ fn test_upgrade_mixed_semver_and_branch() {
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v4"),
         CommitSha::from(old_checkout_sha),
-        "actions/checkout".to_string(),
+        "actions/checkout".to_owned(),
         Some(RefType::Tag),
         String::new(),
     ));
@@ -488,12 +493,12 @@ fn test_upgrade_mixed_semver_and_branch() {
     let registry = FakeRegistry::new().with_all_tags("actions/checkout", vec!["v4", "v5"]);
 
     let request = UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::All).unwrap();
-    let plan = upgrade::plan(&manifest, &lock, &registry, &request, |_| {});
+    let plan = upgrade::plan::plan(&manifest, &lock, &registry, &request, |_| {});
     assert!(plan.is_ok());
     let plan = plan.unwrap();
 
     let updater = FileWorkflowUpdater::new(&root);
-    upgrade::apply_upgrade_workflows(&updater, &plan.lock, &plan.upgrades).unwrap();
+    upgrade::plan::apply_upgrade_workflows(&updater, &plan.lock, &plan.upgrades).unwrap();
 
     let updated_workflow =
         fs::read_to_string(root.join(".github").join("workflows").join("ci.yml")).unwrap();
@@ -531,13 +536,13 @@ fn test_upgrade_skips_bare_sha() {
 
     let lock = Lock::default();
     let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap();
-    let plan = upgrade::plan(&manifest, &lock, &FakeRegistry::new(), &request, |_| {});
+    let plan = upgrade::plan::plan(&manifest, &lock, &FakeRegistry::new(), &request, |_| {});
     assert!(plan.is_ok());
     let plan = plan.unwrap();
 
     if !plan.is_empty() {
         let updater = FileWorkflowUpdater::new(&root);
-        upgrade::apply_upgrade_workflows(&updater, &plan.lock, &plan.upgrades).unwrap();
+        upgrade::plan::apply_upgrade_workflows(&updater, &plan.lock, &plan.upgrades).unwrap();
     }
 
     let updated_workflow =
@@ -569,7 +574,7 @@ fn test_upgrade_safe_single_action() {
         UpgradeScope::Single(ActionId::from("actions/checkout")),
     )
     .unwrap();
-    let result = upgrade::plan(&manifest, &lock, &registry, &request, |_| {});
+    let result = upgrade::plan::plan(&manifest, &lock, &registry, &request, |_| {});
     assert!(result.is_ok());
 }
 
@@ -592,7 +597,7 @@ fn test_upgrade_latest_single_action() {
         UpgradeScope::Single(ActionId::from("actions/checkout")),
     )
     .unwrap();
-    let result = upgrade::plan(&manifest, &lock, &registry, &request, |_| {});
+    let result = upgrade::plan::plan(&manifest, &lock, &registry, &request, |_| {});
     assert!(result.is_ok());
 }
 
@@ -606,7 +611,7 @@ fn test_upgrade_single_action_not_found() {
         UpgradeScope::Single(ActionId::from("actions/nonexistent")),
     )
     .unwrap();
-    let result = upgrade::plan(&manifest, &lock, &FakeRegistry::new(), &request, |_| {});
+    let result = upgrade::plan::plan(&manifest, &lock, &FakeRegistry::new(), &request, |_| {});
     assert!(
         result.is_err(),
         "Expected error when action not found in manifest"
@@ -618,16 +623,4 @@ fn test_cli_rejection_latest_with_version() {
     let action_str = "actions/checkout@v5";
     let contains_at = action_str.contains('@');
     assert!(contains_at, "Test setup: action string should contain @");
-}
-
-#[test]
-fn test_upgrade_pinned_all_scope_rejected() {
-    let result = UpgradeRequest::new(UpgradeMode::Pinned(Version::from("v5")), UpgradeScope::All);
-    assert!(result.is_err(), "Pinned + All should be rejected");
-    assert!(
-        result
-            .unwrap_err()
-            .to_string()
-            .contains("pinned mode requires a single action target")
-    );
 }

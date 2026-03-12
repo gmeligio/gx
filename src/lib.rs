@@ -1,4 +1,7 @@
-#![allow(unused_crate_dependencies)]
+#![expect(
+    unused_crate_dependencies,
+    reason = "dev-dependencies are only used in integration tests"
+)]
 
 pub mod command;
 pub mod config;

@@ -1,9 +1,10 @@
-use super::identity::{ActionId, Specifier, Version, VersionPrecision};
+use super::identity::{ActionId, Version, VersionPrecision};
+use super::specifier::Specifier;
 use std::fmt;
 
 /// Indicates what action to take when upgrading a version.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum UpgradeAction {
+pub enum Action {
     /// Candidate is within the manifest's current range.
     /// Only the lock needs re-resolving; manifest stays unchanged.
     InRange { candidate: Version },
@@ -21,20 +22,18 @@ pub enum UpgradeAction {
 
 /// An available upgrade for an action
 #[derive(Debug)]
-pub struct UpgradeCandidate {
+pub struct Candidate {
     pub id: ActionId,
     pub current: Specifier,
-    pub action: UpgradeAction,
+    pub action: Action,
 }
 
-impl UpgradeCandidate {
+impl Candidate {
     /// Get the candidate version that will be resolved
     #[must_use]
     pub fn candidate(&self) -> &Version {
         match &self.action {
-            UpgradeAction::InRange { candidate } | UpgradeAction::CrossRange { candidate, .. } => {
-                candidate
-            }
+            Action::InRange { candidate } | Action::CrossRange { candidate, .. } => candidate,
         }
     }
 
@@ -42,13 +41,13 @@ impl UpgradeCandidate {
     #[must_use]
     pub fn manifest_specifier(&self) -> &Specifier {
         match &self.action {
-            UpgradeAction::InRange { .. } => &self.current,
-            UpgradeAction::CrossRange { new_specifier, .. } => new_specifier,
+            Action::InRange { .. } => &self.current,
+            Action::CrossRange { new_specifier, .. } => new_specifier,
         }
     }
 }
 
-impl fmt::Display for UpgradeCandidate {
+impl fmt::Display for Candidate {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} {} -> {}", self.id, self.current, self.candidate())
     }
@@ -125,7 +124,7 @@ fn extract_at_precision(
 ///
 /// # Returns
 ///
-/// An `UpgradeAction` indicating whether to update just the lock (`InRange`) or both manifest and lock (`CrossRange`).
+/// An `Action` indicating whether to update just the lock (`InRange`) or both manifest and lock (`CrossRange`).
 /// Returns None if no suitable candidate exists.
 #[must_use]
 pub fn find_upgrade_candidate(
@@ -133,7 +132,7 @@ pub fn find_upgrade_candidate(
     lock_version: Option<&Version>,
     candidates: &[Version],
     allow_major: bool,
-) -> Option<UpgradeAction> {
+) -> Option<Action> {
     let precision = specifier.precision()?;
     let specifier_semver = parse_semver(specifier.as_str())?;
 
@@ -201,14 +200,14 @@ pub fn find_upgrade_candidate(
         let is_in_range = specifier.matches(&best_semver);
 
         if is_in_range {
-            Some(UpgradeAction::InRange {
+            Some(Action::InRange {
                 candidate: best_tag,
             })
         } else {
             let operator = specifier.operator().unwrap_or('^');
             let new_specifier = extract_at_precision(&best_tag, precision, operator);
             let new_comment = new_specifier.to_comment().to_string();
-            Some(UpgradeAction::CrossRange {
+            Some(Action::CrossRange {
                 candidate: best_tag,
                 new_specifier,
                 new_comment,
@@ -257,9 +256,7 @@ fn parse_semver(version: &str) -> Option<semver::Version> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ActionId, Specifier, UpgradeAction, UpgradeCandidate, Version, find_upgrade_candidate,
-    };
+    use super::{Action, ActionId, Candidate, Specifier, Version, find_upgrade_candidate};
 
     #[test]
     fn test_find_upgrade_candidate_safe_mode_major_precision_in_range() {
@@ -275,7 +272,7 @@ mod tests {
         // Best candidate within major is v4.2.1 (in-range)
         assert_eq!(
             find_upgrade_candidate(&specifier, None, &candidates, false),
-            Some(UpgradeAction::InRange {
+            Some(Action::InRange {
                 candidate: Version::from("v4.2.1")
             })
         );
@@ -293,7 +290,7 @@ mod tests {
         // Latest mode: no range constraint, returns highest (cross-range)
         assert_eq!(
             find_upgrade_candidate(&specifier, None, &candidates, true),
-            Some(UpgradeAction::CrossRange {
+            Some(Action::CrossRange {
                 candidate: Version::from("v6.1.0"),
                 new_specifier: Specifier::parse("^6"),
                 new_comment: "v6".to_string(),
@@ -308,7 +305,7 @@ mod tests {
         // Latest mode with minor precision: result should preserve minor precision
         assert_eq!(
             find_upgrade_candidate(&specifier, None, &candidates, true),
-            Some(UpgradeAction::CrossRange {
+            Some(Action::CrossRange {
                 candidate: Version::from("v5.0.0"),
                 new_specifier: Specifier::parse("^5.0"),
                 new_comment: "v5.0".to_string(),
@@ -323,7 +320,7 @@ mod tests {
         // Latest mode with patch precision (tilde): result should preserve tilde and patch precision
         assert_eq!(
             find_upgrade_candidate(&specifier, None, &candidates, true),
-            Some(UpgradeAction::CrossRange {
+            Some(Action::CrossRange {
                 candidate: Version::from("v5.0.0"),
                 new_specifier: Specifier::parse("~5.0.0"),
                 new_comment: "v5.0.0".to_string(),
@@ -343,7 +340,7 @@ mod tests {
         // Safe mode with lock version as floor: v4.2.1 excluded, returns v4.3.0 (in-range)
         assert_eq!(
             find_upgrade_candidate(&specifier, lock_version.as_ref(), &candidates, false),
-            Some(UpgradeAction::InRange {
+            Some(Action::InRange {
                 candidate: Version::from("v4.3.0")
             })
         );
@@ -360,7 +357,7 @@ mod tests {
         // Stable specifier: pre-releases filtered out
         assert_eq!(
             find_upgrade_candidate(&specifier, None, &candidates, true),
-            Some(UpgradeAction::CrossRange {
+            Some(Action::CrossRange {
                 candidate: Version::from("v3.0.0"),
                 new_specifier: Specifier::parse("^3"),
                 new_comment: "v3".to_string(),
@@ -385,10 +382,10 @@ mod tests {
 
     #[test]
     fn test_upgrade_candidate_display_in_range() {
-        let candidate = UpgradeCandidate {
+        let candidate = Candidate {
             id: ActionId::from("actions/checkout"),
             current: Specifier::parse("^4"),
-            action: UpgradeAction::InRange {
+            action: Action::InRange {
                 candidate: Version::from("v4.5.0"),
             },
         };
@@ -397,10 +394,10 @@ mod tests {
 
     #[test]
     fn test_upgrade_candidate_display_cross_range() {
-        let candidate = UpgradeCandidate {
+        let candidate = Candidate {
             id: ActionId::from("actions/checkout"),
             current: Specifier::parse("^4"),
-            action: UpgradeAction::CrossRange {
+            action: Action::CrossRange {
                 candidate: Version::from("v5.0.0"),
                 new_specifier: Specifier::parse("^5"),
                 new_comment: "v5".to_string(),

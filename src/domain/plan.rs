@@ -1,4 +1,8 @@
-use super::{ActionId, ActionOverride, LockEntry, LockKey, Specifier};
+use super::action::identity::ActionId;
+use super::action::spec::LockKey;
+use super::action::specifier::Specifier;
+use super::lock::entry::Entry as LockEntry;
+use super::manifest::overrides::ActionOverride;
 use std::path::PathBuf;
 
 /// Describes the changes to apply to a manifest file.
@@ -54,7 +58,8 @@ pub struct WorkflowPatch {
 #[cfg(test)]
 mod tests {
     use super::{ActionId, LockDiff, LockEntry, LockKey, ManifestDiff, Specifier};
-    use crate::domain::{CommitSha, RefType};
+    use crate::domain::action::identity::CommitSha;
+    use crate::domain::action::uses_ref::RefType;
 
     #[test]
     fn manifest_diff_is_empty_when_default() {

@@ -1,6 +1,7 @@
 use super::LOCK_FILE_VERSION;
 use super::convert::{ActionEntryData, LockData};
-use crate::domain::{LockKey, Specifier};
+use crate::domain::action::spec::LockKey;
+use crate::domain::action::specifier::Specifier;
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -112,8 +113,10 @@ pub(super) fn derive_comment_from_v1_key(key: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::domain::{ActionId, CommitSha, LockKey, Specifier};
-    use crate::infra::parse_lock;
+    use crate::domain::action::identity::{ActionId, CommitSha};
+    use crate::domain::action::spec::LockKey;
+    use crate::domain::action::specifier::Specifier;
+    use crate::infra::lock::parse;
     use std::io::Write;
     use tempfile::NamedTempFile;
 
@@ -131,7 +134,7 @@ mod tests {
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
-        let parsed = parse_lock(file.path()).unwrap();
+        let parsed = parse(file.path()).unwrap();
         assert!(parsed.migrated);
         // Key should have been migrated to ^4
         let entry = parsed.value.get(&make_key("actions/checkout", "^4"));
@@ -153,7 +156,7 @@ mod tests {
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
-        let parsed = parse_lock(file.path()).unwrap();
+        let parsed = parse(file.path()).unwrap();
         assert!(parsed.migrated);
         // Key migrated from @v6 to @^6
         let entry = parsed.value.get(&make_key("actions/checkout", "^6"));

@@ -38,6 +38,10 @@ export GITHUB_TOKEN="${GITHUB_TOKEN:-$(gh auth token)}"
 cargo test --test 'e2e_*'
 """
 
+[tasks.test-all]
+description = "Run unit tests"
+depends = ["test", "integ", "e2e"]
+
 [tasks.init]
 description = "Create manifest and lock from workflows"
 run = "cargo run -- init"

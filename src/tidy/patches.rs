@@ -1,7 +1,11 @@
-use super::TidyError;
-use crate::domain::{
-    ActionId, LocatedAction, Lock, LockKey, Manifest, WorkflowPatch, WorkflowScanner,
-};
+use super::Error as TidyError;
+use crate::domain::action::identity::ActionId;
+use crate::domain::action::spec::LockKey;
+use crate::domain::lock::Lock;
+use crate::domain::manifest::Manifest;
+use crate::domain::plan::WorkflowPatch;
+use crate::domain::workflow::Scanner as WorkflowScanner;
+use crate::domain::workflow_actions::Located as LocatedAction;
 use std::collections::HashMap;
 
 /// Compute workflow patches (pin maps) without writing files.
@@ -70,11 +74,15 @@ fn build_file_update_map(
 }
 
 #[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "tests use unwrap freely")]
 mod tests {
     use super::{Lock, Manifest, build_file_update_map};
-    use crate::domain::{
-        ActionId, CommitSha, LockEntry, LockKey, RefType, Specifier, Version, WorkflowLocation,
-    };
+    use crate::domain::action::identity::{ActionId, CommitSha, Version};
+    use crate::domain::action::spec::LockKey;
+    use crate::domain::action::specifier::Specifier;
+    use crate::domain::action::uses_ref::RefType;
+    use crate::domain::lock::entry::Entry as LockEntry;
+    use crate::domain::workflow_actions::Location as WorkflowLocation;
     use std::collections::HashMap;
 
     /// Task 4.2: SHA-only manifest version produces `@SHA` without trailing
@@ -93,20 +101,20 @@ mod tests {
             CommitSha::from(sha),
             None,
             String::new(),
-            "actions/checkout".to_string(),
+            "actions/checkout".to_owned(),
             Some(RefType::Tag),
-            "2026-01-01T00:00:00Z".to_string(),
+            "2026-01-01T00:00:00Z".to_owned(),
         );
         let lock = Lock::new(HashMap::from([(key, entry)]));
 
         // A located action referencing this action
-        let located = crate::domain::LocatedAction {
+        let located = crate::domain::workflow_actions::Located {
             id: ActionId::from("actions/checkout"),
             version: Version::from(sha),
             sha: Some(CommitSha::from(sha)),
             location: WorkflowLocation {
-                workflow: ".github/workflows/ci.yml".to_string(),
-                job: Some("build".to_string()),
+                workflow: ".github/workflows/ci.yml".to_owned(),
+                job: Some("build".to_owned()),
                 step: Some(0),
             },
         };

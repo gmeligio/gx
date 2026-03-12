@@ -1,5 +1,8 @@
 use super::LOCK_FILE_VERSION;
-use crate::domain::{CommitSha, Lock, LockEntry, LockKey, RefType};
+use crate::domain::action::identity::CommitSha;
+use crate::domain::action::spec::LockKey;
+use crate::domain::action::uses_ref::RefType;
+use crate::domain::lock::{Lock, entry::Entry as LockEntry};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -114,8 +117,12 @@ pub(super) fn build_lock_inline_table(key: &LockKey, entry: &LockEntry) -> toml_
 #[cfg(test)]
 mod tests {
     use super::serialize_lock;
-    use crate::domain::{ActionId, CommitSha, LockKey, RefType, ResolvedAction, Specifier};
-    use crate::infra::lock::{FileLock, LOCK_FILE_VERSION, parse_lock};
+    use crate::domain::action::identity::{ActionId, CommitSha};
+    use crate::domain::action::resolved::Resolved as ResolvedAction;
+    use crate::domain::action::spec::LockKey;
+    use crate::domain::action::specifier::Specifier;
+    use crate::domain::action::uses_ref::RefType;
+    use crate::infra::lock::{LOCK_FILE_VERSION, Store, parse};
     use std::io::Write;
     use tempfile::NamedTempFile;
 
@@ -137,9 +144,9 @@ mod tests {
     #[test]
     fn test_file_lock_save_and_load_roundtrip() {
         let file = NamedTempFile::new().unwrap();
-        let store = FileLock::new(file.path());
+        let store = Store::new(file.path());
 
-        let mut lock = crate::domain::Lock::default();
+        let mut lock = crate::domain::lock::Lock::default();
         lock.set(&make_resolved(
             "actions/checkout",
             "^4",
@@ -148,7 +155,7 @@ mod tests {
 
         store.save(&lock).unwrap();
 
-        let loaded = parse_lock(file.path()).unwrap();
+        let loaded = parse(file.path()).unwrap();
         let entry = loaded.value.get(&make_key("actions/checkout", "^4"));
         assert!(entry.is_some());
         assert_eq!(
@@ -170,7 +177,7 @@ mod tests {
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
-        let parsed = parse_lock(file.path()).unwrap();
+        let parsed = parse(file.path()).unwrap();
         let entry = parsed.value.get(&make_key("actions/checkout", "^4"));
         assert!(entry.is_some());
         assert_eq!(
@@ -184,9 +191,9 @@ mod tests {
     #[test]
     fn test_file_lock_save_sorts_actions_alphabetically() {
         let file = NamedTempFile::new().unwrap();
-        let store = FileLock::new(file.path());
+        let store = Store::new(file.path());
 
-        let mut lock = crate::domain::Lock::default();
+        let mut lock = crate::domain::lock::Lock::default();
         // Insert in non-alphabetical order
         lock.set(&make_resolved(
             "docker/build-push-action",
@@ -222,7 +229,7 @@ mod tests {
 
     #[test]
     fn test_serialize_lock_uses_inline_tables() {
-        let mut lock = crate::domain::Lock::default();
+        let mut lock = crate::domain::lock::Lock::default();
         lock.set(&make_resolved(
             "actions/checkout",
             "^4",
@@ -264,7 +271,7 @@ mod tests {
         let mut f = std::fs::File::create(file.path()).unwrap();
         f.write_all(content.as_bytes()).unwrap();
 
-        let parsed = parse_lock(file.path()).unwrap();
+        let parsed = parse(file.path()).unwrap();
         let entry = parsed.value.get(&make_key("actions/checkout", "^6"));
         assert!(entry.is_some());
         let entry = entry.unwrap();

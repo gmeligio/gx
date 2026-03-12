@@ -1,6 +1,7 @@
-use super::{Diagnostic, LintContext, LintRule};
+use super::{Context, Diagnostic, Rule};
 use crate::config::Level;
-use crate::domain::{LockKey, Specifier};
+use crate::domain::action::spec::LockKey;
+use crate::domain::action::specifier::Specifier;
 
 /// stale-comment rule: detects when a version comment doesn't match the lock file.
 pub struct StaleCommentRule;
@@ -8,8 +9,8 @@ pub struct StaleCommentRule;
 impl StaleCommentRule {
     /// Check a single action for the stale-comment rule.
     pub fn check_action(
-        action: &crate::domain::LocatedAction,
-        lock: &crate::domain::Lock,
+        action: &crate::domain::workflow_actions::Located,
+        lock: &crate::domain::lock::Lock,
     ) -> Option<Diagnostic> {
         let sha = action.sha.as_ref()?;
 
@@ -38,7 +39,7 @@ impl StaleCommentRule {
     }
 }
 
-impl LintRule for StaleCommentRule {
+impl Rule for StaleCommentRule {
     fn name(&self) -> &'static str {
         "stale-comment"
     }
@@ -47,7 +48,7 @@ impl LintRule for StaleCommentRule {
         Level::Warn
     }
 
-    fn check(&self, ctx: &LintContext) -> Vec<Diagnostic> {
+    fn check(&self, ctx: &Context) -> Vec<Diagnostic> {
         ctx.workflows
             .iter()
             .filter_map(|a| Self::check_action(a, ctx.lock))
@@ -57,11 +58,14 @@ impl LintRule for StaleCommentRule {
 
 #[cfg(test)]
 mod tests {
-    use super::{Level, LintRule, StaleCommentRule};
-    use crate::domain::{
-        ActionId, CommitSha, LocatedAction, Lock, Manifest, ResolvedAction, Specifier, Version,
-        WorkflowActionSet, WorkflowLocation,
-    };
+    use super::{Level, Rule, StaleCommentRule};
+    use crate::domain::action::identity::{ActionId, CommitSha, Version};
+    use crate::domain::action::resolved::Resolved as ResolvedAction;
+    use crate::domain::action::specifier::Specifier;
+    use crate::domain::action::uses_ref::RefType;
+    use crate::domain::lock::Lock;
+    use crate::domain::manifest::Manifest;
+    use crate::domain::workflow_actions::{ActionSet, Located, Location};
 
     fn make_lock(action: &str, version: &str, sha: &str) -> Lock {
         let mut lock = Lock::default();
@@ -70,23 +74,18 @@ mod tests {
             Specifier::from_v1(version),
             CommitSha::from(sha),
             ActionId::from(action).base_repo(),
-            Some(crate::domain::RefType::Tag),
+            Some(RefType::Tag),
             "2026-01-01T00:00:00Z".to_string(),
         ));
         lock
     }
 
-    fn make_located(
-        action: &str,
-        version: &str,
-        sha: Option<&str>,
-        workflow: &str,
-    ) -> LocatedAction {
-        LocatedAction {
+    fn make_located(action: &str, version: &str, sha: Option<&str>, workflow: &str) -> Located {
+        Located {
             id: ActionId::from(action),
             version: Version::from(version),
             sha: sha.map(CommitSha::from),
-            location: WorkflowLocation {
+            location: Location {
                 workflow: workflow.to_string(),
                 job: None,
                 step: None,
@@ -112,9 +111,9 @@ mod tests {
             ".github/workflows/ci.yml",
         )];
         let manifest = Manifest::default();
-        let action_set = WorkflowActionSet::new();
+        let action_set = ActionSet::new();
 
-        let ctx = crate::lint::LintContext {
+        let ctx = crate::lint::Context {
             manifest: &manifest,
             lock: &lock,
             workflows: &workflows,
@@ -140,9 +139,9 @@ mod tests {
             ".github/workflows/ci.yml",
         )];
         let manifest = Manifest::default();
-        let action_set = WorkflowActionSet::new();
+        let action_set = ActionSet::new();
 
-        let ctx = crate::lint::LintContext {
+        let ctx = crate::lint::Context {
             manifest: &manifest,
             lock: &lock,
             workflows: &workflows,
@@ -171,9 +170,9 @@ mod tests {
             ".github/workflows/ci.yml",
         )];
         let manifest = Manifest::default();
-        let action_set = WorkflowActionSet::new();
+        let action_set = ActionSet::new();
 
-        let ctx = crate::lint::LintContext {
+        let ctx = crate::lint::Context {
             manifest: &manifest,
             lock: &lock,
             workflows: &workflows,

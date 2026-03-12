@@ -1,12 +1,14 @@
-use super::ManifestError;
-use crate::domain::{ActionId, ActionOverride, ManifestDiff};
+use super::Error as ManifestError;
+use crate::domain::action::identity::ActionId;
+use crate::domain::manifest::overrides::ActionOverride;
+use crate::domain::plan::ManifestDiff;
 use std::fs;
 use std::path::Path;
 use toml_edit::DocumentMut;
 
 /// Apply a `ManifestDiff` to an existing manifest file using `toml_edit` for surgical patching.
 ///
-/// The file must already exist. For creating a new manifest from scratch, use `create_manifest`.
+/// The file must already exist. For creating a new manifest from scratch, use `create`.
 ///
 /// # Errors
 ///
@@ -197,7 +199,7 @@ fn apply_override_additions(
 
     for (id, ovr) in additions {
         // Get or create the array for this action
-        if overrides_table.get(id.as_str()).is_none() {
+        if overrides_table.get(ActionId::as_str(id)).is_none() {
             overrides_table.insert(id.as_str(), toml_edit::value(toml_edit::Array::new()));
         }
         let arr = overrides_table[id.as_str()]
@@ -208,7 +210,7 @@ fn apply_override_additions(
         let mut inline = toml_edit::InlineTable::new();
         inline.insert("workflow", ovr.workflow.as_str().into());
         if let Some(job) = &ovr.job {
-            inline.insert("job", job.as_str().into());
+            inline.insert("job", toml_edit::Value::from(job.as_str()));
         }
         if let Some(step) = ovr.step {
             inline.insert(
@@ -226,12 +228,15 @@ fn apply_override_additions(
 #[cfg(test)]
 mod tests {
     use super::apply_manifest_diff;
-    use crate::domain::{ActionId, ActionOverride, ManifestDiff, Specifier};
+    use crate::domain::action::identity::ActionId;
+    use crate::domain::action::specifier::Specifier;
+    use crate::domain::manifest::overrides::ActionOverride;
+    use crate::domain::plan::ManifestDiff;
     use std::fs;
     use std::io::Write;
     use tempfile::NamedTempFile;
 
-    use crate::infra::manifest::parse_manifest;
+    use crate::infra::manifest::parse;
 
     #[test]
     fn test_apply_empty_diff_does_not_modify_file() {
@@ -270,7 +275,7 @@ mod tests {
         );
 
         // Round-trip: parse back (file has [gx] section, so v2 parsing)
-        let loaded = parse_manifest(file.path()).unwrap();
+        let loaded = parse(file.path()).unwrap();
         assert_eq!(
             loaded.value.get(&ActionId::from("actions/checkout")),
             Some(&Specifier::parse("^4"))
@@ -325,7 +330,7 @@ mod tests {
         apply_manifest_diff(file.path(), &diff).unwrap();
 
         // Round-trip (v1 format since no [gx] section — "^4" parsed via from_v1 yields Ref("^4") but that's fine)
-        let loaded = parse_manifest(file.path()).unwrap();
+        let loaded = parse(file.path()).unwrap();
         let overrides = loaded
             .value
             .overrides_for(&ActionId::from("actions/checkout"));
@@ -361,7 +366,7 @@ mod tests {
         };
         apply_manifest_diff(file.path(), &diff).unwrap();
 
-        let loaded = parse_manifest(file.path()).unwrap();
+        let loaded = parse(file.path()).unwrap();
         let overrides = loaded
             .value
             .overrides_for(&ActionId::from("actions/checkout"));
@@ -395,7 +400,7 @@ mod tests {
         };
         apply_manifest_diff(file.path(), &diff).unwrap();
 
-        let loaded = parse_manifest(file.path()).unwrap();
+        let loaded = parse(file.path()).unwrap();
         assert!(
             loaded
                 .value
@@ -463,7 +468,7 @@ mod tests {
         };
         apply_manifest_diff(file.path(), &diff).unwrap();
 
-        let loaded = parse_manifest(file.path()).unwrap();
+        let loaded = parse(file.path()).unwrap();
         assert!(
             loaded
                 .value

@@ -1,19 +1,20 @@
-use crate::domain::{
-    ActionId, LockDiff, ManifestDiff, ResolutionError, UpgradeCandidate, Version, WorkflowError,
-    WorkflowPatch,
-};
+use crate::domain::action::identity::{ActionId, Version};
+use crate::domain::action::upgrade::Candidate as UpgradeCandidate;
+use crate::domain::plan::{LockDiff, ManifestDiff, WorkflowPatch};
+use crate::domain::resolution::Error as ResolutionError;
+use crate::domain::workflow::Error as WorkflowError;
 use thiserror::Error;
 
 /// The complete plan produced by an upgrade operation.
 #[derive(Debug)]
-pub struct UpgradePlan {
+pub struct Plan {
     pub manifest: ManifestDiff,
     pub lock: LockDiff,
     pub workflows: Vec<WorkflowPatch>,
     pub upgrades: Vec<UpgradeCandidate>,
 }
 
-impl UpgradePlan {
+impl Plan {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.manifest.is_empty() && self.lock.is_empty() && self.workflows.is_empty()
@@ -23,7 +24,7 @@ impl UpgradePlan {
 /// Which actions to upgrade: all or a single action.
 #[non_exhaustive]
 #[derive(Debug, Clone)]
-pub enum UpgradeScope {
+pub enum Scope {
     /// Upgrade all actions in the manifest.
     All,
     /// Upgrade a single action by ID.
@@ -33,7 +34,7 @@ pub enum UpgradeScope {
 /// How the upgrade command should find new versions.
 #[non_exhaustive]
 #[derive(Debug)]
-pub enum UpgradeMode {
+pub enum Mode {
     /// Default: upgrade within the current major version.
     Safe,
     /// Upgrade to the absolute latest version, including major versions.
@@ -44,20 +45,20 @@ pub enum UpgradeMode {
 
 /// A request to upgrade actions with a specific mode and scope.
 #[derive(Debug)]
-pub struct UpgradeRequest {
-    pub mode: UpgradeMode,
-    pub scope: UpgradeScope,
+pub struct Request {
+    pub mode: Mode,
+    pub scope: Scope,
 }
 
-impl UpgradeRequest {
+impl Request {
     /// Create a new upgrade request, validating that Pinned mode requires Single scope.
     ///
     /// # Errors
     ///
-    /// Returns [`UpgradeError::PinnedRequiresSingleScope`] if `mode` is `Pinned` and `scope` is `All`.
-    pub fn new(mode: UpgradeMode, scope: UpgradeScope) -> Result<Self, UpgradeError> {
-        if matches!((&mode, &scope), (UpgradeMode::Pinned(_), UpgradeScope::All)) {
-            return Err(UpgradeError::PinnedRequiresSingleScope);
+    /// Returns [`Error::PinnedRequiresSingleScope`] if `mode` is `Pinned` and `scope` is `All`.
+    pub fn new(mode: Mode, scope: Scope) -> Result<Self, Error> {
+        if matches!((&mode, &scope), (Mode::Pinned(_), Scope::All)) {
+            return Err(Error::PinnedRequiresSingleScope);
         }
         Ok(Self { mode, scope })
     }
@@ -65,7 +66,7 @@ impl UpgradeRequest {
 
 /// Errors that can occur during the upgrade command
 #[derive(Debug, Error)]
-pub enum UpgradeError {
+pub enum Error {
     /// Pinned mode was used without specifying a single action target.
     #[error("pinned mode requires a single action target (e.g., actions/checkout@v5)")]
     PinnedRequiresSingleScope,
@@ -93,12 +94,11 @@ pub enum UpgradeError {
 
 #[cfg(test)]
 mod tests {
-    use super::{ActionId, UpgradeMode, UpgradeRequest, UpgradeScope, Version};
+    use super::{ActionId, Mode, Request, Scope, Version};
 
     #[test]
     fn new_should_reject_pinned_with_all_scope() {
-        let err = UpgradeRequest::new(UpgradeMode::Pinned(Version::from("v5")), UpgradeScope::All)
-            .unwrap_err();
+        let err = Request::new(Mode::Pinned(Version::from("v5")), Scope::All).unwrap_err();
         assert_eq!(
             err.to_string(),
             "pinned mode requires a single action target (e.g., actions/checkout@v5)"
@@ -107,9 +107,9 @@ mod tests {
 
     #[test]
     fn new_should_accept_pinned_with_single_scope() {
-        let result = UpgradeRequest::new(
-            UpgradeMode::Pinned(Version::from("v5")),
-            UpgradeScope::Single(ActionId::from("actions/checkout")),
+        let result = Request::new(
+            Mode::Pinned(Version::from("v5")),
+            Scope::Single(ActionId::from("actions/checkout")),
         );
         assert!(result.is_ok());
     }

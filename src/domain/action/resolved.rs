@@ -1,5 +1,6 @@
-use super::identity::{ActionId, CommitSha, Specifier, Version};
+use super::identity::{ActionId, CommitSha, Version};
 use super::spec::LockKey;
+use super::specifier::Specifier;
 use super::uses_ref::RefType;
 use std::fmt;
 
@@ -7,7 +8,7 @@ use std::fmt;
 /// The `version` field holds the manifest specifier (e.g., `"^6"`).
 /// The resolved tag (e.g., `"v6.0.2"`) is stored in the lock entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResolvedAction {
+pub struct Resolved {
     pub id: ActionId,
     pub version: Specifier,
     pub sha: CommitSha,
@@ -16,7 +17,7 @@ pub struct ResolvedAction {
     pub date: String,
 }
 
-impl ResolvedAction {
+impl Resolved {
     /// Create a new resolved action with all metadata.
     #[must_use]
     pub fn new(
@@ -44,7 +45,7 @@ impl ResolvedAction {
         format!("{} # {}", self.sha, self.version.to_comment())
     }
 
-    /// Create a new `ResolvedAction` with the SHA replaced.
+    /// Create a new `Resolved` with the SHA replaced.
     /// Used when a workflow has a pinned SHA that differs from the registry.
     #[must_use]
     pub fn with_sha(&self, sha: CommitSha) -> Self {
@@ -78,8 +79,8 @@ impl fmt::Display for VersionCorrection {
     }
 }
 
-impl From<&ResolvedAction> for LockKey {
-    fn from(resolved: &ResolvedAction) -> Self {
+impl From<&Resolved> for LockKey {
+    fn from(resolved: &Resolved) -> Self {
         Self::new(
             ActionId::from(resolved.id.as_str()),
             resolved.version.clone(),
@@ -89,11 +90,11 @@ impl From<&ResolvedAction> for LockKey {
 
 #[cfg(test)]
 mod tests {
-    use super::{ActionId, CommitSha, RefType, ResolvedAction, Specifier};
+    use super::{ActionId, CommitSha, RefType, Resolved, Specifier};
 
     #[test]
     fn test_resolved_action_to_workflow_ref() {
-        let resolved = ResolvedAction::new(
+        let resolved = Resolved::new(
             ActionId::from("actions/checkout"),
             Specifier::parse("^4"),
             CommitSha::from("abc123def456789012345678901234567890abcd"),

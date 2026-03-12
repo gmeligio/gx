@@ -1,27 +1,28 @@
-use super::action::{ActionId, CommitSha, InterpretedRef, Version};
+use super::action::identity::{ActionId, CommitSha, Version};
+use super::action::uses_ref::InterpretedRef;
 use std::collections::{HashMap, HashSet};
 
 /// Aggregates action versions discovered across all workflows.
 /// This handles the domain logic of deciding which version "wins"
 /// when multiple versions exist for the same action.
 #[derive(Debug, Default)]
-pub struct WorkflowActionSet {
+pub struct ActionSet {
     /// Maps action ID to set of versions found in workflows
     versions: HashMap<ActionId, HashSet<Version>>,
     /// Count of how many times each version appears for each action (across all steps)
     counts: HashMap<ActionId, HashMap<Version, usize>>,
 }
 
-impl WorkflowActionSet {
+impl ActionSet {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Create a `WorkflowActionSet` from a slice of `LocatedAction`.
+    /// Create a `ActionSet` from a slice of `Located`.
     /// Builds the `versions` and `counts` maps from the actions (no `shas` field).
     #[must_use]
-    pub fn from_located(actions: &[LocatedAction]) -> Self {
+    pub fn from_located(actions: &[Located]) -> Self {
         let mut set = Self::new();
         for action in actions {
             // Build versions and counts maps from the actions
@@ -56,7 +57,7 @@ impl WorkflowActionSet {
     }
 
     /// Add a located action to the set (same logic as `add`, different input type).
-    pub fn add_located(&mut self, action: &LocatedAction) {
+    pub fn add_located(&mut self, action: &Located) {
         self.versions
             .entry(action.id.clone())
             .or_default()
@@ -108,7 +109,7 @@ impl WorkflowActionSet {
 
 /// The precise location of a `uses:` reference within the workflow tree.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorkflowLocation {
+pub struct Location {
     /// Relative path from repo root, e.g. ".github/workflows/ci.yml"
     pub workflow: String,
     /// Job id, e.g. "build"
@@ -119,19 +120,16 @@ pub struct WorkflowLocation {
 
 /// A single action reference with its full location context.
 #[derive(Debug, Clone)]
-pub struct LocatedAction {
+pub struct Located {
     pub id: ActionId,
     pub version: Version,
     pub sha: Option<CommitSha>,
-    pub location: WorkflowLocation,
+    pub location: Location,
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ActionId, CommitSha, InterpretedRef, LocatedAction, Version, WorkflowActionSet,
-        WorkflowLocation,
-    };
+    use super::{ActionId, ActionSet, CommitSha, InterpretedRef, Located, Location, Version};
 
     fn make_interpreted(name: &str, version: &str, sha: Option<&str>) -> InterpretedRef {
         InterpretedRef {
@@ -143,7 +141,7 @@ mod tests {
 
     #[test]
     fn test_most_used_version_two_vs_one() {
-        let mut set = WorkflowActionSet::new();
+        let mut set = ActionSet::new();
         // Add v3 twice (two different steps)
         set.add(&make_interpreted("actions/checkout", "v3", None));
         set.add(&make_interpreted("actions/checkout", "v3", None));
@@ -157,7 +155,7 @@ mod tests {
 
     #[test]
     fn test_dominant_version_tiebreak_highest_semver() {
-        let mut set = WorkflowActionSet::new();
+        let mut set = ActionSet::new();
         // Both versions appear once — tiebreak by highest semver
         set.add(&make_interpreted("actions/checkout", "v3", None));
         set.add(&make_interpreted("actions/checkout", "v4", None));
@@ -168,12 +166,12 @@ mod tests {
 
     #[test]
     fn test_workflow_location_equality() {
-        let loc1 = WorkflowLocation {
+        let loc1 = Location {
             workflow: ".github/workflows/ci.yml".to_string(),
             job: Some("build".to_string()),
             step: Some(0),
         };
-        let loc2 = WorkflowLocation {
+        let loc2 = Location {
             workflow: ".github/workflows/ci.yml".to_string(),
             job: Some("build".to_string()),
             step: Some(0),
@@ -183,12 +181,12 @@ mod tests {
 
     #[test]
     fn test_located_action_stores_location() {
-        let loc = WorkflowLocation {
+        let loc = Location {
             workflow: ".github/workflows/ci.yml".to_string(),
             job: Some("build".to_string()),
             step: Some(0),
         };
-        let action = LocatedAction {
+        let action = Located {
             id: ActionId::from("actions/checkout"),
             version: Version::from("v4"),
             sha: None,
@@ -200,7 +198,7 @@ mod tests {
 
     #[test]
     fn test_add_single_version() {
-        let mut set = WorkflowActionSet::new();
+        let mut set = ActionSet::new();
         set.add(&make_interpreted("actions/checkout", "v4", None));
 
         let versions: Vec<_> = set
@@ -212,7 +210,7 @@ mod tests {
 
     #[test]
     fn test_add_multiple_versions() {
-        let mut set = WorkflowActionSet::new();
+        let mut set = ActionSet::new();
         set.add(&make_interpreted("actions/checkout", "v4", None));
         set.add(&make_interpreted("actions/checkout", "v3", None));
 
@@ -226,7 +224,7 @@ mod tests {
 
     #[test]
     fn test_add_duplicate_version() {
-        let mut set = WorkflowActionSet::new();
+        let mut set = ActionSet::new();
         set.add(&make_interpreted("actions/checkout", "v4", None));
         set.add(&make_interpreted("actions/checkout", "v4", None));
 
@@ -239,7 +237,7 @@ mod tests {
 
     #[test]
     fn test_action_ids() {
-        let mut set = WorkflowActionSet::new();
+        let mut set = ActionSet::new();
         set.add(&make_interpreted("actions/checkout", "v4", None));
         set.add(&make_interpreted("actions/setup-node", "v3", None));
 
@@ -251,7 +249,7 @@ mod tests {
 
     #[test]
     fn test_versions_for_unknown_action() {
-        let set = WorkflowActionSet::new();
+        let set = ActionSet::new();
         assert_eq!(
             set.versions_for(&ActionId::from("unknown/action")).count(),
             0

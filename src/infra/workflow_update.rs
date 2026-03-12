@@ -1,4 +1,5 @@
-use crate::domain::{ActionId, UpdateResult, WorkflowError};
+use crate::domain::action::identity::ActionId;
+use crate::domain::workflow::{Error as WorkflowError, UpdateResult};
 use glob::glob;
 use regex::Regex;
 use std::collections::HashMap;
@@ -6,11 +7,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Writer for updating action versions in workflow files
-pub struct FileWorkflowUpdater {
+pub struct FileUpdater {
     workflows_dir: PathBuf,
 }
 
-impl FileWorkflowUpdater {
+impl FileUpdater {
     #[must_use]
     pub fn new(repo_root: &Path) -> Self {
         Self {
@@ -53,7 +54,7 @@ impl FileWorkflowUpdater {
         workflow_path: &Path,
         actions: &HashMap<ActionId, String>,
     ) -> Result<UpdateResult, WorkflowError> {
-        FileWorkflowUpdater::update_workflow_internal(workflow_path, actions)
+        FileUpdater::update_workflow_internal(workflow_path, actions)
     }
 
     /// Internal implementation returning `WorkflowError` directly.
@@ -134,7 +135,7 @@ impl FileWorkflowUpdater {
     }
 }
 
-impl crate::domain::WorkflowUpdater for FileWorkflowUpdater {
+impl crate::domain::workflow::Updater for FileUpdater {
     fn update_all(
         &self,
         actions: &HashMap<ActionId, String>,
@@ -153,8 +154,8 @@ impl crate::domain::WorkflowUpdater for FileWorkflowUpdater {
 
 #[cfg(test)]
 mod tests {
-    use super::FileWorkflowUpdater;
-    use crate::domain::ActionId;
+    use super::FileUpdater;
+    use crate::domain::action::identity::ActionId;
     use std::collections::HashMap;
     use std::fs;
     use std::io::Write;
@@ -184,7 +185,7 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let writer = FileWorkflowUpdater::new(temp_dir.path());
+        let writer = FileUpdater::new(temp_dir.path());
         let mut actions = HashMap::new();
         actions.insert(ActionId::from("actions/checkout"), "v4".to_string());
 
@@ -211,7 +212,7 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let writer = FileWorkflowUpdater::new(temp_dir.path());
+        let writer = FileUpdater::new(temp_dir.path());
         let mut actions = HashMap::new();
         // Simulate the format from lock.build_update_map(): "SHA # version"
         actions.insert(
@@ -250,7 +251,7 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let writer = FileWorkflowUpdater::new(temp_dir.path());
+        let writer = FileUpdater::new(temp_dir.path());
         let mut actions = HashMap::new();
         // Update both actions with new SHAs
         actions.insert(

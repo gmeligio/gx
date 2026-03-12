@@ -1,10 +1,14 @@
+use super::action::identity::{ActionId, CommitSha, Version};
+use super::action::resolved::Resolved as ResolvedAction;
+use super::action::spec::Spec as ActionSpec;
+use super::action::specifier::Specifier;
 use super::action::tag_selection::{ShaIndex, select_most_specific_tag};
-use super::{ActionId, ActionSpec, CommitSha, RefType, ResolvedAction, Specifier, Version};
+use super::action::uses_ref::RefType;
 use thiserror::Error;
 
 /// Errors that can occur during version resolution
 #[derive(Debug, Clone, Error)]
-pub enum ResolutionError {
+pub enum Error {
     #[error("failed to resolve {spec}: {reason}")]
     ResolveFailed { spec: ActionSpec, reason: String },
 
@@ -18,7 +22,7 @@ pub enum ResolutionError {
     AuthRequired,
 }
 
-impl ResolutionError {
+impl Error {
     /// Returns `true` for errors that are transient and the caller can retry later.
     #[must_use]
     pub fn is_recoverable(&self) -> bool {
@@ -68,33 +72,28 @@ pub trait VersionRegistry {
     /// # Errors
     ///
     /// Returns an error if the lookup fails
-    fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<ResolvedRef, ResolutionError>;
+    fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<ResolvedRef, Error>;
 
     /// Get all tags that point to a specific SHA
     ///
     /// # Errors
     ///
     /// Returns an error if the lookup fails
-    fn tags_for_sha(&self, id: &ActionId, sha: &CommitSha)
-    -> Result<Vec<Version>, ResolutionError>;
+    fn tags_for_sha(&self, id: &ActionId, sha: &CommitSha) -> Result<Vec<Version>, Error>;
 
     /// Get all available version tags for an action's repository
     ///
     /// # Errors
     ///
     /// Returns an error if the lookup fails
-    fn all_tags(&self, id: &ActionId) -> Result<Vec<Version>, ResolutionError>;
+    fn all_tags(&self, id: &ActionId) -> Result<Vec<Version>, Error>;
 
     /// Describe a known commit SHA: return the tags pointing to it, the base repository, and the commit date.
     ///
     /// # Errors
     ///
     /// Returns an error if the commit lookup fails (tag lookup failure is non-fatal, returns empty tags).
-    fn describe_sha(
-        &self,
-        id: &ActionId,
-        sha: &CommitSha,
-    ) -> Result<ShaDescription, ResolutionError>;
+    fn describe_sha(&self, id: &ActionId, sha: &CommitSha) -> Result<ShaDescription, Error>;
 }
 
 /// Resolves actions to their correct version and commit SHA
@@ -118,8 +117,8 @@ impl<'a, R: VersionRegistry> ActionResolver<'a, R> {
     ///
     /// # Errors
     ///
-    /// Returns `ResolutionError` if the registry lookup fails.
-    pub fn resolve(&self, spec: &ActionSpec) -> Result<ResolvedAction, ResolutionError> {
+    /// Returns `Error` if the registry lookup fails.
+    pub fn resolve(&self, spec: &ActionSpec) -> Result<ResolvedAction, Error> {
         let lookup_version = Version::from(spec.version.to_comment());
         let resolved_ref = self.registry.lookup_sha(&spec.id, &lookup_version)?;
         Ok(ResolvedAction::new(
@@ -137,13 +136,13 @@ impl<'a, R: VersionRegistry> ActionResolver<'a, R> {
     ///
     /// # Errors
     ///
-    /// Returns `ResolutionError` if the registry lookup fails.
+    /// Returns `Error` if the registry lookup fails.
     pub fn resolve_from_sha(
         &self,
         id: &ActionId,
         sha: &CommitSha,
         sha_index: &mut ShaIndex,
-    ) -> Result<ResolvedAction, ResolutionError> {
+    ) -> Result<ResolvedAction, Error> {
         let desc = sha_index.get_or_describe(self.registry, id, sha)?;
         let version =
             select_most_specific_tag(&desc.tags).unwrap_or_else(|| Version::from(sha.as_str()));
@@ -198,41 +197,29 @@ pub(crate) mod testutil;
 #[cfg(test)]
 mod tests {
     use super::{
-        ActionId, ActionResolver, ActionSpec, CommitSha, RefType, ResolutionError, ResolvedRef,
+        ActionId, ActionResolver, ActionSpec, CommitSha, Error, RefType, ResolvedRef,
         ShaDescription, ShaIndex, Specifier, Version, VersionRegistry,
     };
 
     struct MockRegistry {
-        resolve_result: Result<ResolvedRef, ResolutionError>,
-        tags_result: Result<Vec<Version>, ResolutionError>,
+        resolve_result: Result<ResolvedRef, Error>,
+        tags_result: Result<Vec<Version>, Error>,
     }
 
     impl VersionRegistry for MockRegistry {
-        fn lookup_sha(
-            &self,
-            _id: &ActionId,
-            _version: &Version,
-        ) -> Result<ResolvedRef, ResolutionError> {
+        fn lookup_sha(&self, _id: &ActionId, _version: &Version) -> Result<ResolvedRef, Error> {
             self.resolve_result.clone()
         }
 
-        fn tags_for_sha(
-            &self,
-            _id: &ActionId,
-            _sha: &CommitSha,
-        ) -> Result<Vec<Version>, ResolutionError> {
+        fn tags_for_sha(&self, _id: &ActionId, _sha: &CommitSha) -> Result<Vec<Version>, Error> {
             self.tags_result.clone()
         }
 
-        fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
+        fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, Error> {
             self.tags_result.clone()
         }
 
-        fn describe_sha(
-            &self,
-            _id: &ActionId,
-            _sha: &CommitSha,
-        ) -> Result<ShaDescription, ResolutionError> {
+        fn describe_sha(&self, _id: &ActionId, _sha: &CommitSha) -> Result<ShaDescription, Error> {
             let meta = self.resolve_result.clone()?;
             let tags = self.tags_result.clone().unwrap_or_default();
             Ok(ShaDescription {
@@ -271,7 +258,7 @@ mod tests {
     #[test]
     fn test_resolve_failure() {
         let registry = MockRegistry {
-            resolve_result: Err(ResolutionError::ResolveFailed {
+            resolve_result: Err(Error::ResolveFailed {
                 spec: ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4")),
                 reason: "not found".to_string(),
             }),
@@ -391,7 +378,7 @@ mod tests {
     #[test]
     fn test_resolve_from_sha_describe_error_propagates() {
         let registry = MockRegistry {
-            resolve_result: Err(ResolutionError::AuthRequired),
+            resolve_result: Err(Error::AuthRequired),
             tags_result: Ok(vec![]),
         };
         let service = ActionResolver::new(&registry);
@@ -401,24 +388,24 @@ mod tests {
 
         let result = service.resolve_from_sha(&id, &sha, &mut sha_index);
         assert!(
-            matches!(result, Err(ResolutionError::AuthRequired)),
+            matches!(result, Err(Error::AuthRequired)),
             "describe_sha error should propagate through resolve_from_sha"
         );
     }
 
     #[test]
     fn test_is_recoverable_rate_limited() {
-        assert!(ResolutionError::RateLimited.is_recoverable());
+        assert!(Error::RateLimited.is_recoverable());
     }
 
     #[test]
     fn test_is_recoverable_auth_required() {
-        assert!(ResolutionError::AuthRequired.is_recoverable());
+        assert!(Error::AuthRequired.is_recoverable());
     }
 
     #[test]
     fn test_is_recoverable_resolve_failed_is_not_recoverable() {
-        let err = ResolutionError::ResolveFailed {
+        let err = Error::ResolveFailed {
             spec: ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4")),
             reason: "not found".to_string(),
         };
@@ -427,7 +414,7 @@ mod tests {
 
     #[test]
     fn test_is_recoverable_no_tags_for_sha_is_not_recoverable() {
-        let err = ResolutionError::NoTagsForSha {
+        let err = Error::NoTagsForSha {
             action: ActionId::from("actions/checkout"),
             sha: CommitSha::from("abc123def456789012345678901234567890abcd"),
         };

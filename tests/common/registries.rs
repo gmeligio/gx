@@ -1,7 +1,10 @@
 #![allow(dead_code)]
-use gx::domain::{
-    ActionId, ActionSpec, CommitSha, RefType, ResolutionError, ResolvedRef, ShaDescription,
-    Specifier, Version, VersionRegistry,
+use gx::domain::action::identity::{ActionId, CommitSha, Version};
+use gx::domain::action::spec::Spec as ActionSpec;
+use gx::domain::action::specifier::Specifier;
+use gx::domain::action::uses_ref::RefType;
+use gx::domain::resolution::{
+    Error as ResolutionError, ResolvedRef, ShaDescription, VersionRegistry,
 };
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -26,7 +29,7 @@ impl FakeRegistry {
     /// Set the available version tags for an action (used by `all_tags`).
     pub fn with_all_tags(mut self, id: &str, tags: Vec<&str>) -> Self {
         self.tags
-            .insert(id.to_string(), tags.into_iter().map(String::from).collect());
+            .insert(id.to_owned(), tags.into_iter().map(String::from).collect());
         self
     }
 
@@ -34,7 +37,7 @@ impl FakeRegistry {
     /// (used by `tags_for_sha` and `describe_sha`).
     pub fn with_sha_tags(mut self, id: &str, sha: &str, tags: Vec<&str>) -> Self {
         self.sha_tags.insert(
-            (id.to_string(), sha.to_string()),
+            (id.to_owned(), sha.to_owned()),
             tags.into_iter().map(String::from).collect(),
         );
         self
@@ -61,7 +64,7 @@ impl VersionRegistry for FakeRegistry {
             CommitSha::from(Self::fake_sha(id.as_str(), version.as_str())),
             id.base_repo(),
             Some(RefType::Tag),
-            "2026-01-01T00:00:00Z".to_string(),
+            "2026-01-01T00:00:00Z".to_owned(),
         ))
     }
 
@@ -70,7 +73,7 @@ impl VersionRegistry for FakeRegistry {
         id: &ActionId,
         sha: &CommitSha,
     ) -> Result<Vec<Version>, ResolutionError> {
-        let key = (id.as_str().to_string(), sha.as_str().to_string());
+        let key = (id.as_str().to_owned(), sha.as_str().to_owned());
         Ok(self
             .sha_tags
             .get(&key)
@@ -97,7 +100,7 @@ impl VersionRegistry for FakeRegistry {
         id: &ActionId,
         sha: &CommitSha,
     ) -> Result<ShaDescription, ResolutionError> {
-        let key = (id.as_str().to_string(), sha.as_str().to_string());
+        let key = (id.as_str().to_owned(), sha.as_str().to_owned());
         let tags = self
             .sha_tags
             .get(&key)
@@ -109,7 +112,7 @@ impl VersionRegistry for FakeRegistry {
         Ok(ShaDescription {
             tags,
             repository: id.base_repo(),
-            date: "2026-01-01T00:00:00Z".to_string(),
+            date: "2026-01-01T00:00:00Z".to_owned(),
         })
     }
 }
@@ -199,7 +202,7 @@ impl VersionRegistry for FailingDescribeRegistry {
             CommitSha::from(FakeRegistry::fake_sha(id.as_str(), version.as_str())),
             id.base_repo(),
             Some(RefType::Tag),
-            "2026-01-01T00:00:00Z".to_string(),
+            "2026-01-01T00:00:00Z".to_owned(),
         ))
     }
 
@@ -222,7 +225,7 @@ impl VersionRegistry for FailingDescribeRegistry {
     ) -> Result<ShaDescription, ResolutionError> {
         Err(ResolutionError::ResolveFailed {
             spec: ActionSpec::new(id.clone(), Specifier::from_v1(sha.as_str())),
-            reason: "Github API returned status 422 Unprocessable Entity".to_string(),
+            reason: "Github API returned status 422 Unprocessable Entity".to_owned(),
         })
     }
 }
