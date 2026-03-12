@@ -2,19 +2,20 @@ pub mod report;
 
 use crate::command::Command;
 use crate::config::Config;
-use crate::domain::WorkflowError;
-use crate::infra::{
-    FileWorkflowScanner, FileWorkflowUpdater, GithubError, GithubRegistry, LockFileError,
-    ManifestError, create_lock, create_manifest,
-};
-use crate::tidy::TidyError;
-use report::InitReport;
+use crate::domain::workflow::Error as WorkflowError;
+use crate::infra::github::{Error as GithubError, Registry as GithubRegistry};
+use crate::infra::lock::Error as LockFileError;
+use crate::infra::manifest::Error as ManifestError;
+use crate::infra::workflow_scan::FileScanner as FileWorkflowScanner;
+use crate::infra::workflow_update::FileUpdater as FileWorkflowUpdater;
+use crate::tidy::Error as TidyError;
+use report::Report;
 use std::path::Path;
 use thiserror::Error;
 
 /// Errors that can occur during the init command
 #[derive(Debug, Error)]
-pub enum InitError {
+pub enum Error {
     #[error("already initialized \u{2014} use `gx tidy` to update")]
     AlreadyInitialized,
     #[error(transparent)]
@@ -33,17 +34,17 @@ pub enum InitError {
 pub struct Init;
 
 impl Command for Init {
-    type Report = InitReport;
-    type Error = InitError;
+    type Report = Report;
+    type Error = Error;
 
     fn run(
         &self,
         repo_root: &Path,
         config: Config,
         on_progress: &mut dyn FnMut(&str),
-    ) -> Result<InitReport, InitError> {
+    ) -> Result<Report, Error> {
         if config.manifest_path.exists() {
-            return Err(InitError::AlreadyInitialized);
+            return Err(Error::AlreadyInitialized);
         }
         on_progress("Reading actions from workflows into the manifest...");
         if config.settings.github_token.is_none() {
@@ -68,12 +69,12 @@ impl Command for Init {
         }
 
         if !plan.is_empty() {
-            create_manifest(&config.manifest_path, &plan.manifest)?;
-            create_lock(&config.lock_path, &plan.lock)?;
+            crate::infra::manifest::create(&config.manifest_path, &plan.manifest)?;
+            crate::infra::lock::create(&config.lock_path, &plan.lock)?;
             crate::tidy::apply_workflow_patches(&updater, &plan.workflows, &plan.corrections)?;
         }
 
-        let report = InitReport {
+        let report = Report {
             actions_discovered: plan.manifest.added.len(),
             created: !plan.is_empty(),
         };

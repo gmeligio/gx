@@ -1,11 +1,11 @@
 use super::Diagnostic;
 use crate::command::CommandReport;
 use crate::config::Level;
-use crate::output::OutputLine;
+use crate::output::lines::Line as OutputLine;
 
 /// Report from the lint command.
 #[derive(Debug, Default)]
-pub struct LintReport {
+pub struct Report {
     /// All diagnostics found
     pub diagnostics: Vec<Diagnostic>,
     /// Number of error-level diagnostics
@@ -14,8 +14,8 @@ pub struct LintReport {
     pub warning_count: usize,
 }
 
-impl LintReport {
-    /// Build a `LintReport` from a list of diagnostics.
+impl Report {
+    /// Build a `Report` from a list of diagnostics.
     #[must_use]
     pub fn from_diagnostics(diagnostics: Vec<Diagnostic>) -> Self {
         let error_count = diagnostics
@@ -34,7 +34,7 @@ impl LintReport {
     }
 }
 
-impl CommandReport for LintReport {
+impl CommandReport for Report {
     fn render(&self) -> Vec<OutputLine> {
         if self.diagnostics.is_empty() {
             return vec![OutputLine::Summary {
@@ -85,7 +85,7 @@ mod tests {
 
     #[test]
     fn render_lint_clean() {
-        let report = LintReport::default();
+        let report = Report::default();
         let lines = report.render();
         assert_eq!(lines.len(), 1);
         assert!(
@@ -109,7 +109,7 @@ mod tests {
             )
             .with_workflow("ci.yml"),
         ];
-        let report = LintReport::from_diagnostics(diagnostics);
+        let report = Report::from_diagnostics(diagnostics);
         let lines = report.render();
 
         assert!(lines.iter().any(|l| matches!(

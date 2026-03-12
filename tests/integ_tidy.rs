@@ -4,11 +4,13 @@ mod common;
 
 use common::registries::{AuthRequiredRegistry, FakeRegistry};
 use common::setup::{create_empty_manifest, create_test_repo};
-use gx::domain::{Manifest, VersionRegistry};
-use gx::infra::{
-    FileWorkflowScanner, FileWorkflowUpdater, apply_lock_diff, apply_manifest_diff, create_lock,
-    parse_lock, parse_manifest,
-};
+use gx::domain::manifest::Manifest;
+use gx::domain::resolution::VersionRegistry;
+use gx::infra::lock::{self, apply_lock_diff};
+use gx::infra::manifest::patch::apply_manifest_diff;
+use gx::infra::manifest::{self};
+use gx::infra::workflow_scan::FileScanner as FileWorkflowScanner;
+use gx::infra::workflow_update::FileUpdater as FileWorkflowUpdater;
 use gx::tidy;
 use std::fs;
 use std::io::Write;
@@ -19,7 +21,7 @@ use tempfile::TempDir;
 fn run_tidy_with_registry<R: VersionRegistry + Clone>(
     repo_root: &Path,
     registry: &R,
-) -> Result<(), gx::tidy::TidyRunError> {
+) -> Result<(), gx::tidy::RunError> {
     let manifest_path = repo_root.join(".github").join("gx.toml");
     let lock_path = repo_root.join(".github").join("gx.lock");
     let scanner = FileWorkflowScanner::new(repo_root);
@@ -27,22 +29,21 @@ fn run_tidy_with_registry<R: VersionRegistry + Clone>(
     let has_manifest = manifest_path.exists();
 
     let manifest = if has_manifest {
-        parse_manifest(&manifest_path)?.value
+        manifest::parse(&manifest_path)?.value
     } else {
         Manifest::default()
     };
-    let lock = parse_lock(&lock_path)?.value;
+    let lock = lock::parse(&lock_path)?.value;
 
     let plan = tidy::plan(&manifest, &lock, registry, &scanner, |_| {})?;
 
     if !plan.is_empty() {
         if has_manifest {
+            apply_manifest_diff(&manifest_path, &plan.manifest)?;
             if lock_path.exists() {
-                apply_manifest_diff(&manifest_path, &plan.manifest)?;
                 apply_lock_diff(&lock_path, &plan.lock)?;
             } else {
-                apply_manifest_diff(&manifest_path, &plan.manifest)?;
-                create_lock(&lock_path, &plan.lock)?;
+                lock::create(&lock_path, &plan.lock)?;
             }
         }
         tidy::apply_workflow_patches(&updater, &plan.workflows, &plan.corrections)?;
@@ -51,7 +52,7 @@ fn run_tidy_with_registry<R: VersionRegistry + Clone>(
     Ok(())
 }
 
-fn run_tidy(repo_root: &Path) -> Result<(), gx::tidy::TidyRunError> {
+fn run_tidy(repo_root: &Path) -> Result<(), gx::tidy::RunError> {
     run_tidy_with_registry(repo_root, &FakeRegistry::new())
 }
 

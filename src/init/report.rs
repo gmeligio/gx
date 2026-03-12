@@ -1,16 +1,16 @@
 use crate::command::CommandReport;
-use crate::output::OutputLine;
+use crate::output::lines::Line as OutputLine;
 
 /// Report from the init command.
 #[derive(Debug, Default)]
-pub struct InitReport {
+pub struct Report {
     /// Number of actions discovered from workflows
     pub actions_discovered: usize,
     /// True if manifest and lock files were created
     pub created: bool,
 }
 
-impl CommandReport for InitReport {
+impl CommandReport for Report {
     fn render(&self) -> Vec<OutputLine> {
         if !self.created {
             return vec![OutputLine::Summary {
@@ -36,11 +36,11 @@ impl CommandReport for InitReport {
 
 #[cfg(test)]
 mod tests {
-    use super::{CommandReport, InitReport, OutputLine};
+    use super::{CommandReport, OutputLine, Report};
 
     #[test]
     fn render_init_no_actions() {
-        let report = InitReport {
+        let report = Report {
             actions_discovered: 0,
             created: false,
         };
@@ -50,7 +50,7 @@ mod tests {
 
     #[test]
     fn render_init_with_actions() {
-        let report = InitReport {
+        let report = Report {
             actions_discovered: 2,
             created: true,
         };

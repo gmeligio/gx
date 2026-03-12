@@ -8,5 +8,5 @@ version = "1.4"
 "actions/download-artifact@^7" = { sha = "37930b1c2abaa49bbe596cd826c3c89aef350131", version = "v7.0.0", comment = "v7", repository = "actions/download-artifact", ref_type = "tag", date = "2025-12-12T17:58:13Z" }
 "actions/upload-artifact@^6" = { sha = "b7c566a772e6b6bfb58ed0dc250532a479d7789f", version = "v6.0.0", comment = "v6", repository = "actions/upload-artifact", ref_type = "tag", date = "2025-12-12T17:58:04Z" }
 "jdx/mise-action@^3" = { sha = "6d1e696aa24c1aa1bcc1adea0212707c71ab78a8", version = "v3.6.1", comment = "v3", repository = "jdx/mise-action", ref_type = "tag", date = "2026-01-20T12:32:53Z" }
-"release-plz/action@^0.5" = { sha = "1528104d2ca23787631a1c1f022abb64b34c1e11", version = "v0.5", comment = "v0.5", repository = "release-plz/action", ref_type = "tag", date = "2026-03-07T16:39:43Z" }
+"release-plz/action@^0.5" = { sha = "1528104d2ca23787631a1c1f022abb64b34c1e11", version = "v0.5.128", comment = "v0.5", repository = "release-plz/action", ref_type = "tag", date = "2026-03-07T16:39:43Z" }
 "rust-lang/crates-io-auth-action@~1.0.3" = { sha = "b7e9a28eded4986ec6b1fa40eeee8f8f165559ec", version = "v1.0.3", comment = "v1.0.3", repository = "rust-lang/crates-io-auth-action", ref_type = "tag", date = "2025-11-06T13:23:38Z" }

@@ -1,5 +1,9 @@
-use crate::domain::workflow_actions::{LocatedAction, WorkflowActionSet, WorkflowLocation};
-use crate::domain::{ActionId, ActionSpec, LockKey, Specifier};
+use crate::domain::action::identity::ActionId;
+use crate::domain::action::spec::{LockKey, Spec};
+use crate::domain::action::specifier::Specifier;
+use crate::domain::workflow_actions::{
+    ActionSet as WorkflowActionSet, Located as LocatedAction, Location as WorkflowLocation,
+};
 use std::collections::HashSet;
 
 /// A version override for a specific workflow location.
@@ -75,9 +79,10 @@ pub fn override_lock_keys<'a>(
 /// global, **only when** multiple distinct versions of that action appear across workflows.
 ///
 /// When only one version appears in workflows, no override is created.
-pub fn sync_overrides(
+#[allow(clippy::implicit_hasher)]
+pub fn sync(
     actions_overrides: &mut std::collections::HashMap<ActionId, Vec<ActionOverride>>,
-    actions_global: &std::collections::HashMap<ActionId, ActionSpec>,
+    actions_global: &std::collections::HashMap<ActionId, Spec>,
     located: &[LocatedAction],
     action_set: &WorkflowActionSet,
 ) {
@@ -124,7 +129,8 @@ pub fn sync_overrides(
 
 /// Remove override entries whose referenced workflow/job/step no longer exists in the
 /// scanned set.
-pub fn prune_stale_overrides(
+#[allow(clippy::implicit_hasher)]
+pub fn prune_stale(
     actions_overrides: &mut std::collections::HashMap<ActionId, Vec<ActionOverride>>,
     located: &[LocatedAction],
 ) {
@@ -180,12 +186,13 @@ pub fn prune_stale_overrides(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ActionOverride, LocatedAction, prune_stale_overrides, resolve_version, sync_overrides,
+    use super::{ActionOverride, LocatedAction, prune_stale, resolve_version, sync};
+    use crate::domain::action::identity::{ActionId, Version};
+    use crate::domain::action::spec::Spec;
+    use crate::domain::action::specifier::Specifier;
+    use crate::domain::workflow_actions::{
+        ActionSet as WorkflowActionSet, Location as WorkflowLocation,
     };
-    use crate::domain::action::Version;
-    use crate::domain::workflow_actions::{WorkflowActionSet, WorkflowLocation};
-    use crate::domain::{ActionId, ActionSpec, Specifier};
 
     use std::collections::HashMap;
     fn make_loc(workflow: &str, job: Option<&str>, step: Option<usize>) -> WorkflowLocation {
@@ -251,12 +258,12 @@ mod tests {
     }
 
     #[test]
-    fn sync_overrides_no_op_when_single_version() {
+    fn sync_no_op_when_single_version() {
         let mut actions_overrides: HashMap<ActionId, Vec<ActionOverride>> = HashMap::new();
-        let mut actions_global: HashMap<ActionId, ActionSpec> = HashMap::new();
+        let mut actions_global: HashMap<ActionId, Spec> = HashMap::new();
         actions_global.insert(
             ActionId::from("actions/checkout"),
-            ActionSpec::new(ActionId::from("actions/checkout"), Specifier::parse("^4")),
+            Spec::new(ActionId::from("actions/checkout"), Specifier::parse("^4")),
         );
 
         let mut action_set = WorkflowActionSet::new();
@@ -269,7 +276,7 @@ mod tests {
             action_set.add_located(a);
         }
 
-        sync_overrides(
+        sync(
             &mut actions_overrides,
             &actions_global,
             &located,
@@ -283,12 +290,12 @@ mod tests {
     }
 
     #[test]
-    fn sync_overrides_adds_override_for_minority_version() {
+    fn sync_adds_override_for_minority_version() {
         let mut actions_overrides: HashMap<ActionId, Vec<ActionOverride>> = HashMap::new();
-        let mut actions_global: HashMap<ActionId, ActionSpec> = HashMap::new();
+        let mut actions_global: HashMap<ActionId, Spec> = HashMap::new();
         actions_global.insert(
             ActionId::from("actions/checkout"),
-            ActionSpec::new(ActionId::from("actions/checkout"), Specifier::parse("^4")),
+            Spec::new(ActionId::from("actions/checkout"), Specifier::parse("^4")),
         );
 
         let mut action_set = WorkflowActionSet::new();
@@ -301,7 +308,7 @@ mod tests {
             action_set.add_located(a);
         }
 
-        sync_overrides(
+        sync(
             &mut actions_overrides,
             &actions_global,
             &located,
@@ -316,7 +323,7 @@ mod tests {
     }
 
     #[test]
-    fn prune_stale_overrides_removes_override_for_missing_workflow() {
+    fn prune_stale_removes_override_for_missing_workflow() {
         let mut actions_overrides: HashMap<ActionId, Vec<ActionOverride>> = HashMap::new();
         actions_overrides.insert(
             ActionId::from("actions/checkout"),
@@ -333,7 +340,7 @@ mod tests {
             "actions/checkout",
             "v4",
         )];
-        prune_stale_overrides(&mut actions_overrides, &located);
+        prune_stale(&mut actions_overrides, &located);
 
         assert!(
             actions_overrides
@@ -343,7 +350,7 @@ mod tests {
     }
 
     #[test]
-    fn prune_stale_overrides_keeps_live_overrides() {
+    fn prune_stale_keeps_live_overrides() {
         let mut actions_overrides: HashMap<ActionId, Vec<ActionOverride>> = HashMap::new();
         actions_overrides.insert(
             ActionId::from("actions/checkout"),
@@ -360,7 +367,7 @@ mod tests {
             "actions/checkout",
             "v4",
         )];
-        prune_stale_overrides(&mut actions_overrides, &located);
+        prune_stale(&mut actions_overrides, &located);
 
         assert_eq!(
             actions_overrides
@@ -372,15 +379,15 @@ mod tests {
 
     // --- Override lifecycle tests (migrated from tidy/tests.rs) ---
 
-    /// Multiple workflows with v6.0.1 + one with v5 → `sync_overrides` creates override for v5.
+    /// Multiple workflows with v6.0.1 + one with v5 → `sync` creates override for v5.
     #[test]
-    fn sync_overrides_multiple_sha_workflows_with_minority_version() {
+    fn sync_multiple_sha_workflows_with_minority_version() {
         let mut actions_overrides: HashMap<ActionId, Vec<ActionOverride>> = HashMap::new();
-        let mut actions_global: HashMap<ActionId, ActionSpec> = HashMap::new();
+        let mut actions_global: HashMap<ActionId, Spec> = HashMap::new();
         // Global is v6.0.1 (dominant version)
         actions_global.insert(
             ActionId::from("actions/checkout"),
-            ActionSpec::new(
+            Spec::new(
                 ActionId::from("actions/checkout"),
                 Specifier::from_v1("v6.0.1"),
             ),
@@ -396,7 +403,7 @@ mod tests {
             action_set.add_located(a);
         }
 
-        sync_overrides(
+        sync(
             &mut actions_overrides,
             &actions_global,
             &located,
@@ -420,7 +427,7 @@ mod tests {
 
     /// Stale override for deploy.yml (which no longer exists) is removed by prune.
     #[test]
-    fn prune_stale_overrides_removes_deploy_yml_when_only_ci_exists() {
+    fn prune_stale_removes_deploy_yml_when_only_ci_exists() {
         let mut actions_overrides: HashMap<ActionId, Vec<ActionOverride>> = HashMap::new();
         actions_overrides.insert(
             ActionId::from("actions/checkout"),
@@ -438,7 +445,7 @@ mod tests {
             "actions/checkout",
             "v4",
         )];
-        prune_stale_overrides(&mut actions_overrides, &located);
+        prune_stale(&mut actions_overrides, &located);
 
         assert!(
             actions_overrides

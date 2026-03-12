@@ -1,4 +1,3 @@
-pub use super::specifier::Specifier;
 use super::specifier::higher_version;
 use std::fmt;
 

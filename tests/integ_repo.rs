@@ -35,5 +35,5 @@ fn test_find_root_without_github_folder() {
     let result = repo::find_root(root);
 
     assert!(result.is_err());
-    assert!(matches!(result.unwrap_err(), repo::RepoError::GithubFolder));
+    assert!(matches!(result.unwrap_err(), repo::Error::GithubFolder));
 }

@@ -1,8 +1,10 @@
-use crate::domain::{CommitSha, RefType, Specifier};
+use crate::domain::action::identity::CommitSha;
+use crate::domain::action::specifier::Specifier;
+use crate::domain::action::uses_ref::RefType;
 
 /// Metadata about a resolved action entry in the lock file.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LockEntry {
+pub struct Entry {
     /// The resolved commit SHA
     pub sha: CommitSha,
     /// The most specific version tag pointing to this SHA
@@ -17,7 +19,7 @@ pub struct LockEntry {
     pub date: String,
 }
 
-impl LockEntry {
+impl Entry {
     /// Create a new lock entry.
     #[must_use]
     pub fn new(
@@ -102,12 +104,14 @@ impl LockEntry {
 
 #[cfg(test)]
 mod tests {
-    use super::LockEntry;
-    use crate::domain::{CommitSha, RefType, Specifier};
+    use super::Entry;
+    use crate::domain::action::identity::CommitSha;
+    use crate::domain::action::specifier::Specifier;
+    use crate::domain::action::uses_ref::RefType;
 
     #[test]
     fn test_is_complete_with_all_fields() {
-        let entry = LockEntry::with_version_and_comment(
+        let entry = Entry::with_version_and_comment(
             CommitSha::from("abc123def456789012345678901234567890abcd"),
             Some("v4.0.0".to_string()),
             "v4".to_string(),
@@ -120,7 +124,7 @@ mod tests {
 
     #[test]
     fn test_is_complete_missing_ref_type() {
-        let entry = LockEntry::with_version_and_comment(
+        let entry = Entry::with_version_and_comment(
             CommitSha::from("abc123def456789012345678901234567890abcd"),
             Some("v4.0.0".to_string()),
             "v4".to_string(),
@@ -133,7 +137,7 @@ mod tests {
 
     #[test]
     fn test_is_complete_missing_comment_for_range() {
-        let entry = LockEntry::with_version_and_comment(
+        let entry = Entry::with_version_and_comment(
             CommitSha::from("abc123def456789012345678901234567890abcd"),
             Some("v4.0.0".to_string()),
             String::new(),
@@ -146,7 +150,7 @@ mod tests {
 
     #[test]
     fn test_is_complete_missing_version() {
-        let entry = LockEntry::with_version_and_comment(
+        let entry = Entry::with_version_and_comment(
             CommitSha::from("abc123def456789012345678901234567890abcd"),
             None,
             "v4".to_string(),
@@ -159,7 +163,7 @@ mod tests {
 
     #[test]
     fn test_is_complete_missing_date() {
-        let entry = LockEntry::with_version_and_comment(
+        let entry = Entry::with_version_and_comment(
             CommitSha::from("abc123def456789012345678901234567890abcd"),
             Some("v4.0.0".to_string()),
             "v4".to_string(),
@@ -173,7 +177,7 @@ mod tests {
     #[test]
     fn test_is_complete_non_semver_ref() {
         // Branch refs have empty comment, that's OK
-        let entry = LockEntry::with_version_and_comment(
+        let entry = Entry::with_version_and_comment(
             CommitSha::from("abc123def456789012345678901234567890abcd"),
             Some("main".to_string()),
             String::new(),
@@ -186,7 +190,7 @@ mod tests {
 
     #[test]
     fn test_is_complete_patch_version() {
-        let entry = LockEntry::with_version_and_comment(
+        let entry = Entry::with_version_and_comment(
             CommitSha::from("abc123def456789012345678901234567890abcd"),
             Some("v4.1.0".to_string()),
             "v4.1.0".to_string(),
@@ -199,7 +203,7 @@ mod tests {
 
     #[test]
     fn test_is_complete_minor_version() {
-        let entry = LockEntry::with_version_and_comment(
+        let entry = Entry::with_version_and_comment(
             CommitSha::from("abc123def456789012345678901234567890abcd"),
             Some("v4.1.0".to_string()),
             "v4.1".to_string(),
@@ -215,7 +219,7 @@ mod tests {
     #[test]
     fn test_lock_completeness_missing_specifier_derived() {
         // Entry with version but empty comment — not complete for a Range specifier
-        let mut entry = LockEntry::with_version_and_comment(
+        let mut entry = Entry::with_version_and_comment(
             CommitSha::from("abc123def456789012345678901234567890abcd"),
             Some("v4".to_string()),
             String::new(), // empty comment = not complete for Range
@@ -237,7 +241,7 @@ mod tests {
     #[test]
     fn test_lock_completeness_missing_version_refined() {
         // Entry with comment but no version — not complete
-        let mut entry = LockEntry::with_version_and_comment(
+        let mut entry = Entry::with_version_and_comment(
             CommitSha::from("abc123def456789012345678901234567890abcd"),
             None, // missing version
             "v4".to_string(),
@@ -258,7 +262,7 @@ mod tests {
     #[test]
     fn test_lock_completeness_complete_entry_unchanged() {
         // A fully-populated entry is already complete — no mutations needed
-        let entry = LockEntry::with_version_and_comment(
+        let entry = Entry::with_version_and_comment(
             CommitSha::from("abc123def456789012345678901234567890abcd"),
             Some("v4".to_string()),
             "v4".to_string(),
@@ -272,7 +276,7 @@ mod tests {
     #[test]
     fn test_lock_completeness_manifest_version_precision_mismatch() {
         // Entry whose comment was set for the old specifier (v6) but specifier is now v6.1
-        let mut entry = LockEntry::with_version_and_comment(
+        let mut entry = Entry::with_version_and_comment(
             CommitSha::from("abc123def456789012345678901234567890abcd"),
             Some("v6.0.2".to_string()),
             "v6".to_string(), // was correct for v6, wrong for v6.1

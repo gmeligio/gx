@@ -1,18 +1,24 @@
 // Integration tests for the tidy module — exercises plan() and apply_workflow_patches()
 
-use super::{TidyError, apply_workflow_patches, plan};
-use crate::domain::RefType;
-use crate::domain::{
-    ActionId, CommitSha, Lock, LockKey, Manifest, ResolvedAction, Specifier, Version,
-};
-use crate::infra::{FileWorkflowScanner, FileWorkflowUpdater, parse_lock, parse_manifest};
+use super::{Error as TidyError, apply_workflow_patches, plan};
+use crate::domain::action::identity::{ActionId, CommitSha, Version};
+use crate::domain::action::resolved::Resolved as ResolvedAction;
+use crate::domain::action::spec::LockKey;
+use crate::domain::action::specifier::Specifier;
+use crate::domain::action::uses_ref::RefType;
+use crate::domain::lock::Lock;
+use crate::domain::manifest::Manifest;
+use crate::infra::lock;
+use crate::infra::manifest;
+use crate::infra::workflow_scan::FileScanner as FileWorkflowScanner;
+use crate::infra::workflow_update::FileUpdater as FileWorkflowUpdater;
 use std::fs;
 
 #[test]
 fn tidy_error_resolution_failed_displays_specs() {
     let err = TidyError::ResolutionFailed {
         count: 2,
-        specs: "actions/checkout: token required\n  actions/setup-node: timeout".to_string(),
+        specs: "actions/checkout: token required\n  actions/setup-node: timeout".to_owned(),
     };
     assert_eq!(
         err.to_string(),
@@ -22,30 +28,30 @@ fn tidy_error_resolution_failed_displays_specs() {
 
 #[derive(Clone, Copy)]
 struct NoopRegistry;
-impl crate::domain::VersionRegistry for NoopRegistry {
+impl crate::domain::resolution::VersionRegistry for NoopRegistry {
     fn lookup_sha(
         &self,
         _id: &ActionId,
         _version: &Version,
-    ) -> Result<crate::domain::ResolvedRef, crate::domain::ResolutionError> {
-        Err(crate::domain::ResolutionError::AuthRequired)
+    ) -> Result<crate::domain::resolution::ResolvedRef, crate::domain::resolution::Error> {
+        Err(crate::domain::resolution::Error::AuthRequired)
     }
     fn tags_for_sha(
         &self,
         _id: &ActionId,
         _sha: &CommitSha,
-    ) -> Result<Vec<Version>, crate::domain::ResolutionError> {
-        Err(crate::domain::ResolutionError::AuthRequired)
+    ) -> Result<Vec<Version>, crate::domain::resolution::Error> {
+        Err(crate::domain::resolution::Error::AuthRequired)
     }
-    fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, crate::domain::ResolutionError> {
-        Err(crate::domain::ResolutionError::AuthRequired)
+    fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, crate::domain::resolution::Error> {
+        Err(crate::domain::resolution::Error::AuthRequired)
     }
     fn describe_sha(
         &self,
         _id: &ActionId,
         _sha: &CommitSha,
-    ) -> Result<crate::domain::ShaDescription, crate::domain::ResolutionError> {
-        Err(crate::domain::ResolutionError::AuthRequired)
+    ) -> Result<crate::domain::resolution::ShaDescription, crate::domain::resolution::Error> {
+        Err(crate::domain::resolution::Error::AuthRequired)
     }
 }
 
@@ -89,53 +95,53 @@ jobs:
     let lock_path = github_dir.join("gx.lock");
 
     // Pre-seed lock with both versions already resolved (simulates a pre-existing lock)
-    let seed_diff = crate::domain::LockDiff {
+    let seed_diff = crate::domain::plan::LockDiff {
         added: vec![
             (
                 LockKey::new(
                     ActionId::from("actions/checkout"),
                     Specifier::from_v1("v6.0.1"),
                 ),
-                crate::domain::LockEntry::with_version_and_comment(
+                crate::domain::lock::entry::Entry::with_version_and_comment(
                     CommitSha::from("8e8c483db84b4bee98b60c0593521ed34d9990e8"),
-                    Some("v6.0.1".to_string()),
+                    Some("v6.0.1".to_owned()),
                     String::new(),
-                    "actions/checkout".to_string(),
+                    "actions/checkout".to_owned(),
                     Some(RefType::Tag),
-                    "2026-01-01T00:00:00Z".to_string(),
+                    "2026-01-01T00:00:00Z".to_owned(),
                 ),
             ),
             (
                 LockKey::new(ActionId::from("actions/checkout"), Specifier::from_v1("v5")),
-                crate::domain::LockEntry::with_version_and_comment(
+                crate::domain::lock::entry::Entry::with_version_and_comment(
                     CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-                    Some("v5".to_string()),
+                    Some("v5".to_owned()),
                     String::new(),
-                    "actions/checkout".to_string(),
+                    "actions/checkout".to_owned(),
                     Some(RefType::Tag),
-                    "2026-01-01T00:00:00Z".to_string(),
+                    "2026-01-01T00:00:00Z".to_owned(),
                 ),
             ),
         ],
         ..Default::default()
     };
-    crate::infra::create_lock(&lock_path, &seed_diff).unwrap();
+    lock::create(&lock_path, &seed_diff).unwrap();
 
     // Load manifest and lock via free functions
-    let manifest = parse_manifest(&manifest_path).unwrap().value; // empty on first run
-    let lock = parse_lock(&lock_path).unwrap().value;
+    let manifest = manifest::parse(&manifest_path).unwrap().value; // empty on first run
+    let lock = lock::parse(&lock_path).unwrap().value;
     let scanner = FileWorkflowScanner::new(repo_root);
     let updater = FileWorkflowUpdater::new(repo_root);
 
     let tidy_plan = plan(&manifest, &lock, &NoopRegistry, &scanner, |_| {}).unwrap();
 
     // Apply the plan — manifest doesn't exist yet so use create, lock exists so use apply
-    crate::infra::create_manifest(&manifest_path, &tidy_plan.manifest).unwrap();
-    crate::infra::apply_lock_diff(&lock_path, &tidy_plan.lock).unwrap();
+    crate::infra::manifest::create(&manifest_path, &tidy_plan.manifest).unwrap();
+    crate::infra::lock::apply_lock_diff(&lock_path, &tidy_plan.lock).unwrap();
     apply_workflow_patches(&updater, &tidy_plan.workflows, &tidy_plan.corrections).unwrap();
 
     // ---- Assert: manifest has global v6.0.1 + override for windows.yml v5 ----
-    let saved_manifest = parse_manifest(&manifest_path).unwrap().value;
+    let saved_manifest = manifest::parse(&manifest_path).unwrap().value;
 
     assert_eq!(
         saved_manifest.get(&ActionId::from("actions/checkout")),
@@ -204,9 +210,9 @@ jobs:
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v4"),
         CommitSha::from("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
-        "actions/checkout".to_string(),
+        "actions/checkout".to_owned(),
         Some(RefType::Tag),
-        "2026-01-01T00:00:00Z".to_string(),
+        "2026-01-01T00:00:00Z".to_owned(),
     ));
 
     let scanner = FileWorkflowScanner::new(repo_root);
@@ -268,9 +274,9 @@ fn test_plan_one_new_action_produces_added_entries() {
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v4"),
         CommitSha::from(sha),
-        "actions/checkout".to_string(),
+        "actions/checkout".to_owned(),
         Some(RefType::Tag),
-        "2026-01-01T00:00:00Z".to_string(),
+        "2026-01-01T00:00:00Z".to_owned(),
     ));
 
     let manifest = Manifest::default(); // empty — action is "new"
@@ -314,17 +320,17 @@ fn test_plan_removed_action_produces_removed_entries() {
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v4"),
         CommitSha::from("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
-        "actions/checkout".to_string(),
+        "actions/checkout".to_owned(),
         Some(RefType::Tag),
-        "2026-01-01T00:00:00Z".to_string(),
+        "2026-01-01T00:00:00Z".to_owned(),
     ));
     lock.set(&ResolvedAction::new(
         ActionId::from("actions/setup-node"),
         Specifier::from_v1("v3"),
         CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-        "actions/setup-node".to_string(),
+        "actions/setup-node".to_owned(),
         Some(RefType::Tag),
-        "2026-01-01T00:00:00Z".to_string(),
+        "2026-01-01T00:00:00Z".to_owned(),
     ));
 
     let scanner = FileWorkflowScanner::new(repo_root);
@@ -382,9 +388,9 @@ fn test_plan_everything_in_sync_returns_empty_plan() {
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v4"),
         CommitSha::from(sha),
-        "actions/checkout".to_string(),
+        "actions/checkout".to_owned(),
         Some(RefType::Tag),
-        "2026-01-01T00:00:00Z".to_string(),
+        "2026-01-01T00:00:00Z".to_owned(),
     ));
 
     let scanner = FileWorkflowScanner::new(repo_root);

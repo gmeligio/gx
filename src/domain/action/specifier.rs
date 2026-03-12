@@ -7,18 +7,18 @@ use std::fmt;
 /// `Version` remains for concrete resolved tags in lock entries.
 #[derive(Debug, Clone)]
 pub enum Specifier {
-    /// Semver range: "^6", "~1.15.2", "^0.5"
+    /// Semver range: `"^6"`, `"~1.15.2"`, `"^0.5"`.
     Range {
-        /// For matching against resolved versions
+        /// For matching against resolved versions.
         req: semver::VersionReq,
-        /// Raw specifier string for serialization roundtrip (e.g., "^6")
+        /// Raw specifier string for serialization roundtrip (e.g., `"^6"`).
         raw: String,
-        /// Human-readable comment for workflow output (e.g., "v6")
+        /// Human-readable comment for workflow output (e.g., `"v6"`).
         comment: String,
     },
-    /// Non-semver ref: "main", "develop"
+    /// Non-semver ref: `"main"`, `"develop"`.
     Ref(String),
-    /// Direct 40-char hex SHA
+    /// Direct 40-char hex SHA.
     Sha(String),
 }
 
@@ -36,18 +36,18 @@ impl Specifier {
         {
             // Comment: strip operator, add v prefix
             let comment = format!("v{rest}");
-            return Specifier::Range {
+            return Self::Range {
                 req,
-                raw: s.to_string(),
+                raw: s.to_owned(),
                 comment,
             };
         }
         // SHA
         if CommitSha::is_valid(s) {
-            return Specifier::Sha(s.to_string());
+            return Self::Sha(s.to_owned());
         }
         // Ref (branch name, etc.)
-        Specifier::Ref(s.to_string())
+        Self::Ref(s.to_owned())
     }
 
     /// Convert a v1 version string (e.g., `"v6"`, `"v1.15.2"`) to a `Specifier`.
@@ -62,36 +62,36 @@ impl Specifier {
     pub fn from_v1(v: &str) -> Self {
         let version = Version::from(v);
         if version.is_sha() {
-            return Specifier::Sha(v.to_string());
+            return Self::Sha(v.to_owned());
         }
         if let Some(spec_str) = version.specifier() {
-            return Specifier::parse(&spec_str);
+            return Self::parse(&spec_str);
         }
-        Specifier::Ref(v.to_string())
+        Self::Ref(v.to_owned())
     }
 
     /// Check if this specifier matches a semver version.
     #[must_use]
     pub fn matches(&self, version: &semver::Version) -> bool {
         match self {
-            Specifier::Range { req, .. } => req.matches(version),
-            _ => false,
+            Self::Range { req, .. } => req.matches(version),
+            Self::Ref(_) | Self::Sha(_) => false,
         }
     }
 
     /// Get the human-readable comment string for workflow output (e.g., "v6").
     #[must_use]
-    pub fn to_comment(&self) -> &str {
+    pub const fn to_comment(&self) -> &str {
         match self {
-            Specifier::Range { comment, .. } => comment.as_str(),
-            Specifier::Ref(s) | Specifier::Sha(s) => s.as_str(),
+            Self::Range { comment, .. } => comment.as_str(),
+            Self::Ref(s) | Self::Sha(s) => s.as_str(),
         }
     }
 
     /// Returns true if this specifier is a direct SHA.
     #[must_use]
-    pub fn is_sha(&self) -> bool {
-        matches!(self, Specifier::Sha(_))
+    pub const fn is_sha(&self) -> bool {
+        matches!(self, Self::Sha(_))
     }
 
     /// Returns the precision of a Range specifier (Major/Minor/Patch).
@@ -99,18 +99,17 @@ impl Specifier {
     #[must_use]
     pub fn precision(&self) -> Option<VersionPrecision> {
         match self {
-            Specifier::Range { raw, .. } => {
+            Self::Range { raw, .. } => {
                 // Strip the operator (first char) and count dot-separated components
-                let rest = &raw[1..];
-                let parts: Vec<&str> = rest.split('.').collect();
-                match parts.len() {
+                let rest = raw.get(1..)?;
+                match rest.split('.').count() {
                     1 => Some(VersionPrecision::Major),
                     2 => Some(VersionPrecision::Minor),
                     3 => Some(VersionPrecision::Patch),
                     _ => None,
                 }
             }
-            _ => None,
+            Self::Ref(_) | Self::Sha(_) => None,
         }
     }
 
@@ -118,17 +117,17 @@ impl Specifier {
     #[must_use]
     pub fn operator(&self) -> Option<char> {
         match self {
-            Specifier::Range { raw, .. } => raw.chars().next(),
-            _ => None,
+            Self::Range { raw, .. } => raw.chars().next(),
+            Self::Ref(_) | Self::Sha(_) => None,
         }
     }
 
     /// Returns the raw string representation.
     #[must_use]
-    pub fn as_str(&self) -> &str {
+    pub const fn as_str(&self) -> &str {
         match self {
-            Specifier::Range { raw, .. } => raw.as_str(),
-            Specifier::Ref(s) | Specifier::Sha(s) => s.as_str(),
+            Self::Range { raw, .. } => raw.as_str(),
+            Self::Ref(s) | Self::Sha(s) => s.as_str(),
         }
     }
 }
@@ -136,10 +135,12 @@ impl Specifier {
 impl PartialEq for Specifier {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Specifier::Range { raw: a, .. }, Specifier::Range { raw: b, .. })
-            | (Specifier::Ref(a), Specifier::Ref(b))
-            | (Specifier::Sha(a), Specifier::Sha(b)) => a == b,
-            _ => false,
+            (Self::Range { raw: a, .. }, Self::Range { raw: b, .. })
+            | (Self::Ref(a), Self::Ref(b))
+            | (Self::Sha(a), Self::Sha(b)) => a == b,
+            (Self::Range { .. }, Self::Ref(_) | Self::Sha(_))
+            | (Self::Ref(_), Self::Range { .. } | Self::Sha(_))
+            | (Self::Sha(_), Self::Range { .. } | Self::Ref(_)) => false,
         }
     }
 }
@@ -149,16 +150,16 @@ impl Eq for Specifier {}
 impl std::hash::Hash for Specifier {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         match self {
-            Specifier::Range { raw, .. } => {
-                0u8.hash(state);
+            Self::Range { raw, .. } => {
+                0_u8.hash(state);
                 raw.hash(state);
             }
-            Specifier::Ref(s) => {
-                1u8.hash(state);
+            Self::Ref(s) => {
+                1_u8.hash(state);
                 s.hash(state);
             }
-            Specifier::Sha(s) => {
-                2u8.hash(state);
+            Self::Sha(s) => {
+                2_u8.hash(state);
                 s.hash(state);
             }
         }
@@ -168,8 +169,8 @@ impl std::hash::Hash for Specifier {
 impl fmt::Display for Specifier {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Specifier::Range { raw, .. } => write!(f, "{raw}"),
-            Specifier::Ref(s) | Specifier::Sha(s) => write!(f, "{s}"),
+            Self::Range { raw, .. } => write!(f, "{raw}"),
+            Self::Ref(s) | Self::Sha(s) => write!(f, "{s}"),
         }
     }
 }
@@ -186,8 +187,8 @@ impl From<&str> for Specifier {
     }
 }
 
-/// Attempts to parse a version string into a semver Version.
-/// Handles common formats like "v4", "v4.1", "v4.1.2", "4.1.2"
+/// Attempts to parse a version string into a semver `Version`.
+/// Handles common formats like `"v4"`, `"v4.1"`, `"v4.1.2"`, `"4.1.2"`.
 pub(super) fn parse_semver(version: &str) -> Option<semver::Version> {
     // Strip leading 'v' or 'V' if present
     let normalized = version
@@ -219,7 +220,7 @@ pub(super) fn parse_semver(version: &str) -> Option<semver::Version> {
 /// If both are valid semver, uses semver comparison.
 /// If only one is valid semver, that one wins.
 /// If neither is valid semver, returns the first one.
-pub(super) fn higher_version<'a>(a: &'a Version, b: &'a Version) -> &'a Version {
+pub(super) fn higher_version<'ver>(a: &'ver Version, b: &'ver Version) -> &'ver Version {
     let parsed_a = parse_semver(a.as_str());
     let parsed_b = parse_semver(b.as_str());
 
@@ -237,11 +238,12 @@ pub(super) fn higher_version<'a>(a: &'a Version, b: &'a Version) -> &'a Version 
 }
 
 #[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "tests use unwrap freely")]
 mod tests {
     use super::{Version, parse_semver};
 
     #[test]
-    fn test_parse_semver_full() {
+    fn parse_semver_full() {
         let v = parse_semver("1.2.3").unwrap();
         assert_eq!(v.major, 1);
         assert_eq!(v.minor, 2);
@@ -249,7 +251,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_semver_with_v_prefix() {
+    fn parse_semver_with_v_prefix() {
         let v = parse_semver("v1.2.3").unwrap();
         assert_eq!(v.major, 1);
         assert_eq!(v.minor, 2);
@@ -257,7 +259,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_semver_major_only() {
+    fn parse_semver_major_only() {
         let v = parse_semver("v4").unwrap();
         assert_eq!(v.major, 4);
         assert_eq!(v.minor, 0);
@@ -265,7 +267,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_semver_major_minor() {
+    fn parse_semver_major_minor() {
         let v = parse_semver("v4.1").unwrap();
         assert_eq!(v.major, 4);
         assert_eq!(v.minor, 1);
@@ -273,18 +275,18 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_semver_branch_returns_none() {
+    fn parse_semver_branch_returns_none() {
         assert!(parse_semver("main").is_none());
         assert!(parse_semver("develop").is_none());
     }
 
     #[test]
-    fn test_parse_semver_sha_returns_none() {
+    fn parse_semver_sha_returns_none() {
         assert!(parse_semver("a1b2c3d4e5f6").is_none());
     }
 
     #[test]
-    fn test_highest_version() {
+    fn highest_version() {
         let versions = vec![
             Version::from("v3"),
             Version::from("v4"),
@@ -292,18 +294,18 @@ mod tests {
         ];
         assert_eq!(
             Version::highest(&versions).map(|v| v.0),
-            Some("v4".to_string())
+            Some("v4".to_owned())
         );
     }
 
     #[test]
-    fn test_highest_version_empty() {
+    fn highest_version_empty() {
         let versions: Vec<Version> = vec![];
         assert!(Version::highest(&versions).is_none());
     }
 
     #[test]
-    fn test_highest_version_detailed() {
+    fn highest_version_detailed() {
         assert_eq!(
             Version::highest(&[Version::from("v4.1"), Version::from("v4.0")]),
             Some(Version::from("v4.1"))
@@ -315,7 +317,7 @@ mod tests {
     }
 
     #[test]
-    fn test_highest_version_one_semver() {
+    fn highest_version_one_semver() {
         assert_eq!(
             Version::highest(&[Version::from("v4"), Version::from("main")]),
             Some(Version::from("v4"))
@@ -327,7 +329,7 @@ mod tests {
     }
 
     #[test]
-    fn test_highest_version_neither_semver() {
+    fn highest_version_neither_semver() {
         assert_eq!(
             Version::highest(&[Version::from("main"), Version::from("develop")]),
             Some(Version::from("main"))

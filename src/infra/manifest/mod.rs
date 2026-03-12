@@ -1,10 +1,11 @@
 mod convert;
-mod patch;
+pub mod patch;
 
-use crate::config::LintConfig;
-use crate::domain::{Manifest, ManifestDiff, Parsed};
+use crate::config::Lint;
+use crate::domain::Parsed;
+use crate::domain::manifest::Manifest;
+use crate::domain::plan::ManifestDiff;
 use convert::{ManifestData, format_manifest_toml, manifest_from_data, manifest_to_data};
-pub use patch::apply_manifest_diff;
 use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -13,7 +14,7 @@ pub const MANIFEST_FILE_NAME: &str = "gx.toml";
 
 /// Errors that can occur when working with manifest files
 #[derive(Debug, Error)]
-pub enum ManifestError {
+pub enum Error {
     #[error("failed to read manifest file: {}", path.display())]
     Read {
         path: PathBuf,
@@ -45,13 +46,13 @@ pub enum ManifestError {
     VersionRequired { required: String, current: String },
 }
 
-// ---- FileManifest ----
+// ---- Store ----
 
-pub struct FileManifest {
+pub struct Store {
     path: PathBuf,
 }
 
-impl FileManifest {
+impl Store {
     #[must_use]
     pub fn new(path: &Path) -> Self {
         Self {
@@ -60,17 +61,17 @@ impl FileManifest {
     }
 }
 
-impl FileManifest {
+impl Store {
     /// Save the given `Manifest` to this file.
     ///
     /// # Errors
     ///
-    /// Returns [`ManifestError::Write`] if the file cannot be written.
-    /// Returns [`ManifestError::Serialize`] if serialization fails.
-    pub fn save(&self, manifest: &Manifest) -> Result<(), ManifestError> {
+    /// Returns [`Error::Write`] if the file cannot be written.
+    /// Returns [`Error::Serialize`] if serialization fails.
+    pub fn save(&self, manifest: &Manifest) -> Result<(), Error> {
         let data = manifest_to_data(manifest);
         let content = format_manifest_toml(&data);
-        fs::write(&self.path, content).map_err(|source| ManifestError::Write {
+        fs::write(&self.path, content).map_err(|source| Error::Write {
             path: self.path.clone(),
             source,
         })?;
@@ -82,11 +83,11 @@ impl FileManifest {
 ///
 /// # Errors
 ///
-/// Returns [`ManifestError::Read`] if the file cannot be read.
-/// Returns [`ManifestError::Parse`] if the TOML is invalid.
-/// Returns [`ManifestError::Validation`] if the manifest data is invalid.
-/// Returns [`ManifestError::VersionRequired`] if the file requires a newer version of gx.
-pub fn parse_manifest(path: &Path) -> Result<Parsed<Manifest>, ManifestError> {
+/// Returns [`Error::Read`] if the file cannot be read.
+/// Returns [`Error::Parse`] if the TOML is invalid.
+/// Returns [`Error::Validation`] if the manifest data is invalid.
+/// Returns [`Error::VersionRequired`] if the file requires a newer version of gx.
+pub fn parse(path: &Path) -> Result<Parsed<Manifest>, Error> {
     if !path.exists() {
         return Ok(Parsed {
             value: Manifest::default(),
@@ -94,12 +95,12 @@ pub fn parse_manifest(path: &Path) -> Result<Parsed<Manifest>, ManifestError> {
         });
     }
 
-    let content = fs::read_to_string(path).map_err(|source| ManifestError::Read {
+    let content = fs::read_to_string(path).map_err(|source| Error::Read {
         path: path.to_path_buf(),
         source,
     })?;
 
-    let data: ManifestData = toml::from_str(&content).map_err(|source| ManifestError::Parse {
+    let data: ManifestData = toml::from_str(&content).map_err(|source| Error::Parse {
         path: path.to_path_buf(),
         source: Box::new(source),
     })?;
@@ -116,7 +117,7 @@ pub fn parse_manifest(path: &Path) -> Result<Parsed<Manifest>, ManifestError> {
         let current = semver::Version::parse(env!("CARGO_PKG_VERSION")).unwrap_or(zero.clone());
         let required = semver::Version::parse(&gx.min_version).unwrap_or(zero);
         if current < required {
-            return Err(ManifestError::VersionRequired {
+            return Err(Error::VersionRequired {
                 required: gx.min_version.clone(),
                 current: env!("CARGO_PKG_VERSION").to_string(),
             });
@@ -131,28 +132,28 @@ pub fn parse_manifest(path: &Path) -> Result<Parsed<Manifest>, ManifestError> {
     })
 }
 
-/// Load lint configuration from a manifest file. Returns `LintConfig::default()` if the file does not exist or has no `[lint]` section.
+/// Load lint configuration from a manifest file. Returns `Lint::default()` if the file does not exist or has no `[lint]` section.
 ///
 /// # Errors
 ///
-/// Returns [`ManifestError::Read`] if the file cannot be read.
-/// Returns [`ManifestError::Parse`] if the TOML is invalid.
-pub fn parse_lint_config(path: &Path) -> Result<LintConfig, ManifestError> {
+/// Returns [`Error::Read`] if the file cannot be read.
+/// Returns [`Error::Parse`] if the TOML is invalid.
+pub fn parse_lint_config(path: &Path) -> Result<Lint, Error> {
     if !path.exists() {
-        return Ok(LintConfig::default());
+        return Ok(Lint::default());
     }
 
-    let content = fs::read_to_string(path).map_err(|source| ManifestError::Read {
+    let content = fs::read_to_string(path).map_err(|source| Error::Read {
         path: path.to_path_buf(),
         source,
     })?;
 
-    let data: ManifestData = toml::from_str(&content).map_err(|source| ManifestError::Parse {
+    let data: ManifestData = toml::from_str(&content).map_err(|source| Error::Parse {
         path: path.to_path_buf(),
         source: Box::new(source),
     })?;
 
-    Ok(LintConfig {
+    Ok(Lint {
         rules: data.lint.rules,
     })
 }
@@ -164,8 +165,8 @@ pub fn parse_lint_config(path: &Path) -> Result<LintConfig, ManifestError> {
 ///
 /// # Errors
 ///
-/// Returns [`ManifestError::Write`] if the file cannot be written.
-pub fn create_manifest(path: &Path, diff: &ManifestDiff) -> Result<(), ManifestError> {
+/// Returns [`Error::Write`] if the file cannot be written.
+pub fn create(path: &Path, diff: &ManifestDiff) -> Result<(), Error> {
     // Build domain Manifest from the diff
     let mut manifest = Manifest::default();
     for (id, version) in &diff.added {
@@ -179,7 +180,7 @@ pub fn create_manifest(path: &Path, diff: &ManifestDiff) -> Result<(), ManifestE
     let data = manifest_to_data(&manifest);
     let content = format_manifest_toml(&data);
 
-    fs::write(path, content).map_err(|source| ManifestError::Write {
+    fs::write(path, content).map_err(|source| Error::Write {
         path: path.to_path_buf(),
         source,
     })?;

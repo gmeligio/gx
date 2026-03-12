@@ -1,23 +1,25 @@
-mod overrides;
+pub mod overrides;
 
+use super::action::identity::ActionId;
+use super::action::spec::{LockKey, Spec};
+use super::action::specifier::Specifier;
 use super::plan::ManifestDiff;
-use super::workflow_actions::{LocatedAction, WorkflowActionSet, WorkflowLocation};
-use super::{ActionId, ActionSpec, LockKey, Specifier};
-pub use overrides::ActionOverride;
+use super::workflow_actions::{ActionSet, Located, Location};
+use overrides::ActionOverride;
 use std::collections::{HashMap, HashSet};
 
 /// Domain entity owning the manifest's action→specifier mapping and all domain behaviour.
 /// No I/O — persistence is handled by infrastructure's file-backed save methods.
 #[derive(Debug, Default, Clone)]
 pub struct Manifest {
-    actions: HashMap<ActionId, ActionSpec>,
+    actions: HashMap<ActionId, Spec>,
     overrides: HashMap<ActionId, Vec<ActionOverride>>,
 }
 
 impl Manifest {
     /// Create a `Manifest` from an existing map of IDs to specs.
     #[must_use]
-    pub fn new(actions: HashMap<ActionId, ActionSpec>) -> Self {
+    pub fn new(actions: HashMap<ActionId, Spec>) -> Self {
         Self {
             actions,
             overrides: HashMap::new(),
@@ -27,7 +29,7 @@ impl Manifest {
     /// Create a `Manifest` with both actions and overrides.
     #[must_use]
     pub fn with_overrides(
-        actions: HashMap<ActionId, ActionSpec>,
+        actions: HashMap<ActionId, Spec>,
         new_overrides: HashMap<ActionId, Vec<ActionOverride>>,
     ) -> Self {
         Self {
@@ -50,11 +52,7 @@ impl Manifest {
     /// 3. Workflow-level override (workflow only)
     /// 4. Global default
     #[must_use]
-    pub fn resolve_version(
-        &self,
-        id: &ActionId,
-        location: &WorkflowLocation,
-    ) -> Option<&Specifier> {
+    pub fn resolve_version(&self, id: &ActionId, location: &Location) -> Option<&Specifier> {
         if let Some(ovrs) = self.overrides.get(id)
             && let Some(v) = overrides::resolve_version(ovrs, location)
         {
@@ -65,7 +63,7 @@ impl Manifest {
 
     /// Set or update the global specifier for an action.
     pub fn set(&mut self, id: ActionId, version: Specifier) {
-        let spec = ActionSpec::new(id.clone(), version);
+        let spec = Spec::new(id.clone(), version);
         self.actions.insert(id, spec);
     }
 
@@ -99,7 +97,7 @@ impl Manifest {
     }
 
     /// Get all action specs (global defaults only).
-    pub fn specs(&self) -> impl Iterator<Item = &ActionSpec> {
+    pub fn specs(&self) -> impl Iterator<Item = &Spec> {
         self.actions.values()
     }
 
@@ -122,14 +120,14 @@ impl Manifest {
     /// global, **only when** multiple distinct versions of that action appear across workflows.
     ///
     /// When only one version appears in workflows, no override is created.
-    pub fn sync_overrides(&mut self, located: &[LocatedAction], action_set: &WorkflowActionSet) {
-        overrides::sync_overrides(&mut self.overrides, &self.actions, located, action_set);
+    pub fn sync_overrides(&mut self, located: &[Located], action_set: &ActionSet) {
+        overrides::sync(&mut self.overrides, &self.actions, located, action_set);
     }
 
     /// Remove override entries whose referenced workflow/job/step no longer exists in the
     /// scanned set.
-    pub fn prune_stale_overrides(&mut self, located: &[LocatedAction]) {
-        overrides::prune_stale_overrides(&mut self.overrides, located);
+    pub fn prune_stale_overrides(&mut self, located: &[Located]) {
+        overrides::prune_stale(&mut self.overrides, located);
     }
 
     /// Compute all lock keys needed: one per (action, version) pair across globals and overrides.
@@ -212,10 +210,10 @@ impl Manifest {
 #[cfg(test)]
 mod tests {
     use super::{ActionId, ActionOverride, Manifest, Specifier};
-    use crate::domain::workflow_actions::WorkflowLocation;
+    use crate::domain::workflow_actions::Location;
 
-    fn make_loc(workflow: &str, job: Option<&str>, step: Option<usize>) -> WorkflowLocation {
-        WorkflowLocation {
+    fn make_loc(workflow: &str, job: Option<&str>, step: Option<usize>) -> Location {
+        Location {
             workflow: workflow.to_string(),
             job: job.map(str::to_string),
             step,

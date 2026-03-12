@@ -36,6 +36,8 @@ warnings = "deny"
 [lints.clippy]
 pedantic = "deny"
 perf = "deny"
+module_name_repetitions = "deny"
+pub_use = "deny"
 
 [profile.dist]
 inherits = "release"

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Lint the code"
+#MISE depends=["lint:size"]
+cargo clippy --tests

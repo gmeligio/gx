@@ -1,5 +1,6 @@
-use super::FileWorkflowScanner;
-use crate::domain::{ActionId, WorkflowScanner};
+use super::FileScanner as FileWorkflowScanner;
+use crate::domain::action::identity::ActionId;
+use crate::domain::workflow::Scanner as WorkflowScanner;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -153,7 +154,7 @@ fn test_scan_all_located_derives_action_set() {
 
     let parser = FileWorkflowScanner::new(temp_dir.path());
     let located = parser.scan_all_located().unwrap();
-    let action_set = crate::domain::WorkflowActionSet::from_located(&located);
+    let action_set = crate::domain::workflow_actions::ActionSet::from_located(&located);
 
     assert_eq!(action_set.action_ids().count(), 2);
 }
@@ -305,10 +306,10 @@ fn test_scan_iterator_matches_scan_all_located() {
     assert_eq!(via_iter.len(), via_collect.len());
 
     // Same action IDs appear in both
-    let mut iter_ids: Vec<String> = via_iter.iter().map(|a| a.id.as_str().to_string()).collect();
+    let mut iter_ids: Vec<String> = via_iter.iter().map(|a| a.id.as_str().to_owned()).collect();
     let mut collect_ids: Vec<String> = via_collect
         .iter()
-        .map(|a| a.id.as_str().to_string())
+        .map(|a| a.id.as_str().to_owned())
         .collect();
     iter_ids.sort();
     collect_ids.sort();

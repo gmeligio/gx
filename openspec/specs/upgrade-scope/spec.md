@@ -1,6 +1,8 @@
 ### Requirement: Upgrade a single action in safe mode
 The system SHALL allow upgrading a single named action within its current major version, leaving all other actions in the manifest unchanged.
 
+The `UpgradeRequest` for this case SHALL be constructed infallibly as `UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::Single(id))`.
+
 #### Scenario: Safe upgrade of a single action
 - **WHEN** user runs `gx upgrade actions/checkout`
 - **THEN** only `actions/checkout` is checked and upgraded within its current major
@@ -16,6 +18,8 @@ The system SHALL allow upgrading a single named action within its current major 
 
 ### Requirement: Upgrade a single action to latest version
 The system SHALL allow upgrading a single named action to the absolute latest version (including major version bumps), leaving all other actions in the manifest unchanged.
+
+The `UpgradeRequest` for this case SHALL be constructed infallibly as `UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::Single(id))`.
 
 #### Scenario: Latest upgrade of a single action
 - **WHEN** user runs `gx upgrade --latest actions/checkout`

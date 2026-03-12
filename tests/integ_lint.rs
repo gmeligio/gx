@@ -1,8 +1,13 @@
 #![allow(unused_crate_dependencies)]
 
-use gx::config::{Level, LintConfig};
-use gx::domain::{ActionId, CommitSha, Lock, Manifest, RefType, ResolvedAction, Specifier};
-use gx::infra::FileWorkflowScanner;
+use gx::config::{Level, Lint};
+use gx::domain::action::identity::{ActionId, CommitSha};
+use gx::domain::action::resolved::Resolved as ResolvedAction;
+use gx::domain::action::specifier::Specifier;
+use gx::domain::action::uses_ref::RefType;
+use gx::domain::lock::Lock;
+use gx::domain::manifest::Manifest;
+use gx::infra::workflow_scan::FileScanner as FileWorkflowScanner;
 use gx::lint;
 use std::fs;
 
@@ -16,7 +21,7 @@ fn lint_clean_repo_no_diagnostics() {
     let scanner = FileWorkflowScanner::new(repo_root);
     let manifest = Manifest::default();
     let lock = Lock::default();
-    let lint_config = LintConfig::default();
+    let lint_config = Lint::default();
 
     let diagnostics =
         lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {})
@@ -56,7 +61,7 @@ jobs:
 
     let lock = Lock::default();
     let scanner = FileWorkflowScanner::new(repo_root);
-    let lint_config = LintConfig::default();
+    let lint_config = Lint::default();
 
     let diagnostics =
         lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {})
@@ -91,7 +96,7 @@ jobs:
     let manifest = Manifest::default();
     let lock = Lock::default();
     let scanner = FileWorkflowScanner::new(repo_root);
-    let lint_config = LintConfig::default();
+    let lint_config = Lint::default();
 
     let diagnostics =
         lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {})
@@ -128,10 +133,10 @@ jobs:
     let lock = Lock::default();
     let scanner = FileWorkflowScanner::new(repo_root);
 
-    let mut lint_config = LintConfig::default();
+    let mut lint_config = Lint::default();
     lint_config.rules.insert(
-        "unpinned".to_string(),
-        gx::config::RuleConfig {
+        "unpinned".to_owned(),
+        gx::config::Rule {
             level: Level::Off,
             ignore: vec![],
         },
@@ -172,13 +177,13 @@ jobs:
     let lock = Lock::default();
     let scanner = FileWorkflowScanner::new(repo_root);
 
-    let mut lint_config = LintConfig::default();
+    let mut lint_config = Lint::default();
     lint_config.rules.insert(
-        "unpinned".to_string(),
-        gx::config::RuleConfig {
+        "unpinned".to_owned(),
+        gx::config::Rule {
             level: Level::Error,
             ignore: vec![gx::config::IgnoreTarget {
-                action: Some("actions/checkout".to_string()),
+                action: Some("actions/checkout".to_owned()),
                 workflow: None,
                 job: None,
             }],
@@ -217,7 +222,7 @@ jobs:
     let manifest = Manifest::default();
     let lock = Lock::default();
     let scanner = FileWorkflowScanner::new(repo_root);
-    let lint_config = LintConfig::default();
+    let lint_config = Lint::default();
 
     let diagnostics =
         lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {})
@@ -259,13 +264,13 @@ jobs:
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v4"),
         CommitSha::from("def456789012345678901234567890abcd123456"),
-        "actions/checkout".to_string(),
+        "actions/checkout".to_owned(),
         Some(RefType::Tag),
-        "2026-01-01T00:00:00Z".to_string(),
+        "2026-01-01T00:00:00Z".to_owned(),
     ));
 
     let scanner = FileWorkflowScanner::new(repo_root);
-    let lint_config = LintConfig::default();
+    let lint_config = Lint::default();
 
     let diagnostics =
         lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {})
@@ -309,13 +314,13 @@ jobs:
         ActionId::from("actions/setup-node"),
         Specifier::from_v1("v3"),
         CommitSha::from("def456789012345678901234567890abcd123456"),
-        "actions/setup-node".to_string(),
+        "actions/setup-node".to_owned(),
         Some(RefType::Tag),
-        "2026-01-01T00:00:00Z".to_string(),
+        "2026-01-01T00:00:00Z".to_owned(),
     ));
 
     let scanner = FileWorkflowScanner::new(repo_root);
-    let lint_config = LintConfig::default();
+    let lint_config = Lint::default();
 
     let diagnostics =
         lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {})
@@ -358,31 +363,31 @@ jobs:
         ActionId::from("actions/setup-node"),
         Specifier::from_v1("v3"),
         CommitSha::from("def456789012345678901234567890abcd123456"),
-        "actions/setup-node".to_string(),
+        "actions/setup-node".to_owned(),
         Some(RefType::Tag),
-        "2026-01-01T00:00:00Z".to_string(),
+        "2026-01-01T00:00:00Z".to_owned(),
     ));
 
     let scanner = FileWorkflowScanner::new(repo_root);
 
-    let mut lint_config = LintConfig::default();
+    let mut lint_config = Lint::default();
     lint_config.rules.insert(
-        "unpinned".to_string(),
-        gx::config::RuleConfig {
+        "unpinned".to_owned(),
+        gx::config::Rule {
             level: Level::Off,
             ignore: vec![],
         },
     );
     lint_config.rules.insert(
-        "sha-mismatch".to_string(),
-        gx::config::RuleConfig {
+        "sha-mismatch".to_owned(),
+        gx::config::Rule {
             level: Level::Off,
             ignore: vec![],
         },
     );
     lint_config.rules.insert(
-        "unsynced-manifest".to_string(),
-        gx::config::RuleConfig {
+        "unsynced-manifest".to_owned(),
+        gx::config::Rule {
             level: Level::Off,
             ignore: vec![],
         },
@@ -419,7 +424,7 @@ jobs:
     let manifest = Manifest::default();
     let lock = Lock::default();
     let scanner = FileWorkflowScanner::new(repo_root);
-    let lint_config = LintConfig::default();
+    let lint_config = Lint::default();
 
     let diagnostics =
         lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {})
@@ -457,17 +462,17 @@ jobs:
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v4"),
         CommitSha::from("def456789012345678901234567890abcd123456"),
-        "actions/checkout".to_string(),
+        "actions/checkout".to_owned(),
         Some(RefType::Tag),
-        "2026-01-01T00:00:00Z".to_string(),
+        "2026-01-01T00:00:00Z".to_owned(),
     ));
 
     let scanner = FileWorkflowScanner::new(repo_root);
 
-    let mut lint_config = LintConfig::default();
+    let mut lint_config = Lint::default();
     lint_config.rules.insert(
-        "stale-comment".to_string(),
-        gx::config::RuleConfig {
+        "stale-comment".to_owned(),
+        gx::config::Rule {
             level: Level::Error,
             ignore: vec![],
         },
@@ -526,14 +531,14 @@ jobs:
     let lock = Lock::default();
     let scanner = FileWorkflowScanner::new(repo_root);
 
-    let mut lint_config = LintConfig::default();
+    let mut lint_config = Lint::default();
     lint_config.rules.insert(
-        "unpinned".to_string(),
-        gx::config::RuleConfig {
+        "unpinned".to_owned(),
+        gx::config::Rule {
             level: Level::Error,
             ignore: vec![gx::config::IgnoreTarget {
                 action: None,
-                workflow: Some("ci.yml".to_string()),
+                workflow: Some("ci.yml".to_owned()),
                 job: None,
             }],
         },

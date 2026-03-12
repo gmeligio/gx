@@ -8,6 +8,9 @@ on:
 permissions:
     contents: read
 
+env:
+    MISE_CONFIG_FILE: .config/mise.ci.toml
+
 jobs:
     check:
         name: Check

@@ -5,12 +5,13 @@ mod unpinned;
 mod unsynced_manifest;
 
 use crate::command::Command;
-use crate::config::{Config, IgnoreTarget, Level, LintConfig};
-use crate::domain::{
-    LocatedAction, Lock, Manifest, WorkflowActionSet, WorkflowError, WorkflowScanner,
-};
-use crate::infra::FileWorkflowScanner;
-use report::LintReport;
+use crate::config::{Config, IgnoreTarget, Level, Lint as LintConfig};
+use crate::domain::lock::Lock;
+use crate::domain::manifest::Manifest;
+use crate::domain::workflow::{Error as WorkflowError, Scanner as WorkflowScanner};
+use crate::domain::workflow_actions::{ActionSet as WorkflowActionSet, Located as LocatedAction};
+use crate::infra::workflow_scan::FileScanner as FileWorkflowScanner;
+use report::Report;
 use sha_mismatch::ShaMismatchRule;
 use stale_comment::StaleCommentRule;
 use std::path::Path;
@@ -20,7 +21,7 @@ use unsynced_manifest::UnsyncedManifestRule;
 
 /// Errors that can occur during the lint command
 #[derive(Debug, Error)]
-pub enum LintError {
+pub enum Error {
     /// A workflow parsing or I/O error occurred.
     #[error(transparent)]
     Workflow(#[from] WorkflowError),
@@ -59,7 +60,7 @@ impl Diagnostic {
 }
 
 /// Context shared by all lint rules during checking.
-pub struct LintContext<'a> {
+pub struct Context<'a> {
     /// The manifest (gx.toml)
     pub manifest: &'a Manifest,
     /// The lock file (gx.lock)
@@ -71,7 +72,7 @@ pub struct LintContext<'a> {
 }
 
 /// Trait for a lint rule.
-pub trait LintRule {
+pub trait Rule {
     /// Returns the rule's name (e.g., "sha-mismatch")
     fn name(&self) -> &str;
 
@@ -80,7 +81,7 @@ pub trait LintRule {
 
     /// Run the lint check and return all detected diagnostics.
     /// Rules report everything they find; filtering against ignores happens in the orchestrator.
-    fn check(&self, ctx: &LintContext) -> Vec<Diagnostic>;
+    fn check(&self, ctx: &Context) -> Vec<Diagnostic>;
 }
 
 /// Check if a diagnostic matches an ignore target using intersection semantics.
@@ -127,10 +128,10 @@ fn matches_ignore(
     true
 }
 
-/// Build a `LintReport` from diagnostics.
+/// Build a `Report` from diagnostics.
 #[must_use]
-pub fn format_and_report(diagnostics: Vec<Diagnostic>) -> LintReport {
-    LintReport::from_diagnostics(diagnostics)
+pub fn format_and_report(diagnostics: Vec<Diagnostic>) -> Report {
+    Report::from_diagnostics(diagnostics)
 }
 
 /// Run lint checks by scanning workflows and return diagnostics.
@@ -140,14 +141,14 @@ pub fn format_and_report(diagnostics: Vec<Diagnostic>) -> LintReport {
 ///
 /// # Errors
 ///
-/// Returns [`LintError::Workflow`] if a workflow parsing error occurs.
+/// Returns [`Error::Workflow`] if a workflow parsing error occurs.
 pub fn collect_diagnostics(
     manifest: &Manifest,
     lock: &Lock,
     scanner: &dyn WorkflowScanner,
     lint_config: &LintConfig,
     on_progress: &mut dyn FnMut(&str),
-) -> Result<Vec<Diagnostic>, LintError> {
+) -> Result<Vec<Diagnostic>, Error> {
     on_progress("Scanning workflows...");
     let sha_mismatch_level = lint_config.get_rule("sha-mismatch", Level::Error).level;
     let unpinned_level = lint_config.get_rule("unpinned", Level::Error).level;
@@ -196,7 +197,7 @@ pub fn collect_diagnostics(
         .get_rule("unsynced-manifest", Level::Error)
         .level;
     if unsynced_level != Level::Off {
-        let ctx = LintContext {
+        let ctx = Context {
             manifest,
             lock,
             workflows: &located,
@@ -263,15 +264,15 @@ fn matches_ignore_action(diag: &Diagnostic, target: &IgnoreTarget, action: &Loca
 pub struct Lint;
 
 impl Command for Lint {
-    type Report = LintReport;
-    type Error = LintError;
+    type Report = Report;
+    type Error = Error;
 
     fn run(
         &self,
         repo_root: &Path,
         config: Config,
         on_progress: &mut dyn FnMut(&str),
-    ) -> Result<LintReport, LintError> {
+    ) -> Result<Report, Error> {
         let scanner = FileWorkflowScanner::new(repo_root);
 
         let diagnostics = collect_diagnostics(

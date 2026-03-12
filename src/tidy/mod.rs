@@ -5,30 +5,39 @@ pub mod report;
 
 use crate::command::Command;
 use crate::config::Config;
-use crate::domain::{
-    ActionId, ActionResolver, CommitSha, Lock, LockDiff, LockKey, Manifest, ManifestDiff, ShaIndex,
-    VersionCorrection, VersionRegistry, WorkflowActionSet, WorkflowError, WorkflowPatch,
-    WorkflowScanner, WorkflowUpdater,
+use crate::domain::action::identity::{ActionId, CommitSha};
+use crate::domain::action::resolved::VersionCorrection;
+use crate::domain::action::spec::LockKey;
+use crate::domain::action::tag_selection::ShaIndex;
+use crate::domain::lock::Lock;
+use crate::domain::manifest::Manifest;
+use crate::domain::plan::{LockDiff, ManifestDiff, WorkflowPatch};
+use crate::domain::resolution::{ActionResolver, VersionRegistry};
+use crate::domain::workflow::{
+    Error as WorkflowError, Scanner as WorkflowScanner, Updater as WorkflowUpdater,
 };
-use crate::infra::{
-    FileWorkflowScanner, FileWorkflowUpdater, GithubError, GithubRegistry, LockFileError,
-    ManifestError, apply_lock_diff, apply_manifest_diff, create_lock,
-};
-use report::TidyReport;
+use crate::domain::workflow_actions::ActionSet as WorkflowActionSet;
+use crate::infra::github::{Error as GithubError, Registry as GithubRegistry};
+use crate::infra::lock::{Error as LockFileError, apply_lock_diff, create};
+use crate::infra::manifest::Error as ManifestError;
+use crate::infra::manifest::patch::apply_manifest_diff;
+use crate::infra::workflow_scan::FileScanner as FileWorkflowScanner;
+use crate::infra::workflow_update::FileUpdater as FileWorkflowUpdater;
+use report::Report;
 use std::collections::HashMap;
 use std::path::Path;
 use thiserror::Error;
 
 /// The complete plan produced by a tidy operation.
 #[derive(Debug, Default)]
-pub struct TidyPlan {
+pub struct Plan {
     pub manifest: ManifestDiff,
     pub lock: LockDiff,
     pub workflows: Vec<WorkflowPatch>,
     pub corrections: Vec<VersionCorrection>,
 }
 
-impl TidyPlan {
+impl Plan {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.manifest.is_empty() && self.lock.is_empty() && self.workflows.is_empty()
@@ -37,7 +46,7 @@ impl TidyPlan {
 
 /// Errors that can occur during the tidy command
 #[derive(Debug, Error)]
-pub enum TidyError {
+pub enum Error {
     /// One or more actions could not be resolved to a commit SHA.
     #[error("failed to resolve {count} action(s):\n  {specs}")]
     ResolutionFailed { count: usize, specs: String },
@@ -47,22 +56,22 @@ pub enum TidyError {
     Workflow(#[from] WorkflowError),
 }
 
-/// Compute a `TidyPlan` describing all changes without modifying the original manifest or lock.
+/// Compute a `Plan` describing all changes without modifying the original manifest or lock.
 ///
 /// Internally, this clones the manifest/lock and runs the same mutation logic, then diffs
 /// the before/after state to produce the plan.
 ///
 /// # Errors
 ///
-/// Returns [`TidyError::Workflow`] if workflows cannot be scanned.
-/// Returns [`TidyError::ResolutionFailed`] if actions cannot be resolved.
+/// Returns [`Error::Workflow`] if workflows cannot be scanned.
+/// Returns [`Error::ResolutionFailed`] if actions cannot be resolved.
 pub fn plan<R, P>(
     manifest: &Manifest,
     lock: &Lock,
     registry: &R,
     scanner: &P,
     mut on_progress: impl FnMut(&str),
-) -> Result<TidyPlan, TidyError>
+) -> Result<Plan, Error>
 where
     R: VersionRegistry,
     P: WorkflowScanner,
@@ -75,7 +84,7 @@ where
         located.push(action);
     }
     if located.is_empty() {
-        return Ok(TidyPlan::default());
+        return Ok(Plan::default());
     }
 
     // Work on clones to compute the planned state
@@ -142,7 +151,7 @@ where
     let manifest_diff = manifest.diff(&planned_manifest);
     let lock_diff = lock.diff(&planned_lock);
 
-    Ok(TidyPlan {
+    Ok(Plan {
         manifest: manifest_diff,
         lock: lock_diff,
         workflows: workflow_patches,
@@ -154,12 +163,12 @@ where
 ///
 /// # Errors
 ///
-/// Returns [`TidyError::Workflow`] if any workflow file cannot be updated.
+/// Returns [`Error::Workflow`] if any workflow file cannot be updated.
 pub fn apply_workflow_patches<W: WorkflowUpdater>(
     writer: &W,
     patches: &[WorkflowPatch],
     corrections: &[VersionCorrection],
-) -> Result<usize, TidyError> {
+) -> Result<usize, Error> {
     let mut results = Vec::new();
     for patch in patches {
         let map: HashMap<ActionId, String> = patch.pins.iter().cloned().collect();
@@ -174,7 +183,7 @@ pub fn apply_workflow_patches<W: WorkflowUpdater>(
 
 /// Errors that can occur during the tidy command's run phase (I/O + domain)
 #[derive(Debug, thiserror::Error)]
-pub enum TidyRunError {
+pub enum RunError {
     #[error(transparent)]
     Github(#[from] GithubError),
     #[error(transparent)]
@@ -182,22 +191,22 @@ pub enum TidyRunError {
     #[error(transparent)]
     Lock(#[from] LockFileError),
     #[error(transparent)]
-    Tidy(#[from] TidyError),
+    Tidy(#[from] Error),
 }
 
 /// The tidy command struct.
 pub struct Tidy;
 
 impl Command for Tidy {
-    type Report = TidyReport;
-    type Error = TidyRunError;
+    type Report = Report;
+    type Error = RunError;
 
     fn run(
         &self,
         repo_root: &Path,
         config: Config,
         on_progress: &mut dyn FnMut(&str),
-    ) -> Result<TidyReport, TidyRunError> {
+    ) -> Result<Report, RunError> {
         let has_manifest = config.manifest_path.exists();
         if config.manifest_migrated {
             on_progress("migrated gx.toml → semver specifiers");
@@ -225,7 +234,7 @@ impl Command for Tidy {
         )?;
 
         if tidy_plan.is_empty() {
-            return Ok(TidyReport::default());
+            return Ok(Report::default());
         }
 
         if has_manifest {
@@ -233,14 +242,14 @@ impl Command for Tidy {
             if config.lock_path.exists() {
                 apply_lock_diff(&config.lock_path, &tidy_plan.lock)?;
             } else {
-                create_lock(&config.lock_path, &tidy_plan.lock)?;
+                create(&config.lock_path, &tidy_plan.lock)?;
             }
         }
 
         let workflows_updated =
             apply_workflow_patches(&updater, &tidy_plan.workflows, &tidy_plan.corrections)?;
 
-        let report = TidyReport {
+        let report = Report {
             removed: tidy_plan
                 .manifest
                 .removed

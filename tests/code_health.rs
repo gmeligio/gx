@@ -6,6 +6,59 @@ use std::path::Path;
 // Import path hygiene helpers
 // ---------------------------------------------------------------------------
 
+/// Find a sibling `.rs` file that includes `target` via `#[path = "target"]`.
+/// Returns the includer's path and the module name declared for the target.
+fn find_path_includer(target: &Path) -> Option<(std::path::PathBuf, String)> {
+    let parent_dir = target.parent()?;
+    let target_name = target.file_name()?.to_str()?;
+    let path_attr = format!("#[path = \"{target_name}\"]");
+
+    for entry in fs::read_dir(parent_dir).ok()?.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+            continue;
+        }
+        if path.file_name().and_then(|n| n.to_str()) == Some(target_name) {
+            continue;
+        }
+        let Ok(content) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let mut prev_was_path_attr = false;
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("//") {
+                continue;
+            }
+            if trimmed == path_attr {
+                prev_was_path_attr = true;
+                continue;
+            }
+            if prev_was_path_attr {
+                // Next non-comment/non-attribute line should be `[pub(...)] mod <name>;`
+                if trimmed.starts_with('#') {
+                    // Skip attributes like #[cfg(test)]
+                    continue;
+                }
+                // Strip optional visibility prefix to find `mod <name>;`
+                let mod_part = trimmed
+                    .strip_prefix("pub(crate) ")
+                    .or_else(|| trimmed.strip_prefix("pub(super) "))
+                    .or_else(|| trimmed.strip_prefix("pub "))
+                    .unwrap_or(trimmed);
+                if let Some(mod_name) = mod_part
+                    .strip_prefix("mod ")
+                    .and_then(|rest| rest.strip_suffix(';'))
+                {
+                    return Some((path, mod_name.trim().to_owned()));
+                }
+                prev_was_path_attr = false;
+            }
+        }
+    }
+    None
+}
+
 /// For a `tests.rs` file, find the sibling `.rs` file that contains `mod tests;`.
 /// Returns the path to the includer, or `None` if not found.
 fn find_tests_rs_includer(tests_file: &Path, _src_dir: &Path) -> Option<std::path::PathBuf> {
@@ -52,7 +105,7 @@ fn module_path_segments(file_path: &Path, src_dir: &Path) -> Vec<String> {
         if i == parts.len() - 1 {
             let stem = part.strip_suffix(".rs").unwrap_or(part);
             if stem != "mod" && stem != "lib" && stem != "main" {
-                segments.push(stem.to_string());
+                segments.push(stem.to_owned());
             }
         } else {
             segments.push(part.clone());
@@ -78,16 +131,18 @@ fn parent_prefixes(file_path: &Path, src_dir: &Path) -> (Option<String>, Option<
         let base_segments = module_path_segments(file_path, src_dir);
         // base_segments ends with "tests" from the filename
 
-        if let Some(includer) = find_tests_rs_includer(file_path, src_dir) {
+        find_tests_rs_includer(file_path, src_dir).map_or(base_segments, |includer| {
             let includer_segments = module_path_segments(&includer, src_dir);
             // The tests.rs module path = includer's module path + "tests"
             let mut full = includer_segments;
-            full.push("tests".to_string());
+            full.push("tests".to_owned());
             full
-        } else {
-            // No includer found; use file-path-based segments as fallback
-            base_segments
-        }
+        })
+    } else if let Some((includer, mod_name)) = find_path_includer(file_path) {
+        // File is included via #[path = "..."] — derive module path from includer
+        let mut includer_segments = module_path_segments(&includer, src_dir);
+        includer_segments.push(mod_name);
+        includer_segments
     } else {
         module_path_segments(file_path, src_dir)
     };
@@ -278,7 +333,7 @@ fn no_duplicate_private_fns_across_command_modules() {
                         .filter(|n| !n.is_empty())
                 {
                     fn_to_modules
-                        .entry(name.to_string())
+                        .entry(name.to_owned())
                         .or_default()
                         .push(module.to_string());
                 }

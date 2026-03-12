@@ -1,6 +1,7 @@
-use super::{Diagnostic, LintContext, LintRule};
+use super::{Context, Diagnostic, Rule};
 use crate::config::Level;
-use crate::domain::{LockKey, Specifier};
+use crate::domain::action::spec::LockKey;
+use crate::domain::action::specifier::Specifier;
 
 /// sha-mismatch rule: detects when a workflow SHA doesn't match the lock file.
 pub struct ShaMismatchRule;
@@ -8,8 +9,8 @@ pub struct ShaMismatchRule;
 impl ShaMismatchRule {
     /// Check a single action for the sha-mismatch rule.
     pub fn check_action(
-        action: &crate::domain::LocatedAction,
-        lock: &crate::domain::Lock,
+        action: &crate::domain::workflow_actions::Located,
+        lock: &crate::domain::lock::Lock,
     ) -> Option<Diagnostic> {
         if !action.version.is_sha() {
             return None;
@@ -36,7 +37,7 @@ impl ShaMismatchRule {
     }
 }
 
-impl LintRule for ShaMismatchRule {
+impl Rule for ShaMismatchRule {
     fn name(&self) -> &'static str {
         "sha-mismatch"
     }
@@ -45,7 +46,7 @@ impl LintRule for ShaMismatchRule {
         Level::Error
     }
 
-    fn check(&self, ctx: &LintContext) -> Vec<Diagnostic> {
+    fn check(&self, ctx: &Context) -> Vec<Diagnostic> {
         ctx.workflows
             .iter()
             .filter_map(|a| Self::check_action(a, ctx.lock))
@@ -55,7 +56,7 @@ impl LintRule for ShaMismatchRule {
 
 #[cfg(test)]
 mod tests {
-    use super::{Level, LintRule, ShaMismatchRule};
+    use super::{Level, Rule, ShaMismatchRule};
 
     #[test]
     fn sha_mismatch_rule_has_correct_metadata() {
