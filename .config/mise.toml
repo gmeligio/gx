@@ -8,3 +8,4 @@ ttyd = "1.7.3"
 [settings]
 github.github_attestations = true
 github.slsa = true
+lockfile = true
