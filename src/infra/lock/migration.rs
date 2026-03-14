@@ -1,4 +1,3 @@
-use super::LOCK_FILE_VERSION;
 use super::convert::{ActionEntryData, LockData};
 use crate::domain::action::spec::LockKey;
 use crate::domain::action::specifier::Specifier;
@@ -59,7 +58,7 @@ pub(super) fn migrate_v1(data: LockDataV1) -> LockData {
         })
         .collect();
     LockData {
-        version: LOCK_FILE_VERSION.to_string(),
+        version: String::new(),
         actions,
     }
 }
@@ -84,7 +83,7 @@ pub(super) fn migrate_v1_3(data: LockDataV1_3) -> LockData {
         })
         .collect();
     LockData {
-        version: LOCK_FILE_VERSION.to_string(),
+        version: String::new(),
         actions,
     }
 }

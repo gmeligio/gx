@@ -1,4 +1,4 @@
-use super::{Error as ManifestError, Manifest, Store, create, parse, parse_lint_config};
+use super::{Manifest, Store, create, parse, parse_lint_config};
 use crate::domain::action::identity::ActionId;
 use crate::domain::action::specifier::Specifier;
 use crate::domain::manifest::overrides::ActionOverride;
@@ -199,6 +199,11 @@ fn test_save_and_load_roundtrip_generates_correct_toml_format() {
         content.contains(r#""actions/checkout" = ["#),
         "Expected inline table array syntax, got:\n{content}"
     );
+    // No [gx] section
+    assert!(
+        !content.contains("[gx]"),
+        "Should not contain [gx] section, got:\n{content}"
+    );
 
     // Verify it can be loaded back correctly
     let loaded = parse(file.path()).unwrap();
@@ -290,7 +295,7 @@ unpinned = { level = "warn", ignore = [
     assert_eq!(unpinned.ignore[2].job, Some("build".to_owned()));
 }
 
-// ========== Step 13: create tests ==========
+// ========== create tests ==========
 
 #[test]
 fn test_create_from_diff_with_3_actions() {
@@ -308,9 +313,9 @@ fn test_create_from_diff_with_3_actions() {
 
     let content = fs::read_to_string(file.path()).unwrap();
     assert!(content.contains("[actions]"));
+    assert!(!content.contains("[gx]"), "New format has no [gx] section");
 
     let loaded = parse(file.path()).unwrap();
-    // create writes v2 format (with [gx] section), so values are parsed as v2
     assert_eq!(
         loaded.value.get(&ActionId::from("actions/checkout")),
         Some(&Specifier::parse("^4"))
@@ -360,10 +365,10 @@ fn test_create_with_overrides() {
     assert_eq!(overrides[0].workflow, ".github/workflows/windows.yml");
 }
 
-// ========== Phase 4.2: v1 migration and version guard tests ==========
+// ========== v1 migration tests ==========
 
 #[test]
-fn test_v1_to_v2_migration_sets_migrated_flag() {
+fn test_v1_migration_sets_migrated_flag() {
     // v1 format: no [gx] section, values like "v4" style
     let content = r#"
 [actions]
@@ -388,23 +393,17 @@ fn test_v1_to_v2_migration_sets_migrated_flag() {
 }
 
 #[test]
-fn test_v2_format_not_migrated() {
-    // v2 format: has [gx] section
-    let content = format!(
-        r#"
-[gx]
-min_version = "{}"
-
+fn test_current_format_not_migrated() {
+    // Current format: no [gx] section, semver specifiers
+    let content = r#"
 [actions]
 "actions/checkout" = "^4"
-"#,
-        env!("CARGO_PKG_VERSION")
-    );
+"#;
     let mut file = NamedTempFile::new().unwrap();
     file.write_all(content.as_bytes()).unwrap();
 
     let parsed = parse(file.path()).unwrap();
-    assert!(!parsed.migrated, "v2 format should not set migrated");
+    assert!(!parsed.migrated, "Current format should not set migrated");
     assert_eq!(
         parsed.value.get(&ActionId::from("actions/checkout")),
         Some(&Specifier::parse("^4"))
@@ -412,10 +411,11 @@ min_version = "{}"
 }
 
 #[test]
-fn test_version_guard_returns_error_when_version_too_old() {
+fn test_gx_section_ignored_and_triggers_migration() {
+    // Old v2 format with [gx] section — should be ignored and trigger migration
     let content = r#"
 [gx]
-min_version = "99.0.0"
+min_version = "0.5.10"
 
 [actions]
 "actions/checkout" = "^4"
@@ -423,35 +423,10 @@ min_version = "99.0.0"
     let mut file = NamedTempFile::new().unwrap();
     file.write_all(content.as_bytes()).unwrap();
 
-    let result = parse(file.path());
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-    assert!(
-        matches!(err, ManifestError::VersionRequired { .. }),
-        "Expected VersionRequired error, got: {err}"
+    let parsed = parse(file.path()).unwrap();
+    assert!(parsed.migrated, "[gx] section should trigger migration");
+    assert_eq!(
+        parsed.value.get(&ActionId::from("actions/checkout")),
+        Some(&Specifier::parse("^4"))
     );
-    assert!(
-        err.to_string().contains("99.0.0"),
-        "Error should mention required version, got: {err}"
-    );
-}
-
-#[test]
-fn test_version_guard_passes_when_version_sufficient() {
-    // Use the current binary version — should always pass
-    let content = format!(
-        r#"
-[gx]
-min_version = "{}"
-
-[actions]
-"actions/checkout" = "^4"
-"#,
-        env!("CARGO_PKG_VERSION")
-    );
-    let mut file = NamedTempFile::new().unwrap();
-    file.write_all(content.as_bytes()).unwrap();
-
-    let result = parse(file.path());
-    assert!(result.is_ok(), "Should not error when version matches");
 }

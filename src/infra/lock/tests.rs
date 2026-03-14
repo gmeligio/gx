@@ -1,4 +1,4 @@
-use super::{Error as LockFileError, LOCK_FILE_VERSION, apply_lock_diff, create, parse};
+use super::{apply_lock_diff, create, parse};
 use crate::domain::action::identity::{ActionId, CommitSha};
 use crate::domain::action::spec::LockKey;
 use crate::domain::action::specifier::Specifier;
@@ -14,17 +14,46 @@ fn make_key(action: &str, specifier: &str) -> LockKey {
     LockKey::new(ActionId::from(action), Specifier::parse(specifier))
 }
 
+/// Helper to build new-format lock file content (standard tables, no version field).
+fn new_format_entry(
+    key: &str,
+    sha: &str,
+    version: &str,
+    comment: &str,
+    repository: &str,
+    ref_type: &str,
+    date: &str,
+) -> String {
+    format!(
+        "[actions.\"{key}\"]\nsha = \"{sha}\"\nversion = \"{version}\"\ncomment = \"{comment}\"\nrepository = \"{repository}\"\nref_type = \"{ref_type}\"\ndate = \"{date}\"\n"
+    )
+}
+
 #[test]
-fn test_parse_unknown_version_errors() {
+fn test_parse_unknown_version_is_forward_compatible() {
+    // Unknown version fields are ignored (forward compatibility)
     let content = r#"version = "2.0"
 
-[actions]
+[actions."actions/checkout@^4"]
+sha = "abc123"
+version = "v4.0.0"
+comment = "v4"
+repository = "actions/checkout"
+ref_type = "tag"
+date = ""
 "#;
     let mut file = NamedTempFile::new().unwrap();
     file.write_all(content.as_bytes()).unwrap();
 
     let result = parse(file.path());
-    assert!(matches!(result, Err(LockFileError::UnsupportedVersion(_))));
+    assert!(
+        result.is_ok(),
+        "Unknown version should be forward-compatible"
+    );
+    assert!(
+        result.unwrap().migrated,
+        "Unknown version should trigger migration"
+    );
 }
 
 #[test]
@@ -35,22 +64,46 @@ fn test_parse_missing_returns_empty() {
 }
 
 #[test]
-fn test_parse_reads_file() {
-    let content = format!(
-        "version = \"{LOCK_FILE_VERSION}\"\n\n[actions]\n\"actions/checkout@^4\" = {{ sha = \"abc123\", version = \"v4.0.0\", comment = \"v4\", repository = \"actions/checkout\", ref_type = \"tag\", date = \"\" }}\n"
+fn test_parse_reads_new_format() {
+    let content = new_format_entry(
+        "actions/checkout@^4",
+        "abc123",
+        "v4.0.0",
+        "v4",
+        "actions/checkout",
+        "tag",
+        "",
     );
     let mut file = NamedTempFile::new().unwrap();
     file.write_all(content.as_bytes()).unwrap();
     let parsed = parse(file.path()).unwrap();
     assert!(parsed.value.has(&make_key("actions/checkout", "^4")));
+    assert!(!parsed.migrated);
+}
+
+#[test]
+fn test_parse_v1_4_format_triggers_migration() {
+    // v1.4 format: has version field + inline tables
+    let content = "version = \"1.4\"\n\n[actions]\n\"actions/checkout@^4\" = { sha = \"abc123\", version = \"v4.0.0\", comment = \"v4\", repository = \"actions/checkout\", ref_type = \"tag\", date = \"\" }\n";
+    let mut file = NamedTempFile::new().unwrap();
+    file.write_all(content.as_bytes()).unwrap();
+    let parsed = parse(file.path()).unwrap();
+    assert!(parsed.value.has(&make_key("actions/checkout", "^4")));
+    assert!(parsed.migrated, "v1.4 format should trigger migration");
 }
 
 // ========== apply_lock_diff tests ==========
 
 #[test]
 fn test_apply_lock_empty_diff_does_not_modify_file() {
-    let content = format!(
-        "version = \"{LOCK_FILE_VERSION}\"\n\n[actions]\n\"actions/checkout@^4\" = {{ sha = \"abc123def456789012345678901234567890abcd\", version = \"v4.0.0\", comment = \"v4\", repository = \"actions/checkout\", ref_type = \"tag\", date = \"2026-01-01T00:00:00Z\" }}\n"
+    let content = new_format_entry(
+        "actions/checkout@^4",
+        "abc123def456789012345678901234567890abcd",
+        "v4.0.0",
+        "v4",
+        "actions/checkout",
+        "tag",
+        "2026-01-01T00:00:00Z",
     );
     let mut file = NamedTempFile::new().unwrap();
     file.write_all(content.as_bytes()).unwrap();
@@ -64,8 +117,14 @@ fn test_apply_lock_empty_diff_does_not_modify_file() {
 
 #[test]
 fn test_apply_lock_add_one_entry() {
-    let content = format!(
-        "version = \"{LOCK_FILE_VERSION}\"\n\n[actions]\n\"actions/checkout@^4\" = {{ sha = \"abc123def456789012345678901234567890abcd\", version = \"v4.0.0\", comment = \"v4\", repository = \"actions/checkout\", ref_type = \"tag\", date = \"2026-01-01T00:00:00Z\" }}\n"
+    let content = new_format_entry(
+        "actions/checkout@^4",
+        "abc123def456789012345678901234567890abcd",
+        "v4.0.0",
+        "v4",
+        "actions/checkout",
+        "tag",
+        "2026-01-01T00:00:00Z",
     );
     let mut file = NamedTempFile::new().unwrap();
     file.write_all(content.as_bytes()).unwrap();
@@ -107,9 +166,24 @@ fn test_apply_lock_add_one_entry() {
 
 #[test]
 fn test_apply_lock_remove_one_entry() {
-    let content = format!(
-        "version = \"{LOCK_FILE_VERSION}\"\n\n[actions]\n\"actions/checkout@^4\" = {{ sha = \"abc123\", version = \"v4\", comment = \"\", repository = \"actions/checkout\", ref_type = \"tag\", date = \"\" }}\n\"actions/setup-node@^3\" = {{ sha = \"def456\", version = \"v3\", comment = \"\", repository = \"actions/setup-node\", ref_type = \"tag\", date = \"\" }}\n"
+    let mut content = new_format_entry(
+        "actions/checkout@^4",
+        "abc123",
+        "v4",
+        "",
+        "actions/checkout",
+        "tag",
+        "",
     );
+    content.push_str(&new_format_entry(
+        "actions/setup-node@^3",
+        "def456",
+        "v3",
+        "",
+        "actions/setup-node",
+        "tag",
+        "",
+    ));
     let mut file = NamedTempFile::new().unwrap();
     file.write_all(content.as_bytes()).unwrap();
 
@@ -126,8 +200,14 @@ fn test_apply_lock_remove_one_entry() {
 
 #[test]
 fn test_apply_lock_update_version_field() {
-    let content = format!(
-        "version = \"{LOCK_FILE_VERSION}\"\n\n[actions]\n\"actions/checkout@^4\" = {{ sha = \"abc123\", version = \"v4\", comment = \"v4\", repository = \"actions/checkout\", ref_type = \"tag\", date = \"2026-01-01T00:00:00Z\" }}\n"
+    let content = new_format_entry(
+        "actions/checkout@^4",
+        "abc123",
+        "v4",
+        "v4",
+        "actions/checkout",
+        "tag",
+        "2026-01-01T00:00:00Z",
     );
     let mut file = NamedTempFile::new().unwrap();
     file.write_all(content.as_bytes()).unwrap();
@@ -155,8 +235,14 @@ fn test_apply_lock_update_version_field() {
 
 #[test]
 fn test_apply_lock_update_comment_field() {
-    let content = format!(
-        "version = \"{LOCK_FILE_VERSION}\"\n\n[actions]\n\"actions/checkout@^4\" = {{ sha = \"abc123\", version = \"v4\", comment = \"v4\", repository = \"actions/checkout\", ref_type = \"tag\", date = \"2026-01-01T00:00:00Z\" }}\n"
+    let content = new_format_entry(
+        "actions/checkout@^4",
+        "abc123",
+        "v4",
+        "v4",
+        "actions/checkout",
+        "tag",
+        "2026-01-01T00:00:00Z",
     );
     let mut file = NamedTempFile::new().unwrap();
     file.write_all(content.as_bytes()).unwrap();
@@ -188,9 +274,24 @@ fn test_apply_lock_update_comment_field() {
 
 #[test]
 fn test_apply_lock_roundtrip() {
-    let content = format!(
-        "version = \"{LOCK_FILE_VERSION}\"\n\n[actions]\n\"actions/checkout@^4\" = {{ sha = \"abc123def456789012345678901234567890abcd\", version = \"v4\", comment = \"v4\", repository = \"actions/checkout\", ref_type = \"tag\", date = \"2026-01-01T00:00:00Z\" }}\n\"actions/old-action@^1\" = {{ sha = \"aaabbbcccdddeeefffaaabbbcccdddeeefffaaab\", version = \"v1\", comment = \"\", repository = \"actions/old-action\", ref_type = \"tag\", date = \"\" }}\n"
+    let mut content = new_format_entry(
+        "actions/checkout@^4",
+        "abc123def456789012345678901234567890abcd",
+        "v4",
+        "v4",
+        "actions/checkout",
+        "tag",
+        "2026-01-01T00:00:00Z",
     );
+    content.push_str(&new_format_entry(
+        "actions/old-action@^1",
+        "aaabbbcccdddeeefffaaabbbcccdddeeefffaaab",
+        "v1",
+        "",
+        "actions/old-action",
+        "tag",
+        "",
+    ));
     let mut file = NamedTempFile::new().unwrap();
     file.write_all(content.as_bytes()).unwrap();
 
@@ -264,8 +365,9 @@ fn test_create_from_diff_with_3_entries() {
     create(file.path(), &diff).unwrap();
 
     let content = fs::read_to_string(file.path()).unwrap();
-    assert!(content.contains(&format!("version = \"{LOCK_FILE_VERSION}\"")));
-    assert!(content.contains("[actions]"));
+    // New format: no version field, uses standard tables
+    assert!(!content.contains("version = \"1.4\""));
+    assert!(content.contains("[actions.\""));
 
     // Round-trip
     let loaded = parse(file.path()).unwrap();
