@@ -9,7 +9,7 @@ permissions:
     contents: read
 
 env:
-    MISE_CONFIG_FILE: .config/mise.ci.toml
+    MISE_ENV: test
 
 jobs:
     check:

@@ -6,3 +6,5 @@
 [settings]
 github.github_attestations = true
 github.slsa = true
+lockfile = true
+locked = true
