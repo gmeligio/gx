@@ -1,4 +1,4 @@
----
+﻿---
 model: opus
 name: "OPSX: Propose"
 description: Propose a new change - create it and generate all artifacts in one step
@@ -88,6 +88,26 @@ After completing all artifacts, summarize:
 - List of artifacts created with brief descriptions
 - What's ready: "All artifacts created! Ready for implementation."
 - Prompt: "Run `/opsx:apply` to start implementing."
+
+<!-- opsx-autoreview-patch -->
+**AUTO-REVIEW (mandatory — do not skip)**
+
+After all artifacts are created, immediately invoke the Skill tool:
+- skill: `openspec-review-proposal`
+- change: `<n>`
+
+Do NOT ask the user. Do NOT proceed to suggest /opsx:apply yet.
+
+Wait for the review subagent to return a result, then:
+
+- **BLOCKED**: List CRITICAL issues. Do not suggest /opsx:apply. Ask what to
+  fix. After fixes, re-invoke `openspec-review-proposal` (max 3 iterations,
+  then surface to human).
+- **APPROVED** or **APPROVED_WITH_WARNINGS**: Write the review marker:
+  `echo "reviewed" > "openspec/changes/<n>/.review-passed"`
+  Then show: "All artifacts created and proposal reviewed. Ready for
+  implementation." List any warnings. Prompt: "Run /opsx:apply to start
+  implementing."
 
 **Artifact Creation Guidelines**
 
