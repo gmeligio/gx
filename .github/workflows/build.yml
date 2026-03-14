@@ -9,7 +9,7 @@ permissions:
     contents: read
 
 env:
-    MISE_ENV: test
+    MISE_DISABLE_TOOLS: ttyd,github:charmbracelet/vhs
 
 jobs:
     check:
