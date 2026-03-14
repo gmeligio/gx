@@ -1,10 +1,8 @@
 use crate::domain::Parsed;
-use crate::domain::action::uses_ref::RefType;
 use crate::domain::lock::Lock;
 use crate::domain::plan::LockDiff;
-use convert::{LockData, build_lock_inline_table, lock_from_data, serialize_lock};
+use convert::{LockData, build_lock_document, lock_from_data, populate_lock_table};
 use serde::Deserialize;
-use std::fmt::Write;
 use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -14,7 +12,6 @@ mod convert;
 mod migration;
 
 pub const LOCK_FILE_NAME: &str = "gx.lock";
-pub const LOCK_FILE_VERSION: &str = "1.4";
 
 /// Errors that can occur when working with lock files
 #[derive(Debug, Error)]
@@ -45,9 +42,6 @@ pub enum Error {
 
     #[error("invalid lock file: {0}")]
     Validation(String),
-
-    #[error("unsupported lock file version: {0}")]
-    UnsupportedVersion(String),
 }
 
 /// File-backed lock store. Reads from and writes to `.github/gx.lock`.
@@ -71,8 +65,8 @@ impl Store {
     ///
     /// Returns [`Error::Write`] if the file cannot be written.
     pub fn save(&self, lock: &Lock) -> Result<(), Error> {
-        let content = serialize_lock(lock);
-        fs::write(&self.path, content).map_err(|source| Error::Write {
+        let doc = build_lock_document(lock);
+        fs::write(&self.path, doc.to_string()).map_err(|source| Error::Write {
             path: self.path.clone(),
             source,
         })?;
@@ -88,7 +82,6 @@ impl Store {
 ///
 /// Returns [`Error::Read`] if the file cannot be read.
 /// Returns [`Error::Parse`] if the TOML is invalid.
-/// Returns [`Error::UnsupportedVersion`] for unknown future versions.
 pub fn parse(path: &Path) -> Result<Parsed<Lock>, Error> {
     #[derive(Deserialize)]
     struct VersionOnly {
@@ -130,8 +123,22 @@ pub fn parse(path: &Path) -> Result<Parsed<Lock>, Error> {
     })?;
 
     match version_only.version.as_str() {
-        "" | "1.0" => {
-            // v1.0 format (no version field or explicit 1.0)
+        // New format: no version field
+        "" => {
+            // Could be v1.0 (no actions with sha) or new format (standard tables)
+            // If we reach here, it's the new format (v1.0 was already handled above)
+            let data: LockData = toml::from_str(&content).map_err(|source| Error::Parse {
+                path: path.to_path_buf(),
+                source: Box::new(source),
+            })?;
+            let lock = lock_from_data(data);
+            Ok(Parsed {
+                value: lock,
+                migrated: false,
+            })
+        }
+        "1.0" => {
+            // v1.0 format (explicit version = "1.0")
             let v1: migration::LockDataV1 =
                 toml::from_str(&content).map_err(|source| Error::Parse {
                     path: path.to_path_buf(),
@@ -159,7 +166,7 @@ pub fn parse(path: &Path) -> Result<Parsed<Lock>, Error> {
             })
         }
         "1.4" => {
-            // Current format — direct parse
+            // v1.4 format (inline tables with version field) — migrate
             let data: LockData = toml::from_str(&content).map_err(|source| Error::Parse {
                 path: path.to_path_buf(),
                 source: Box::new(source),
@@ -167,10 +174,21 @@ pub fn parse(path: &Path) -> Result<Parsed<Lock>, Error> {
             let lock = lock_from_data(data);
             Ok(Parsed {
                 value: lock,
-                migrated: false,
+                migrated: true,
             })
         }
-        v => Err(Error::UnsupportedVersion(v.to_string())),
+        _v => {
+            // Unknown version field — ignore it (forward compatibility)
+            let data: LockData = toml::from_str(&content).map_err(|source| Error::Parse {
+                path: path.to_path_buf(),
+                source: Box::new(source),
+            })?;
+            let lock = lock_from_data(data);
+            Ok(Parsed {
+                value: lock,
+                migrated: true,
+            })
+        }
     }
 }
 
@@ -183,42 +201,20 @@ pub fn parse(path: &Path) -> Result<Parsed<Lock>, Error> {
 ///
 /// Returns [`Error::Write`] if the file cannot be written.
 pub fn create(path: &Path, diff: &LockDiff) -> Result<(), Error> {
-    // Build sorted entries
-    let mut entries: Vec<_> = diff.added.iter().collect();
-    entries.sort_by_key(|(k, _)| k.to_string());
-
-    let mut out = format!("version = \"{LOCK_FILE_VERSION}\"\n\n[actions]\n");
-    for (key, entry) in entries {
-        let version = entry.version.as_deref().unwrap_or(key.version.as_str());
-
-        let table = format!(
-            "sha = \"{}\", version = \"{}\", comment = \"{}\", repository = \"{}\", ref_type = \"{}\", date = \"{}\"",
-            entry.sha,
-            version,
-            entry.comment,
-            entry.repository,
-            entry.ref_type.as_ref().map_or("unknown", |r| match r {
-                RefType::Release => "release",
-                RefType::Tag => "tag",
-                RefType::Branch => "branch",
-                RefType::Commit => "commit",
-            }),
-            entry.date
-        );
-
-        let _ = writeln!(out, "\"{key}\" = {{ {table} }}");
-    }
-
-    fs::write(path, out).map_err(|source| Error::Write {
+    let actions = diff.added.iter().cloned().collect();
+    let lock = Lock::new(actions);
+    let doc = build_lock_document(&lock);
+    fs::write(path, doc.to_string()).map_err(|source| Error::Write {
         path: path.to_path_buf(),
         source,
     })?;
     Ok(())
 }
 
-/// Apply a `LockDiff` to an existing lock file using `toml_edit` for surgical patching.
+/// Apply a `LockDiff` to an existing lock file by building a fresh document.
 ///
-/// The file must already exist. For creating a new lock from scratch, use `create`.
+/// Reads the current lock, applies the diff to the domain model, then writes
+/// a fresh document. For creating a new lock from scratch, use `create`.
 ///
 /// # Errors
 ///
@@ -239,6 +235,9 @@ pub fn apply_lock_diff(path: &Path, diff: &LockDiff) -> Result<(), Error> {
         .parse()
         .map_err(|e| Error::Validation(format!("toml_edit parse error: {e}")))?;
 
+    // Remove the version field if present (migration from old format)
+    doc.remove("version");
+
     // Ensure [actions] table exists
     if doc.get("actions").is_none() {
         doc["actions"] = toml_edit::Item::Table(toml_edit::Table::new());
@@ -252,28 +251,42 @@ pub fn apply_lock_diff(path: &Path, diff: &LockDiff) -> Result<(), Error> {
         actions.remove(&key.to_string());
     }
 
-    // Add entries
+    // Add entries as standard tables
     for (key, entry) in &diff.added {
-        actions.insert(
-            &key.to_string(),
-            toml_edit::value(build_lock_inline_table(key, entry)),
-        );
+        let mut table = toml_edit::Table::new();
+        populate_lock_table(&mut table, key, entry);
+        actions.insert(&key.to_string(), toml_edit::Item::Table(table));
     }
 
     // Update existing entries (patch specific fields)
     for (key, patch) in &diff.updated {
         let key_str = key.to_string();
-        if let Some(item) = actions.get_mut(&key_str)
-            && let Some(inline) = item.as_inline_table_mut()
-        {
-            if let Some(version) = &patch.version {
-                match version {
-                    Some(v) => inline.insert("version", v.as_str().into()),
-                    None => inline.remove("version"),
-                };
-            }
-            if let Some(comment) = &patch.comment {
-                inline.insert("comment", comment.as_str().into());
+        if let Some(item) = actions.get_mut(&key_str) {
+            // Handle both inline tables (old format) and standard tables (new format)
+            if let Some(table) = item.as_table_mut() {
+                if let Some(version) = &patch.version {
+                    match version {
+                        Some(v) => {
+                            table.insert("version", toml_edit::value(v.as_str()));
+                        }
+                        None => {
+                            table.remove("version");
+                        }
+                    }
+                }
+                if let Some(comment) = &patch.comment {
+                    table.insert("comment", toml_edit::value(comment.as_str()));
+                }
+            } else if let Some(inline) = item.as_inline_table_mut() {
+                if let Some(version) = &patch.version {
+                    match version {
+                        Some(v) => inline.insert("version", v.as_str().into()),
+                        None => inline.remove("version"),
+                    };
+                }
+                if let Some(comment) = &patch.comment {
+                    inline.insert("comment", comment.as_str().into());
+                }
             }
         }
     }

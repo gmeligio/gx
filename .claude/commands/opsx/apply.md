@@ -1,4 +1,4 @@
----
+﻿---
 model: sonnet
 name: "OPSX: Apply"
 description: Implement tasks from an OpenSpec change (Experimental)
@@ -29,6 +29,29 @@ Implement tasks from an OpenSpec change.
    - `schemaName`: The workflow being used (e.g., "spec-driven")
    - Which artifact contains the tasks (typically "tasks" for spec-driven, check status for others)
 
+<!-- opsx-autoreview-patch -->
+3. **REVIEW GATE: verify the proposal has been reviewed**
+
+   Check for the review marker:
+   `ash
+   cat "openspec/changes/<n>/.review-passed" 2>/dev/null
+   `
+
+   **If the marker does NOT exist** (review has never run or was not passed):
+   - Announce: "Proposal review required before implementation."
+   - Invoke Skill tool: `openspec-review-proposal` for change `<n>`
+   - Wait for the review to complete
+   - If result is **BLOCKED**: stop immediately, list CRITICAL issues, do not
+     write any code, do not continue to the next step
+   - If result is **APPROVED** or **APPROVED_WITH_WARNINGS**:
+     Write the marker: `echo "reviewed" > "openspec/changes/<n>/.review-passed"`
+     Continue to the next step
+
+   **If the marker EXISTS**: show "✓ Proposal reviewed" and continue.
+
+   > If implementation reveals a design issue mid-task, stop, fix the artifact,
+   > delete the marker (`Remove-Item "openspec/changes/<n>/.review-passed"`),
+   > re-invoke `openspec-review-proposal`, and only resume after it passes.
 3. **Get apply instructions**
 
    ```bash

@@ -29,22 +29,8 @@ pub fn apply_manifest_diff(path: &Path, diff: &ManifestDiff) -> Result<(), Manif
         .parse()
         .map_err(|e| ManifestError::Validation(format!("toml_edit parse error: {e}")))?;
 
-    // Ensure [gx] section exists (migrates v1 → v2 format)
-    if doc.get("gx").is_none() {
-        let mut gx_table = toml_edit::Table::new();
-        gx_table.insert("min_version", toml_edit::value(env!("CARGO_PKG_VERSION")));
-        // Insert [gx] before [actions] by inserting at position 0
-        doc.insert("gx", toml_edit::Item::Table(gx_table));
-        // Move [gx] to the front
-        doc.sort_values_by(|a, _, b, _| {
-            let order = |k: &str| match k {
-                "gx" => 0,
-                "actions" => 1,
-                _ => 2,
-            };
-            order(a).cmp(&order(b))
-        });
-    }
+    // Remove [gx] section if present (migration from old format)
+    doc.remove("gx");
 
     // Ensure [actions] table exists
     if doc.get("actions").is_none() {
@@ -253,8 +239,7 @@ mod tests {
 
     #[test]
     fn test_apply_add_one_action_preserves_existing() {
-        let content =
-            "[gx]\nmin_version = \"0.5.10\"\n\n[actions]\n\"actions/checkout\" = \"^4\"\n";
+        let content = "[actions]\n\"actions/checkout\" = \"^4\"\n";
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
@@ -274,7 +259,7 @@ mod tests {
             "New entry must be added, got:\n{after}"
         );
 
-        // Round-trip: parse back (file has [gx] section, so v2 parsing)
+        // Round-trip
         let loaded = parse(file.path()).unwrap();
         assert_eq!(
             loaded.value.get(&ActionId::from("actions/checkout")),

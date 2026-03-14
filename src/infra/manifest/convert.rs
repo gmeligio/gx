@@ -7,11 +7,12 @@ use crate::domain::manifest::Manifest;
 use crate::domain::manifest::overrides::ActionOverride;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
-use std::fmt::Write;
 use std::path::Path;
+use toml_edit::DocumentMut;
 
 // ---- TOML wire types ----
 
+/// Legacy [gx] section — only used for reading old manifests.
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub(super) struct GxSection {
     #[serde(default)]
@@ -132,106 +133,68 @@ pub(super) fn manifest_from_data(
     Ok(Manifest::with_overrides(actions, overrides))
 }
 
-pub(super) fn manifest_to_data(manifest: &Manifest) -> ManifestData {
-    let versions: BTreeMap<String, String> = manifest
-        .specs()
-        .map(|spec| {
-            (
-                spec.id.as_str().to_owned(),
-                spec.version.as_str().to_owned(),
-            )
-        })
-        .collect();
+// ---- Building ----
 
-    let overrides: BTreeMap<String, Vec<TomlOverride>> = {
-        let mut map: BTreeMap<String, Vec<TomlOverride>> = BTreeMap::new();
-        for (id, excs) in manifest.all_overrides() {
-            if excs.is_empty() {
+/// Build a `toml_edit::DocumentMut` from a `Manifest`.
+/// Output has no `[gx]` section. Sections: `[actions]`, optional `[actions.overrides]`,
+/// optional `[lint]`.
+pub(super) fn build_manifest_document(manifest: &Manifest) -> DocumentMut {
+    let mut doc = DocumentMut::new();
+
+    // Build [actions] table with sorted key-value pairs
+    let mut actions = toml_edit::Table::new();
+    let mut specs: Vec<_> = manifest.specs().collect();
+    specs.sort_by_key(|s| s.id.as_str().to_owned());
+
+    for spec in &specs {
+        actions.insert(spec.id.as_str(), toml_edit::value(spec.version.as_str()));
+    }
+
+    // Build [actions.overrides] if any overrides exist
+    let mut all_overrides: Vec<(&ActionId, &Vec<ActionOverride>)> =
+        manifest.all_overrides().iter().collect();
+    all_overrides.sort_by_key(|(id, _)| id.as_str().to_owned());
+
+    let has_overrides = all_overrides.iter().any(|(_, ovrs)| !ovrs.is_empty());
+    if has_overrides {
+        let mut overrides_table = toml_edit::Table::new();
+
+        for (id, ovrs) in &all_overrides {
+            if ovrs.is_empty() {
                 continue;
             }
-            let toml_excs: Vec<TomlOverride> = excs
-                .iter()
-                .map(|e| TomlOverride {
-                    workflow: e.workflow.clone(),
-                    job: e.job.clone(),
-                    step: e.step,
-                    version: e.version.as_str().to_owned(),
-                })
-                .collect();
-            map.insert(id.as_str().to_owned(), toml_excs);
-        }
-        map
-    };
-
-    ManifestData {
-        gx: Some(GxSection {
-            min_version: env!("CARGO_PKG_VERSION").to_string(),
-        }),
-        actions: TomlActions {
-            versions,
-            overrides,
-        },
-        lint: LintData::default(),
-    }
-}
-
-// ---- Formatting ----
-
-/// Formats the manifest data as TOML with proper inline table syntax for overrides.
-pub(super) fn format_manifest_toml(data: &ManifestData) -> String {
-    let mut output = String::new();
-
-    // Write [gx] section first if present
-    if let Some(gx) = &data.gx {
-        output.push_str("[gx]\n");
-        writeln!(output, "min_version = \"{}\"", gx.min_version).ok();
-        output.push('\n');
-    }
-
-    // Write [actions] section header
-    output.push_str("[actions]\n");
-
-    // Write global action versions (sorted alphabetically)
-    for (action_id, version) in &data.actions.versions {
-        writeln!(output, "\"{action_id}\" = \"{version}\"").ok();
-    }
-
-    // Write [actions.overrides] section if there are any overrides
-    if !data.actions.overrides.is_empty() {
-        output.push('\n');
-        output.push_str("[actions.overrides]\n");
-
-        // Write overrides with inline table arrays (sorted alphabetically by action ID)
-        for (action_id, overrides) in &data.actions.overrides {
-            writeln!(output, "\"{action_id}\" = [").ok();
-
-            for override_entry in overrides {
-                write!(output, "  {{ workflow = \"{}\"", override_entry.workflow).ok();
-
-                if let Some(job) = &override_entry.job {
-                    write!(output, ", job = \"{job}\"").ok();
+            let mut arr = toml_edit::Array::new();
+            for ovr in *ovrs {
+                let mut inline = toml_edit::InlineTable::new();
+                inline.insert("workflow", ovr.workflow.as_str().into());
+                if let Some(job) = &ovr.job {
+                    inline.insert("job", toml_edit::Value::from(job.as_str()));
                 }
-
-                if let Some(step) = override_entry.step {
-                    write!(output, ", step = {step}").ok();
+                if let Some(step) = ovr.step {
+                    inline.insert(
+                        "step",
+                        i64::try_from(step).expect("step index overflow").into(),
+                    );
                 }
-
-                writeln!(output, ", version = \"{}\" }},", override_entry.version).ok();
+                inline.insert("version", ovr.version.as_str().into());
+                arr.push(inline);
             }
-
-            output.push_str("]\n");
+            overrides_table.insert(id.as_str(), toml_edit::value(arr));
         }
+        actions.insert("overrides", toml_edit::Item::Table(overrides_table));
     }
 
-    output.push('\n');
-    output
+    doc.insert("actions", toml_edit::Item::Table(actions));
+
+    doc
 }
 
 #[cfg(test)]
 mod tests {
-    use super::Manifest;
+    use super::{Manifest, build_manifest_document};
     use crate::domain::action::identity::ActionId;
     use crate::domain::action::specifier::Specifier;
+    use crate::domain::manifest::overrides::ActionOverride;
     use crate::infra::manifest::{Store, parse};
     use std::fs;
     use std::io::Write;
@@ -310,7 +273,7 @@ mod tests {
     }
 
     #[test]
-    fn test_save_writes_gx_section() {
+    fn test_save_no_gx_section() {
         let file = NamedTempFile::new().unwrap();
         let store = Store::new(file.path());
 
@@ -320,16 +283,38 @@ mod tests {
 
         let content = fs::read_to_string(file.path()).unwrap();
         assert!(
-            content.contains("[gx]"),
-            "Saved file must contain [gx] section, got:\n{content}"
+            !content.contains("[gx]"),
+            "Saved file must NOT contain [gx] section, got:\n{content}"
         );
         assert!(
-            content.contains("min_version"),
-            "Saved file must contain min_version, got:\n{content}"
+            !content.contains("min_version"),
+            "Saved file must NOT contain min_version, got:\n{content}"
         );
-        // [gx] section should appear before [actions]
-        let gx_pos = content.find("[gx]").unwrap();
-        let actions_pos = content.find("[actions]").unwrap();
-        assert!(gx_pos < actions_pos, "[gx] must appear before [actions]");
+        assert!(
+            content.contains("[actions]"),
+            "Saved file must contain [actions] section, got:\n{content}"
+        );
+    }
+
+    #[test]
+    fn test_build_manifest_document_with_overrides() {
+        let mut manifest = Manifest::default();
+        manifest.set(ActionId::from("actions/checkout"), Specifier::parse("^4"));
+        manifest.add_override(
+            ActionId::from("actions/checkout"),
+            ActionOverride {
+                workflow: ".github/workflows/ci.yml".to_owned(),
+                job: None,
+                step: None,
+                version: Specifier::parse("^3"),
+            },
+        );
+
+        let output = build_manifest_document(&manifest).to_string();
+
+        assert!(output.contains("[actions]"));
+        assert!(output.contains("[actions.overrides]"));
+        assert!(output.contains("\"actions/checkout\" = \"^4\""));
+        assert!(!output.contains("[gx]"));
     }
 }

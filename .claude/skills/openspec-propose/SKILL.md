@@ -1,4 +1,4 @@
----
+﻿---
 model: opus
 name: openspec-propose
 description: Propose a new change with all artifacts generated in one step. Use when the user wants to quickly describe what they want to build and get a complete proposal with design, specs, and tasks ready for implementation.
@@ -92,6 +92,22 @@ After completing all artifacts, summarize:
 - List of artifacts created with brief descriptions
 - What's ready: "All artifacts created! Ready for implementation."
 - Prompt: "Run `/opsx:apply` or ask me to implement to start working on the tasks."
+
+<!-- opsx-autoreview-patch -->
+**AUTO-REVIEW (mandatory — do not skip)**
+
+After all artifacts are created, immediately invoke the Skill tool:
+- skill: `openspec-review-proposal`
+- change: `<n>`
+
+Wait for the result. Do not suggest apply until review is complete.
+
+- **BLOCKED**: List CRITICAL issues. Ask what to fix. Re-invoke after fixes
+  (max 3 iterations).
+- **APPROVED** / **APPROVED_WITH_WARNINGS**:
+  Write marker: `echo "reviewed" > "openspec/changes/<n>/.review-passed"`
+  Show: "All artifacts created and proposal reviewed."
+  List any warnings. Prompt: "Run /opsx:apply to start implementing."
 
 **Artifact Creation Guidelines**
 
