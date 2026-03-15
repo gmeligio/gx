@@ -84,7 +84,11 @@ fn override_entry_matches(
     ovr: &ActionOverride,
 ) -> bool {
     workflow == Some(ovr.workflow.as_str())
-        && job == ovr.job.as_deref()
+        && job
+            == ovr
+                .job
+                .as_ref()
+                .map(crate::domain::workflow_actions::JobId::as_str)
         && step.and_then(|s| StepIndex::try_from(s).ok()) == ovr.step
 }
 
@@ -229,6 +233,7 @@ mod tests {
     use crate::domain::action::specifier::Specifier;
     use crate::domain::manifest::overrides::ActionOverride;
     use crate::domain::plan::ManifestDiff;
+    use crate::domain::workflow_actions::{JobId, WorkflowPath};
     use std::fs;
     use std::io::Write as _;
     use tempfile::NamedTempFile;
@@ -315,7 +320,7 @@ mod tests {
             overrides_added: vec![(
                 ActionId::from("actions/checkout"),
                 ActionOverride {
-                    workflow: ".github/workflows/deploy.yml".to_owned(),
+                    workflow: WorkflowPath::new(".github/workflows/deploy.yml"),
                     job: None,
                     step: None,
                     version: Specifier::parse("^3"),
@@ -331,7 +336,10 @@ mod tests {
             .value
             .overrides_for(&ActionId::from("actions/checkout"));
         assert_eq!(overrides.len(), 1);
-        assert_eq!(overrides[0].workflow, ".github/workflows/deploy.yml");
+        assert_eq!(
+            overrides[0].workflow,
+            WorkflowPath::new(".github/workflows/deploy.yml")
+        );
         assert_eq!(overrides[0].version.as_str(), "^3");
     }
 
@@ -352,8 +360,8 @@ mod tests {
             overrides_added: vec![(
                 ActionId::from("actions/checkout"),
                 ActionOverride {
-                    workflow: ".github/workflows/ci.yml".to_owned(),
-                    job: Some("legacy".to_owned()),
+                    workflow: WorkflowPath::new(".github/workflows/ci.yml"),
+                    job: Some(JobId::from("legacy")),
                     step: None,
                     version: Specifier::parse("^2"),
                 },
@@ -386,7 +394,7 @@ mod tests {
             overrides_removed: vec![(
                 ActionId::from("actions/checkout"),
                 vec![ActionOverride {
-                    workflow: ".github/workflows/deploy.yml".to_owned(),
+                    workflow: WorkflowPath::new(".github/workflows/deploy.yml"),
                     job: None,
                     step: None,
                     version: Specifier::parse("^3"),
@@ -422,7 +430,7 @@ mod tests {
             overrides_removed: vec![(
                 ActionId::from("actions/checkout"),
                 vec![ActionOverride {
-                    workflow: ".github/workflows/deploy.yml".to_owned(),
+                    workflow: WorkflowPath::new(".github/workflows/deploy.yml"),
                     job: None,
                     step: None,
                     version: Specifier::parse("^3"),
@@ -454,7 +462,7 @@ mod tests {
             overrides_added: vec![(
                 ActionId::from("actions/checkout"),
                 ActionOverride {
-                    workflow: ".github/workflows/windows.yml".to_owned(),
+                    workflow: WorkflowPath::new(".github/workflows/windows.yml"),
                     job: None,
                     step: None,
                     version: Specifier::parse("^3"),
@@ -482,6 +490,9 @@ mod tests {
             .value
             .overrides_for(&ActionId::from("actions/checkout"));
         assert_eq!(overrides.len(), 1);
-        assert_eq!(overrides[0].workflow, ".github/workflows/windows.yml");
+        assert_eq!(
+            overrides[0].workflow,
+            WorkflowPath::new(".github/workflows/windows.yml")
+        );
     }
 }

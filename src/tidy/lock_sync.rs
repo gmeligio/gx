@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use super::Error as TidyError;
-use crate::domain::action::identity::CommitSha;
+use crate::domain::action::identity::{CommitSha, VersionComment};
 use crate::domain::action::spec::Spec as ActionSpec;
 use crate::domain::action::tag_selection::ShaIndex;
 use crate::domain::event::Event as SyncEvent;
@@ -103,7 +103,7 @@ fn populate_lock_entry<R: VersionRegistry>(
         match result {
             Ok(action) => {
                 let resolved_version = action.version.to_comment().to_owned();
-                let comment = spec.version.to_comment().to_owned();
+                let comment = VersionComment::from(spec.version.to_comment());
                 lock.set(
                     spec,
                     crate::domain::action::identity::Version::from(resolved_version.as_str()),
@@ -118,7 +118,7 @@ fn populate_lock_entry<R: VersionRegistry>(
     }
 
     if lock.has(spec) {
-        let comment = spec.version.to_comment().to_owned();
+        let comment = VersionComment::from(spec.version.to_comment());
         lock.set_comment(spec, comment);
     }
 
@@ -133,7 +133,7 @@ fn populate_lock_entry<R: VersionRegistry>(
 )]
 mod tests {
     use super::*;
-    use crate::domain::action::identity::{ActionId, CommitSha, Version};
+    use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Version};
     use crate::domain::action::spec::Spec as ActionSpec;
     use crate::domain::action::specifier::Specifier;
     use crate::domain::action::tag_selection::ShaIndex;
@@ -165,7 +165,7 @@ mod tests {
                     CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
                     id.base_repo(),
                     Some(RefType::Tag),
-                    "2026-01-01T00:00:00Z".to_owned(),
+                    CommitDate::from("2026-01-01T00:00:00Z"),
                 ))
             }
         }

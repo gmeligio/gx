@@ -19,7 +19,10 @@ pub(super) fn compute_workflow_patches<P: WorkflowScanner>(
     lock: &Lock,
     scanner: &P,
 ) -> Result<Vec<WorkflowPatch>, TidyError> {
-    let mut by_location: HashMap<String, Vec<&LocatedAction>> = HashMap::new();
+    let mut by_location: HashMap<
+        crate::domain::workflow_actions::WorkflowPath,
+        Vec<&LocatedAction>,
+    > = HashMap::new();
     for action in located {
         by_location
             .entry(action.location.workflow.clone())
@@ -81,12 +84,16 @@ fn build_file_update_map(
 )]
 mod tests {
     use super::{Lock, Manifest, build_file_update_map};
-    use crate::domain::action::identity::{ActionId, CommitSha, Version};
+    use crate::domain::action::identity::{
+        ActionId, CommitDate, CommitSha, Repository, Version, VersionComment,
+    };
     use crate::domain::action::resolved::Commit;
     use crate::domain::action::spec::Spec;
     use crate::domain::action::specifier::Specifier;
     use crate::domain::action::uses_ref::RefType;
-    use crate::domain::workflow_actions::{Location as WorkflowLocation, StepIndex};
+    use crate::domain::workflow_actions::{
+        JobId, Location as WorkflowLocation, StepIndex, WorkflowPath,
+    };
 
     /// Task 4.2: SHA-only manifest version produces `@SHA` without trailing
     /// `# SHA` comment in workflow output.
@@ -106,11 +113,11 @@ mod tests {
             Version::from(sha),
             Commit {
                 sha: CommitSha::from(sha),
-                repository: "actions/checkout".to_owned(),
+                repository: Repository::from("actions/checkout"),
                 ref_type: Some(RefType::Tag),
-                date: "2026-01-01T00:00:00Z".to_owned(),
+                date: CommitDate::from("2026-01-01T00:00:00Z"),
             },
-            String::new(),
+            VersionComment::from(""),
         );
 
         // A located action referencing this action
@@ -121,8 +128,8 @@ mod tests {
                 sha: Some(CommitSha::from(sha)),
             },
             location: WorkflowLocation {
-                workflow: ".github/workflows/ci.yml".to_owned(),
-                job: Some("build".to_owned()),
+                workflow: WorkflowPath::new(".github/workflows/ci.yml"),
+                job: Some(JobId::from("build")),
                 step: Some(StepIndex::from(0_u16)),
             },
         };

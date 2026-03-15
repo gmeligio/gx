@@ -3,7 +3,8 @@ use crate::domain::action::identity::ActionId;
 use crate::domain::action::specifier::Specifier;
 use crate::domain::manifest::overrides::ActionOverride;
 use crate::domain::plan::ManifestDiff;
-use crate::domain::workflow_actions::StepIndex;
+use crate::domain::workflow_actions::{JobId, StepIndex, WorkflowPath};
+use crate::lint::RuleName;
 use std::fs;
 use std::io::Write as _;
 use std::path::Path;
@@ -56,9 +57,15 @@ fn load_manifest_with_overrides() {
         .value
         .overrides_for(&ActionId::from("actions/checkout"));
     assert_eq!(overrides.len(), 2);
-    assert_eq!(overrides[0].workflow, ".github/workflows/deploy.yml");
+    assert_eq!(
+        overrides[0].workflow,
+        WorkflowPath::new(".github/workflows/deploy.yml")
+    );
     assert_eq!(overrides[0].version.as_str(), "^3");
-    assert_eq!(overrides[1].job.as_deref(), Some("legacy-build"));
+    assert_eq!(
+        overrides[1].job.as_ref(),
+        Some(&JobId::from("legacy-build"))
+    );
     assert_eq!(overrides[1].version.as_str(), "^2");
 }
 
@@ -72,7 +79,7 @@ fn save_and_load_roundtrip_with_overrides() {
     manifest.add_override(
         ActionId::from("actions/checkout"),
         ActionOverride {
-            workflow: ".github/workflows/deploy.yml".to_owned(),
+            workflow: WorkflowPath::new(".github/workflows/deploy.yml"),
             job: None,
             step: None,
             version: Specifier::parse("^3"),
@@ -91,7 +98,10 @@ fn save_and_load_roundtrip_with_overrides() {
         .value
         .overrides_for(&ActionId::from("actions/checkout"));
     assert_eq!(overrides.len(), 1);
-    assert_eq!(overrides[0].workflow, ".github/workflows/deploy.yml");
+    assert_eq!(
+        overrides[0].workflow,
+        WorkflowPath::new(".github/workflows/deploy.yml")
+    );
     assert_eq!(overrides[0].version.as_str(), "^3");
 }
 
@@ -176,8 +186,8 @@ fn save_and_load_roundtrip_generates_correct_toml_format() {
     manifest.add_override(
         ActionId::from("actions/checkout"),
         ActionOverride {
-            workflow: ".github/workflows/windows.yml".to_owned(),
-            job: Some("test_windows".to_owned()),
+            workflow: WorkflowPath::new(".github/workflows/windows.yml"),
+            job: Some(JobId::from("test_windows")),
             step: Some(StepIndex::from(0_u16)),
             version: Specifier::parse("^5"),
         },
@@ -212,8 +222,14 @@ fn save_and_load_roundtrip_generates_correct_toml_format() {
         .value
         .overrides_for(&ActionId::from("actions/checkout"));
     assert_eq!(overrides.len(), 1);
-    assert_eq!(overrides[0].workflow, ".github/workflows/windows.yml");
-    assert_eq!(overrides[0].job.as_deref(), Some("test_windows"));
+    assert_eq!(
+        overrides[0].workflow,
+        WorkflowPath::new(".github/workflows/windows.yml")
+    );
+    assert_eq!(
+        overrides[0].job.as_ref(),
+        Some(&JobId::from("test_windows"))
+    );
     assert_eq!(overrides[0].step, Some(StepIndex::from(0_u16)));
     assert_eq!(overrides[0].version.as_str(), "^5");
 }
@@ -255,9 +271,9 @@ stale-comment = { level = "off" }
 
     let config = parse_lint_config(file.path()).unwrap();
     assert_eq!(config.rules.len(), 3);
-    assert!(config.rules.contains_key("sha-mismatch"));
-    assert!(config.rules.contains_key("unpinned"));
-    assert!(config.rules.contains_key("stale-comment"));
+    assert!(config.rules.contains_key(&RuleName::ShaMismatch));
+    assert!(config.rules.contains_key(&RuleName::Unpinned));
+    assert!(config.rules.contains_key(&RuleName::StaleComment));
 }
 
 #[test]
@@ -277,7 +293,7 @@ unpinned = { level = "warn", ignore = [
     file.write_all(content.as_bytes()).unwrap();
 
     let config = parse_lint_config(file.path()).unwrap();
-    let unpinned = &config.rules["unpinned"];
+    let unpinned = &config.rules[&RuleName::Unpinned];
     assert_eq!(unpinned.ignore.len(), 3);
     assert_eq!(
         unpinned.ignore[0].action,
@@ -340,7 +356,7 @@ fn create_with_overrides() {
         overrides_added: vec![(
             ActionId::from("actions/checkout"),
             ActionOverride {
-                workflow: ".github/workflows/windows.yml".to_owned(),
+                workflow: WorkflowPath::new(".github/workflows/windows.yml"),
                 job: None,
                 step: None,
                 version: Specifier::parse("^3"),
@@ -363,7 +379,10 @@ fn create_with_overrides() {
         .value
         .overrides_for(&ActionId::from("actions/checkout"));
     assert_eq!(overrides.len(), 1);
-    assert_eq!(overrides[0].workflow, ".github/workflows/windows.yml");
+    assert_eq!(
+        overrides[0].workflow,
+        WorkflowPath::new(".github/workflows/windows.yml")
+    );
 }
 
 // ========== v1 migration tests ==========

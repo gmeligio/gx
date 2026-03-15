@@ -14,7 +14,9 @@ Neither `gx.toml` nor `gx.lock` SHALL contain a format version field.
 - **AND** there is no top-level `version` field
 
 ### Requirement: Forward-compatible reads
-The parser SHALL ignore unknown TOML keys and sections without erroring. This applies to both `[resolutions]` and `[actions]` sections.
+The parser SHALL ignore unknown TOML keys and sections without erroring. This applies to `[resolutions]` and `[actions]` sections in the lock file, and unknown top-level sections in the manifest.
+
+This requirement does NOT apply to `[lint.rules]` keys in the manifest. Lint rule names are a closed set deserialized as a `RuleName` enum — unrecognized rule names produce a parse error (see lint spec). This distinction is intentional: unknown data fields should be forward-compatible, but misconfigured lint rules should fail early to catch typos.
 
 #### Scenario: Manifest with unknown top-level section
 - **GIVEN** a manifest containing an unknown section `[metadata]`

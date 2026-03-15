@@ -2,8 +2,8 @@ use crate::domain::action::identity::ActionId;
 use crate::domain::action::spec::Spec;
 use crate::domain::action::specifier::Specifier;
 use crate::domain::workflow_actions::{
-    ActionSet as WorkflowActionSet, Located as LocatedAction, Location as WorkflowLocation,
-    StepIndex,
+    ActionSet as WorkflowActionSet, JobId, Located as LocatedAction, Location as WorkflowLocation,
+    StepIndex, WorkflowPath,
 };
 use std::collections::HashSet;
 
@@ -11,9 +11,9 @@ use std::collections::HashSet;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActionOverride {
     /// Relative path from repo root, e.g. ".github/workflows/deploy.yml".
-    pub workflow: String,
+    pub workflow: WorkflowPath,
     /// Job id, if scoped to a job.
-    pub job: Option<String>,
+    pub job: Option<JobId>,
     /// 0-based step index, if scoped to a step (requires job).
     pub step: Option<StepIndex>,
     /// The specifier to use at this location.
@@ -36,7 +36,7 @@ pub fn resolve_version<'ovr>(
     if let (Some(job), Some(step)) = (&location.job, location.step) {
         for exc in overrides {
             if exc.workflow == location.workflow
-                && exc.job.as_deref() == Some(job.as_str())
+                && exc.job.as_ref() == Some(job)
                 && exc.step == Some(step)
             {
                 return Some(&exc.version);
@@ -48,7 +48,7 @@ pub fn resolve_version<'ovr>(
     if let Some(job) = &location.job {
         for exc in overrides {
             if exc.workflow == location.workflow
-                && exc.job.as_deref() == Some(job.as_str())
+                && exc.job.as_ref() == Some(job)
                 && exc.step.is_none()
             {
                 return Some(&exc.version);
@@ -153,7 +153,7 @@ pub fn prune_stale(
                     if let Some(job) = &exc.job {
                         let job_exists = located.iter().any(|a| {
                             a.location.workflow == exc.workflow
-                                && a.location.job.as_deref() == Some(job.as_str())
+                                && a.location.job.as_ref() == Some(job)
                         });
                         if !job_exists {
                             return false;
@@ -162,7 +162,7 @@ pub fn prune_stale(
                     if let (Some(job), Some(step)) = (&exc.job, exc.step) {
                         let step_exists = located.iter().any(|a| {
                             a.location.workflow == exc.workflow
-                                && a.location.job.as_deref() == Some(job.as_str())
+                                && a.location.job.as_ref() == Some(job)
                                 && a.location.step == Some(step)
                         });
                         if !step_exists {
@@ -200,14 +200,15 @@ mod tests {
     use crate::domain::action::spec::Spec;
     use crate::domain::action::specifier::Specifier;
     use crate::domain::workflow_actions::{
-        ActionSet as WorkflowActionSet, Location as WorkflowLocation, StepIndex,
+        ActionSet as WorkflowActionSet, JobId, Location as WorkflowLocation, StepIndex,
+        WorkflowPath,
     };
 
     use std::collections::HashMap;
     fn make_loc(workflow: &str, job: Option<&str>, step: Option<u16>) -> WorkflowLocation {
         WorkflowLocation {
-            workflow: workflow.to_owned(),
-            job: job.map(str::to_string),
+            workflow: WorkflowPath::new(workflow),
+            job: job.map(JobId::from),
             step: step.map(StepIndex::from),
         }
     }
@@ -234,7 +235,7 @@ mod tests {
     #[test]
     fn resolve_version_workflow_level() {
         let overrides = vec![ActionOverride {
-            workflow: ".github/workflows/ci.yml".to_owned(),
+            workflow: WorkflowPath::new(".github/workflows/ci.yml"),
             job: None,
             step: None,
             version: Specifier::parse("^3"),
@@ -250,14 +251,14 @@ mod tests {
     fn resolve_version_step_level_wins_over_workflow() {
         let overrides = vec![
             ActionOverride {
-                workflow: ".github/workflows/ci.yml".to_owned(),
+                workflow: WorkflowPath::new(".github/workflows/ci.yml"),
                 job: None,
                 step: None,
                 version: Specifier::parse("^3"),
             },
             ActionOverride {
-                workflow: ".github/workflows/ci.yml".to_owned(),
-                job: Some("build".to_owned()),
+                workflow: WorkflowPath::new(".github/workflows/ci.yml"),
+                job: Some(JobId::from("build")),
                 step: Some(StepIndex::from(0_u16)),
                 version: Specifier::parse("^2"),
             },
@@ -330,7 +331,10 @@ mod tests {
             .get(&ActionId::from("actions/checkout"))
             .unwrap();
         assert_eq!(overrides.len(), 1);
-        assert_eq!(overrides[0].workflow, ".github/workflows/windows.yml");
+        assert_eq!(
+            overrides[0].workflow,
+            WorkflowPath::new(".github/workflows/windows.yml")
+        );
         assert_eq!(overrides[0].version, Specifier::from_v1("v3"));
     }
 
@@ -340,7 +344,7 @@ mod tests {
         actions_overrides.insert(
             ActionId::from("actions/checkout"),
             vec![ActionOverride {
-                workflow: ".github/workflows/deploy.yml".to_owned(),
+                workflow: WorkflowPath::new(".github/workflows/deploy.yml"),
                 job: None,
                 step: None,
                 version: Specifier::parse("v3"),
@@ -367,7 +371,7 @@ mod tests {
         actions_overrides.insert(
             ActionId::from("actions/checkout"),
             vec![ActionOverride {
-                workflow: ".github/workflows/ci.yml".to_owned(),
+                workflow: WorkflowPath::new(".github/workflows/ci.yml"),
                 job: None,
                 step: None,
                 version: Specifier::parse("v3"),
@@ -427,7 +431,7 @@ mod tests {
             .expect("override must exist for minority version");
         assert_eq!(overrides.len(), 1, "exactly one override for v5");
         assert!(
-            overrides[0].workflow.ends_with("windows.yml"),
+            overrides[0].workflow.as_str().ends_with("windows.yml"),
             "override must be scoped to windows.yml"
         );
         assert_eq!(
@@ -444,7 +448,7 @@ mod tests {
         actions_overrides.insert(
             ActionId::from("actions/checkout"),
             vec![ActionOverride {
-                workflow: ".github/workflows/deploy.yml".to_owned(),
+                workflow: WorkflowPath::new(".github/workflows/deploy.yml"),
                 job: None,
                 step: None,
                 version: Specifier::from_v1("v3"),

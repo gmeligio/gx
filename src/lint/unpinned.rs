@@ -1,4 +1,4 @@
-use super::{Context, Diagnostic, Rule};
+use super::{Context, Diagnostic, Rule, RuleName};
 use crate::config::Level;
 
 /// unpinned rule: detects actions that use tag refs instead of SHA pins.
@@ -17,14 +17,15 @@ impl UnpinnedRule {
             action.action.version.as_str()
         );
         Some(
-            Diagnostic::new("unpinned", Level::Error, msg).with_workflow(&action.location.workflow),
+            Diagnostic::new(RuleName::Unpinned, Level::Error, msg)
+                .with_workflow(action.location.workflow.clone()),
         )
     }
 }
 
 impl Rule for UnpinnedRule {
-    fn name(&self) -> &'static str {
-        "unpinned"
+    fn name(&self) -> RuleName {
+        RuleName::Unpinned
     }
 
     fn default_level(&self) -> Level {
@@ -41,12 +42,12 @@ impl Rule for UnpinnedRule {
 
 #[cfg(test)]
 mod tests {
-    use super::{Level, Rule as _, UnpinnedRule};
+    use super::{Level, Rule as _, RuleName, UnpinnedRule};
 
     #[test]
     fn unpinned_rule_has_correct_metadata() {
         let rule = UnpinnedRule;
-        assert_eq!(rule.name(), "unpinned");
+        assert_eq!(rule.name(), RuleName::Unpinned);
         assert_eq!(rule.default_level(), Level::Error);
     }
 }

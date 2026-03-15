@@ -1,4 +1,4 @@
-use super::{Context, Diagnostic, Rule};
+use super::{Context, Diagnostic, Rule, RuleName};
 use crate::config::Level;
 use crate::domain::action::spec::Spec;
 use crate::domain::action::specifier::Specifier;
@@ -31,15 +31,15 @@ impl ShaMismatchRule {
             action.action.version.as_str()
         );
         Some(
-            Diagnostic::new("sha-mismatch", Level::Error, msg)
-                .with_workflow(&action.location.workflow),
+            Diagnostic::new(RuleName::ShaMismatch, Level::Error, msg)
+                .with_workflow(action.location.workflow.clone()),
         )
     }
 }
 
 impl Rule for ShaMismatchRule {
-    fn name(&self) -> &'static str {
-        "sha-mismatch"
+    fn name(&self) -> RuleName {
+        RuleName::ShaMismatch
     }
 
     fn default_level(&self) -> Level {
@@ -56,12 +56,12 @@ impl Rule for ShaMismatchRule {
 
 #[cfg(test)]
 mod tests {
-    use super::{Level, Rule as _, ShaMismatchRule};
+    use super::{Level, Rule as _, RuleName, ShaMismatchRule};
 
     #[test]
     fn sha_mismatch_rule_has_correct_metadata() {
         let rule = ShaMismatchRule;
-        assert_eq!(rule.name(), "sha-mismatch");
+        assert_eq!(rule.name(), RuleName::ShaMismatch);
         assert_eq!(rule.default_level(), Level::Error);
     }
 }

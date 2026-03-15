@@ -1,7 +1,7 @@
 // Integration tests for the tidy module — exercises plan() and apply_workflow_patches()
 
 use super::{Error as TidyError, apply_workflow_patches, plan};
-use crate::domain::action::identity::{ActionId, CommitSha, Version};
+use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
 use crate::domain::action::resolved::Resolved as ResolvedAction;
 use crate::domain::action::specifier::Specifier;
 use crate::domain::action::uses_ref::RefType;
@@ -99,17 +99,17 @@ jobs:
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v6.0.1"),
         CommitSha::from("8e8c483db84b4bee98b60c0593521ed34d9990e8"),
-        "actions/checkout".to_owned(),
+        Repository::from("actions/checkout"),
         Some(RefType::Tag),
-        "2026-01-01T00:00:00Z".to_owned(),
+        CommitDate::from("2026-01-01T00:00:00Z"),
     ));
     seeded_lock.set_resolved(ResolvedAction::new(
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v5"),
         CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-        "actions/checkout".to_owned(),
+        Repository::from("actions/checkout"),
         Some(RefType::Tag),
-        "2026-01-01T00:00:00Z".to_owned(),
+        CommitDate::from("2026-01-01T00:00:00Z"),
     ));
     let lock_store = lock::Store::new(&lock_path);
     lock_store.save(&seeded_lock).unwrap();
@@ -144,7 +144,7 @@ jobs:
 
     let windows_override = overrides
         .iter()
-        .find(|o| o.workflow.ends_with("windows.yml"));
+        .find(|o| o.workflow.as_str().ends_with("windows.yml"));
     assert!(
         windows_override.is_some(),
         "Override must be scoped to windows.yml"
@@ -197,9 +197,9 @@ jobs:
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v4"),
         CommitSha::from("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
-        "actions/checkout".to_owned(),
+        Repository::from("actions/checkout"),
         Some(RefType::Tag),
-        "2026-01-01T00:00:00Z".to_owned(),
+        CommitDate::from("2026-01-01T00:00:00Z"),
     ));
 
     let scanner = FileWorkflowScanner::new(repo_root);
@@ -261,9 +261,9 @@ fn plan_one_new_action_produces_added_entries() {
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v4"),
         CommitSha::from(sha),
-        "actions/checkout".to_owned(),
+        Repository::from("actions/checkout"),
         Some(RefType::Tag),
-        "2026-01-01T00:00:00Z".to_owned(),
+        CommitDate::from("2026-01-01T00:00:00Z"),
     ));
 
     let manifest = Manifest::default(); // empty — action is "new"
@@ -307,17 +307,17 @@ fn plan_removed_action_produces_removed_entries() {
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v4"),
         CommitSha::from("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
-        "actions/checkout".to_owned(),
+        Repository::from("actions/checkout"),
         Some(RefType::Tag),
-        "2026-01-01T00:00:00Z".to_owned(),
+        CommitDate::from("2026-01-01T00:00:00Z"),
     ));
     lock.set_resolved(ResolvedAction::new(
         ActionId::from("actions/setup-node"),
         Specifier::from_v1("v3"),
         CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-        "actions/setup-node".to_owned(),
+        Repository::from("actions/setup-node"),
         Some(RefType::Tag),
-        "2026-01-01T00:00:00Z".to_owned(),
+        CommitDate::from("2026-01-01T00:00:00Z"),
     ));
 
     let scanner = FileWorkflowScanner::new(repo_root);
@@ -375,9 +375,9 @@ fn plan_everything_in_sync_returns_empty_plan() {
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v4"),
         CommitSha::from(sha),
-        "actions/checkout".to_owned(),
+        Repository::from("actions/checkout"),
         Some(RefType::Tag),
-        "2026-01-01T00:00:00Z".to_owned(),
+        CommitDate::from("2026-01-01T00:00:00Z"),
     ));
 
     let scanner = FileWorkflowScanner::new(repo_root);

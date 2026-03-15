@@ -5,7 +5,7 @@ use crate::domain::action::spec::Spec as ActionSpec;
 use crate::domain::action::specifier::Specifier;
 use crate::domain::manifest::Manifest;
 use crate::domain::manifest::overrides::ActionOverride;
-use crate::domain::workflow_actions::StepIndex;
+use crate::domain::workflow_actions::{JobId, StepIndex, WorkflowPath};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
@@ -66,7 +66,7 @@ pub struct ManifestData {
 pub struct LintData {
     /// Map of rule names to their configuration.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub rules: BTreeMap<String, Rule>,
+    pub rules: BTreeMap<crate::lint::RuleName, Rule>,
 }
 
 // ---- conversion ----
@@ -142,8 +142,8 @@ pub fn manifest_from_data(
                 .map_err(ManifestError::Validation)?;
 
             converted.push(ActionOverride {
-                workflow: exc.workflow,
-                job: exc.job,
+                workflow: WorkflowPath::new(exc.workflow),
+                job: exc.job.map(JobId::from),
                 step: step_index,
                 version: specifier,
             });
@@ -218,6 +218,7 @@ mod tests {
     use crate::domain::action::identity::ActionId;
     use crate::domain::action::specifier::Specifier;
     use crate::domain::manifest::overrides::ActionOverride;
+    use crate::domain::workflow_actions::WorkflowPath;
     use crate::infra::manifest::{Store, parse};
     use std::fs;
     use std::io::Write as _;
@@ -326,7 +327,7 @@ mod tests {
         manifest.add_override(
             ActionId::from("actions/checkout"),
             ActionOverride {
-                workflow: ".github/workflows/ci.yml".to_owned(),
+                workflow: WorkflowPath::new(".github/workflows/ci.yml"),
                 job: None,
                 step: None,
                 version: Specifier::parse("^3"),

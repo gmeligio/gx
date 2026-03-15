@@ -12,7 +12,7 @@ use common::registries::FakeRegistry;
 use common::setup::{
     create_test_repo, lock_path, manifest_path, write_lock, write_manifest, write_workflow,
 };
-use gx::domain::action::identity::{ActionId, CommitSha, Version};
+use gx::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
 use gx::domain::action::resolved::Resolved as ResolvedAction;
 use gx::domain::action::spec::Spec;
 use gx::domain::action::specifier::Specifier;
@@ -273,9 +273,9 @@ jobs:
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v6.0.2"),
         CommitSha::from(checkout_new_sha),
-        "actions/checkout".to_owned(),
+        Repository::from("actions/checkout"),
         Some(RefType::Tag),
-        String::new(),
+        CommitDate::from(""),
     ));
 
     let keys_to_retain: Vec<Spec> = manifest.specs().cloned().collect();
@@ -331,9 +331,9 @@ fn upgrade_repins_branch_ref() {
         ActionId::from("my-org/my-action"),
         Specifier::from_v1("main"),
         CommitSha::from(old_sha),
-        "my-org/my-action".to_owned(),
+        Repository::from("my-org/my-action"),
         Some(RefType::Branch),
-        String::new(),
+        CommitDate::from(""),
     ));
 
     let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All);
@@ -376,9 +376,9 @@ fn upgrade_latest_also_repins_branch_ref() {
         ActionId::from("my-org/my-action"),
         Specifier::from_v1("main"),
         CommitSha::from(old_sha),
-        "my-org/my-action".to_owned(),
+        Repository::from("my-org/my-action"),
         Some(RefType::Branch),
-        String::new(),
+        CommitDate::from(""),
     ));
 
     let request = UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::All);
@@ -423,17 +423,17 @@ fn upgrade_targeted_does_not_repin_branch_ref() {
         ActionId::from("my-org/my-action"),
         Specifier::from_v1("main"),
         CommitSha::from(branch_sha),
-        "my-org/my-action".to_owned(),
+        Repository::from("my-org/my-action"),
         Some(RefType::Branch),
-        String::new(),
+        CommitDate::from(""),
     ));
     lock.set_resolved(ResolvedAction::new(
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v4"),
         CommitSha::from(checkout_sha),
-        "actions/checkout".to_owned(),
+        Repository::from("actions/checkout"),
         Some(RefType::Tag),
-        String::new(),
+        CommitDate::from(""),
     ));
 
     let registry = FakeRegistry::new().with_all_tags("actions/checkout", vec!["v4", "v5"]);
@@ -483,17 +483,17 @@ fn upgrade_mixed_semver_and_branch() {
         ActionId::from("my-org/my-action"),
         Specifier::from_v1("main"),
         CommitSha::from(old_branch_sha),
-        "my-org/my-action".to_owned(),
+        Repository::from("my-org/my-action"),
         Some(RefType::Branch),
-        String::new(),
+        CommitDate::from(""),
     ));
     lock.set_resolved(ResolvedAction::new(
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v4"),
         CommitSha::from(old_checkout_sha),
-        "actions/checkout".to_owned(),
+        Repository::from("actions/checkout"),
         Some(RefType::Tag),
-        String::new(),
+        CommitDate::from(""),
     ));
 
     let registry = FakeRegistry::new().with_all_tags("actions/checkout", vec!["v4", "v5"]);

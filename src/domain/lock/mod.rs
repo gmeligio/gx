@@ -1,6 +1,6 @@
 pub mod resolution;
 
-use super::action::identity::{ActionId, Version};
+use super::action::identity::{ActionId, Version, VersionComment};
 use super::action::resolved::{Commit, Resolved};
 use super::action::spec::Spec;
 use super::action::specifier::Specifier;
@@ -55,7 +55,7 @@ impl Lock {
     }
 
     /// Set or update both tiers for a spec.
-    pub fn set(&mut self, spec: &Spec, version: Version, commit: Commit, comment: String) {
+    pub fn set(&mut self, spec: &Spec, version: Version, commit: Commit, comment: VersionComment) {
         self.resolutions.insert(
             spec.clone(),
             Resolution {
@@ -73,9 +73,10 @@ impl Lock {
     /// Set from a `Resolved` action (convenience for callers that have a Resolved).
     pub fn set_resolved(&mut self, resolved: Resolved) {
         let spec = Spec::new(resolved.id.clone(), resolved.version.clone());
-        let comment = resolved.version.to_comment().to_owned();
+        let comment_str = resolved.version.to_comment();
+        let comment = VersionComment::from(comment_str);
         // Version initially set to the specifier's comment (e.g., "v4") — will be refined later
-        let version = Version::from(comment.as_str());
+        let version = Version::from(comment_str);
         self.set(&spec, version, resolved.commit, comment);
     }
 
@@ -96,7 +97,7 @@ impl Lock {
         }
         // For semver ranges, comment must match the specifier's expected comment
         let comment_ok = match &spec.version {
-            Specifier::Range { .. } => resolution.comment == spec.version.to_comment(),
+            Specifier::Range { .. } => resolution.comment.as_str() == spec.version.to_comment(),
             Specifier::Ref(_) | Specifier::Sha(_) => true,
         };
         if !comment_ok {
@@ -110,9 +111,9 @@ impl Lock {
             return false;
         };
         !commit.sha.as_str().is_empty()
-            && !commit.repository.is_empty()
+            && !commit.repository.as_str().is_empty()
             && commit.ref_type.is_some()
-            && !commit.date.is_empty()
+            && !commit.date.as_str().is_empty()
     }
 
     /// Set the version for a spec's resolution and update the action key.
@@ -140,7 +141,7 @@ impl Lock {
     }
 
     /// Set the comment for a spec's resolution.
-    pub fn set_comment(&mut self, spec: &Spec, comment: String) {
+    pub fn set_comment(&mut self, spec: &Spec, comment: VersionComment) {
         if let Some(resolution) = self.resolutions.get_mut(spec) {
             resolution.comment = comment;
         }

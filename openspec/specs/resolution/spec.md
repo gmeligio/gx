@@ -70,7 +70,14 @@ The `VersionRegistry::lookup_sha` implementation SHALL always return a commit SH
 The `VersionRegistry` trait SHALL provide a `describe_sha` method that accepts an `ActionId` and `CommitSha` and returns a `ShaDescription` containing the tags pointing to that SHA, the base repository name, and the commit date.
 
 ### Requirement: ShaDescription carries commit metadata
-The `ShaDescription` struct SHALL contain `tags: Vec<Version>`, `repository: String`, and `date: String`. It SHALL NOT contain `sha`, `ref_type`, or `version` (these are derived by the caller).
+The `ShaDescription` struct SHALL contain `tags: Vec<Version>`, `repository: Repository`, and `date: CommitDate`. It SHALL NOT contain `sha`, `ref_type`, or `version` (these are derived by the caller).
+
+#### Scenario: ShaDescription fields use domain newtypes
+- **GIVEN** a `ShaDescription` returned from `describe_sha`
+- **WHEN** the caller accesses `repository`
+- **THEN** it SHALL be a `Repository` newtype (not a bare `String`)
+- **AND** `date` SHALL be a `CommitDate` newtype (not a bare `String`)
+- **AND** the TOML serialization boundary in the infra layer converts between `String` and these newtypes
 
 ### Requirement: GithubRegistry describe_sha skips ref resolution
 The `GithubRegistry` implementation of `describe_sha` SHALL go directly to the commit endpoint (`/commits/{sha}`) to fetch the date, skipping the tag/branch/commit fallback chain. Tag lookup failure is non-fatal (returns empty tags, not error).
@@ -113,7 +120,16 @@ The version registry SHALL return the ref_type, repository, and date alongside t
 Release `published_at` > tag `tagger.date` > commit `committer.date`. The date is read from `commit.committer.date` (nested), NOT the top-level `committer` field.
 
 ### Requirement: ResolvedAction carries metadata
-The `ResolvedAction` struct SHALL include `repository`, `ref_type`, and `date`. It SHALL NOT carry `resolved_version` or `specifier` (these are outputs of REFINE and DERIVE).
+The `ResolvedAction` struct SHALL include `repository` (`Repository`), `ref_type`, and `date` (`CommitDate`). It SHALL NOT carry `resolved_version` or `specifier` (these are outputs of REFINE and DERIVE).
+
+### Requirement: ResolvedRef carries commit metadata
+
+`ResolvedRef` SHALL have its `repository` and `date` fields updated to `Repository` and `CommitDate` newtypes respectively.
+
+#### Scenario: ResolvedRef fields use domain newtypes
+- **GIVEN** a `ResolvedRef` returned from resolution
+- **THEN** `ResolvedRef::repository` SHALL be `Repository` (not `String`)
+- **AND** `ResolvedRef::date` SHALL be `CommitDate` (not `String`)
 
 ### Requirement: SHA-pinned actions keep the workflow SHA
 When a workflow already has a SHA-pinned action, the lock entry SHALL use the workflow's SHA, not the SHA that `lookup_sha()` returns for the version tag.

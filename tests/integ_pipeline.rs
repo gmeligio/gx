@@ -87,7 +87,8 @@ fn init_sha_first_describe_sha_empty_date() {
     );
 
     assert_eq!(
-        commit.date, "",
+        commit.date.as_str(),
+        "",
         "Date should be empty when commit date fetch fails"
     );
 }
@@ -121,7 +122,8 @@ fn init_sha_first_describe_sha_fails_falls_back_to_resolve() {
         "Lock entry must have a SHA"
     );
     assert_eq!(
-        commit.repository, "actions/checkout",
+        commit.repository.as_str(),
+        "actions/checkout",
         "Repository must be set"
     );
 }

@@ -1,4 +1,6 @@
-use crate::domain::action::identity::{ActionId, CommitSha, Version};
+use crate::domain::action::identity::{
+    ActionId, CommitDate, CommitSha, Repository, Version, VersionComment,
+};
 use crate::domain::action::resolved::Commit;
 use crate::domain::action::spec::Spec;
 use crate::domain::action::specifier::Specifier;
@@ -72,7 +74,7 @@ fn lock_from_two_tier(data: TwoTierData) -> Lock {
                 spec,
                 Resolution {
                     version: Version::from(res_data.version.as_str()),
-                    comment: res_data.comment,
+                    comment: VersionComment::from(res_data.comment),
                 },
             );
         }
@@ -88,9 +90,9 @@ fn lock_from_two_tier(data: TwoTierData) -> Lock {
                 key,
                 Commit {
                     sha: CommitSha::from(commit_data.sha),
-                    repository: commit_data.repository,
+                    repository: Repository::from(commit_data.repository),
                     ref_type: RefType::parse(&commit_data.ref_type),
-                    date: commit_data.date,
+                    date: CommitDate::from(commit_data.date),
                 },
             );
         }
@@ -231,7 +233,7 @@ mod tests {
             CommitSha::from(sha),
             ActionId::from(action).base_repo(),
             Some(RefType::Tag),
-            "2026-01-01T00:00:00Z".to_owned(),
+            CommitDate::from("2026-01-01T00:00:00Z"),
         )
     }
 
