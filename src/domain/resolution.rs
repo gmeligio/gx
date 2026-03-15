@@ -6,7 +6,7 @@ use super::action::tag_selection::{ShaIndex, select_most_specific_tag};
 use super::action::uses_ref::RefType;
 use thiserror::Error;
 
-/// Errors that can occur during version resolution
+/// Errors that can occur during version resolution.
 #[derive(Debug, Clone, Error)]
 pub enum Error {
     #[error("failed to resolve {spec}: {reason}")]
@@ -38,7 +38,7 @@ pub struct ShaDescription {
     pub date: String,
 }
 
-/// The result of resolving a ref to its metadata
+/// The result of resolving a ref to its metadata.
 #[derive(Debug, Clone)]
 pub struct ResolvedRef {
     pub sha: CommitSha,
@@ -65,27 +65,27 @@ impl ResolvedRef {
     }
 }
 
-/// Trait for querying available versions and commit SHAs from a remote registry
+/// Trait for querying available versions and commit SHAs from a remote registry.
 pub trait VersionRegistry {
-    /// Look up the commit SHA and metadata for a version reference
+    /// Look up the commit SHA and metadata for a version reference.
     ///
     /// # Errors
     ///
-    /// Returns an error if the lookup fails
+    /// Returns an error if the lookup fails.
     fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<ResolvedRef, Error>;
 
-    /// Get all tags that point to a specific SHA
+    /// Get all tags that point to a specific SHA.
     ///
     /// # Errors
     ///
-    /// Returns an error if the lookup fails
+    /// Returns an error if the lookup fails.
     fn tags_for_sha(&self, id: &ActionId, sha: &CommitSha) -> Result<Vec<Version>, Error>;
 
-    /// Get all available version tags for an action's repository
+    /// Get all available version tags for an action's repository.
     ///
     /// # Errors
     ///
-    /// Returns an error if the lookup fails
+    /// Returns an error if the lookup fails.
     fn all_tags(&self, id: &ActionId) -> Result<Vec<Version>, Error>;
 
     /// Describe a known commit SHA: return the tags pointing to it, the base repository, and the commit date.
@@ -96,18 +96,19 @@ pub trait VersionRegistry {
     fn describe_sha(&self, id: &ActionId, sha: &CommitSha) -> Result<ShaDescription, Error>;
 }
 
-/// Resolves actions to their correct version and commit SHA
-pub struct ActionResolver<'a, R: VersionRegistry> {
-    registry: &'a R,
+/// Resolves actions to their correct version and commit SHA.
+pub struct ActionResolver<'reg, R: VersionRegistry> {
+    /// The version registry used for lookups.
+    registry: &'reg R,
 }
 
-impl<'a, R: VersionRegistry> ActionResolver<'a, R> {
+impl<'reg, R: VersionRegistry> ActionResolver<'reg, R> {
     #[must_use]
-    pub fn new(registry: &'a R) -> Self {
+    pub fn new(registry: &'reg R) -> Self {
         Self { registry }
     }
 
-    /// Access the underlying version registry
+    /// Access the underlying version registry.
     #[must_use]
     pub fn registry(&self) -> &R {
         self.registry
@@ -195,6 +196,11 @@ impl<'a, R: VersionRegistry> ActionResolver<'a, R> {
 pub(crate) mod testutil;
 
 #[cfg(test)]
+#[expect(
+    clippy::expect_used,
+    clippy::assertions_on_result_states,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
 mod tests {
     use super::{
         ActionId, ActionResolver, ActionSpec, CommitSha, Error, RefType, ResolvedRef,
@@ -231,13 +237,13 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_success() {
+    fn resolve_success() {
         let mock_registry = MockRegistry {
             resolve_result: Ok(ResolvedRef::new(
                 CommitSha::from("abc123def456789012345678901234567890abcd"),
-                "actions/checkout".to_string(),
+                "actions/checkout".to_owned(),
                 Some(RefType::Tag),
-                "2026-01-01T00:00:00Z".to_string(),
+                "2026-01-01T00:00:00Z".to_owned(),
             )),
             tags_result: Ok(vec![]),
         };
@@ -250,17 +256,17 @@ mod tests {
         assert_eq!(resolved.id.as_str(), "actions/checkout");
         assert_eq!(resolved.version.to_comment(), "v4");
         assert_eq!(
-            resolved.sha.as_str(),
+            resolved.commit.sha.as_str(),
             "abc123def456789012345678901234567890abcd"
         );
     }
 
     #[test]
-    fn test_resolve_failure() {
+    fn resolve_failure() {
         let registry = MockRegistry {
             resolve_result: Err(Error::ResolveFailed {
                 spec: ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4")),
-                reason: "not found".to_string(),
+                reason: "not found".to_owned(),
             }),
             tags_result: Ok(vec![]),
         };
@@ -273,13 +279,13 @@ mod tests {
     }
 
     #[test]
-    fn test_correct_version_no_correction_needed() {
+    fn correct_version_no_correction_needed() {
         let registry = MockRegistry {
             resolve_result: Ok(ResolvedRef::new(
                 CommitSha::from("abc123def456789012345678901234567890abcd"),
-                "actions/checkout".to_string(),
+                "actions/checkout".to_owned(),
                 Some(RefType::Tag),
-                "2026-01-01T00:00:00Z".to_string(),
+                "2026-01-01T00:00:00Z".to_owned(),
             )),
             tags_result: Ok(vec![Version::from("v4"), Version::from("v4.0.0")]),
         };
@@ -297,13 +303,13 @@ mod tests {
     }
 
     #[test]
-    fn test_correct_version_correction_needed() {
+    fn correct_version_correction_needed() {
         let registry = MockRegistry {
             resolve_result: Ok(ResolvedRef::new(
                 CommitSha::from("abc123def456789012345678901234567890abcd"),
-                "actions/checkout".to_string(),
+                "actions/checkout".to_owned(),
                 Some(RefType::Tag),
-                "2026-01-01T00:00:00Z".to_string(),
+                "2026-01-01T00:00:00Z".to_owned(),
             )),
             tags_result: Ok(vec![Version::from("v5"), Version::from("v5.0.0")]),
         };
@@ -321,14 +327,14 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_from_sha_with_tags() {
+    fn resolve_from_sha_with_tags() {
         let sha = CommitSha::from("abc123def456789012345678901234567890abcd");
         let registry = MockRegistry {
             resolve_result: Ok(ResolvedRef::new(
                 sha.clone(),
-                "owner/repo".to_string(),
+                "owner/repo".to_owned(),
                 Some(RefType::Commit),
-                "2026-01-01T00:00:00Z".to_string(),
+                "2026-01-01T00:00:00Z".to_owned(),
             )),
             tags_result: Ok(vec![
                 Version::from("v3"),
@@ -345,20 +351,20 @@ mod tests {
             .expect("Expected Ok result");
 
         assert_eq!(result.version.to_comment(), "v3.6.1");
-        assert_eq!(result.sha, sha);
-        assert_eq!(result.ref_type, Some(RefType::Tag));
-        assert_eq!(result.repository, "owner/repo");
+        assert_eq!(result.commit.sha, sha);
+        assert_eq!(result.commit.ref_type, Some(RefType::Tag));
+        assert_eq!(result.commit.repository, "owner/repo");
     }
 
     #[test]
-    fn test_resolve_from_sha_no_tags() {
+    fn resolve_from_sha_no_tags() {
         let sha = CommitSha::from("abc123def456789012345678901234567890abcd");
         let registry = MockRegistry {
             resolve_result: Ok(ResolvedRef::new(
                 sha.clone(),
-                "owner/repo".to_string(),
+                "owner/repo".to_owned(),
                 Some(RefType::Commit),
-                "2026-01-01T00:00:00Z".to_string(),
+                "2026-01-01T00:00:00Z".to_owned(),
             )),
             tags_result: Ok(vec![]),
         };
@@ -371,12 +377,12 @@ mod tests {
             .expect("Expected Ok result");
 
         assert_eq!(result.version.as_str(), sha.as_str());
-        assert_eq!(result.sha, sha);
-        assert_eq!(result.ref_type, Some(RefType::Commit));
+        assert_eq!(result.commit.sha, sha);
+        assert_eq!(result.commit.ref_type, Some(RefType::Commit));
     }
 
     #[test]
-    fn test_resolve_from_sha_describe_error_propagates() {
+    fn resolve_from_sha_describe_error_propagates() {
         let registry = MockRegistry {
             resolve_result: Err(Error::AuthRequired),
             tags_result: Ok(vec![]),
@@ -394,26 +400,26 @@ mod tests {
     }
 
     #[test]
-    fn test_is_recoverable_rate_limited() {
+    fn is_recoverable_rate_limited() {
         assert!(Error::RateLimited.is_recoverable());
     }
 
     #[test]
-    fn test_is_recoverable_auth_required() {
+    fn is_recoverable_auth_required() {
         assert!(Error::AuthRequired.is_recoverable());
     }
 
     #[test]
-    fn test_is_recoverable_resolve_failed_is_not_recoverable() {
+    fn is_recoverable_resolve_failed_is_not_recoverable() {
         let err = Error::ResolveFailed {
             spec: ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4")),
-            reason: "not found".to_string(),
+            reason: "not found".to_owned(),
         };
         assert!(!err.is_recoverable());
     }
 
     #[test]
-    fn test_is_recoverable_no_tags_for_sha_is_not_recoverable() {
+    fn is_recoverable_no_tags_for_sha_is_not_recoverable() {
         let err = Error::NoTagsForSha {
             action: ActionId::from("actions/checkout"),
             sha: CommitSha::from("abc123def456789012345678901234567890abcd"),

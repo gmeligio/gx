@@ -1,4 +1,7 @@
-#![allow(dead_code)]
+#![expect(
+    dead_code,
+    reason = "shared test helpers: not every integration test crate uses every item"
+)]
 use gx::domain::action::identity::{ActionId, CommitSha, Version};
 use gx::domain::action::spec::Spec as ActionSpec;
 use gx::domain::action::specifier::Specifier;
@@ -7,7 +10,7 @@ use gx::domain::resolution::{
     Error as ResolutionError, ResolvedRef, ShaDescription, VersionRegistry,
 };
 use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use std::hash::{Hash as _, Hasher as _};
 
 /// A versatile mock registry that resolves any version to a deterministic SHA.
 ///
@@ -15,9 +18,9 @@ use std::hash::{Hash, Hasher};
 /// `tags_for_sha`/`describe_sha`. Default behavior returns empty tag lists.
 #[derive(Clone, Default)]
 pub struct FakeRegistry {
-    /// Maps `action_id` → list of available version tags (for `all_tags`)
+    /// Maps `action_id` → list of available version tags (for `all_tags`).
     tags: std::collections::HashMap<String, Vec<String>>,
-    /// Maps `(action_id, sha)` → list of tags pointing to that SHA (for `tags_for_sha` / `describe_sha`)
+    /// Maps `(action_id, sha)` → list of tags pointing to that SHA (for `tags_for_sha` / `describe_sha`).
     sha_tags: std::collections::HashMap<(String, String), Vec<String>>,
 }
 

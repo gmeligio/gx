@@ -89,7 +89,7 @@ mod tests {
         let spec = Spec::new(ActionId::from("actions/checkout"), Specifier::parse("^4"));
         let event = Event::ResolutionSkipped {
             spec,
-            reason: "rate limited".to_string(),
+            reason: "rate limited".to_owned(),
         };
         assert!(event.to_string().contains("Skipping"));
         assert!(event.to_string().contains("rate limited"));

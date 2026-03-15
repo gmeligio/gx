@@ -7,10 +7,15 @@ use super::responses::{
 use crate::domain::action::identity::CommitSha;
 use crate::domain::action::uses_ref::RefType;
 
+/// Base URL for the GitHub REST API.
 const GITHUB_API_BASE: &str = "https://api.github.com";
 
+#[expect(
+    clippy::multiple_inherent_impl,
+    reason = "resolution logic is in a separate file for clarity"
+)]
 impl Registry {
-    /// Resolve a ref (tag, branch, or commit) to a full commit SHA and detect the ref type
+    /// Resolve a ref (tag, branch, or commit) to a full commit SHA and detect the ref type.
     ///
     /// Returns a tuple of (`sha`, `ref_type`) by tracking which API path succeeded.
     ///
@@ -31,7 +36,7 @@ impl Registry {
     ) -> Result<(String, Option<RefType>), GithubError> {
         // If it already looks like a full SHA (40 hex chars), return it as a Commit
         if CommitSha::is_valid(ref_name) {
-            return Ok((ref_name.to_string(), Some(RefType::Commit)));
+            return Ok((ref_name.to_owned(), Some(RefType::Commit)));
         }
 
         // Handle subpath actions (e.g., "github/codeql-action/upload-sarif")
@@ -39,8 +44,8 @@ impl Registry {
         let base_repo = owner_repo.split('/').take(2).collect::<Vec<_>>().join("/");
 
         // Try to resolve as a tag first
-        let url = format!("{GITHUB_API_BASE}/repos/{base_repo}/git/ref/tags/{ref_name}");
-        if let Ok(sha) = self.fetch_ref_commit(&url) {
+        let tag_url = format!("{GITHUB_API_BASE}/repos/{base_repo}/git/ref/tags/{ref_name}");
+        if let Ok(sha) = self.fetch_ref_commit(&tag_url) {
             // Check if this tag has a GitHub Release
             if self
                 .fetch_release_date(&base_repo, ref_name)
@@ -54,24 +59,25 @@ impl Registry {
         }
 
         // Try to resolve as a branch
-        let url = format!("{GITHUB_API_BASE}/repos/{base_repo}/git/ref/heads/{ref_name}");
-        if let Ok(sha) = self.fetch_ref_commit(&url) {
+        let branch_url = format!("{GITHUB_API_BASE}/repos/{base_repo}/git/ref/heads/{ref_name}");
+        if let Ok(sha) = self.fetch_ref_commit(&branch_url) {
             return Ok((sha, Some(RefType::Branch)));
         }
 
         // Try to resolve as a direct commit
-        let url = format!("{GITHUB_API_BASE}/repos/{base_repo}/commits/{ref_name}");
-        self.fetch_commit_sha(&url)
+        let commit_url = format!("{GITHUB_API_BASE}/repos/{base_repo}/commits/{ref_name}");
+        self.fetch_commit_sha(&commit_url)
             .map(|sha| (sha, Some(RefType::Commit)))
     }
 
+    /// Fetch the commit SHA for a git ref, dereferencing annotated tags if needed.
     pub(super) fn fetch_ref_commit(&self, url: &str) -> Result<String, GithubError> {
         let response =
             self.authenticated_get(url)
                 .send()
                 .map_err(|source| GithubError::Request {
                     operation: "ref",
-                    url: url.to_string(),
+                    url: url.to_owned(),
                     source,
                 })?;
 
@@ -82,7 +88,7 @@ impl Registry {
         let git_ref: GitRef = response
             .json()
             .map_err(|source| GithubError::ParseResponse {
-                url: url.to_string(),
+                url: url.to_owned(),
                 source,
             })?;
 
@@ -94,12 +100,10 @@ impl Registry {
                 // Extract owner/repo from the ref URL
                 url.strip_prefix(&format!("{GITHUB_API_BASE}/repos/"))
                     .and_then(|s| {
-                        let parts: Vec<&str> = s.splitn(3, '/').collect();
-                        if parts.len() >= 2 {
-                            Some(format!("{}/{}", parts[0], parts[1]))
-                        } else {
-                            None
-                        }
+                        let mut split = s.splitn(3, '/');
+                        let owner = split.next()?;
+                        let repo = split.next()?;
+                        Some(format!("{owner}/{repo}"))
                     })
                     .unwrap_or_default(),
                 git_ref.object.sha
@@ -132,13 +136,14 @@ impl Registry {
         Ok(git_ref.object.sha)
     }
 
+    /// Fetch the SHA from a commit endpoint URL.
     pub(super) fn fetch_commit_sha(&self, url: &str) -> Result<String, GithubError> {
         let response =
             self.authenticated_get(url)
                 .send()
                 .map_err(|source| GithubError::Request {
                     operation: "commit",
-                    url: url.to_string(),
+                    url: url.to_owned(),
                     source,
                 })?;
 
@@ -150,7 +155,7 @@ impl Registry {
             response
                 .json()
                 .map_err(|source| GithubError::ParseResponse {
-                    url: url.to_string(),
+                    url: url.to_owned(),
                     source,
                 })?;
 
@@ -233,16 +238,13 @@ impl Registry {
         }
 
         let tag_data: GitTagResponse = tag_response.json().ok()?;
-        if tag_data.object.sha == commit_sha {
-            let tag_name = entry
+        (tag_data.object.sha == commit_sha).then(|| {
+            entry
                 .ref_name
                 .strip_prefix("refs/tags/")
                 .unwrap_or(&entry.ref_name)
-                .to_string();
-            Some(tag_name)
-        } else {
-            None
-        }
+                .to_owned()
+        })
     }
 
     /// Fetch all version-like tags using the matching-refs endpoint.
@@ -298,14 +300,14 @@ impl Registry {
                 r.ref_name
                     .strip_prefix("refs/tags/")
                     .unwrap_or(&r.ref_name)
-                    .to_string()
+                    .to_owned()
             })
             .collect();
 
         Ok(tags)
     }
 
-    /// Fetch the commit date from a commit SHA
+    /// Fetch the commit date from a commit SHA.
     ///
     /// # Errors
     ///
@@ -337,7 +339,7 @@ impl Registry {
         Ok(commit.commit.committer.and_then(|c| c.date))
     }
 
-    /// Fetch the release date from a release tag
+    /// Fetch the release date from a release tag.
     ///
     /// # Errors
     ///
@@ -369,7 +371,7 @@ impl Registry {
         Ok(release.published_at)
     }
 
-    /// Fetch the tag date from an annotated tag object
+    /// Fetch the tag date from an annotated tag object.
     ///
     /// # Errors
     ///
@@ -406,12 +408,12 @@ impl Registry {
 pub(super) fn parse_next_link(headers: &reqwest::header::HeaderMap) -> Option<String> {
     let link_header = headers.get("link")?.to_str().ok()?;
     for part in link_header.split(',') {
-        let part = part.trim();
-        if part.ends_with("rel=\"next\"") {
+        let trimmed_part = part.trim();
+        if trimmed_part.ends_with("rel=\"next\"") {
             // Extract URL between < and >
-            let start = part.find('<')? + 1;
-            let end = part.find('>')?;
-            return Some(part[start..end].to_string());
+            let after_open = trimmed_part.split_once('<')?.1;
+            let url_str = after_open.split_once('>')?.0;
+            return Some(url_str.to_owned());
         }
     }
     None
@@ -429,11 +431,15 @@ pub(super) fn filter_refs_by_sha(refs: &[GitRefEntry], sha: &str) -> Vec<String>
             r.ref_name
                 .strip_prefix("refs/tags/")
                 .unwrap_or(&r.ref_name)
-                .to_string()
+                .to_owned()
         })
         .collect()
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::unwrap_used,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
 #[path = "tests.rs"]
 mod tests;

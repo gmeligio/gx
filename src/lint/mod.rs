@@ -1,7 +1,11 @@
 pub mod report;
+/// Detects workflows where the pinned SHA does not match the lock file.
 mod sha_mismatch;
+/// Detects stale version comments that no longer match the locked version.
 mod stale_comment;
+/// Detects actions used without a pinned SHA.
 mod unpinned;
+/// Detects actions present in workflows but missing from the manifest.
 mod unsynced_manifest;
 
 use crate::command::Command;
@@ -19,7 +23,7 @@ use thiserror::Error;
 use unpinned::UnpinnedRule;
 use unsynced_manifest::UnsyncedManifestRule;
 
-/// Errors that can occur during the lint command
+/// Errors that can occur during the lint command.
 #[derive(Debug, Error)]
 pub enum Error {
     /// A workflow parsing or I/O error occurred.
@@ -30,19 +34,19 @@ pub enum Error {
 /// A single diagnostic reported by a lint rule.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Diagnostic {
-    /// Name of the rule that produced this diagnostic
+    /// Name of the rule that produced this diagnostic.
     pub rule: String,
-    /// Severity level
+    /// Severity level.
     pub level: Level,
-    /// Human-readable message
+    /// Human-readable message.
     pub message: String,
-    /// Optional workflow file path where the issue was found
+    /// Optional workflow file path where the issue was found.
     pub workflow: Option<String>,
 }
 
 impl Diagnostic {
     /// Create a new diagnostic.
-    pub fn new(rule: impl Into<String>, level: Level, message: impl Into<String>) -> Self {
+    pub fn new<R: Into<String>, M: Into<String>>(rule: R, level: Level, message: M) -> Self {
         Self {
             rule: rule.into(),
             level,
@@ -53,30 +57,30 @@ impl Diagnostic {
 
     /// Set the workflow field.
     #[must_use]
-    pub fn with_workflow(mut self, workflow: impl Into<String>) -> Self {
+    pub fn with_workflow<W: Into<String>>(mut self, workflow: W) -> Self {
         self.workflow = Some(workflow.into());
         self
     }
 }
 
 /// Context shared by all lint rules during checking.
-pub struct Context<'a> {
-    /// The manifest (gx.toml)
-    pub manifest: &'a Manifest,
-    /// The lock file (gx.lock)
-    pub lock: &'a Lock,
-    /// All located actions from scanned workflows
-    pub workflows: &'a [LocatedAction],
-    /// Aggregated action set from all workflows
-    pub action_set: &'a WorkflowActionSet,
+pub struct Context<'ctx> {
+    /// The manifest (gx.toml).
+    pub manifest: &'ctx Manifest,
+    /// The lock file (gx.lock).
+    pub lock: &'ctx Lock,
+    /// All located actions from scanned workflows.
+    pub workflows: &'ctx [LocatedAction],
+    /// Aggregated action set from all workflows.
+    pub action_set: &'ctx WorkflowActionSet,
 }
 
 /// Trait for a lint rule.
 pub trait Rule {
-    /// Returns the rule's name (e.g., "sha-mismatch")
+    /// Returns the rule's name (e.g., "sha-mismatch").
     fn name(&self) -> &str;
 
-    /// Returns this rule's default severity level
+    /// Returns this rule's default severity level.
     fn default_level(&self) -> Level;
 
     /// Run the lint check and return all detected diagnostics.
@@ -100,12 +104,12 @@ fn matches_ignore(
     let diag_action = located_actions
         .iter()
         .find(|loc| loc.location.workflow == *diag_workflow)
-        .map(|loc| &loc.id);
+        .map(|loc| &loc.action.id);
 
     // Check intersection of specified keys
     if let Some(target_action) = &target.action {
-        if let Some(diag_action) = diag_action {
-            if diag_action.as_str() != target_action.as_str() {
+        if let Some(matched_action) = diag_action {
+            if matched_action.as_str() != target_action.as_str() {
                 return false;
             }
         } else {
@@ -188,7 +192,7 @@ pub fn collect_diagnostics(
             }
         }
 
-        action_set.add_located(&action);
+        action_set.add(&action.action);
         located.push(action);
     }
 
@@ -242,7 +246,7 @@ fn matches_ignore_action(diag: &Diagnostic, target: &IgnoreTarget, action: &Loca
     };
 
     if let Some(target_action) = &target.action
-        && action.id.as_str() != target_action.as_str()
+        && action.action.id.as_str() != target_action.as_str()
     {
         return false;
     }
@@ -304,6 +308,6 @@ mod tests {
     fn diagnostic_with_workflow() {
         let diag = Diagnostic::new("test-rule", Level::Warn, "test")
             .with_workflow(".github/workflows/ci.yml");
-        assert_eq!(diag.workflow, Some(".github/workflows/ci.yml".to_string()));
+        assert_eq!(diag.workflow, Some(".github/workflows/ci.yml".to_owned()));
     }
 }

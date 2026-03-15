@@ -2,6 +2,7 @@ use super::Error as ManifestError;
 use crate::domain::action::identity::ActionId;
 use crate::domain::manifest::overrides::ActionOverride;
 use crate::domain::plan::ManifestDiff;
+use crate::domain::workflow_actions::StepIndex;
 use std::fs;
 use std::path::Path;
 use toml_edit::DocumentMut;
@@ -34,11 +35,12 @@ pub fn apply_manifest_diff(path: &Path, diff: &ManifestDiff) -> Result<(), Manif
 
     // Ensure [actions] table exists
     if doc.get("actions").is_none() {
-        doc["actions"] = toml_edit::Item::Table(toml_edit::Table::new());
+        doc.insert("actions", toml_edit::Item::Table(toml_edit::Table::new()));
     }
-    let actions = doc["actions"]
-        .as_table_mut()
-        .ok_or_else(|| ManifestError::Validation("[actions] is not a table".to_string()))?;
+    let actions = doc
+        .get_mut("actions")
+        .and_then(toml_edit::Item::as_table_mut)
+        .ok_or_else(|| ManifestError::Validation("[actions] is not a table".to_owned()))?;
 
     // Remove actions
     for id in &diff.removed {
@@ -63,7 +65,7 @@ pub fn apply_manifest_diff(path: &Path, diff: &ManifestDiff) -> Result<(), Manif
 
     // Handle override additions
     if !diff.overrides_added.is_empty() {
-        apply_override_additions(actions, &diff.overrides_added);
+        apply_override_additions(actions, &diff.overrides_added)?;
     }
 
     fs::write(path, doc.to_string()).map_err(|source| ManifestError::Write {
@@ -83,7 +85,7 @@ fn override_entry_matches(
 ) -> bool {
     workflow == Some(ovr.workflow.as_str())
         && job == ovr.job.as_deref()
-        && step.map(|s| usize::try_from(s).unwrap_or(usize::MAX)) == ovr.step
+        && step.and_then(|s| StepIndex::try_from(s).ok()) == ovr.step
 }
 
 /// Remove matching overrides from the `[actions.overrides]` table.
@@ -171,7 +173,7 @@ fn collect_override_removal_indices(
 fn apply_override_additions(
     actions: &mut toml_edit::Table,
     additions: &[(ActionId, ActionOverride)],
-) {
+) -> Result<(), ManifestError> {
     // Ensure overrides sub-table exists
     if actions.get("overrides").is_none() {
         actions.insert("overrides", toml_edit::Item::Table(toml_edit::Table::new()));
@@ -180,7 +182,7 @@ fn apply_override_additions(
         .get_mut("overrides")
         .and_then(toml_edit::Item::as_table_mut)
     else {
-        return;
+        return Ok(());
     };
 
     for (id, ovr) in additions {
@@ -188,9 +190,15 @@ fn apply_override_additions(
         if overrides_table.get(ActionId::as_str(id)).is_none() {
             overrides_table.insert(id.as_str(), toml_edit::value(toml_edit::Array::new()));
         }
-        let arr = overrides_table[id.as_str()]
-            .as_array_mut()
-            .expect("override entry is always an array");
+        let arr = overrides_table
+            .get_mut(id.as_str())
+            .and_then(toml_edit::Item::as_array_mut)
+            .ok_or_else(|| {
+                ManifestError::Validation(format!(
+                    "override entry for \"{}\" is not an array",
+                    id.as_str()
+                ))
+            })?;
 
         // Build the inline table for this override entry
         let mut inline = toml_edit::InlineTable::new();
@@ -199,19 +207,22 @@ fn apply_override_additions(
             inline.insert("job", toml_edit::Value::from(job.as_str()));
         }
         if let Some(step) = ovr.step {
-            inline.insert(
-                "step",
-                i64::try_from(step).expect("step index overflow").into(),
-            );
+            inline.insert("step", i64::from(step).into());
         }
         inline.insert("version", ovr.version.as_str().into());
 
         arr.push(inline);
     }
     overrides_table.sort_values();
+    Ok(())
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
 mod tests {
     use super::apply_manifest_diff;
     use crate::domain::action::identity::ActionId;
@@ -219,13 +230,13 @@ mod tests {
     use crate::domain::manifest::overrides::ActionOverride;
     use crate::domain::plan::ManifestDiff;
     use std::fs;
-    use std::io::Write;
+    use std::io::Write as _;
     use tempfile::NamedTempFile;
 
     use crate::infra::manifest::parse;
 
     #[test]
-    fn test_apply_empty_diff_does_not_modify_file() {
+    fn apply_empty_diff_does_not_modify_file() {
         let content = "[actions]\n\"actions/checkout\" = \"v4\"\n";
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(content.as_bytes()).unwrap();
@@ -238,7 +249,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_add_one_action_preserves_existing() {
+    fn apply_add_one_action_preserves_existing() {
         let content = "[actions]\n\"actions/checkout\" = \"^4\"\n";
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(content.as_bytes()).unwrap();
@@ -272,7 +283,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_remove_one_action() {
+    fn apply_remove_one_action() {
         let content = "[actions]\n\"actions/checkout\" = \"v4\"\n\"actions/setup-node\" = \"v3\"\n";
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(content.as_bytes()).unwrap();
@@ -295,7 +306,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_add_override_creates_section_if_missing() {
+    fn apply_add_override_creates_section_if_missing() {
         let content = "[actions]\n\"actions/checkout\" = \"^4\"\n";
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(content.as_bytes()).unwrap();
@@ -304,7 +315,7 @@ mod tests {
             overrides_added: vec![(
                 ActionId::from("actions/checkout"),
                 ActionOverride {
-                    workflow: ".github/workflows/deploy.yml".to_string(),
+                    workflow: ".github/workflows/deploy.yml".to_owned(),
                     job: None,
                     step: None,
                     version: Specifier::parse("^3"),
@@ -325,7 +336,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_add_override_to_existing_section() {
+    fn apply_add_override_to_existing_section() {
         let content = r#"[actions]
 "actions/checkout" = "v4"
 
@@ -341,8 +352,8 @@ mod tests {
             overrides_added: vec![(
                 ActionId::from("actions/checkout"),
                 ActionOverride {
-                    workflow: ".github/workflows/ci.yml".to_string(),
-                    job: Some("legacy".to_string()),
+                    workflow: ".github/workflows/ci.yml".to_owned(),
+                    job: Some("legacy".to_owned()),
                     step: None,
                     version: Specifier::parse("^2"),
                 },
@@ -359,7 +370,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_remove_all_overrides_removes_action_entry() {
+    fn apply_remove_all_overrides_removes_action_entry() {
         let content = r#"[actions]
 "actions/checkout" = "v4"
 
@@ -375,7 +386,7 @@ mod tests {
             overrides_removed: vec![(
                 ActionId::from("actions/checkout"),
                 vec![ActionOverride {
-                    workflow: ".github/workflows/deploy.yml".to_string(),
+                    workflow: ".github/workflows/deploy.yml".to_owned(),
                     job: None,
                     step: None,
                     version: Specifier::parse("^3"),
@@ -395,7 +406,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_remove_last_override_removes_section() {
+    fn apply_remove_last_override_removes_section() {
         let content = r#"[actions]
 "actions/checkout" = "v4"
 
@@ -411,7 +422,7 @@ mod tests {
             overrides_removed: vec![(
                 ActionId::from("actions/checkout"),
                 vec![ActionOverride {
-                    workflow: ".github/workflows/deploy.yml".to_string(),
+                    workflow: ".github/workflows/deploy.yml".to_owned(),
                     job: None,
                     step: None,
                     version: Specifier::parse("^3"),
@@ -429,7 +440,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_roundtrip_domain_state_matches() {
+    fn apply_roundtrip_domain_state_matches() {
         let content = r#"[actions]
 "actions/checkout" = "^4"
 "actions/setup-node" = "^3"
@@ -443,7 +454,7 @@ mod tests {
             overrides_added: vec![(
                 ActionId::from("actions/checkout"),
                 ActionOverride {
-                    workflow: ".github/workflows/windows.yml".to_string(),
+                    workflow: ".github/workflows/windows.yml".to_owned(),
                     job: None,
                     step: None,
                     version: Specifier::parse("^3"),

@@ -2,7 +2,7 @@ use super::Registry as GithubRegistry;
 use super::filter_refs_by_sha;
 use crate::domain::action::identity::Version;
 use crate::domain::action::uses_ref::RefType;
-use crate::domain::resolution::VersionRegistry;
+use crate::domain::resolution::VersionRegistry as _;
 use crate::infra::github::responses::{GitObject, GitRefEntry};
 
 fn make_ref_entry(ref_name: &str, sha: &str) -> GitRefEntry {
@@ -20,7 +20,7 @@ fn make_ref_entry_typed(ref_name: &str, sha: &str, object_type: &str) -> GitRefE
 }
 
 #[test]
-fn test_full_sha_passthrough() {
+fn full_sha_passthrough() {
     let client = GithubRegistry::new(None).unwrap();
     let sha = "a1b2c3d4e5f6789012345678901234567890abcd";
     let (result_sha, result_type) = client.resolve_ref("actions/checkout", sha).unwrap();
@@ -29,7 +29,7 @@ fn test_full_sha_passthrough() {
 }
 
 #[test]
-fn test_subpath_action_extracts_base_repo() {
+fn subpath_action_extracts_base_repo() {
     let client = GithubRegistry::new(None).unwrap();
     let sha = "a1b2c3d4e5f6789012345678901234567890abcd";
     // Should work with subpath actions
@@ -41,7 +41,7 @@ fn test_subpath_action_extracts_base_repo() {
 }
 
 #[test]
-fn test_version_resolver_trait() {
+fn version_resolver_trait() {
     let client = GithubRegistry::new(None).unwrap();
     let id = crate::domain::action::identity::ActionId::from("actions/checkout");
     let sha_version = Version::from("a1b2c3d4e5f6789012345678901234567890abcd");
@@ -55,7 +55,7 @@ fn test_version_resolver_trait() {
 // --- filter_refs_by_sha tests ---
 
 #[test]
-fn test_filter_refs_lightweight_tags_match_commit_sha() {
+fn filter_refs_lightweight_tags_match_commit_sha() {
     let commit_sha = "abc123def456789012345678901234567890abcd";
     let refs = vec![
         make_ref_entry("refs/tags/v4", commit_sha),
@@ -68,7 +68,7 @@ fn test_filter_refs_lightweight_tags_match_commit_sha() {
 }
 
 #[test]
-fn test_filter_refs_no_matches() {
+fn filter_refs_no_matches() {
     let refs = vec![
         make_ref_entry("refs/tags/v4", "aaa0000000000000000000000000000000000000"),
         make_ref_entry("refs/tags/v3", "bbb0000000000000000000000000000000000000"),
@@ -82,7 +82,7 @@ fn test_filter_refs_no_matches() {
 /// `(object_type == "tag")` are handled separately by `get_tags_for_sha`
 /// via dereferencing.
 #[test]
-fn test_filter_refs_skips_annotated_tags() {
+fn filter_refs_skips_annotated_tags() {
     let commit_sha = "abc123def456789012345678901234567890abcd";
     let tag_object_sha = "fedcba9876543210fedcba9876543210fedcba98";
 

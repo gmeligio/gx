@@ -1,4 +1,4 @@
-use super::action::identity::{ActionId, CommitSha, Version};
+use super::action::identity::{ActionId, Version};
 use super::action::uses_ref::InterpretedRef;
 use std::collections::{HashMap, HashSet};
 
@@ -7,9 +7,9 @@ use std::collections::{HashMap, HashSet};
 /// when multiple versions exist for the same action.
 #[derive(Debug, Default)]
 pub struct ActionSet {
-    /// Maps action ID to set of versions found in workflows
+    /// Maps action ID to set of versions found in workflows.
     versions: HashMap<ActionId, HashSet<Version>>,
-    /// Count of how many times each version appears for each action (across all steps)
+    /// Count of how many times each version appears for each action (across all steps).
     counts: HashMap<ActionId, HashMap<Version, usize>>,
 }
 
@@ -19,23 +19,13 @@ impl ActionSet {
         Self::default()
     }
 
-    /// Create a `ActionSet` from a slice of `Located`.
-    /// Builds the `versions` and `counts` maps from the actions (no `shas` field).
+    /// Create an `ActionSet` from a slice of `Located`.
+    /// Builds the `versions` and `counts` maps from the actions.
     #[must_use]
     pub fn from_located(actions: &[Located]) -> Self {
         let mut set = Self::new();
         for action in actions {
-            // Build versions and counts maps from the actions
-            set.versions
-                .entry(action.id.clone())
-                .or_default()
-                .insert(action.version.clone());
-
-            *set.counts
-                .entry(action.id.clone())
-                .or_default()
-                .entry(action.version.clone())
-                .or_insert(0) += 1;
+            set.add(&action.action);
         }
         set
     }
@@ -48,27 +38,13 @@ impl ActionSet {
             .insert(interpreted.version.clone());
 
         // Track occurrence count for dominant_version selection
-        *self
+        let count = self
             .counts
             .entry(interpreted.id.clone())
             .or_default()
             .entry(interpreted.version.clone())
-            .or_insert(0) += 1;
-    }
-
-    /// Add a located action to the set (same logic as `add`, different input type).
-    pub fn add_located(&mut self, action: &Located) {
-        self.versions
-            .entry(action.id.clone())
-            .or_default()
-            .insert(action.version.clone());
-
-        *self
-            .counts
-            .entry(action.id.clone())
-            .or_default()
-            .entry(action.version.clone())
-            .or_insert(0) += 1;
+            .or_insert(0);
+        *count = count.saturating_add(1);
     }
 
     /// Select the dominant version for an action:
@@ -83,7 +59,7 @@ impl ActionSet {
             .filter(|(_, c)| **c == max_count)
             .map(|(v, _)| v.clone())
             .collect();
-        Some(Version::highest(&candidates).unwrap_or_else(|| candidates[0].clone()))
+        Version::highest(&candidates)
     }
 
     /// Returns true if no actions have been added.
@@ -107,29 +83,82 @@ impl ActionSet {
     }
 }
 
+/// A 0-based step index within a workflow job.
+///
+/// Wraps `u16` to make `From<StepIndex> for i64` infallible,
+/// eliminating `expect("step index overflow")` in TOML serialization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct StepIndex(u16);
+
+impl StepIndex {
+    /// Returns the raw `u16` value.
+    #[must_use]
+    pub fn as_u16(self) -> u16 {
+        self.0
+    }
+}
+
+impl From<u16> for StepIndex {
+    fn from(value: u16) -> Self {
+        Self(value)
+    }
+}
+
+impl From<StepIndex> for i64 {
+    fn from(value: StepIndex) -> Self {
+        Self::from(value.0)
+    }
+}
+
+impl TryFrom<i64> for StepIndex {
+    type Error = String;
+
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        let raw = u16::try_from(value)
+            .map_err(|_| format!("invalid step index: {value} (must be 0..=65535)"))?;
+        Ok(Self(raw))
+    }
+}
+
+impl TryFrom<usize> for StepIndex {
+    type Error = String;
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        let raw = u16::try_from(value)
+            .map_err(|_| format!("invalid step index: {value} (must be 0..=65535)"))?;
+        Ok(Self(raw))
+    }
+}
+
+impl std::fmt::Display for StepIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// The precise location of a `uses:` reference within the workflow tree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Location {
-    /// Relative path from repo root, e.g. ".github/workflows/ci.yml"
+    /// Relative path from repo root, e.g. ".github/workflows/ci.yml".
     pub workflow: String,
-    /// Job id, e.g. "build"
+    /// Job id, e.g. "build".
     pub job: Option<String>,
-    /// 0-based step index within the job
-    pub step: Option<usize>,
+    /// 0-based step index within the job.
+    pub step: Option<StepIndex>,
 }
 
 /// A single action reference with its full location context.
 #[derive(Debug, Clone)]
 pub struct Located {
-    pub id: ActionId,
-    pub version: Version,
-    pub sha: Option<CommitSha>,
+    /// The interpreted action reference (id, version, optional SHA).
+    pub action: InterpretedRef,
     pub location: Location,
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ActionId, ActionSet, CommitSha, InterpretedRef, Located, Location, Version};
+    use super::{ActionId, ActionSet, InterpretedRef, Located, Location, StepIndex, Version};
+    use crate::domain::action::identity::CommitSha;
 
     fn make_interpreted(name: &str, version: &str, sha: Option<&str>) -> InterpretedRef {
         InterpretedRef {
@@ -140,7 +169,7 @@ mod tests {
     }
 
     #[test]
-    fn test_most_used_version_two_vs_one() {
+    fn most_used_version_two_vs_one() {
         let mut set = ActionSet::new();
         // Add v3 twice (two different steps)
         set.add(&make_interpreted("actions/checkout", "v3", None));
@@ -154,7 +183,7 @@ mod tests {
     }
 
     #[test]
-    fn test_dominant_version_tiebreak_highest_semver() {
+    fn dominant_version_tiebreak_highest_semver() {
         let mut set = ActionSet::new();
         // Both versions appear once — tiebreak by highest semver
         set.add(&make_interpreted("actions/checkout", "v3", None));
@@ -165,39 +194,41 @@ mod tests {
     }
 
     #[test]
-    fn test_workflow_location_equality() {
+    fn workflow_location_equality() {
         let loc1 = Location {
-            workflow: ".github/workflows/ci.yml".to_string(),
-            job: Some("build".to_string()),
-            step: Some(0),
+            workflow: ".github/workflows/ci.yml".to_owned(),
+            job: Some("build".to_owned()),
+            step: Some(StepIndex::from(0_u16)),
         };
         let loc2 = Location {
-            workflow: ".github/workflows/ci.yml".to_string(),
-            job: Some("build".to_string()),
-            step: Some(0),
+            workflow: ".github/workflows/ci.yml".to_owned(),
+            job: Some("build".to_owned()),
+            step: Some(StepIndex::from(0_u16)),
         };
         assert_eq!(loc1, loc2);
     }
 
     #[test]
-    fn test_located_action_stores_location() {
+    fn located_action_stores_location() {
         let loc = Location {
-            workflow: ".github/workflows/ci.yml".to_string(),
-            job: Some("build".to_string()),
-            step: Some(0),
+            workflow: ".github/workflows/ci.yml".to_owned(),
+            job: Some("build".to_owned()),
+            step: Some(StepIndex::from(0_u16)),
         };
         let action = Located {
-            id: ActionId::from("actions/checkout"),
-            version: Version::from("v4"),
-            sha: None,
+            action: InterpretedRef {
+                id: ActionId::from("actions/checkout"),
+                version: Version::from("v4"),
+                sha: None,
+            },
             location: loc.clone(),
         };
         assert_eq!(action.location, loc);
-        assert_eq!(action.id.as_str(), "actions/checkout");
+        assert_eq!(action.action.id.as_str(), "actions/checkout");
     }
 
     #[test]
-    fn test_add_single_version() {
+    fn add_single_version() {
         let mut set = ActionSet::new();
         set.add(&make_interpreted("actions/checkout", "v4", None));
 
@@ -209,7 +240,7 @@ mod tests {
     }
 
     #[test]
-    fn test_add_multiple_versions() {
+    fn add_multiple_versions() {
         let mut set = ActionSet::new();
         set.add(&make_interpreted("actions/checkout", "v4", None));
         set.add(&make_interpreted("actions/checkout", "v3", None));
@@ -223,7 +254,7 @@ mod tests {
     }
 
     #[test]
-    fn test_add_duplicate_version() {
+    fn add_duplicate_version() {
         let mut set = ActionSet::new();
         set.add(&make_interpreted("actions/checkout", "v4", None));
         set.add(&make_interpreted("actions/checkout", "v4", None));
@@ -236,7 +267,7 @@ mod tests {
     }
 
     #[test]
-    fn test_action_ids() {
+    fn action_ids() {
         let mut set = ActionSet::new();
         set.add(&make_interpreted("actions/checkout", "v4", None));
         set.add(&make_interpreted("actions/setup-node", "v3", None));
@@ -248,7 +279,7 @@ mod tests {
     }
 
     #[test]
-    fn test_versions_for_unknown_action() {
+    fn versions_for_unknown_action() {
         let set = ActionSet::new();
         assert_eq!(
             set.versions_for(&ActionId::from("unknown/action")).count(),

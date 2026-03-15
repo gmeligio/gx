@@ -1,6 +1,6 @@
 use crate::domain::lock::Lock;
 use crate::domain::manifest::Manifest;
-use crate::infra::lock::{Error as LockFileError, LOCK_FILE_NAME};
+use crate::infra::lock::{Error as LockFileError, LOCK_FILE_NAME, Store as LockStore};
 use crate::infra::manifest::{Error as ManifestError, MANIFEST_FILE_NAME, parse_lint_config};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -23,7 +23,7 @@ pub enum Error {
 /// Runtime settings loaded from environment variables.
 #[derive(Debug, Clone, Default)]
 pub struct Settings {
-    /// Github API token for authenticated requests
+    /// Github API token for authenticated requests.
     pub github_token: Option<String>,
 }
 
@@ -31,11 +31,11 @@ pub struct Settings {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Level {
-    /// Rule violation is an error
+    /// Rule violation is an error.
     Error,
-    /// Rule violation is a warning
+    /// Rule violation is a warning.
     Warn,
-    /// Rule is disabled
+    /// Rule is disabled.
     Off,
 }
 
@@ -43,20 +43,20 @@ pub enum Level {
 /// All specified keys must match for the ignore to apply (intersection semantics).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct IgnoreTarget {
-    /// Action ID (e.g., "actions/checkout")
+    /// Action ID (e.g., "actions/checkout").
     pub action: Option<String>,
-    /// Workflow file path (e.g., ".github/workflows/ci.yml")
+    /// Workflow file path (e.g., ".github/workflows/ci.yml").
     pub workflow: Option<String>,
-    /// Job name within a workflow
+    /// Job name within a workflow.
     pub job: Option<String>,
 }
 
 /// Configuration for a single lint rule.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Rule {
-    /// Severity level (error, warn, off)
+    /// Severity level (error, warn, off).
     pub level: Level,
-    /// Targets to ignore (intersection semantics)
+    /// Targets to ignore (intersection semantics).
     #[serde(default)]
     pub ignore: Vec<IgnoreTarget>,
 }
@@ -64,7 +64,7 @@ pub struct Rule {
 /// Configuration for all lint rules.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Lint {
-    /// Per-rule configuration, keyed by rule name
+    /// Per-rule configuration, keyed by rule name.
     #[serde(default)]
     pub rules: BTreeMap<String, Rule>,
 }
@@ -92,8 +92,6 @@ pub struct Config {
     pub lock_path: PathBuf,
     /// Whether the manifest was auto-migrated from v1 format on load.
     pub manifest_migrated: bool,
-    /// Whether the lock file was auto-migrated from an older format on load.
-    pub lock_migrated: bool,
 }
 
 impl Settings {
@@ -118,13 +116,13 @@ impl Config {
         let manifest_path = repo_root.join(".github").join(MANIFEST_FILE_NAME);
         let lock_path = repo_root.join(".github").join(LOCK_FILE_NAME);
         let parsed_manifest = crate::infra::manifest::parse(&manifest_path)?;
-        let parsed_lock = crate::infra::lock::parse(&lock_path)?;
+        let lock_store = LockStore::new(&lock_path);
+        let lock = lock_store.load()?;
         Ok(Self {
             settings: Settings::from_env(),
             manifest: parsed_manifest.value,
             manifest_migrated: parsed_manifest.migrated,
-            lock: parsed_lock.value,
-            lock_migrated: parsed_lock.migrated,
+            lock,
             lint_config: parse_lint_config(&manifest_path)?,
             manifest_path,
             lock_path,
@@ -133,6 +131,11 @@ impl Config {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
 mod tests {
     use super::{
         Config, Deserialize, IgnoreTarget, Level, Lint, Lock, Manifest, PathBuf, Rule, Settings,
@@ -161,9 +164,8 @@ mod tests {
             manifest_path: PathBuf::from("gx.toml"),
             lock_path: PathBuf::from("gx.lock"),
             manifest_migrated: false,
-            lock_migrated: false,
         };
-        assert_eq!(config.settings.github_token, Some("test_token".to_string()));
+        assert_eq!(config.settings.github_token, Some("test_token".to_owned()));
     }
 
     #[test]
@@ -227,13 +229,10 @@ mod tests {
         let config: Rule = toml::from_str(toml_str).unwrap();
         assert_eq!(config.level, Level::Warn);
         assert_eq!(config.ignore.len(), 2);
-        assert_eq!(
-            config.ignore[0].action,
-            Some("actions/checkout".to_string())
-        );
+        assert_eq!(config.ignore[0].action, Some("actions/checkout".to_owned()));
         assert_eq!(
             config.ignore[1].workflow,
-            Some(".github/workflows/ci.yml".to_string())
+            Some(".github/workflows/ci.yml".to_owned())
         );
     }
 
@@ -245,12 +244,9 @@ workflow = ".github/workflows/ci.yml"
 job = "build"
         "#;
         let target: IgnoreTarget = toml::from_str(toml_str).unwrap();
-        assert_eq!(target.action, Some("actions/checkout".to_string()));
-        assert_eq!(
-            target.workflow,
-            Some(".github/workflows/ci.yml".to_string())
-        );
-        assert_eq!(target.job, Some("build".to_string()));
+        assert_eq!(target.action, Some("actions/checkout".to_owned()));
+        assert_eq!(target.workflow, Some(".github/workflows/ci.yml".to_owned()));
+        assert_eq!(target.job, Some("build".to_owned()));
     }
 
     #[test]
@@ -287,11 +283,11 @@ job = "build"
     fn lint_config_get_rule_returns_configured_value() {
         let mut config = Lint::default();
         config.rules.insert(
-            "unpinned".to_string(),
+            "unpinned".to_owned(),
             Rule {
                 level: Level::Warn,
                 ignore: vec![IgnoreTarget {
-                    action: Some("actions/checkout".to_string()),
+                    action: Some("actions/checkout".to_owned()),
                     workflow: None,
                     job: None,
                 }],
@@ -306,7 +302,7 @@ job = "build"
     fn lint_config_get_rule_respects_off_level() {
         let mut config = Lint::default();
         config.rules.insert(
-            "stale-comment".to_string(),
+            "stale-comment".to_owned(),
             Rule {
                 level: Level::Off,
                 ignore: vec![],

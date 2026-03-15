@@ -1,5 +1,6 @@
 use crate::domain::action::identity::{ActionId, Version};
 use crate::domain::action::upgrade::Candidate as UpgradeCandidate;
+use crate::domain::lock::Lock;
 use crate::domain::plan::{LockDiff, ManifestDiff, WorkflowPatch};
 use crate::domain::resolution::Error as ResolutionError;
 use crate::domain::workflow::Error as WorkflowError;
@@ -9,7 +10,10 @@ use thiserror::Error;
 #[derive(Debug)]
 pub struct Plan {
     pub manifest: ManifestDiff,
-    pub lock: LockDiff,
+    /// The final lock state — written by `Store::save()`.
+    pub lock: Lock,
+    /// The diff between the original and planned lock — for reporting only.
+    pub lock_changes: LockDiff,
     pub workflows: Vec<WorkflowPatch>,
     pub upgrades: Vec<UpgradeCandidate>,
 }
@@ -17,11 +21,11 @@ pub struct Plan {
 impl Plan {
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.manifest.is_empty() && self.lock.is_empty() && self.workflows.is_empty()
+        self.manifest.is_empty() && self.lock_changes.is_empty() && self.workflows.is_empty()
     }
 }
 
-/// Which actions to upgrade: all or a single action.
+/// Which actions to upgrade: all, a single action, or a pinned action+version.
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub enum Scope {
@@ -29,6 +33,8 @@ pub enum Scope {
     All,
     /// Upgrade a single action by ID.
     Single(ActionId),
+    /// Pin a specific action to an exact version.
+    Pinned(ActionId, Version),
 }
 
 /// How the upgrade command should find new versions.
@@ -39,8 +45,6 @@ pub enum Mode {
     Safe,
     /// Upgrade to the absolute latest version, including major versions.
     Latest,
-    /// Upgrade to a specific version (only valid with Single scope).
-    Pinned(Version),
 }
 
 /// A request to upgrade actions with a specific mode and scope.
@@ -51,26 +55,16 @@ pub struct Request {
 }
 
 impl Request {
-    /// Create a new upgrade request, validating that Pinned mode requires Single scope.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::PinnedRequiresSingleScope`] if `mode` is `Pinned` and `scope` is `All`.
-    pub fn new(mode: Mode, scope: Scope) -> Result<Self, Error> {
-        if matches!((&mode, &scope), (Mode::Pinned(_), Scope::All)) {
-            return Err(Error::PinnedRequiresSingleScope);
-        }
-        Ok(Self { mode, scope })
+    /// Create a new upgrade request.
+    #[must_use]
+    pub fn new(mode: Mode, scope: Scope) -> Self {
+        Self { mode, scope }
     }
 }
 
-/// Errors that can occur during the upgrade command
+/// Errors that can occur during the upgrade command.
 #[derive(Debug, Error)]
 pub enum Error {
-    /// Pinned mode was used without specifying a single action target.
-    #[error("pinned mode requires a single action target (e.g., actions/checkout@v5)")]
-    PinnedRequiresSingleScope,
-
     /// The specified action was not found in the manifest.
     #[error("{0} not found in manifest")]
     ActionNotInManifest(ActionId),
@@ -97,20 +91,18 @@ mod tests {
     use super::{ActionId, Mode, Request, Scope, Version};
 
     #[test]
-    fn new_should_reject_pinned_with_all_scope() {
-        let err = Request::new(Mode::Pinned(Version::from("v5")), Scope::All).unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "pinned mode requires a single action target (e.g., actions/checkout@v5)"
+    fn new_should_accept_pinned_scope() {
+        let req = Request::new(
+            Mode::Safe,
+            Scope::Pinned(ActionId::from("actions/checkout"), Version::from("v5")),
         );
+        assert!(matches!(req.scope, Scope::Pinned(_, _)));
     }
 
     #[test]
-    fn new_should_accept_pinned_with_single_scope() {
-        let result = Request::new(
-            Mode::Pinned(Version::from("v5")),
-            Scope::Single(ActionId::from("actions/checkout")),
-        );
-        assert!(result.is_ok());
+    fn new_should_accept_safe_all() {
+        let req = Request::new(Mode::Safe, Scope::All);
+        assert!(matches!(req.mode, Mode::Safe));
+        assert!(matches!(req.scope, Scope::All));
     }
 }

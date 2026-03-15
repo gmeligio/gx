@@ -1,7 +1,7 @@
 pub mod overrides;
 
 use super::action::identity::ActionId;
-use super::action::spec::{LockKey, Spec};
+use super::action::spec::Spec;
 use super::action::specifier::Specifier;
 use super::plan::ManifestDiff;
 use super::workflow_actions::{ActionSet, Located, Location};
@@ -12,7 +12,9 @@ use std::collections::{HashMap, HashSet};
 /// No I/O — persistence is handled by infrastructure's file-backed save methods.
 #[derive(Debug, Default, Clone)]
 pub struct Manifest {
+    /// Global action-to-spec mappings.
     actions: HashMap<ActionId, Spec>,
+    /// Per-action override entries scoped to specific workflows, jobs, or steps.
     overrides: HashMap<ActionId, Vec<ActionOverride>>,
 }
 
@@ -132,10 +134,10 @@ impl Manifest {
 
     /// Compute all lock keys needed: one per (action, version) pair across globals and overrides.
     #[must_use]
-    pub fn lock_keys(&self) -> Vec<LockKey> {
-        let seen: HashSet<LockKey> = self
+    pub fn lock_keys(&self) -> Vec<Spec> {
+        let seen: HashSet<Spec> = self
             .specs()
-            .map(LockKey::from)
+            .cloned()
             .chain(
                 self.all_overrides()
                     .iter()
@@ -208,20 +210,24 @@ impl Manifest {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::indexing_slicing,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
 mod tests {
     use super::{ActionId, ActionOverride, Manifest, Specifier};
-    use crate::domain::workflow_actions::Location;
+    use crate::domain::workflow_actions::{Location, StepIndex};
 
-    fn make_loc(workflow: &str, job: Option<&str>, step: Option<usize>) -> Location {
+    fn make_loc(workflow: &str, job: Option<&str>, step: Option<u16>) -> Location {
         Location {
-            workflow: workflow.to_string(),
+            workflow: workflow.to_owned(),
             job: job.map(str::to_string),
-            step,
+            step: step.map(StepIndex::from),
         }
     }
 
     #[test]
-    fn test_set_and_get() {
+    fn set_and_get() {
         let mut m = Manifest::default();
         m.set(ActionId::from("actions/checkout"), Specifier::parse("^4"));
         assert_eq!(
@@ -231,7 +237,7 @@ mod tests {
     }
 
     #[test]
-    fn test_has_and_remove() {
+    fn has_and_remove() {
         let mut m = Manifest::default();
         m.set(ActionId::from("actions/checkout"), Specifier::parse("^4"));
         assert!(m.has(&ActionId::from("actions/checkout")));
@@ -240,13 +246,13 @@ mod tests {
     }
 
     #[test]
-    fn test_remove_also_clears_overrides() {
+    fn remove_also_clears_overrides() {
         let mut m = Manifest::default();
         m.set(ActionId::from("actions/checkout"), Specifier::parse("^4"));
         m.add_override(
             ActionId::from("actions/checkout"),
             ActionOverride {
-                workflow: ".github/workflows/ci.yml".to_string(),
+                workflow: ".github/workflows/ci.yml".to_owned(),
                 job: None,
                 step: None,
                 version: Specifier::parse("^3"),
@@ -260,7 +266,7 @@ mod tests {
     }
 
     #[test]
-    fn test_is_empty() {
+    fn is_empty() {
         let mut m = Manifest::default();
         assert!(m.is_empty());
         m.set(ActionId::from("actions/checkout"), Specifier::parse("^4"));
@@ -268,7 +274,7 @@ mod tests {
     }
 
     #[test]
-    fn test_specs() {
+    fn specs() {
         let mut m = Manifest::default();
         m.set(ActionId::from("actions/checkout"), Specifier::parse("^4"));
         m.set(ActionId::from("actions/setup-node"), Specifier::parse("^3"));
@@ -276,7 +282,7 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_version_returns_global_when_no_override() {
+    fn resolve_version_returns_global_when_no_override() {
         let mut m = Manifest::default();
         m.set(ActionId::from("actions/checkout"), Specifier::parse("^4"));
         let loc = make_loc(".github/workflows/ci.yml", Some("build"), Some(0));
@@ -287,7 +293,7 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_version_returns_none_when_not_in_manifest() {
+    fn resolve_version_returns_none_when_not_in_manifest() {
         let m = Manifest::default();
         assert_eq!(
             m.resolve_version(
@@ -367,7 +373,7 @@ mod tests {
         after.add_override(
             ActionId::from("actions/checkout"),
             ActionOverride {
-                workflow: ".github/workflows/ci.yml".to_string(),
+                workflow: ".github/workflows/ci.yml".to_owned(),
                 job: None,
                 step: None,
                 version: Specifier::parse("^3"),
@@ -386,7 +392,7 @@ mod tests {
         before.add_override(
             ActionId::from("actions/checkout"),
             ActionOverride {
-                workflow: ".github/workflows/ci.yml".to_string(),
+                workflow: ".github/workflows/ci.yml".to_owned(),
                 job: None,
                 step: None,
                 version: Specifier::parse("^3"),
@@ -419,7 +425,7 @@ mod tests {
         m.add_override(
             ActionId::from("actions/checkout"),
             ActionOverride {
-                workflow: ".github/workflows/windows.yml".to_string(),
+                workflow: ".github/workflows/windows.yml".to_owned(),
                 job: None,
                 step: None,
                 version: Specifier::parse("^3"),
@@ -437,7 +443,7 @@ mod tests {
         m.add_override(
             ActionId::from("actions/checkout"),
             ActionOverride {
-                workflow: ".github/workflows/ci.yml".to_string(),
+                workflow: ".github/workflows/ci.yml".to_owned(),
                 job: None,
                 step: None,
                 version: Specifier::parse("^3"),
@@ -446,7 +452,7 @@ mod tests {
         m.add_override(
             ActionId::from("actions/checkout"),
             ActionOverride {
-                workflow: ".github/workflows/deploy.yml".to_string(),
+                workflow: ".github/workflows/deploy.yml".to_owned(),
                 job: None,
                 step: None,
                 version: Specifier::parse("^3"),

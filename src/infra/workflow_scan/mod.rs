@@ -1,5 +1,6 @@
 use crate::domain::action::uses_ref::UsesRef;
 use crate::domain::workflow::Error as WorkflowError;
+use crate::domain::workflow_actions::StepIndex;
 use glob::glob;
 use regex::Regex;
 use serde::Deserialize;
@@ -8,24 +9,32 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-/// Internal I/O errors for workflow operations
+/// Internal I/O errors for workflow operations.
 #[derive(Debug, Error)]
 enum IoWorkflowError {
+    /// A glob pattern could not be compiled.
     #[error("glob pattern error")]
     Glob(#[from] glob::PatternError),
 
+    /// A workflow file could not be read from disk.
     #[error("read error: {}", path.display())]
     Read {
+        /// The file path that could not be read.
         path: PathBuf,
+        /// The underlying I/O error.
         source: std::io::Error,
     },
 
+    /// A workflow file could not be parsed as YAML.
     #[error("YAML parse error: {}", path.display())]
     Parse {
+        /// The file path that could not be parsed.
         path: PathBuf,
+        /// The underlying YAML parse error.
         source: Box<serde_saphyr::Error>,
     },
 
+    /// A regex pattern could not be compiled.
     #[error("regex error")]
     Regex(#[from] regex::Error),
 }
@@ -55,25 +64,32 @@ impl From<IoWorkflowError> for WorkflowError {
 /// Call `uses_ref.interpret()` to get domain types.
 #[derive(Debug, Clone)]
 struct ExtractedAction {
+    /// The parsed `uses:` reference from the workflow step.
     uses_ref: UsesRef,
+    /// The workflow/job/step location where this action was found.
     location: crate::domain::workflow_actions::Location,
 }
 
-/// Minimal workflow structure for YAML parsing
+/// Minimal workflow structure for YAML parsing.
 #[derive(Debug, Deserialize)]
 struct Workflow {
+    /// Map of job IDs to their definitions.
     #[serde(default)]
     jobs: HashMap<String, Job>,
 }
 
+/// A single job within a workflow.
 #[derive(Debug, Deserialize)]
 struct Job {
+    /// Ordered list of steps in this job.
     #[serde(default)]
     steps: Vec<Step>,
 }
 
+/// A single step within a job.
 #[derive(Debug, Deserialize)]
 struct Step {
+    /// The `uses:` field referencing an action (e.g. "actions/checkout@v4").
     uses: Option<String>,
 }
 
@@ -102,9 +118,11 @@ fn find_workflow_files(workflows_dir: &Path) -> Result<Vec<PathBuf>, IoWorkflowE
     Ok(workflows)
 }
 
-/// Parser for extracting action information from workflow files
+/// Parser for extracting action information from workflow files.
 pub struct FileScanner {
+    /// Root directory of the repository.
     repo_root: PathBuf,
+    /// Path to the `.github/workflows` directory.
     workflows_dir: PathBuf,
 }
 
@@ -161,7 +179,7 @@ impl FileScanner {
 
         for line in content.lines() {
             if let Some(cap) = uses_with_comment_re.captures(line) {
-                let uses_part = cap[1].trim().to_string();
+                let uses_part = cap[1].trim().to_owned();
                 let comment = cap[2].to_string();
                 comments.insert(uses_part, comment);
             }
@@ -196,9 +214,9 @@ impl FileScanner {
                     actions.push(ExtractedAction {
                         uses_ref: UsesRef::new(action_name, uses_ref, comment),
                         location: crate::domain::workflow_actions::Location {
-                            workflow: workflow_rel_path.to_string(),
+                            workflow: workflow_rel_path.to_owned(),
                             job: Some(job_id.clone()),
-                            step: Some(step_idx),
+                            step: StepIndex::try_from(step_idx).ok(),
                         },
                     });
                 }
@@ -235,14 +253,9 @@ impl FileScanner {
             Self::extract_actions(workflow_path, workflow_rel_path).map_err(WorkflowError::from)?;
         Ok(actions
             .into_iter()
-            .map(|action| {
-                let interpreted = action.uses_ref.interpret();
-                crate::domain::workflow_actions::Located {
-                    id: interpreted.id,
-                    version: interpreted.version,
-                    sha: interpreted.sha,
-                    location: action.location,
-                }
+            .map(|action| crate::domain::workflow_actions::Located {
+                action: action.uses_ref.interpret(),
+                location: action.location,
             })
             .collect())
     }
@@ -254,6 +267,10 @@ impl crate::domain::workflow::Scanner for FileScanner {
     ) -> Box<
         dyn Iterator<Item = Result<crate::domain::workflow_actions::Located, WorkflowError>> + '_,
     > {
+        type LocatedIter = Box<
+            dyn Iterator<Item = Result<crate::domain::workflow_actions::Located, WorkflowError>>,
+        >;
+
         let workflows = match self.find_workflows() {
             Ok(w) => w,
             Err(e) => return Box::new(std::iter::once(Err(e))),
@@ -262,12 +279,10 @@ impl crate::domain::workflow::Scanner for FileScanner {
         Box::new(workflows.into_iter().flat_map(move |workflow_path| {
             let rel = self.rel_path(&workflow_path);
             match Self::located_from_file(&workflow_path, &rel) {
-                Ok(actions) => Box::new(actions.into_iter().map(Ok))
-                    as Box<
-                        dyn Iterator<
-                            Item = Result<crate::domain::workflow_actions::Located, WorkflowError>,
-                        >,
-                    >,
+                Ok(actions) => {
+                    let iter: LocatedIter = Box::new(actions.into_iter().map(Ok));
+                    iter
+                }
                 Err(e) => Box::new(std::iter::once(Err(e))),
             }
         }))
@@ -282,5 +297,9 @@ impl crate::domain::workflow::Scanner for FileScanner {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::unwrap_used,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
 #[path = "tests.rs"]
 mod tests;

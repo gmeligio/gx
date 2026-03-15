@@ -1,123 +1,235 @@
-pub mod entry;
+pub mod resolution;
 
-use super::action::identity::ActionId;
-use super::action::resolved::Resolved;
-use super::action::spec::LockKey;
+use super::action::identity::{ActionId, Version};
+use super::action::resolved::{Commit, Resolved};
+use super::action::spec::Spec;
+use super::action::specifier::Specifier;
 use super::plan::LockDiff;
-use entry::Entry;
+use resolution::Resolution;
 use std::collections::{HashMap, HashSet};
 
-/// Domain entity representing the resolved lock state: maps action@version → lock entry.
+/// Key for the actions tier: (`ActionId`, resolved `Version`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ActionKey {
+    pub id: ActionId,
+    pub version: Version,
+}
+
+/// Domain entity representing the resolved lock state with two tiers:
+/// - `resolutions`: maps `Spec` → `Resolution` (resolved version + comment)
+/// - `actions`: maps `ActionKey` → `Commit` (SHA + metadata)
+///
 /// Contains all domain logic for querying and mutating the lock. No I/O.
 #[derive(Debug, Default, Clone)]
 pub struct Lock {
-    pub(crate) actions: HashMap<LockKey, Entry>,
+    /// Tier 1: specifier → resolved version + comment.
+    pub resolutions: HashMap<Spec, Resolution>,
+    /// Tier 2: (action, version) → commit metadata.
+    pub actions: HashMap<ActionKey, Commit>,
 }
 
 impl Lock {
-    /// Create a `Lock` from an existing map of keys to entries.
+    /// Create a `Lock` from two-tier maps.
     #[must_use]
-    pub fn new(actions: HashMap<LockKey, Entry>) -> Self {
-        Self { actions }
+    pub fn new(
+        resolutions: HashMap<Spec, Resolution>,
+        actions: HashMap<ActionKey, Commit>,
+    ) -> Self {
+        Self {
+            resolutions,
+            actions,
+        }
     }
 
-    /// Get the locked entry for a lock key.
+    /// Two-step lookup: spec → resolution → commit.
+    /// Returns both the resolution and the commit metadata.
     #[must_use]
-    pub fn get(&self, key: &LockKey) -> Option<&Entry> {
-        self.actions.get(key)
+    pub fn get(&self, spec: &Spec) -> Option<(&Resolution, &Commit)> {
+        let resolution = self.resolutions.get(spec)?;
+        let key = ActionKey {
+            id: spec.id.clone(),
+            version: resolution.version.clone(),
+        };
+        let commit = self.actions.get(&key)?;
+        Some((resolution, commit))
     }
 
-    /// Set or update a locked action with its resolved metadata.
-    pub fn set(&mut self, resolved: &Resolved) {
-        let key = LockKey::from(resolved);
-        let comment = resolved.version.to_comment().to_string();
-        let entry = Entry::with_version_and_comment(
-            resolved.sha.clone(),
-            None,
-            comment,
-            resolved.repository.clone(),
-            resolved.ref_type.clone(),
-            resolved.date.clone(),
+    /// Set or update both tiers for a spec.
+    pub fn set(&mut self, spec: &Spec, version: Version, commit: Commit, comment: String) {
+        self.resolutions.insert(
+            spec.clone(),
+            Resolution {
+                version: version.clone(),
+                comment,
+            },
         );
-        self.actions.insert(key, entry);
+        let action_key = ActionKey {
+            id: spec.id.clone(),
+            version,
+        };
+        self.actions.insert(action_key, commit);
     }
 
-    /// Set the version field for a lock entry.
-    pub fn set_version(&mut self, key: &LockKey, version: Option<String>) {
-        if let Some(entry) = self.actions.get_mut(key) {
-            entry.set_version(version);
-        }
+    /// Set from a `Resolved` action (convenience for callers that have a Resolved).
+    pub fn set_resolved(&mut self, resolved: Resolved) {
+        let spec = Spec::new(resolved.id.clone(), resolved.version.clone());
+        let comment = resolved.version.to_comment().to_owned();
+        // Version initially set to the specifier's comment (e.g., "v4") — will be refined later
+        let version = Version::from(comment.as_str());
+        self.set(&spec, version, resolved.commit, comment);
     }
 
-    /// Set the comment field for a lock entry.
-    pub fn set_comment(&mut self, key: &LockKey, comment: String) {
-        if let Some(entry) = self.actions.get_mut(key) {
-            entry.set_comment(comment);
-        }
-    }
-
-    /// Check if the lock has an entry for the given key.
+    /// Check if the lock has a resolution for the given spec.
     #[must_use]
-    pub fn has(&self, key: &LockKey) -> bool {
-        self.actions.contains_key(key)
+    pub fn has(&self, key: &Spec) -> bool {
+        self.resolutions.contains_key(key)
     }
 
-    /// Retain only entries for the given keys, removing all others.
-    pub fn retain(&mut self, keys: &[LockKey]) {
-        let keep: HashSet<&LockKey> = keys.iter().collect();
-        self.actions.retain(|k, _| keep.contains(k));
+    /// Check if a spec is complete across both tiers.
+    #[must_use]
+    pub fn is_complete(&self, spec: &Spec) -> bool {
+        let Some(resolution) = self.resolutions.get(spec) else {
+            return false;
+        };
+        if resolution.version.as_str().is_empty() {
+            return false;
+        }
+        // For semver ranges, comment must match the specifier's expected comment
+        let comment_ok = match &spec.version {
+            Specifier::Range { .. } => resolution.comment == spec.version.to_comment(),
+            Specifier::Ref(_) | Specifier::Sha(_) => true,
+        };
+        if !comment_ok {
+            return false;
+        }
+        let key = ActionKey {
+            id: spec.id.clone(),
+            version: resolution.version.clone(),
+        };
+        let Some(commit) = self.actions.get(&key) else {
+            return false;
+        };
+        !commit.sha.as_str().is_empty()
+            && !commit.repository.is_empty()
+            && commit.ref_type.is_some()
+            && !commit.date.is_empty()
+    }
+
+    /// Set the version for a spec's resolution and update the action key.
+    pub fn set_version(&mut self, spec: &Spec, version: Option<String>) {
+        if let Some(resolution) = self.resolutions.get_mut(spec)
+            && let Some(v) = version
+        {
+            let old_key = ActionKey {
+                id: spec.id.clone(),
+                version: resolution.version.clone(),
+            };
+            let new_version = Version::from(v.as_str());
+            // Move the commit entry to the new key if version changed
+            if resolution.version != new_version
+                && let Some(commit) = self.actions.remove(&old_key)
+            {
+                let new_key = ActionKey {
+                    id: spec.id.clone(),
+                    version: new_version.clone(),
+                };
+                self.actions.insert(new_key, commit);
+            }
+            resolution.version = new_version;
+        }
+    }
+
+    /// Set the comment for a spec's resolution.
+    pub fn set_comment(&mut self, spec: &Spec, comment: String) {
+        if let Some(resolution) = self.resolutions.get_mut(spec) {
+            resolution.comment = comment;
+        }
+    }
+
+    /// Retain only resolutions for the given specs, removing all others.
+    /// Does NOT prune orphaned action entries — use `cleanup_orphans()` for that.
+    pub fn retain(&mut self, keys: &[Spec]) {
+        let keep: HashSet<&Spec> = keys.iter().collect();
+        self.resolutions.retain(|k, _| keep.contains(k));
+    }
+
+    /// Prune action entries that are not referenced by any resolution.
+    pub fn cleanup_orphans(&mut self) {
+        let referenced: HashSet<ActionKey> = self
+            .resolutions
+            .iter()
+            .map(|(spec, res)| ActionKey {
+                id: spec.id.clone(),
+                version: res.version.clone(),
+            })
+            .collect();
+        self.actions.retain(|k, _| referenced.contains(k));
     }
 
     /// Build a map of action IDs to "SHA # comment" strings for workflow updates.
-    /// Falls back to the key version string if no SHA is found.
+    /// Falls back to the key version string if no resolution/commit is found.
     #[must_use]
-    pub fn build_update_map(&self, keys: &[LockKey]) -> HashMap<ActionId, String> {
+    pub fn build_update_map(&self, keys: &[Spec]) -> HashMap<ActionId, String> {
         keys.iter()
-            .map(|key| {
-                let value = if let Some(entry) = self.get(key) {
-                    format!("{} # {}", entry.sha, entry.comment)
+            .map(|spec| {
+                if let Some((res, commit)) = self.get(spec) {
+                    (spec.id.clone(), format!("{} # {}", commit.sha, res.comment))
                 } else {
-                    key.version.to_string()
-                };
-                (key.id.clone(), value)
+                    (spec.id.clone(), spec.version.to_string())
+                }
             })
             .collect()
     }
 
-    /// Iterate over all (key, entry) entries.
-    pub fn entries(&self) -> impl Iterator<Item = (&LockKey, &Entry)> {
+    /// Iterate over resolutions.
+    pub fn resolution_entries(&self) -> impl Iterator<Item = (&Spec, &Resolution)> {
+        self.resolutions.iter()
+    }
+
+    /// Iterate over action entries.
+    pub fn action_entries(&self) -> impl Iterator<Item = (&ActionKey, &Commit)> {
         self.actions.iter()
     }
 
-    /// Check if the lock is empty.
+    /// Check if the lock is empty (no resolutions).
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.actions.is_empty()
+        self.resolutions.is_empty()
     }
 
     /// Compute the diff between this lock (`before`) and `other` (`after`).
     ///
-    /// Entries with the same key but different SHAs are treated as replacements
-    /// (they appear in both `removed` and `added`).
+    /// Operates on the resolutions tier. Entries with the same key but different
+    /// SHAs are treated as replacements (they appear in both `removed` and `added`).
     #[must_use]
     pub fn diff(&self, other: &Lock) -> LockDiff {
-        let before_keys: HashSet<LockKey> = self.entries().map(|(k, _)| k.clone()).collect();
-        let after_keys: HashSet<LockKey> = other.entries().map(|(k, _)| k.clone()).collect();
+        let before_keys: HashSet<&Spec> = self.resolutions.keys().collect();
+        let after_keys: HashSet<&Spec> = other.resolutions.keys().collect();
 
-        let mut added: Vec<(LockKey, Entry)> = after_keys
-            .difference(&before_keys)
-            .filter_map(|k| other.get(k).map(|e| (k.clone(), e.clone())))
-            .collect();
+        let mut added: Vec<(Spec, Resolution, Commit)> = Vec::new();
+        let mut removed: Vec<Spec> = Vec::new();
 
-        let mut removed: Vec<LockKey> = before_keys.difference(&after_keys).cloned().collect();
+        // New specs
+        for &spec in after_keys.difference(&before_keys) {
+            if let Some((res, commit)) = other.get(spec) {
+                added.push((spec.clone(), res.clone(), commit.clone()));
+            }
+        }
 
-        // Detect changed entries (same key, different SHA) → treat as replace
-        for key in before_keys.intersection(&after_keys) {
-            if let (Some(b), Some(a)) = (self.get(key), other.get(key))
-                && b.sha != a.sha
-            {
-                removed.push(key.clone());
-                added.push((key.clone(), a.clone()));
+        // Removed specs
+        for &spec in before_keys.difference(&after_keys) {
+            removed.push(spec.clone());
+        }
+
+        // Changed specs (same key, different SHA)
+        for &spec in before_keys.intersection(&after_keys) {
+            let before_sha = self.get(spec).map(|(_, c)| &c.sha);
+            let after_sha = other.get(spec).map(|(_, c)| &c.sha);
+            if before_sha != after_sha {
+                removed.push(spec.clone());
+                if let Some((res, commit)) = other.get(spec) {
+                    added.push((spec.clone(), res.clone(), commit.clone()));
+                }
             }
         }
 
@@ -130,251 +242,10 @@ impl Lock {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{ActionId, Entry, Lock, LockKey, Resolved};
-    use crate::domain::action::identity::CommitSha;
-    use crate::domain::action::specifier::Specifier;
-    use crate::domain::action::uses_ref::RefType;
-
-    fn make_key(action: &str, specifier: &str) -> LockKey {
-        LockKey::new(ActionId::from(action), Specifier::parse(specifier))
-    }
-
-    fn make_resolved(action: &str, specifier: &str, sha: &str) -> Resolved {
-        Resolved::new(
-            ActionId::from(action),
-            Specifier::parse(specifier),
-            CommitSha::from(sha),
-            ActionId::from(action).base_repo(),
-            Some(RefType::Tag),
-            "2026-01-01T00:00:00Z".to_string(),
-        )
-    }
-
-    fn make_entry(sha: &str) -> Entry {
-        Entry::with_version_and_comment(
-            CommitSha::from(sha),
-            Some("v4.0.0".to_string()),
-            "v4".to_string(),
-            "actions/checkout".to_string(),
-            Some(RefType::Tag),
-            "2026-01-01T00:00:00Z".to_string(),
-        )
-    }
-
-    #[test]
-    fn test_new_empty() {
-        let lock = Lock::default();
-        assert!(lock.get(&make_key("actions/checkout", "^4")).is_none());
-    }
-
-    #[test]
-    fn test_set_and_get() {
-        let mut lock = Lock::default();
-        lock.set(&make_resolved(
-            "actions/checkout",
-            "^4",
-            "abc123def456789012345678901234567890abcd",
-        ));
-        let entry = lock.get(&make_key("actions/checkout", "^4"));
-        assert!(entry.is_some());
-        assert_eq!(
-            entry.unwrap().sha,
-            CommitSha::from("abc123def456789012345678901234567890abcd")
-        );
-        assert_eq!(lock.get(&make_key("actions/checkout", "^3")), None);
-    }
-
-    #[test]
-    fn test_has() {
-        let mut lock = Lock::default();
-        lock.set(&make_resolved(
-            "actions/checkout",
-            "^4",
-            "abc123def456789012345678901234567890abcd",
-        ));
-        assert!(lock.has(&make_key("actions/checkout", "^4")));
-        assert!(!lock.has(&make_key("actions/checkout", "^3")));
-    }
-
-    #[test]
-    fn test_retain() {
-        let mut lock = Lock::default();
-        lock.set(&make_resolved(
-            "actions/checkout",
-            "^4",
-            "abc123def456789012345678901234567890abcd",
-        ));
-        lock.set(&make_resolved(
-            "actions/setup-node",
-            "^3",
-            "def456789012345678901234567890abcd123456",
-        ));
-        lock.set(&make_resolved(
-            "actions/old-action",
-            "^1",
-            "xyz789012345678901234567890abcd12345678a",
-        ));
-
-        let keep = vec![
-            make_key("actions/checkout", "^4"),
-            make_key("actions/setup-node", "^3"),
-        ];
-        lock.retain(&keep);
-
-        assert!(lock.has(&make_key("actions/checkout", "^4")));
-        assert!(lock.has(&make_key("actions/setup-node", "^3")));
-        assert!(!lock.has(&make_key("actions/old-action", "^1")));
-    }
-
-    #[test]
-    fn test_build_update_map() {
-        let mut lock = Lock::default();
-        let mut entry1 = Entry::new(
-            CommitSha::from("abc123def456789012345678901234567890abcd"),
-            "actions/checkout".to_string(),
-            Some(RefType::Tag),
-            "2026-01-01T00:00:00Z".to_string(),
-        );
-        entry1.set_comment("v4".to_string());
-        lock.actions
-            .insert(make_key("actions/checkout", "^4"), entry1);
-
-        let mut entry2 = Entry::new(
-            CommitSha::from("def456789012345678901234567890abcd123456"),
-            "actions/setup-node".to_string(),
-            Some(RefType::Tag),
-            "2026-01-01T00:00:00Z".to_string(),
-        );
-        entry2.set_comment("v3".to_string());
-        lock.actions
-            .insert(make_key("actions/setup-node", "^3"), entry2);
-
-        let keys = vec![
-            make_key("actions/checkout", "^4"),
-            make_key("actions/setup-node", "^3"),
-        ];
-        let map = lock.build_update_map(&keys);
-
-        assert_eq!(
-            map.get(&ActionId::from("actions/checkout")),
-            Some(&"abc123def456789012345678901234567890abcd # v4".to_string())
-        );
-        assert_eq!(
-            map.get(&ActionId::from("actions/setup-node")),
-            Some(&"def456789012345678901234567890abcd123456 # v3".to_string())
-        );
-    }
-
-    #[test]
-    fn test_build_update_map_missing_sha_falls_back_to_version() {
-        let lock = Lock::default();
-        let keys = vec![make_key("actions/checkout", "^4")];
-        let map = lock.build_update_map(&keys);
-        assert_eq!(
-            map.get(&ActionId::from("actions/checkout")),
-            Some(&"^4".to_string())
-        );
-    }
-
-    #[test]
-    fn test_update_existing_sha() {
-        let mut lock = Lock::default();
-        lock.set(&make_resolved(
-            "actions/checkout",
-            "^4",
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        ));
-        lock.set(&make_resolved(
-            "actions/checkout",
-            "^4",
-            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        ));
-        let entry = lock.get(&make_key("actions/checkout", "^4"));
-        assert!(entry.is_some());
-        assert_eq!(
-            entry.unwrap().sha,
-            CommitSha::from("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
-        );
-    }
-
-    // --- Lock::diff tests ---
-
-    #[test]
-    fn lock_diff_empty_locks_is_empty() {
-        let before = Lock::default();
-        let after = Lock::default();
-        assert!(before.diff(&after).is_empty());
-    }
-
-    #[test]
-    fn lock_diff_detects_added_entry() {
-        let before = Lock::default();
-        let mut after = Lock::default();
-        let key = make_key("actions/checkout", "^4");
-        after.actions.insert(
-            key.clone(),
-            make_entry("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-        );
-
-        let diff = before.diff(&after);
-        assert_eq!(diff.added.len(), 1);
-        assert_eq!(diff.added[0].0, key);
-        assert!(diff.removed.is_empty());
-    }
-
-    #[test]
-    fn lock_diff_detects_removed_entry() {
-        let mut before = Lock::default();
-        let key = make_key("actions/checkout", "^4");
-        before.actions.insert(
-            key.clone(),
-            make_entry("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-        );
-        let after = Lock::default();
-
-        let diff = before.diff(&after);
-        assert!(diff.added.is_empty());
-        assert_eq!(diff.removed.len(), 1);
-        assert_eq!(diff.removed[0], key);
-    }
-
-    #[test]
-    fn lock_diff_same_sha_not_in_diff() {
-        let mut before = Lock::default();
-        let key = make_key("actions/checkout", "^4");
-        before.actions.insert(
-            key.clone(),
-            make_entry("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-        );
-        let after = before.clone();
-
-        let diff = before.diff(&after);
-        assert!(diff.is_empty());
-    }
-
-    #[test]
-    fn lock_diff_sha_replaced_appears_in_both_added_and_removed() {
-        let mut before = Lock::default();
-        let key = make_key("actions/checkout", "^4");
-        before.actions.insert(
-            key.clone(),
-            make_entry("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-        );
-        let mut after = Lock::default();
-        after.actions.insert(
-            key.clone(),
-            make_entry("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
-        );
-
-        let diff = before.diff(&after);
-        assert_eq!(diff.added.len(), 1, "replaced entry should appear in added");
-        assert_eq!(
-            diff.removed.len(),
-            1,
-            "replaced entry should appear in removed"
-        );
-        assert_eq!(diff.added[0].0, key);
-        assert_eq!(diff.removed[0], key);
-    }
-}
+#[expect(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
+#[path = "tests.rs"]
+mod tests;

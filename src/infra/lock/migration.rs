@@ -1,171 +1,241 @@
-use super::convert::{ActionEntryData, LockData};
-use crate::domain::action::spec::LockKey;
-use crate::domain::action::specifier::Specifier;
+use crate::domain::action::identity::{CommitSha, Version};
+use crate::domain::action::resolved::Commit;
+use crate::domain::action::spec::Spec;
+use crate::domain::action::uses_ref::RefType;
+use crate::domain::lock::resolution::Resolution;
+use crate::domain::lock::{ActionKey, Lock};
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::path::Path;
 
-/// Legacy v1.0 format: actions are plain strings (SHA only)
-#[derive(Debug, Deserialize)]
-pub(super) struct LockDataV1 {
-    #[serde(default)]
-    pub(super) actions: HashMap<String, String>,
-}
-
-/// v1.3 format: has `specifier` field, keys use `@v6` style
+/// Action entry data in the flat lock format.
 #[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
-pub(super) struct ActionEntryDataV1_3 {
-    pub(super) sha: String,
+pub struct FlatEntryData {
+    /// The full commit SHA.
+    pub sha: String,
+    /// The resolved version string (e.g. "v4.0.0").
     #[serde(default)]
-    pub(super) version: Option<String>,
+    pub version: Option<String>,
+    /// Human-readable version comment (e.g. "v4").
     #[serde(default)]
-    pub(super) specifier: Option<String>,
-    pub(super) repository: String,
-    pub(super) ref_type: String,
-    pub(super) date: String,
+    pub comment: String,
+    /// The source repository (e.g. "actions/checkout").
+    pub repository: String,
+    /// The ref type that was resolved (tag, branch, commit, or release).
+    pub ref_type: String,
+    /// ISO 8601 date of the resolved commit or release.
+    pub date: String,
 }
 
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-pub(super) struct LockDataV1_3 {
+/// Internal structure for flat TOML deserialization (legacy format).
+#[derive(Debug, Deserialize, Default)]
+pub struct FlatData {
+    /// Schema version string (ignored by serde — present in v1.4 files).
     #[serde(default)]
-    pub(super) version: String,
+    #[expect(
+        dead_code,
+        reason = "version field is consumed by serde but not accessed directly"
+    )]
+    pub version: String,
+    /// Map of `"action@specifier"` composite keys to their entry data.
     #[serde(default)]
-    pub(super) actions: HashMap<String, ActionEntryDataV1_3>,
+    pub actions: HashMap<String, FlatEntryData>,
 }
 
-/// Migrate v1.0 lock (plain SHA values) to v1.4 format.
-pub(super) fn migrate_v1(data: LockDataV1) -> LockData {
-    let actions = data
-        .actions
-        .into_iter()
-        .map(|(key, sha)| {
-            // Migrate key from @v6 style to @^6 style
-            let new_key = migrate_key(&key);
-            let comment = derive_comment_from_v1_key(&key);
-            let repository = LockKey::parse(&new_key)
-                .map(|k| k.id.base_repo())
-                .unwrap_or_default();
-            let entry = ActionEntryData {
-                sha,
-                version: None,
-                comment,
-                repository,
-                ref_type: String::new(),
-                date: String::new(),
-            };
-            (new_key, entry)
-        })
-        .collect();
-    LockData {
-        version: String::new(),
-        actions,
+/// Try to parse lock file content as the flat format.
+///
+/// Returns `Ok(Some(lock))` if the content is flat format (has `[actions` but no `[resolutions`),
+/// `Ok(None)` if the content is not flat format, or `Err` if parsing fails.
+pub fn try_parse(content: &str, path: &Path) -> Result<Option<Lock>, super::Error> {
+    if content.contains("[resolutions") {
+        return Ok(None);
     }
+    if !content.contains("[actions") {
+        return Ok(None);
+    }
+
+    let data: FlatData = super::parse_toml(content, path)?;
+    Ok(Some(lock_from_flat(data)))
 }
 
-/// Migrate v1.3 lock (specifier field, @v6 keys) to v1.4 format.
-pub(super) fn migrate_v1_3(data: LockDataV1_3) -> LockData {
-    let actions = data
-        .actions
-        .into_iter()
-        .map(|(key, entry)| {
-            let new_key = migrate_key(&key);
-            let comment = derive_comment_from_v1_key(&key);
-            let new_entry = ActionEntryData {
-                sha: entry.sha,
-                version: entry.version,
-                comment,
-                repository: entry.repository,
-                ref_type: entry.ref_type,
-                date: entry.date,
-            };
-            (new_key, new_entry)
-        })
-        .collect();
-    LockData {
-        version: String::new(),
-        actions,
-    }
-}
+/// Convert deserialized flat lock data into a domain `Lock`.
+fn lock_from_flat(data: FlatData) -> Lock {
+    let mut resolutions = HashMap::new();
+    let mut actions = HashMap::new();
 
-/// Convert a v1.x key like "actions/checkout@v6" to v1.4 "actions/checkout@^6".
-pub(super) fn migrate_key(key: &str) -> String {
-    if let Some((action, version_part)) = key.rsplit_once('@') {
-        let specifier = Specifier::from_v1(version_part);
-        format!("{action}@{specifier}")
-    } else {
-        key.to_string()
+    for (k, entry_data) in data.actions {
+        let Some(spec) = Spec::parse(&k) else {
+            continue;
+        };
+        let version_str = entry_data
+            .version
+            .as_deref()
+            .unwrap_or(spec.version.as_str());
+        let version = Version::from(version_str);
+        resolutions.insert(
+            spec.clone(),
+            Resolution {
+                version: version.clone(),
+                comment: entry_data.comment,
+            },
+        );
+        let key = ActionKey {
+            id: spec.id.clone(),
+            version,
+        };
+        actions.insert(
+            key,
+            Commit {
+                sha: CommitSha::from(entry_data.sha),
+                repository: entry_data.repository,
+                ref_type: RefType::parse(&entry_data.ref_type),
+                date: entry_data.date,
+            },
+        );
     }
-}
 
-/// Derive the human-readable comment from a v1.x key version part.
-/// "v6" → "v6", "v6.1" → "v6.1", "v1.15.2" → "v1.15.2", "main" → ""
-pub(super) fn derive_comment_from_v1_key(key: &str) -> String {
-    if let Some((_, version_part)) = key.rsplit_once('@') {
-        // If it starts with 'v' followed by a digit, use as comment
-        if version_part.starts_with('v') {
-            return version_part.to_string();
-        }
-    }
-    String::new()
+    Lock::new(resolutions, actions)
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::unwrap_used,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
 mod tests {
+    use super::*;
     use crate::domain::action::identity::{ActionId, CommitSha};
-    use crate::domain::action::spec::LockKey;
+    use crate::domain::action::spec::Spec;
     use crate::domain::action::specifier::Specifier;
-    use crate::infra::lock::parse;
-    use std::io::Write;
-    use tempfile::NamedTempFile;
 
-    fn make_key(action: &str, specifier: &str) -> LockKey {
-        LockKey::new(ActionId::from(action), Specifier::parse(specifier))
+    fn make_key(action: &str, specifier: &str) -> Spec {
+        Spec::new(ActionId::from(action), Specifier::parse(specifier))
     }
 
     #[test]
-    fn test_file_lock_migrates_v1_0_format() {
-        // v1.0 format: plain string SHA values
-        let content = r#"
-[actions]
-"actions/checkout@v4" = "abc123def456789012345678901234567890abcd"
-"#;
-        let mut file = NamedTempFile::new().unwrap();
-        file.write_all(content.as_bytes()).unwrap();
+    fn flat_format_with_version_field_parses() {
+        let content = r#"version = "1.4"
 
-        let parsed = parse(file.path()).unwrap();
-        assert!(parsed.migrated);
-        // Key should have been migrated to ^4
-        let entry = parsed.value.get(&make_key("actions/checkout", "^4"));
-        assert!(entry.is_some());
+[actions]
+"actions/checkout@^6" = { sha = "de0fac2e4500dabe0009e67214ff5f5447ce83dd", version = "v6.2.3", comment = "v6", repository = "actions/checkout", ref_type = "release", date = "2026-01-09T19:42:23Z" }
+"#;
+        let result = try_parse(content, Path::new("test.lock")).unwrap();
+        assert!(result.is_some(), "v1.4 format must be parsed as flat");
+        let lock = result.unwrap();
+        let (res, commit) = lock.get(&make_key("actions/checkout", "^6")).unwrap();
+        assert_eq!(res.version.as_str(), "v6.2.3");
+        assert_eq!(res.comment, "v6");
         assert_eq!(
-            entry.unwrap().sha,
+            commit.sha,
+            CommitSha::from("de0fac2e4500dabe0009e67214ff5f5447ce83dd")
+        );
+    }
+
+    #[test]
+    fn flat_format_without_version_field_parses() {
+        let content = r#"[actions."actions/checkout@^4"]
+sha = "abc123def456789012345678901234567890abcd"
+version = "v4.0.0"
+comment = "v4"
+repository = "actions/checkout"
+ref_type = "tag"
+date = "2026-01-01T00:00:00Z"
+"#;
+        let result = try_parse(content, Path::new("test.lock")).unwrap();
+        assert!(result.is_some(), "flat format without version must parse");
+        let lock = result.unwrap();
+        let (res, commit) = lock.get(&make_key("actions/checkout", "^4")).unwrap();
+        assert_eq!(res.version.as_str(), "v4.0.0");
+        assert_eq!(
+            commit.sha,
             CommitSha::from("abc123def456789012345678901234567890abcd")
         );
     }
 
     #[test]
-    fn test_file_lock_migrates_v1_3_format() {
-        // v1.3 format: specifier field, @v6 style keys
-        let content = r#"version = "1.3"
-
-[actions]
-"actions/checkout@v6" = { sha = "de0fac2e4500dabe0009e67214ff5f5447ce83dd", version = "v6.2.3", specifier = "^6", repository = "actions/checkout", ref_type = "release", date = "2026-01-09T19:42:23Z" }
+    fn flat_entry_missing_version_falls_back_to_specifier() {
+        let content = r#"[actions."actions/checkout@^4"]
+sha = "abc123def456789012345678901234567890abcd"
+comment = ""
+repository = "actions/checkout"
+ref_type = "tag"
+date = ""
 "#;
-        let mut file = NamedTempFile::new().unwrap();
-        file.write_all(content.as_bytes()).unwrap();
-
-        let parsed = parse(file.path()).unwrap();
-        assert!(parsed.migrated);
-        // Key migrated from @v6 to @^6
-        let entry = parsed.value.get(&make_key("actions/checkout", "^6"));
-        assert!(entry.is_some());
-        let entry = entry.unwrap();
+        let result = try_parse(content, Path::new("test.lock")).unwrap();
+        assert!(result.is_some());
+        let lock = result.unwrap();
+        let (res, _) = lock.get(&make_key("actions/checkout", "^4")).unwrap();
         assert_eq!(
-            entry.sha,
-            CommitSha::from("de0fac2e4500dabe0009e67214ff5f5447ce83dd")
+            res.version.as_str(),
+            "^4",
+            "missing version must fall back to specifier"
         );
-        assert_eq!(entry.version, Some("v6.2.3".to_string()));
-        assert_eq!(entry.comment, "v6"); // derived from old key
+    }
+
+    #[test]
+    fn two_flat_entries_deduplicating_to_one_action() {
+        let content = r#"[actions."actions/checkout@^4"]
+sha = "abc123def456789012345678901234567890abcd"
+version = "v4.2.1"
+comment = "v4"
+repository = "actions/checkout"
+ref_type = "tag"
+date = "2026-01-01T00:00:00Z"
+
+[actions."actions/checkout@^4.2"]
+sha = "abc123def456789012345678901234567890abcd"
+version = "v4.2.1"
+comment = "v4.2"
+repository = "actions/checkout"
+ref_type = "tag"
+date = "2026-01-01T00:00:00Z"
+"#;
+        let result = try_parse(content, Path::new("test.lock")).unwrap();
+        assert!(result.is_some());
+        let lock = result.unwrap();
+
+        // Two resolution entries
+        let spec1 = make_key("actions/checkout", "^4");
+        let spec2 = make_key("actions/checkout", "^4.2");
+        assert!(lock.has(&spec1));
+        assert!(lock.has(&spec2));
+
+        // But only one action entry (same version v4.2.1)
+        let action_entries: Vec<_> = lock.action_entries().collect();
+        let checkout_actions: Vec<_> = action_entries
+            .iter()
+            .filter(|(k, _)| k.id == ActionId::from("actions/checkout"))
+            .collect();
+        assert_eq!(
+            checkout_actions.len(),
+            1,
+            "two flat entries with same version should deduplicate to one action entry"
+        );
+    }
+
+    #[test]
+    fn try_parse_returns_none_for_two_tier() {
+        let content = r#"[resolutions."actions/checkout"."^4"]
+version = "v4.0.0"
+comment = "v4"
+
+[actions."actions/checkout"."v4.0.0"]
+sha = "abc123"
+repository = "actions/checkout"
+ref_type = "tag"
+date = ""
+"#;
+        let result = try_parse(content, Path::new("test.lock")).unwrap();
+        assert!(result.is_none(), "two-tier format should return None");
+    }
+
+    #[test]
+    fn try_parse_returns_none_for_no_actions() {
+        let content = "# empty lock file\n";
+        let result = try_parse(content, Path::new("test.lock")).unwrap();
+        assert!(
+            result.is_none(),
+            "content without [actions] should return None"
+        );
     }
 }

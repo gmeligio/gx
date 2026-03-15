@@ -4,7 +4,10 @@ use std::fmt::Debug;
 use std::path::Path;
 
 /// Trait for report types returned by commands.
-#[allow(clippy::module_name_repetitions)]
+#[expect(
+    clippy::module_name_repetitions,
+    reason = "CommandReport is the canonical name"
+)]
 pub trait CommandReport: Debug + Default {
     /// Render the report into output lines.
     fn render(&self) -> Vec<OutputLine>;

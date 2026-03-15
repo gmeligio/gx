@@ -1,18 +1,18 @@
 use crate::command::CommandReport;
+use crate::domain::action::identity::ActionId;
+use crate::domain::action::specifier::Specifier;
 use crate::output::lines::Line as OutputLine;
 
 /// Report from the tidy command.
 #[derive(Debug, Default)]
 pub struct Report {
-    /// Actions removed: action names
-    pub removed: Vec<String>,
-    /// Actions added: (action, version)
-    pub added: Vec<(String, String)>,
-    /// Actions upgraded (sha→tag or version bump): (action, from, to)
-    pub upgraded: Vec<(String, String, String)>,
-    /// Version corrections applied
-    pub corrections: usize,
-    /// Number of workflow files updated
+    /// Actions removed.
+    pub removed: Vec<ActionId>,
+    /// Actions added: (action, version).
+    pub added: Vec<(ActionId, Specifier)>,
+    /// Actions upgraded (sha→tag or version bump): (action, from, to).
+    pub upgraded: Vec<(ActionId, String, Specifier)>,
+    /// Number of workflow files updated.
     pub workflows_updated: usize,
 }
 
@@ -23,7 +23,7 @@ impl CommandReport for Report {
 
         if !has_changes {
             return vec![OutputLine::Summary {
-                text: "Everything up to date".to_string(),
+                text: "Everything up to date".to_owned(),
             }];
         }
 
@@ -31,22 +31,22 @@ impl CommandReport for Report {
 
         for action in &self.removed {
             lines.push(OutputLine::Removed {
-                action: action.clone(),
+                action: action.to_string(),
             });
         }
 
         for (action, version) in &self.added {
             lines.push(OutputLine::Added {
-                action: action.clone(),
-                version: version.clone(),
+                action: action.to_string(),
+                version: version.to_string(),
             });
         }
 
         for (action, from, to) in &self.upgraded {
             lines.push(OutputLine::Upgraded {
-                action: action.clone(),
+                action: action.to_string(),
                 from: from.clone(),
-                to: to.clone(),
+                to: to.to_string(),
             });
         }
 
@@ -74,8 +74,12 @@ impl CommandReport for Report {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::indexing_slicing,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
 mod tests {
-    use super::{CommandReport, OutputLine, Report};
+    use super::{ActionId, CommandReport as _, OutputLine, Report, Specifier};
 
     #[test]
     fn render_tidy_nothing_changed() {
@@ -90,30 +94,29 @@ mod tests {
     #[test]
     fn render_tidy_with_changes() {
         let report = Report {
-            removed: vec!["actions/unused".to_string()],
+            removed: vec![ActionId::from("actions/unused")],
             added: vec![
-                ("actions/new".to_string(), "v2".to_string()),
-                ("actions/other".to_string(), "v1".to_string()),
+                (ActionId::from("actions/new"), Specifier::from_v1("v2")),
+                (ActionId::from("actions/other"), Specifier::from_v1("v1")),
             ],
             upgraded: vec![(
-                "actions/checkout".to_string(),
-                "sha".to_string(),
-                "v6.0.2".to_string(),
+                ActionId::from("actions/checkout"),
+                "sha".to_owned(),
+                Specifier::from_v1("v6.0.2"),
             )],
             workflows_updated: 2,
-            corrections: 0,
         };
         let lines = report.render();
 
         assert!(lines.contains(&OutputLine::Removed {
-            action: "actions/unused".to_string(),
+            action: "actions/unused".to_owned(),
         }));
         assert!(lines.contains(&OutputLine::Added {
-            action: "actions/new".to_string(),
-            version: "v2".to_string(),
+            action: "actions/new".to_owned(),
+            version: "^2".to_owned(),
         }));
         assert!(lines.contains(&OutputLine::Summary {
-            text: "1 removed · 2 added · 1 upgraded · 2 workflows".to_string(),
+            text: "1 removed · 2 added · 1 upgraded · 2 workflows".to_owned(),
         }));
     }
 }

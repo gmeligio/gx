@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use thiserror::Error;
 
-/// Errors that can occur when interacting with the local repository
+/// Errors that can occur when interacting with the local repository.
 #[derive(Debug, Error)]
 pub enum Error {
     #[error(".github folder not found")]

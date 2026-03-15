@@ -1,3 +1,4 @@
+/// TOML serialization, deserialization, and document building for manifests.
 mod convert;
 pub mod patch;
 
@@ -12,7 +13,7 @@ use thiserror::Error;
 
 pub const MANIFEST_FILE_NAME: &str = "gx.toml";
 
-/// Errors that can occur when working with manifest files
+/// Errors that can occur when working with manifest files.
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("failed to read manifest file: {}", path.display())]
@@ -45,7 +46,9 @@ pub enum Error {
 
 // ---- Store ----
 
+/// File-backed manifest store. Reads from and writes to `gx.toml`.
 pub struct Store {
+    /// Path to the manifest file on disk.
     path: PathBuf,
 }
 
@@ -58,6 +61,10 @@ impl Store {
     }
 }
 
+#[expect(
+    clippy::multiple_inherent_impl,
+    reason = "constructor and methods are in separate impl blocks for readability"
+)]
 impl Store {
     /// Save the given `Manifest` to this file.
     ///
@@ -118,7 +125,10 @@ pub fn parse(path: &Path) -> Result<Parsed<Manifest>, Error> {
         // No [gx] section — could be v1 (old "v4" style) or current format ("^4" style)
         // Detect v1 by checking if any value looks like v1 format
         let is_v1 = data.actions.versions.values().any(|v| {
-            v.starts_with('v') && v[1..].chars().next().is_some_and(|c| c.is_ascii_digit())
+            v.starts_with('v')
+                && v.get(1..)
+                    .and_then(|s| s.chars().next())
+                    .is_some_and(|c| c.is_ascii_digit())
         });
 
         let manifest = manifest_from_data(data, path, !is_v1)?;
@@ -182,5 +192,11 @@ pub fn create(path: &Path, diff: &ManifestDiff) -> Result<(), Error> {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::assertions_on_result_states,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
 #[path = "tests.rs"]
 mod tests;

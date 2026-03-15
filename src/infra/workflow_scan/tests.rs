@@ -1,8 +1,9 @@
 use super::FileScanner as FileWorkflowScanner;
 use crate::domain::action::identity::ActionId;
-use crate::domain::workflow::Scanner as WorkflowScanner;
+use crate::domain::workflow::Scanner as _;
+use crate::domain::workflow_actions::StepIndex;
 use std::fs;
-use std::io::Write;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
@@ -16,7 +17,7 @@ fn create_test_workflow(dir: &Path, name: &str, content: &str) -> PathBuf {
 }
 
 #[test]
-fn test_scan_all_located_includes_location() {
+fn scan_all_located_includes_location() {
     let temp_dir = TempDir::new().unwrap();
     let content = "name: CI
 jobs:
@@ -37,22 +38,24 @@ jobs:
 
     // Find the build-job checkout entry
     let build_checkout = located.iter().find(|a| {
-        a.id == ActionId::from("actions/checkout") && a.location.job.as_deref() == Some("build")
+        a.action.id == ActionId::from("actions/checkout")
+            && a.location.job.as_deref() == Some("build")
     });
     assert!(build_checkout.is_some());
     let bc = build_checkout.unwrap();
-    assert_eq!(bc.version.as_str(), "v4");
-    assert_eq!(bc.location.step, Some(0));
+    assert_eq!(bc.action.version.as_str(), "v4");
+    assert_eq!(bc.location.step, Some(StepIndex::from(0_u16)));
 
     let test_checkout = located.iter().find(|a| {
-        a.id == ActionId::from("actions/checkout") && a.location.job.as_deref() == Some("test")
+        a.action.id == ActionId::from("actions/checkout")
+            && a.location.job.as_deref() == Some("test")
     });
     assert!(test_checkout.is_some());
-    assert_eq!(test_checkout.unwrap().version.as_str(), "v3");
+    assert_eq!(test_checkout.unwrap().action.version.as_str(), "v3");
 }
 
 #[test]
-fn test_find_workflows() {
+fn find_workflows() {
     let temp_dir = TempDir::new().unwrap();
     create_test_workflow(temp_dir.path(), "ci.yml", "name: CI");
     create_test_workflow(temp_dir.path(), "deploy.yaml", "name: Deploy");
@@ -64,7 +67,7 @@ fn test_find_workflows() {
 }
 
 #[test]
-fn test_scan_single_workflow() {
+fn scan_single_workflow() {
     let temp_dir = TempDir::new().unwrap();
     let content = "name: CI
 on: push
@@ -89,7 +92,7 @@ jobs:
 }
 
 #[test]
-fn test_scan_skips_local() {
+fn scan_skips_local() {
     let temp_dir = TempDir::new().unwrap();
     let content = "name: CI
 jobs:
@@ -110,7 +113,7 @@ jobs:
 }
 
 #[test]
-fn test_scan_multiple_jobs() {
+fn scan_multiple_jobs() {
     let temp_dir = TempDir::new().unwrap();
     let content = "name: CI
 jobs:
@@ -139,7 +142,7 @@ jobs:
 }
 
 #[test]
-fn test_scan_all_located_derives_action_set() {
+fn scan_all_located_derives_action_set() {
     let temp_dir = TempDir::new().unwrap();
     create_test_workflow(
         temp_dir.path(),
@@ -160,7 +163,7 @@ fn test_scan_all_located_derives_action_set() {
 }
 
 #[test]
-fn test_scan_with_sha_and_comment() {
+fn scan_with_sha_and_comment() {
     let temp_dir = TempDir::new().unwrap();
     let content = "name: CI
 jobs:
@@ -188,7 +191,7 @@ jobs:
 }
 
 #[test]
-fn test_scan_comment_without_v_prefix() {
+fn scan_comment_without_v_prefix() {
     let temp_dir = TempDir::new().unwrap();
     let content = "name: CI
 jobs:
@@ -210,7 +213,7 @@ jobs:
 }
 
 #[test]
-fn test_scan_tag_without_comment() {
+fn scan_tag_without_comment() {
     let temp_dir = TempDir::new().unwrap();
     let content = "name: CI
 jobs:
@@ -231,7 +234,7 @@ jobs:
 }
 
 #[test]
-fn test_scan_sha_without_comment() {
+fn scan_sha_without_comment() {
     let temp_dir = TempDir::new().unwrap();
     let content = "name: CI
 jobs:
@@ -253,7 +256,7 @@ jobs:
 }
 
 #[test]
-fn test_scan_real_world_format() {
+fn scan_real_world_format() {
     let temp_dir = TempDir::new().unwrap();
     let content = "on:
   pull_request:
@@ -274,16 +277,16 @@ jobs:
     let action_set = parser.scan_file(&workflow_path).unwrap();
 
     let checkout_id = ActionId::from("actions/checkout");
-    let version = action_set.versions_for(&checkout_id).next().unwrap();
-    assert_eq!(version.as_str(), "v6.0.1");
+    let checkout_action_version = action_set.versions_for(&checkout_id).next().unwrap();
+    assert_eq!(checkout_action_version.as_str(), "v6.0.1");
 
     let login_id = ActionId::from("docker/login-action");
-    let version = action_set.versions_for(&login_id).next().unwrap();
-    assert_eq!(version.as_str(), "v3.6.0");
+    let login_action_version = action_set.versions_for(&login_id).next().unwrap();
+    assert_eq!(login_action_version.as_str(), "v3.6.0");
 }
 
 #[test]
-fn test_scan_iterator_matches_scan_all_located() {
+fn scan_iterator_matches_scan_all_located() {
     let temp_dir = TempDir::new().unwrap();
     create_test_workflow(
         temp_dir.path(),
@@ -306,10 +309,13 @@ fn test_scan_iterator_matches_scan_all_located() {
     assert_eq!(via_iter.len(), via_collect.len());
 
     // Same action IDs appear in both
-    let mut iter_ids: Vec<String> = via_iter.iter().map(|a| a.id.as_str().to_owned()).collect();
+    let mut iter_ids: Vec<String> = via_iter
+        .iter()
+        .map(|a| a.action.id.as_str().to_owned())
+        .collect();
     let mut collect_ids: Vec<String> = via_collect
         .iter()
-        .map(|a| a.id.as_str().to_owned())
+        .map(|a| a.action.id.as_str().to_owned())
         .collect();
     iter_ids.sort();
     collect_ids.sort();
@@ -317,7 +323,7 @@ fn test_scan_iterator_matches_scan_all_located() {
 }
 
 #[test]
-fn test_scan_iterator_yields_error_for_malformed_file_without_aborting() {
+fn scan_iterator_yields_error_for_malformed_file_without_aborting() {
     let temp_dir = TempDir::new().unwrap();
     // One valid workflow
     create_test_workflow(

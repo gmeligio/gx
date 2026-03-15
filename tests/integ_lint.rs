@@ -1,4 +1,8 @@
-#![allow(unused_crate_dependencies)]
+#![expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
 
 use gx::config::{Level, Lint};
 use gx::domain::action::identity::{ActionId, CommitSha};
@@ -260,7 +264,7 @@ jobs:
     manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
 
     let mut lock = Lock::default();
-    lock.set(&ResolvedAction::new(
+    lock.set_resolved(ResolvedAction::new(
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v4"),
         CommitSha::from("def456789012345678901234567890abcd123456"),
@@ -310,7 +314,7 @@ jobs:
     );
 
     let mut lock = Lock::default();
-    lock.set(&ResolvedAction::new(
+    lock.set_resolved(ResolvedAction::new(
         ActionId::from("actions/setup-node"),
         Specifier::from_v1("v3"),
         CommitSha::from("def456789012345678901234567890abcd123456"),
@@ -359,7 +363,7 @@ jobs:
     );
 
     let mut lock = Lock::default();
-    lock.set(&ResolvedAction::new(
+    lock.set_resolved(ResolvedAction::new(
         ActionId::from("actions/setup-node"),
         Specifier::from_v1("v3"),
         CommitSha::from("def456789012345678901234567890abcd123456"),
@@ -458,7 +462,7 @@ jobs:
     manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
 
     let mut lock = Lock::default();
-    lock.set(&ResolvedAction::new(
+    lock.set_resolved(ResolvedAction::new(
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v4"),
         CommitSha::from("def456789012345678901234567890abcd123456"),

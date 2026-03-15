@@ -5,6 +5,7 @@ use crate::domain::action::spec::Spec as ActionSpec;
 use crate::domain::action::specifier::Specifier;
 use crate::domain::manifest::Manifest;
 use crate::domain::manifest::overrides::ActionOverride;
+use crate::domain::workflow_actions::StepIndex;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
@@ -14,50 +15,64 @@ use toml_edit::DocumentMut;
 
 /// Legacy [gx] section — only used for reading old manifests.
 #[derive(Debug, Default, Deserialize, Serialize)]
-pub(super) struct GxSection {
+pub struct GxSection {
+    /// Minimum gx version required (legacy field).
     #[serde(default)]
-    pub(super) min_version: String,
+    pub min_version: String,
 }
 
+/// A single override entry in the TOML manifest.
 #[derive(Debug, Default, Deserialize, Serialize)]
-pub(super) struct TomlOverride {
-    pub(super) workflow: String,
+pub struct TomlOverride {
+    /// The workflow file path this override applies to.
+    pub workflow: String,
+    /// Optional job name to narrow the override scope.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) job: Option<String>,
+    pub job: Option<String>,
+    /// Optional step index to narrow the override scope.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) step: Option<usize>,
-    pub(super) version: String,
+    pub step: Option<usize>,
+    /// The version specifier for this override.
+    pub version: String,
 }
 
 /// The [actions] section: flat string entries + optional [actions.overrides] sub-table.
 #[derive(Debug, Default, Deserialize, Serialize)]
-pub(super) struct TomlActions {
+pub struct TomlActions {
+    /// Flat map of action IDs to version specifier strings.
     #[serde(default, flatten)]
-    pub(super) versions: BTreeMap<String, String>,
+    pub versions: BTreeMap<String, String>,
+    /// Per-action override lists keyed by action ID.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub(super) overrides: BTreeMap<String, Vec<TomlOverride>>,
+    pub overrides: BTreeMap<String, Vec<TomlOverride>>,
 }
 
+/// Top-level TOML structure for the manifest file.
 #[derive(Debug, Default, Deserialize, Serialize)]
-pub(super) struct ManifestData {
+pub struct ManifestData {
+    /// Legacy [gx] section (only present in old manifests).
     #[serde(default)]
-    pub(super) gx: Option<GxSection>,
+    pub gx: Option<GxSection>,
+    /// The [actions] section containing version pins and overrides.
     #[serde(default)]
-    pub(super) actions: TomlActions,
+    pub actions: TomlActions,
+    /// The [lint] section containing rule configuration.
     #[serde(default)]
-    pub(super) lint: LintData,
+    pub lint: LintData,
 }
 
 /// The [lint] section of the manifest.
 #[derive(Debug, Default, Deserialize, Serialize)]
-pub(super) struct LintData {
+pub struct LintData {
+    /// Map of rule names to their configuration.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub(super) rules: BTreeMap<String, Rule>,
+    pub rules: BTreeMap<String, Rule>,
 }
 
 // ---- conversion ----
 
-pub(super) fn manifest_from_data(
+/// Convert deserialized manifest data into a domain `Manifest`.
+pub fn manifest_from_data(
     data: ManifestData,
     _path: &Path,
     is_v2: bool,
@@ -120,10 +135,16 @@ pub(super) fn manifest_from_data(
                 Specifier::from_v1(&exc.version)
             };
 
+            let step_index = exc
+                .step
+                .map(StepIndex::try_from)
+                .transpose()
+                .map_err(ManifestError::Validation)?;
+
             converted.push(ActionOverride {
                 workflow: exc.workflow,
                 job: exc.job,
-                step: exc.step,
+                step: step_index,
                 version: specifier,
             });
         }
@@ -138,7 +159,7 @@ pub(super) fn manifest_from_data(
 /// Build a `toml_edit::DocumentMut` from a `Manifest`.
 /// Output has no `[gx]` section. Sections: `[actions]`, optional `[actions.overrides]`,
 /// optional `[lint]`.
-pub(super) fn build_manifest_document(manifest: &Manifest) -> DocumentMut {
+pub fn build_manifest_document(manifest: &Manifest) -> DocumentMut {
     let mut doc = DocumentMut::new();
 
     // Build [actions] table with sorted key-value pairs
@@ -171,10 +192,7 @@ pub(super) fn build_manifest_document(manifest: &Manifest) -> DocumentMut {
                     inline.insert("job", toml_edit::Value::from(job.as_str()));
                 }
                 if let Some(step) = ovr.step {
-                    inline.insert(
-                        "step",
-                        i64::try_from(step).expect("step index overflow").into(),
-                    );
+                    inline.insert("step", i64::from(step).into());
                 }
                 inline.insert("version", ovr.version.as_str().into());
                 arr.push(inline);
@@ -190,6 +208,11 @@ pub(super) fn build_manifest_document(manifest: &Manifest) -> DocumentMut {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
 mod tests {
     use super::{Manifest, build_manifest_document};
     use crate::domain::action::identity::ActionId;
@@ -197,11 +220,11 @@ mod tests {
     use crate::domain::manifest::overrides::ActionOverride;
     use crate::infra::manifest::{Store, parse};
     use std::fs;
-    use std::io::Write;
+    use std::io::Write as _;
     use tempfile::NamedTempFile;
 
     #[test]
-    fn test_file_manifest_save_and_load_roundtrip() {
+    fn file_manifest_save_and_load_roundtrip() {
         let file = NamedTempFile::new().unwrap();
         let store = Store::new(file.path());
 
@@ -223,7 +246,7 @@ mod tests {
     }
 
     #[test]
-    fn test_file_manifest_load_existing_toml() {
+    fn file_manifest_load_existing_toml() {
         // v1 format (no [gx] section) — values like "v4" get converted via from_v1
         let content = r#"
 [actions]
@@ -241,7 +264,7 @@ mod tests {
     }
 
     #[test]
-    fn test_file_manifest_save_sorts_actions_alphabetically() {
+    fn file_manifest_save_sorts_actions_alphabetically() {
         let file = NamedTempFile::new().unwrap();
         let store = Store::new(file.path());
 
@@ -273,7 +296,7 @@ mod tests {
     }
 
     #[test]
-    fn test_save_no_gx_section() {
+    fn save_no_gx_section() {
         let file = NamedTempFile::new().unwrap();
         let store = Store::new(file.path());
 
@@ -297,7 +320,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_manifest_document_with_overrides() {
+    fn build_manifest_document_with_overrides() {
         let mut manifest = Manifest::default();
         manifest.set(ActionId::from("actions/checkout"), Specifier::parse("^4"));
         manifest.add_override(

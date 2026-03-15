@@ -1,7 +1,7 @@
 use super::specifier::higher_version;
 use std::fmt;
 
-/// Unique identifier for an action (e.g., "actions/checkout")
+/// Unique identifier for an action (e.g., "actions/checkout").
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ActionId(pub String);
 
@@ -33,11 +33,11 @@ impl From<String> for ActionId {
 
 impl From<&str> for ActionId {
     fn from(s: &str) -> Self {
-        Self(s.to_string())
+        Self(s.to_owned())
     }
 }
 
-/// A version specifier (e.g., "v4", "v4.1.0")
+/// A version specifier (e.g., "v4", "v4.1.0").
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Version(pub String);
 
@@ -50,23 +50,23 @@ impl Version {
     /// Create a normalized version with a 'v' prefix.
     /// Only adds a 'v' prefix when the string starts with a digit (semver without prefix).
     /// Non-numeric refs like branch names ("main", "develop") are returned as-is.
-    /// Examples: "4" -> "v4", "4.1.0" -> "v4.1.0", "v4" -> "v4", "main" -> "main"
+    /// Examples: "4" -> "v4", "4.1.0" -> "v4.1.0", "v4" -> "v4", "main" -> "main".
     #[must_use]
     pub fn normalized(s: &str) -> Self {
         if s.starts_with(|c: char| c.is_ascii_digit()) {
             Self(format!("v{s}"))
         } else {
-            Self(s.to_string())
+            Self(s.to_owned())
         }
     }
 
-    /// Returns true if this version is a full commit SHA (40 hex characters)
+    /// Returns true if this version is a full commit SHA (40 hex characters).
     #[must_use]
     pub fn is_sha(&self) -> bool {
         CommitSha::is_valid(&self.0)
     }
 
-    /// Returns true if this version looks like a semantic version tag (e.g., "v4", "v4.1.0")
+    /// Returns true if this version looks like a semantic version tag (e.g., "v4", "v4.1.0").
     #[must_use]
     pub fn is_semver_like(&self) -> bool {
         let normalized = self
@@ -106,20 +106,25 @@ impl Version {
         let base = stripped.split('-').next().unwrap_or(stripped);
 
         let parts: Vec<&str> = base.split('.').collect();
-        if parts.is_empty() || !parts[0].chars().all(|c| c.is_ascii_digit()) || parts[0].is_empty()
-        {
-            return None;
-        }
-
-        match parts.len() {
-            1 => Some(VersionPrecision::Major),
-            2 if parts[1].chars().all(|c| c.is_ascii_digit()) && !parts[1].is_empty() => {
+        match parts.as_slice() {
+            [major] if !major.is_empty() && major.chars().all(|c| c.is_ascii_digit()) => {
+                Some(VersionPrecision::Major)
+            }
+            [major, minor]
+                if !major.is_empty()
+                    && major.chars().all(|c| c.is_ascii_digit())
+                    && !minor.is_empty()
+                    && minor.chars().all(|c| c.is_ascii_digit()) =>
+            {
                 Some(VersionPrecision::Minor)
             }
-            3 if parts[1].chars().all(|c| c.is_ascii_digit())
-                && parts[2].chars().all(|c| c.is_ascii_digit())
-                && !parts[1].is_empty()
-                && !parts[2].is_empty() =>
+            [major, minor, patch]
+                if !major.is_empty()
+                    && major.chars().all(|c| c.is_ascii_digit())
+                    && !minor.is_empty()
+                    && minor.chars().all(|c| c.is_ascii_digit())
+                    && !patch.is_empty()
+                    && patch.chars().all(|c| c.is_ascii_digit()) =>
             {
                 Some(VersionPrecision::Patch)
             }
@@ -131,7 +136,7 @@ impl Version {
     /// Major ("v4") → "^4"
     /// Minor ("v4.2") → "^4.2"
     /// Patch ("v4.1.0") → "~4.1.0"
-    /// Non-semver (SHAs, branches) → None
+    /// Non-semver (SHAs, branches) → None.
     #[must_use]
     pub fn specifier(&self) -> Option<String> {
         let stripped = self
@@ -161,22 +166,22 @@ impl From<String> for Version {
 
 impl From<&str> for Version {
     fn from(s: &str) -> Self {
-        Self(s.to_string())
+        Self(s.to_owned())
     }
 }
 
 /// How precisely a version is pinned, following semver component conventions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VersionPrecision {
-    /// Only major version specified (e.g., "v4")
+    /// Only major version specified (e.g., "v4").
     Major,
-    /// Major and minor specified (e.g., "v4.1")
+    /// Major and minor specified (e.g., "v4.1").
     Minor,
-    /// Full major.minor.patch specified (e.g., "v4.1.0")
+    /// Full major.minor.patch specified (e.g., "v4.1.0").
     Patch,
 }
 
-/// A resolved commit SHA (40 hex characters)
+/// A resolved commit SHA (40 hex characters).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CommitSha(pub String);
 
@@ -186,7 +191,7 @@ impl CommitSha {
         &self.0
     }
 
-    /// Check if a string is a full commit SHA (40 hexadecimal characters)
+    /// Check if a string is a full commit SHA (40 hexadecimal characters).
     #[must_use]
     pub fn is_valid(s: &str) -> bool {
         s.len() == 40 && s.chars().all(|c| c.is_ascii_hexdigit())
@@ -207,7 +212,7 @@ impl From<String> for CommitSha {
 
 impl From<&str> for CommitSha {
     fn from(s: &str) -> Self {
-        Self(s.to_string())
+        Self(s.to_owned())
     }
 }
 
@@ -216,7 +221,7 @@ mod tests {
     use super::{ActionId, CommitSha, Version, VersionPrecision};
 
     #[test]
-    fn test_action_id_base_repo() {
+    fn action_id_base_repo() {
         let simple = ActionId::from("actions/checkout");
         assert_eq!(simple.base_repo(), "actions/checkout");
 
@@ -225,7 +230,7 @@ mod tests {
     }
 
     #[test]
-    fn test_commit_sha_is_valid() {
+    fn commit_sha_is_valid() {
         assert!(CommitSha::is_valid(
             "a1b2c3d4e5f6789012345678901234567890abcd"
         ));
@@ -238,7 +243,7 @@ mod tests {
     }
 
     #[test]
-    fn test_commit_sha_is_valid_invalid_length() {
+    fn commit_sha_is_valid_invalid_length() {
         assert!(!CommitSha::is_valid("abc123")); // Too short
         assert!(!CommitSha::is_valid(
             "a1b2c3d4e5f6789012345678901234567890abcde"
@@ -247,7 +252,7 @@ mod tests {
     }
 
     #[test]
-    fn test_commit_sha_is_valid_invalid_chars() {
+    fn commit_sha_is_valid_invalid_chars() {
         assert!(!CommitSha::is_valid(
             "g1b2c3d4e5f6789012345678901234567890abcd"
         )); // 'g' is not hex
@@ -257,27 +262,27 @@ mod tests {
     }
 
     #[test]
-    fn test_version_normalized_with_v_prefix() {
+    fn version_normalized_with_v_prefix() {
         assert_eq!(Version::normalized("v4").as_str(), "v4");
         assert_eq!(Version::normalized("v4.1.0").as_str(), "v4.1.0");
         assert_eq!(Version::normalized("V4").as_str(), "V4");
     }
 
     #[test]
-    fn test_version_normalized_without_v_prefix() {
+    fn version_normalized_without_v_prefix() {
         assert_eq!(Version::normalized("4").as_str(), "v4");
         assert_eq!(Version::normalized("4.1.0").as_str(), "v4.1.0");
     }
 
     #[test]
-    fn test_version_is_sha() {
+    fn version_is_sha() {
         assert!(Version::from("abc123def456789012345678901234567890abcd").is_sha());
         assert!(!Version::from("v4").is_sha());
         assert!(!Version::from("main").is_sha());
     }
 
     #[test]
-    fn test_version_is_semver_like() {
+    fn version_is_semver_like() {
         assert!(Version::from("v4").is_semver_like());
         assert!(Version::from("v4.1").is_semver_like());
         assert!(Version::from("v4.1.0").is_semver_like());
@@ -286,7 +291,7 @@ mod tests {
     }
 
     #[test]
-    fn test_version_is_semver_like_invalid() {
+    fn version_is_semver_like_invalid() {
         assert!(!Version::from("main").is_semver_like());
         assert!(!Version::from("develop").is_semver_like());
         assert!(!Version::from("abc123def456789012345678901234567890abcd").is_semver_like());
@@ -294,7 +299,7 @@ mod tests {
     }
 
     #[test]
-    fn test_precision_major() {
+    fn precision_major() {
         assert_eq!(
             Version::from("v4").precision(),
             Some(VersionPrecision::Major)
@@ -306,7 +311,7 @@ mod tests {
     }
 
     #[test]
-    fn test_precision_minor() {
+    fn precision_minor() {
         assert_eq!(
             Version::from("v4.1").precision(),
             Some(VersionPrecision::Minor)
@@ -318,7 +323,7 @@ mod tests {
     }
 
     #[test]
-    fn test_precision_patch() {
+    fn precision_patch() {
         assert_eq!(
             Version::from("v4.1.0").precision(),
             Some(VersionPrecision::Patch)
@@ -330,7 +335,7 @@ mod tests {
     }
 
     #[test]
-    fn test_precision_non_semver() {
+    fn precision_non_semver() {
         assert!(Version::from("main").precision().is_none());
         assert!(
             Version::from("abc123def456789012345678901234567890abcd")
@@ -341,7 +346,7 @@ mod tests {
     }
 
     #[test]
-    fn test_precision_prerelease_patch() {
+    fn precision_prerelease_patch() {
         assert_eq!(
             Version::from("v3.0.0-beta.2").precision(),
             Some(VersionPrecision::Patch)
@@ -349,7 +354,7 @@ mod tests {
     }
 
     #[test]
-    fn test_precision_prerelease_minor() {
+    fn precision_prerelease_minor() {
         assert_eq!(
             Version::from("v3.0-rc.1").precision(),
             Some(VersionPrecision::Minor)
@@ -357,7 +362,7 @@ mod tests {
     }
 
     #[test]
-    fn test_precision_prerelease_major() {
+    fn precision_prerelease_major() {
         assert_eq!(
             Version::from("v3-alpha").precision(),
             Some(VersionPrecision::Major)
@@ -365,31 +370,31 @@ mod tests {
     }
 
     #[test]
-    fn test_specifier_major() {
-        assert_eq!(Version::from("v4").specifier(), Some("^4".to_string()));
-        assert_eq!(Version::from("v12").specifier(), Some("^12".to_string()));
+    fn specifier_major() {
+        assert_eq!(Version::from("v4").specifier(), Some("^4".to_owned()));
+        assert_eq!(Version::from("v12").specifier(), Some("^12".to_owned()));
     }
 
     #[test]
-    fn test_specifier_minor() {
-        assert_eq!(Version::from("v4.2").specifier(), Some("^4.2".to_string()));
-        assert_eq!(Version::from("v4.0").specifier(), Some("^4.0".to_string()));
+    fn specifier_minor() {
+        assert_eq!(Version::from("v4.2").specifier(), Some("^4.2".to_owned()));
+        assert_eq!(Version::from("v4.0").specifier(), Some("^4.0".to_owned()));
     }
 
     #[test]
-    fn test_specifier_patch() {
+    fn specifier_patch() {
         assert_eq!(
             Version::from("v4.1.0").specifier(),
-            Some("~4.1.0".to_string())
+            Some("~4.1.0".to_owned())
         );
         assert_eq!(
             Version::from("v4.1.2").specifier(),
-            Some("~4.1.2".to_string())
+            Some("~4.1.2".to_owned())
         );
     }
 
     #[test]
-    fn test_specifier_non_semver() {
+    fn specifier_non_semver() {
         assert!(Version::from("main").specifier().is_none());
         assert!(
             Version::from("abc123def456789012345678901234567890abcd")
@@ -399,38 +404,38 @@ mod tests {
     }
 
     #[test]
-    fn test_specifier_without_v_prefix() {
+    fn specifier_without_v_prefix() {
         // Version without prefix should still work
         let v = Version::from("4.2");
-        assert_eq!(v.specifier(), Some("^4.2".to_string()));
+        assert_eq!(v.specifier(), Some("^4.2".to_owned()));
     }
 
     #[test]
-    fn test_specifier_prerelease_patch() {
+    fn specifier_prerelease_patch() {
         assert_eq!(
             Version::from("v3.0.0-beta.2").specifier(),
-            Some("~3.0.0-beta.2".to_string())
+            Some("~3.0.0-beta.2".to_owned())
         );
     }
 
     #[test]
-    fn test_specifier_prerelease_minor() {
+    fn specifier_prerelease_minor() {
         assert_eq!(
             Version::from("v3.0-rc.1").specifier(),
-            Some("^3.0-rc.1".to_string())
+            Some("^3.0-rc.1".to_owned())
         );
     }
 
     #[test]
-    fn test_specifier_prerelease_major() {
+    fn specifier_prerelease_major() {
         assert_eq!(
             Version::from("v3-alpha").specifier(),
-            Some("^3-alpha".to_string())
+            Some("^3-alpha".to_owned())
         );
     }
 
     #[test]
-    fn test_version_specifier_uses_parse_semver() {
+    fn version_specifier_uses_parse_semver() {
         // Ensure that Version::highest and parse_semver integration works correctly
         assert_eq!(
             Version::highest(&[Version::from("v4"), Version::from("main")]),

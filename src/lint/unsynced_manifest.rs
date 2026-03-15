@@ -42,7 +42,7 @@ impl Rule for UnsyncedManifestRule {
 
 #[cfg(test)]
 mod tests {
-    use super::{Level, Rule, UnsyncedManifestRule};
+    use super::{Level, Rule as _, UnsyncedManifestRule};
 
     #[test]
     fn unsynced_manifest_rule_has_correct_metadata() {

@@ -4,9 +4,9 @@ use crate::output::lines::Line as OutputLine;
 /// Report from the init command.
 #[derive(Debug, Default)]
 pub struct Report {
-    /// Number of actions discovered from workflows
+    /// Number of actions discovered from workflows.
     pub actions_discovered: usize,
-    /// True if manifest and lock files were created
+    /// True if manifest and lock files were created.
     pub created: bool,
 }
 
@@ -14,7 +14,7 @@ impl CommandReport for Report {
     fn render(&self) -> Vec<OutputLine> {
         if !self.created {
             return vec![OutputLine::Summary {
-                text: "No actions found in workflows".to_string(),
+                text: "No actions found in workflows".to_owned(),
             }];
         }
 
@@ -36,7 +36,7 @@ impl CommandReport for Report {
 
 #[cfg(test)]
 mod tests {
-    use super::{CommandReport, OutputLine, Report};
+    use super::{CommandReport as _, OutputLine, Report};
 
     #[test]
     fn render_init_no_actions() {
@@ -56,7 +56,7 @@ mod tests {
         };
         let lines = report.render();
         assert!(lines.contains(&OutputLine::Summary {
-            text: "2 actions discovered · manifest created".to_string(),
+            text: "2 actions discovered · manifest created".to_owned(),
         }));
     }
 }

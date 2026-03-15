@@ -5,6 +5,7 @@ use std::collections::HashMap;
 /// Accumulates `ShaDescription` results during a plan run, keyed by `(ActionId, CommitSha)`.
 /// Provides deduplication: `get_or_describe` calls the registry only on first access.
 pub struct ShaIndex {
+    /// Cached SHA descriptions keyed by action ID and commit SHA.
     cache: HashMap<(ActionId, CommitSha), ShaDescription>,
 }
 
@@ -28,12 +29,13 @@ impl ShaIndex {
         sha: &CommitSha,
     ) -> Result<&ShaDescription, ResolutionError> {
         let key = (id.clone(), sha.clone());
-        if let std::collections::hash_map::Entry::Vacant(entry) = self.cache.entry(key.clone()) {
-            let desc = registry.describe_sha(id, sha)?;
-            entry.insert(desc);
+        match self.cache.entry(key) {
+            std::collections::hash_map::Entry::Occupied(entry) => Ok(entry.into_mut()),
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                let desc = registry.describe_sha(id, sha)?;
+                Ok(entry.insert(desc))
+            }
         }
-        // SAFETY: key was just inserted above if it was missing
-        Ok(&self.cache[&key])
     }
 }
 
@@ -70,12 +72,13 @@ pub fn select_most_specific_tag(tags: &[Version]) -> Option<Version> {
         (None, None) => std::cmp::Ordering::Equal,
         (Some(_), None) => std::cmp::Ordering::Less,
         (None, Some(_)) => std::cmp::Ordering::Greater,
-        (Some(av), Some(bv)) => {
-            let a_len = av.len();
-            let b_len = bv.len();
+        (Some(a_components), Some(b_components)) => {
+            let a_len = a_components.len();
+            let b_len = b_components.len();
             match b_len.cmp(&a_len) {
-                std::cmp::Ordering::Equal => bv.cmp(av), // higher version wins (descending)
-                other => other,                          // more components wins (descending)
+                std::cmp::Ordering::Equal => b_components.cmp(a_components), // higher version wins (descending)
+                std::cmp::Ordering::Less => std::cmp::Ordering::Less, // more components wins (descending)
+                std::cmp::Ordering::Greater => std::cmp::Ordering::Greater, // more components wins (descending)
             }
         }
     });
@@ -88,18 +91,18 @@ mod tests {
     use super::{Version, select_most_specific_tag};
 
     #[test]
-    fn test_select_most_specific_tag_empty() {
+    fn select_most_specific_tag_empty() {
         assert_eq!(select_most_specific_tag(&[]), None);
     }
 
     #[test]
-    fn test_select_most_specific_tag_single() {
+    fn select_most_specific_tag_single() {
         let tags = vec![Version::from("v4")];
         assert_eq!(select_most_specific_tag(&tags), Some(Version::from("v4")));
     }
 
     #[test]
-    fn test_select_most_specific_tag_prefers_patch_over_major() {
+    fn select_most_specific_tag_prefers_patch_over_major() {
         let tags = vec![Version::from("v4.1.0"), Version::from("v4")];
         assert_eq!(
             select_most_specific_tag(&tags),
@@ -108,13 +111,13 @@ mod tests {
     }
 
     #[test]
-    fn test_select_most_specific_tag_prefers_minor_over_major() {
+    fn select_most_specific_tag_prefers_minor_over_major() {
         let tags = vec![Version::from("v4.1"), Version::from("v4")];
         assert_eq!(select_most_specific_tag(&tags), Some(Version::from("v4.1")));
     }
 
     #[test]
-    fn test_select_most_specific_tag_three_tiers() {
+    fn select_most_specific_tag_three_tiers() {
         let tags = vec![
             Version::from("v3"),
             Version::from("v3.6"),
@@ -127,20 +130,20 @@ mod tests {
     }
 
     #[test]
-    fn test_select_most_specific_tag_non_semver_sorted_last() {
+    fn select_most_specific_tag_non_semver_sorted_last() {
         let tags = vec![Version::from("latest"), Version::from("v4")];
         assert_eq!(select_most_specific_tag(&tags), Some(Version::from("v4")));
     }
 
     #[test]
-    fn test_select_most_specific_tag_all_non_semver_returns_first() {
+    fn select_most_specific_tag_all_non_semver_returns_first() {
         let tags = vec![Version::from("latest"), Version::from("stable")];
         // No semver tags — returns the first one
         assert!(select_most_specific_tag(&tags).is_some());
     }
 
     #[test]
-    fn test_select_most_specific_tag_higher_major_wins_among_same_precision() {
+    fn select_most_specific_tag_higher_major_wins_among_same_precision() {
         let tags = vec![
             Version::from("v3"),
             Version::from("v4"),

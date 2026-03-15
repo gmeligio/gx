@@ -4,15 +4,15 @@ use crate::output::lines::Line as OutputLine;
 /// Report from the upgrade command.
 #[derive(Debug, Default)]
 pub struct Report {
-    /// Actions that were upgraded: (action, `from_version`, `to_version`)
+    /// Actions that were upgraded: (action, `from_version`, `to_version`).
     pub upgrades: Vec<(String, String, String)>,
-    /// Actions that were skipped: (action, reason)
+    /// Actions that were skipped: (action, reason).
     pub skipped: Vec<(String, String)>,
-    /// Warnings encountered during upgrade
+    /// Warnings encountered during upgrade.
     pub warnings: Vec<String>,
-    /// Number of workflow files updated
+    /// Number of workflow files updated.
     pub workflows_updated: usize,
-    /// True if everything was already up to date
+    /// True if everything was already up to date.
     pub up_to_date: bool,
 }
 
@@ -20,13 +20,13 @@ impl CommandReport for Report {
     fn render(&self) -> Vec<OutputLine> {
         if self.up_to_date {
             return vec![OutputLine::Summary {
-                text: "All actions up to date".to_string(),
+                text: "All actions up to date".to_owned(),
             }];
         }
 
         if self.upgrades.is_empty() && self.skipped.is_empty() && self.warnings.is_empty() {
             return vec![OutputLine::Summary {
-                text: "All actions up to date".to_string(),
+                text: "All actions up to date".to_owned(),
             }];
         }
 
@@ -70,8 +70,12 @@ impl CommandReport for Report {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::indexing_slicing,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
 mod tests {
-    use super::{CommandReport, OutputLine, Report};
+    use super::{CommandReport as _, OutputLine, Report};
 
     #[test]
     fn render_upgrade_up_to_date() {
@@ -91,14 +95,14 @@ mod tests {
         let report = Report {
             upgrades: vec![
                 (
-                    "actions/checkout".to_string(),
-                    "v6".to_string(),
-                    "v6.0.2".to_string(),
+                    "actions/checkout".to_owned(),
+                    "v6".to_owned(),
+                    "v6.0.2".to_owned(),
                 ),
                 (
-                    "jdx/mise-action".to_string(),
-                    "v3".to_string(),
-                    "v3.6.2".to_string(),
+                    "jdx/mise-action".to_owned(),
+                    "v3".to_owned(),
+                    "v3.6.2".to_owned(),
                 ),
             ],
             workflows_updated: 1,
@@ -107,17 +111,17 @@ mod tests {
         let lines = report.render();
 
         assert!(lines.contains(&OutputLine::Upgraded {
-            action: "actions/checkout".to_string(),
-            from: "v6".to_string(),
-            to: "v6.0.2".to_string(),
+            action: "actions/checkout".to_owned(),
+            from: "v6".to_owned(),
+            to: "v6.0.2".to_owned(),
         }));
         assert!(lines.contains(&OutputLine::Upgraded {
-            action: "jdx/mise-action".to_string(),
-            from: "v3".to_string(),
-            to: "v3.6.2".to_string(),
+            action: "jdx/mise-action".to_owned(),
+            from: "v3".to_owned(),
+            to: "v3.6.2".to_owned(),
         }));
         assert!(lines.contains(&OutputLine::Summary {
-            text: "2 upgraded · 1 workflow".to_string(),
+            text: "2 upgraded · 1 workflow".to_owned(),
         }));
     }
 }

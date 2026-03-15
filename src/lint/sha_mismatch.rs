@@ -1,6 +1,6 @@
 use super::{Context, Diagnostic, Rule};
 use crate::config::Level;
-use crate::domain::action::spec::LockKey;
+use crate::domain::action::spec::Spec;
 use crate::domain::action::specifier::Specifier;
 
 /// sha-mismatch rule: detects when a workflow SHA doesn't match the lock file.
@@ -12,13 +12,13 @@ impl ShaMismatchRule {
         action: &crate::domain::workflow_actions::Located,
         lock: &crate::domain::lock::Lock,
     ) -> Option<Diagnostic> {
-        if !action.version.is_sha() {
+        if !action.action.version.is_sha() {
             return None;
         }
 
-        let key = LockKey::new(
-            action.id.clone(),
-            Specifier::from_v1(action.version.as_str()),
+        let key = Spec::new(
+            action.action.id.clone(),
+            Specifier::from_v1(action.action.version.as_str()),
         );
         if lock.has(&key) {
             return None;
@@ -27,8 +27,8 @@ impl ShaMismatchRule {
         let msg = format!(
             "{}: action {} SHA {} not found in lock file",
             &action.location.workflow,
-            &action.id,
-            action.version.as_str()
+            &action.action.id,
+            action.action.version.as_str()
         );
         Some(
             Diagnostic::new("sha-mismatch", Level::Error, msg)
@@ -56,7 +56,7 @@ impl Rule for ShaMismatchRule {
 
 #[cfg(test)]
 mod tests {
-    use super::{Level, Rule, ShaMismatchRule};
+    use super::{Level, Rule as _, ShaMismatchRule};
 
     #[test]
     fn sha_mismatch_rule_has_correct_metadata() {

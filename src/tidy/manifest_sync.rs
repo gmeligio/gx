@@ -9,7 +9,7 @@ use crate::domain::workflow_actions::{ActionSet as WorkflowActionSet, Located as
 use std::collections::HashSet;
 
 /// Remove unused actions from manifest and add missing ones.
-/// Returns events for each added action (and version corrections).
+/// Returns events for each added action.
 pub(super) fn sync_manifest_actions<R: VersionRegistry>(
     manifest: &mut Manifest,
     located: &[LocatedAction],
@@ -34,14 +34,16 @@ pub(super) fn sync_manifest_actions<R: VersionRegistry>(
         let version = select_dominant_version(action_id, action_set);
 
         let corrected_version = if version.is_sha() {
-            let located_with_version = located
-                .iter()
-                .find(|loc| &loc.id == action_id && loc.version == version && loc.sha.is_some());
+            let located_with_version = located.iter().find(|loc| {
+                &loc.action.id == action_id
+                    && loc.action.version == version
+                    && loc.action.sha.is_some()
+            });
 
             located_with_version.map_or_else(
                 || version.clone(),
                 |located_action| {
-                    located_action.sha.as_ref().map_or_else(
+                    located_action.action.sha.as_ref().map_or_else(
                         || version.clone(),
                         |sha| {
                             let (corrected, was_corrected) =
@@ -138,13 +140,13 @@ mod tests {
     use crate::domain::resolution::testutil::{AuthRequiredRegistry, FakeRegistry};
 
     #[test]
-    fn test_select_version_single() {
+    fn select_version_single() {
         let versions = vec![Version::from("v4")];
         assert_eq!(select_version(&versions), Version::from("v4"));
     }
 
     #[test]
-    fn test_select_version_picks_highest() {
+    fn select_version_picks_highest() {
         let versions = vec![
             Version::from("v3"),
             Version::from("v4"),
@@ -159,7 +161,7 @@ mod tests {
 
     /// Manifest SHA specifier is upgraded to the most specific tag via the registry.
     #[test]
-    fn test_sha_to_tag_upgrade_via_registry() {
+    fn sha_to_tag_upgrade_via_registry() {
         let sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         let mut manifest = Manifest::default();
         manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1(sha));
@@ -178,7 +180,7 @@ mod tests {
 
     /// Without a token, SHA stays unchanged — registry returns `AuthRequired` gracefully.
     #[test]
-    fn test_sha_to_tag_upgrade_graceful_without_token() {
+    fn sha_to_tag_upgrade_graceful_without_token() {
         let sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         let mut manifest = Manifest::default();
         manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1(sha));

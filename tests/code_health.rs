@@ -1,3 +1,11 @@
+#![expect(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::shadow_reuse,
+    clippy::arithmetic_side_effects,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
+
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -153,12 +161,10 @@ fn parent_prefixes(file_path: &Path, src_dir: &Path) -> (Option<String>, Option<
     }
 
     // file_level_prefix = parent of the file's module
-    let file_level_prefix = if segments.len() >= 2 {
+    let file_level_prefix = (segments.len() >= 2).then(|| {
         let parent = &segments[..segments.len() - 1];
-        Some(format!("crate::{}", parent.join("::")))
-    } else {
-        None
-    };
+        format!("crate::{}", parent.join("::"))
+    });
 
     // indented_prefix = the file's own module path
     let indented_prefix = Some(format!("crate::{}", segments.join("::")));

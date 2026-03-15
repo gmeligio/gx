@@ -238,7 +238,10 @@ pub(super) fn higher_version<'ver>(a: &'ver Version, b: &'ver Version) -> &'ver 
 }
 
 #[cfg(test)]
-#[expect(clippy::unwrap_used, reason = "tests use unwrap freely")]
+#[expect(
+    clippy::unwrap_used,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
 mod tests {
     use super::{Version, parse_semver};
 

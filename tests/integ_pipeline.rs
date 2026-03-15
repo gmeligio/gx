@@ -1,4 +1,9 @@
-#![allow(unused_crate_dependencies)]
+#![expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::string_slice,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
 
 //! Integration tests for pipeline edge cases that require specific mock behavior.
 //!
@@ -10,14 +15,14 @@ mod common;
 use common::registries::{EmptyDateRegistry, FailingDescribeRegistry, FakeRegistry};
 use common::setup::{create_test_repo, lock_path, run_init, write_workflow};
 use gx::domain::action::identity::ActionId;
-use gx::domain::action::spec::LockKey;
+use gx::domain::action::spec::Spec;
 use gx::domain::action::specifier::Specifier;
-use gx::infra::lock;
+use gx::infra::lock::Store as LockStore;
 use tempfile::TempDir;
 
 /// `init` on a SHA-pinned workflow where `describe_sha` returns no tags must use the SHA as version.
 #[test]
-fn test_init_sha_first_describe_sha_no_tags() {
+fn init_sha_first_describe_sha_no_tags() {
     let temp = TempDir::new().unwrap();
     let root = create_test_repo(&temp);
 
@@ -35,19 +40,19 @@ fn test_init_sha_first_describe_sha_no_tags() {
     // FakeRegistry.describe_sha returns empty tags → SHA used as version in lock entry
     run_init(&root, &FakeRegistry::new());
 
-    let lock = lock::parse(&lock_path(&root)).unwrap().value;
-    let key = LockKey::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
-    let entry = lock.get(&key).expect("Lock must have checkout@v4 entry");
+    let lock = LockStore::new(&lock_path(&root)).load().unwrap();
+    let key = Spec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
+    let (res, commit) = lock.get(&key).expect("Lock must have checkout@v4 entry");
 
     assert_eq!(
-        entry.sha.as_str(),
+        commit.sha.as_str(),
         checkout_sha.as_str(),
         "Lock SHA must match the workflow-pinned SHA"
     );
 
     assert_eq!(
-        entry.version.as_deref(),
-        Some(checkout_sha.as_str()),
+        res.version.as_str(),
+        checkout_sha.as_str(),
         "When describe_sha returns no tags, lock version should be the SHA itself"
     );
 }
@@ -55,7 +60,7 @@ fn test_init_sha_first_describe_sha_no_tags() {
 /// `init` on a SHA-pinned workflow where `describe_sha` cannot fetch the commit date
 /// must still succeed — date fetch failures are non-fatal.
 #[test]
-fn test_init_sha_first_describe_sha_empty_date() {
+fn init_sha_first_describe_sha_empty_date() {
     let temp = TempDir::new().unwrap();
     let root = create_test_repo(&temp);
 
@@ -71,18 +76,18 @@ fn test_init_sha_first_describe_sha_empty_date() {
 
     run_init(&root, &EmptyDateRegistry);
 
-    let lock = lock::parse(&lock_path(&root)).unwrap().value;
-    let key = LockKey::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
-    let entry = lock.get(&key).expect("Lock must have checkout@v4 entry");
+    let lock = LockStore::new(&lock_path(&root)).load().unwrap();
+    let key = Spec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
+    let (_res, commit) = lock.get(&key).expect("Lock must have checkout@v4 entry");
 
     assert_eq!(
-        entry.sha.as_str(),
+        commit.sha.as_str(),
         checkout_sha.as_str(),
         "Lock SHA must match the workflow-pinned SHA"
     );
 
     assert_eq!(
-        entry.date, "",
+        commit.date, "",
         "Date should be empty when commit date fetch fails"
     );
 }
@@ -90,7 +95,7 @@ fn test_init_sha_first_describe_sha_empty_date() {
 /// `init` on a SHA-pinned workflow where `describe_sha` fails must fall back
 /// to `resolve(spec)` (tag-based resolution) instead of failing entirely.
 #[test]
-fn test_init_sha_first_describe_sha_fails_falls_back_to_resolve() {
+fn init_sha_first_describe_sha_fails_falls_back_to_resolve() {
     let temp = TempDir::new().unwrap();
     let root = create_test_repo(&temp);
 
@@ -107,13 +112,16 @@ fn test_init_sha_first_describe_sha_fails_falls_back_to_resolve() {
     // describe_sha fails, but init must succeed by falling back to resolve(spec)
     run_init(&root, &FailingDescribeRegistry);
 
-    let lock = lock::parse(&lock_path(&root)).unwrap().value;
-    let key = LockKey::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
-    let entry = lock.get(&key).expect("Lock must have checkout@v4 entry");
+    let lock = LockStore::new(&lock_path(&root)).load().unwrap();
+    let key = Spec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
+    let (_res, commit) = lock.get(&key).expect("Lock must have checkout@v4 entry");
 
-    assert!(!entry.sha.as_str().is_empty(), "Lock entry must have a SHA");
+    assert!(
+        !commit.sha.as_str().is_empty(),
+        "Lock entry must have a SHA"
+    );
     assert_eq!(
-        entry.repository, "actions/checkout",
+        commit.repository, "actions/checkout",
         "Repository must be set"
     );
 }

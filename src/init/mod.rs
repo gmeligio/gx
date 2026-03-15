@@ -13,7 +13,7 @@ use report::Report;
 use std::path::Path;
 use thiserror::Error;
 
-/// Errors that can occur during the init command
+/// Errors that can occur during the init command.
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("already initialized \u{2014} use `gx tidy` to update")]
@@ -64,14 +64,11 @@ impl Command for Init {
             &mut *on_progress,
         )?;
 
-        if config.lock_migrated {
-            on_progress("migrated gx.lock → v1.4");
-        }
-
         if !plan.is_empty() {
             crate::infra::manifest::create(&config.manifest_path, &plan.manifest)?;
-            crate::infra::lock::create(&config.lock_path, &plan.lock)?;
-            crate::tidy::apply_workflow_patches(&updater, &plan.workflows, &plan.corrections)?;
+            let lock_store = crate::infra::lock::Store::new(&config.lock_path);
+            lock_store.save(&plan.lock)?;
+            crate::tidy::apply_workflow_patches(&updater, &plan.workflows)?;
         }
 
         let report = Report {

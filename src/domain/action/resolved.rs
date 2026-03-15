@@ -1,8 +1,15 @@
-use super::identity::{ActionId, CommitSha, Version};
-use super::spec::LockKey;
+use super::identity::{ActionId, CommitSha};
 use super::specifier::Specifier;
 use super::uses_ref::RefType;
-use std::fmt;
+
+/// Commit metadata shared between `Resolved` and lock `Entry`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Commit {
+    pub sha: CommitSha,
+    pub repository: String,
+    pub ref_type: Option<RefType>,
+    pub date: String,
+}
 
 /// A fully resolved action with its commit SHA and metadata.
 /// The `version` field holds the manifest specifier (e.g., `"^6"`).
@@ -11,10 +18,7 @@ use std::fmt;
 pub struct Resolved {
     pub id: ActionId,
     pub version: Specifier,
-    pub sha: CommitSha,
-    pub repository: String,
-    pub ref_type: Option<RefType>,
-    pub date: String,
+    pub commit: Commit,
 }
 
 impl Resolved {
@@ -31,10 +35,12 @@ impl Resolved {
         Self {
             id,
             version,
-            sha,
-            repository,
-            ref_type,
-            date,
+            commit: Commit {
+                sha,
+                repository,
+                ref_type,
+                date,
+            },
         }
     }
 
@@ -42,49 +48,17 @@ impl Resolved {
     /// The comment is derived from the specifier (e.g., `"^6"` → `"v6"`).
     #[must_use]
     pub fn to_workflow_ref(&self) -> String {
-        format!("{} # {}", self.sha, self.version.to_comment())
+        format!("{} # {}", self.commit.sha, self.version.to_comment())
     }
 
     /// Create a new `Resolved` with the SHA replaced.
     /// Used when a workflow has a pinned SHA that differs from the registry.
     #[must_use]
-    pub fn with_sha(&self, sha: CommitSha) -> Self {
+    pub fn with_sha(self, sha: CommitSha) -> Self {
         Self {
-            id: self.id.clone(),
-            version: self.version.clone(),
-            sha,
-            repository: self.repository.clone(),
-            ref_type: self.ref_type.clone(),
-            date: self.date.clone(),
+            commit: Commit { sha, ..self.commit },
+            ..self
         }
-    }
-}
-
-/// Tracks a version correction when SHA doesn't match the version comment
-#[derive(Debug)]
-pub struct VersionCorrection {
-    pub action: ActionId,
-    pub old_version: Version,
-    pub new_version: Version,
-    pub sha: CommitSha,
-}
-
-impl fmt::Display for VersionCorrection {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{} {} -> {} (SHA {} points to {})",
-            self.action, self.old_version, self.new_version, self.sha, self.new_version
-        )
-    }
-}
-
-impl From<&Resolved> for LockKey {
-    fn from(resolved: &Resolved) -> Self {
-        Self::new(
-            ActionId::from(resolved.id.as_str()),
-            resolved.version.clone(),
-        )
     }
 }
 
@@ -93,18 +67,38 @@ mod tests {
     use super::{ActionId, CommitSha, RefType, Resolved, Specifier};
 
     #[test]
-    fn test_resolved_action_to_workflow_ref() {
+    fn resolved_action_to_workflow_ref() {
         let resolved = Resolved::new(
             ActionId::from("actions/checkout"),
             Specifier::parse("^4"),
             CommitSha::from("abc123def456789012345678901234567890abcd"),
-            "actions/checkout".to_string(),
+            "actions/checkout".to_owned(),
             Some(RefType::Tag),
-            "2026-01-01T00:00:00Z".to_string(),
+            "2026-01-01T00:00:00Z".to_owned(),
         );
         assert_eq!(
             resolved.to_workflow_ref(),
             "abc123def456789012345678901234567890abcd # v4"
         );
+    }
+
+    #[test]
+    fn with_sha_replaces_only_sha() {
+        let resolved = Resolved::new(
+            ActionId::from("actions/checkout"),
+            Specifier::parse("^4"),
+            CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            "actions/checkout".to_owned(),
+            Some(RefType::Tag),
+            "2026-01-01T00:00:00Z".to_owned(),
+        );
+        let updated =
+            resolved.with_sha(CommitSha::from("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
+        assert_eq!(
+            updated.commit.sha,
+            CommitSha::from("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+        );
+        assert_eq!(updated.commit.repository, "actions/checkout");
+        assert_eq!(updated.id.as_str(), "actions/checkout");
     }
 }
