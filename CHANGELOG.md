@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1](https://github.com/gmeligio/gx/compare/v0.6.0...v0.6.1) - 2026-03-15
+
+### Added
+
+- introduce domain newtypes for stringly-typed fields ([#72](https://github.com/gmeligio/gx/pull/72))
+- slim crate packaging and lock store simplification ([#70](https://github.com/gmeligio/gx/pull/70))
+
 ## [0.6.0](https://github.com/gmeligio/gx/compare/v0.5.10...v0.6.0) - 2026-03-10
 
 ### Added
