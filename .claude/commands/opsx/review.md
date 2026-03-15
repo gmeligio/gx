@@ -1,6 +1,7 @@
 ﻿---
+model: opus
 name: "OPSX: Review"
-description: Review an OpenSpec change proposal before implementation — checks cross-artifact consistency
+description: Review an OpenSpec change proposal for cross-artifact consistency before implementation
 category: Workflow
 tags: [workflow, review, artifacts]
 ---
@@ -14,108 +15,64 @@ If omitted, infer from context or prompt for selection.
 
 1. **Select the change**
 
-   If a name is provided, use it. Otherwise:
-   - Infer from conversation context
-   - Auto-select if only one active change exists
-   - If ambiguous: `openspec list --json` + **AskUserQuestion**
+   Use provided name, or `openspec list --json` + infer/auto-select.
+   AskUserQuestion if ambiguous. Announce: "Reviewing change: <n>"
 
-   Announce: "Reviewing change: <n>"
-
-2. **Collect artifact paths**
+2. **Collect artifacts**
 
    ```bash
    openspec status --change "<n>" --json
    ```
    Collect `outputPath` for each artifact with `status: "done"`.
+   Also collect existing main specs (`openspec/specs/**/spec.md`).
 
-   Also collect existing main specs:
-   ```bash
-   find openspec/specs -name "spec.md" 2>/dev/null
-   ```
+3. **Dispatch review subagent**
 
-3. **Dispatch the review subagent**
-
-   Use the **Task tool** (`subagent_type: "general-purpose"`).
+   Use **Agent tool** (`subagent_type: "general-purpose"`).
    **Never pass session history** — pass only artifact content.
 
    Subagent prompt:
    ```
    You are a spec reviewer. Evaluate only the artifacts provided.
-   No conversation history is available to you.
 
    ## Change: <n>
-
    ## Existing main specs
-   <paste full content of each openspec/specs/**/spec.md>
-
+   <each openspec/specs/**/spec.md>
    ## Proposal
-   <paste full content of proposal.md>
-
+   <proposal.md>
    ## Delta specs
-   <paste full content of each openspec/changes/<n>/specs/**/*.md>
-
+   <each openspec/changes/<n>/specs/**/*.md>
    ## Design
-   <paste design.md content, or "NOT PRESENT">
-
+   <design.md or "NOT PRESENT">
    ## Tasks
-   <paste tasks.md content>
+   <tasks.md>
 
    ---
+   CRITICAL (blocks): task without requirement, delta contradicts main spec
+   without marker, design makes requirement impossible, required artifact missing.
 
-   CRITICAL (blocks implementation):
-   - Task has no corresponding requirement
-   - Delta spec contradicts main spec without MODIFIED/REMOVED marker
-   - Design makes a stated requirement impossible
-   - Required artifact missing
+   WARNING (fix before apply): unmarked duplication, unjustified design,
+   vague tasks, missing GIVEN/WHEN/THEN, design exceeds proposal scope.
 
-   WARNING (fix before apply):
-   - Semantic duplication with existing specs not marked MODIFIED
-   - Design decision not justified in proposal or specs
-   - Tasks vague enough to require guessing
-   - Missing GIVEN/WHEN/THEN for non-trivial requirement
-   - Design scope broader than proposal scope
+   SUGGESTION: missing edge cases, splittable tasks, unstated alternatives.
 
-   SUGGESTION:
-   - Missing edge-case scenarios
-   - Tasks that could be split for clearer checkpoints
-   - Unstated design alternatives worth documenting
-
-   Output (exactly this structure):
-
+   Output (exactly):
    ### Review result: <APPROVED | APPROVED_WITH_WARNINGS | BLOCKED>
-
    ### CRITICAL issues
-   <list or "None">
-
    ### Warnings
-   <list or "None">
-
    ### Suggestions
-   <list or "None">
-
-   ### Verdict
-   One sentence.
+   ### Verdict (one sentence)
    ```
 
-4. **Display the full review result**
+4. **Act on result**
 
-   ```
-   ## Proposal review: <change-name>
-   <full subagent output>
-   ```
-
-5. **Act on the result**
-
-   - **BLOCKED**: Do not proceed. List CRITICAL issues. Ask what to fix.
-     Re-run review after fixes (max 3 iterations, then ask human).
-   - **APPROVED** / **APPROVED_WITH_WARNINGS**:
-     Write marker: `echo "reviewed" > "openspec/changes/<n>/.review-passed"`
-     Announce: "Review passed. Ready for implementation."
-     List any warnings. Ask: "Fix these now, or proceed to apply?"
+   - **BLOCKED**: List CRITICAL issues. Ask what to fix. Re-run after fixes (max 3 iterations).
+   - **APPROVED** / **APPROVED_WITH_WARNINGS**: Write marker
+     `echo "reviewed" > "openspec/changes/<n>/.review-passed"`.
+     List warnings. Prompt: "Fix these now, or proceed to apply?"
 
 **Guardrails**
-- Never pass session history to the review subagent
+- Never pass session history to subagent
 - Never suppress CRITICAL issues
-- Cap auto-iterations at 3
-- This command only reviews — never writes application code
+- Reviews only — never writes application code
 - Warnings do not block implementation
