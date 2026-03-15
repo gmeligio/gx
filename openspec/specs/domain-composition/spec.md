@@ -27,7 +27,7 @@ The `LockKey` type SHALL be deleted. `Spec` SHALL be used everywhere a lock look
 A `ResolvedCommit` struct SHALL hold the four fields shared between `Resolved` and `Entry`:
 
 ```
-ResolvedCommit { sha: CommitSha, repository: String, ref_type: Option<RefType>, date: String }
+ResolvedCommit { sha: CommitSha, repository: Repository, ref_type: Option<RefType>, date: CommitDate }
 ```
 
 #### Scenario: Resolved uses ResolvedCommit
@@ -37,7 +37,7 @@ ResolvedCommit { sha: CommitSha, repository: String, ref_type: Option<RefType>, 
 
 #### Scenario: Entry uses ResolvedCommit
 - **GIVEN** a lock entry
-- **THEN** `Entry` SHALL have fields `{ commit: ResolvedCommit, version: Option<String>, comment: String }`
+- **THEN** `Entry` SHALL have fields `{ commit: ResolvedCommit, version: Option<String>, comment: VersionComment }`
 - **AND** accessing the repository is `entry.commit.repository`
 
 #### Scenario: with_sha consumes self
@@ -53,6 +53,17 @@ ResolvedCommit { sha: CommitSha, repository: String, ref_type: Option<RefType>, 
 - **WHEN** an `Entry` containing a `ResolvedCommit` is serialized to TOML
 - **THEN** the fields `sha`, `repository`, `ref_type`, `date` SHALL appear as flat keys in the TOML table (not nested under a `commit` key)
 - **AND** existing lock files SHALL parse and roundtrip identically
+
+#### Scenario: Lock actions tier uses Commit with newtypes
+- **GIVEN** the lock's actions tier maps `ActionKey` → `Commit`
+- **THEN** `Commit::repository` SHALL be `Repository` (not `String`)
+- **AND** `Commit::date` SHALL be `CommitDate` (not `String`)
+
+#### Scenario: Resolution comment updated to VersionComment
+- **GIVEN** the lock's `Resolution` struct has a `comment` field
+- **THEN** `Resolution::comment` SHALL be `VersionComment` (not `String`)
+- **AND** `Resolution.version` remains `Version` (unchanged)
+- **NOTE** The main spec's `Entry { commit: ResolvedCommit, version: Option<String>, comment: String }` is aspirational naming. In the codebase, `Resolution` holds the `comment` field, and `Commit` holds commit metadata.
 
 ### Requirement: Located composes InterpretedRef
 

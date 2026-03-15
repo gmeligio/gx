@@ -47,8 +47,8 @@ impl CommandReport for Report {
         for diag in &self.diagnostics {
             lines.push(OutputLine::LintDiag {
                 level: diag.level,
-                workflow: diag.workflow.clone(),
-                rule: diag.rule.clone(),
+                workflow: diag.workflow.as_ref().map(std::string::ToString::to_string),
+                rule: diag.rule.to_string(),
                 message: diag.message.clone(),
             });
         }
@@ -86,6 +86,8 @@ impl CommandReport for Report {
 )]
 mod tests {
     use super::*;
+    use crate::domain::workflow_actions::WorkflowPath;
+    use crate::lint::RuleName;
 
     #[test]
     fn render_lint_clean() {
@@ -101,17 +103,17 @@ mod tests {
     fn render_lint_with_violations() {
         let diagnostics = vec![
             Diagnostic::new(
-                "unpinned",
+                RuleName::Unpinned,
                 Level::Error,
                 "actions/checkout@main is not pinned",
             )
-            .with_workflow("ci.yml"),
+            .with_workflow(WorkflowPath::new("ci.yml")),
             Diagnostic::new(
-                "stale-comment",
+                RuleName::StaleComment,
                 Level::Warn,
                 "version comment does not match lock",
             )
-            .with_workflow("ci.yml"),
+            .with_workflow(WorkflowPath::new("ci.yml")),
         ];
         let report = Report::from_diagnostics(diagnostics);
         let lines = report.render();

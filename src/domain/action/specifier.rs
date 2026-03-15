@@ -1,4 +1,4 @@
-use super::identity::{CommitSha, Version, VersionPrecision};
+use super::identity::{CommitSha, Version, VersionComment, VersionPrecision};
 use std::fmt;
 
 /// A specifier for an action version in the manifest or lock key.
@@ -14,7 +14,7 @@ pub enum Specifier {
         /// Raw specifier string for serialization roundtrip (e.g., `"^6"`).
         raw: String,
         /// Human-readable comment for workflow output (e.g., `"v6"`).
-        comment: String,
+        comment: VersionComment,
     },
     /// Non-semver ref: `"main"`, `"develop"`.
     Ref(String),
@@ -35,7 +35,7 @@ impl Specifier {
             && let Ok(req) = semver::VersionReq::parse(s)
         {
             // Comment: strip operator, add v prefix
-            let comment = format!("v{rest}");
+            let comment = VersionComment::from(format!("v{rest}"));
             return Self::Range {
                 req,
                 raw: s.to_owned(),
@@ -81,7 +81,7 @@ impl Specifier {
 
     /// Get the human-readable comment string for workflow output (e.g., "v6").
     #[must_use]
-    pub const fn to_comment(&self) -> &str {
+    pub fn to_comment(&self) -> &str {
         match self {
             Self::Range { comment, .. } => comment.as_str(),
             Self::Ref(s) | Self::Sha(s) => s.as_str(),

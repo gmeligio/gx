@@ -1,4 +1,4 @@
-use super::{Context, Diagnostic, Rule};
+use super::{Context, Diagnostic, Rule, RuleName};
 use crate::config::Level;
 use crate::domain::action::spec::Spec;
 use crate::domain::action::specifier::Specifier;
@@ -33,15 +33,15 @@ impl StaleCommentRule {
             commit.sha.as_str()
         );
         Some(
-            Diagnostic::new("stale-comment", Level::Warn, msg)
-                .with_workflow(&action.location.workflow),
+            Diagnostic::new(RuleName::StaleComment, Level::Warn, msg)
+                .with_workflow(action.location.workflow.clone()),
         )
     }
 }
 
 impl Rule for StaleCommentRule {
-    fn name(&self) -> &'static str {
-        "stale-comment"
+    fn name(&self) -> RuleName {
+        RuleName::StaleComment
     }
 
     fn default_level(&self) -> Level {
@@ -62,14 +62,14 @@ impl Rule for StaleCommentRule {
     reason = "tests use unwrap, indexing, and other patterns freely"
 )]
 mod tests {
-    use super::{Level, Rule as _, StaleCommentRule};
-    use crate::domain::action::identity::{ActionId, CommitSha, Version};
+    use super::{Level, Rule as _, RuleName, StaleCommentRule};
+    use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Version};
     use crate::domain::action::resolved::Resolved as ResolvedAction;
     use crate::domain::action::specifier::Specifier;
     use crate::domain::action::uses_ref::RefType;
     use crate::domain::lock::Lock;
     use crate::domain::manifest::Manifest;
-    use crate::domain::workflow_actions::{ActionSet, Located, Location};
+    use crate::domain::workflow_actions::{ActionSet, Located, Location, WorkflowPath};
 
     fn make_lock(action: &str, version: &str, sha: &str) -> Lock {
         let mut lock = Lock::default();
@@ -79,7 +79,7 @@ mod tests {
             CommitSha::from(sha),
             ActionId::from(action).base_repo(),
             Some(RefType::Tag),
-            "2026-01-01T00:00:00Z".to_owned(),
+            CommitDate::from("2026-01-01T00:00:00Z"),
         ));
         lock
     }
@@ -93,7 +93,7 @@ mod tests {
                 sha: sha.map(CommitSha::from),
             },
             location: Location {
-                workflow: workflow.to_owned(),
+                workflow: WorkflowPath::new(workflow),
                 job: None,
                 step: None,
             },
@@ -103,7 +103,7 @@ mod tests {
     #[test]
     fn stale_comment_rule_has_correct_metadata() {
         let rule = StaleCommentRule;
-        assert_eq!(rule.name(), "stale-comment");
+        assert_eq!(rule.name(), RuleName::StaleComment);
         assert_eq!(rule.default_level(), Level::Warn);
     }
 
@@ -162,7 +162,7 @@ mod tests {
             "Mismatched SHA should produce one diagnostic"
         );
         assert_eq!(diagnostics[0].level, Level::Warn);
-        assert_eq!(diagnostics[0].rule, "stale-comment");
+        assert_eq!(diagnostics[0].rule, RuleName::StaleComment);
         assert!(diagnostics[0].message.contains("stale comment"));
     }
 

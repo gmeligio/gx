@@ -5,7 +5,7 @@
 )]
 
 use gx::config::{Level, Lint};
-use gx::domain::action::identity::{ActionId, CommitSha};
+use gx::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository};
 use gx::domain::action::resolved::Resolved as ResolvedAction;
 use gx::domain::action::specifier::Specifier;
 use gx::domain::action::uses_ref::RefType;
@@ -71,7 +71,10 @@ jobs:
         lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {})
             .expect("Should succeed");
 
-    let unpinned_count = diagnostics.iter().filter(|d| d.rule == "unpinned").count();
+    let unpinned_count = diagnostics
+        .iter()
+        .filter(|d| d.rule == gx::lint::RuleName::Unpinned)
+        .count();
     assert!(unpinned_count > 0, "Should detect unpinned actions");
     assert!(
         diagnostics.iter().any(|d| d.level == Level::Error),
@@ -108,7 +111,7 @@ jobs:
 
     let unsynced_count = diagnostics
         .iter()
-        .filter(|d| d.rule == "unsynced-manifest")
+        .filter(|d| d.rule == gx::lint::RuleName::UnsyncedManifest)
         .count();
     assert!(unsynced_count > 0, "Should detect unsynced manifest");
 }
@@ -139,7 +142,7 @@ jobs:
 
     let mut lint_config = Lint::default();
     lint_config.rules.insert(
-        "unpinned".to_owned(),
+        gx::lint::RuleName::Unpinned,
         gx::config::Rule {
             level: Level::Off,
             ignore: vec![],
@@ -150,7 +153,10 @@ jobs:
         lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {})
             .expect("Should succeed");
 
-    let unpinned_count = diagnostics.iter().filter(|d| d.rule == "unpinned").count();
+    let unpinned_count = diagnostics
+        .iter()
+        .filter(|d| d.rule == gx::lint::RuleName::Unpinned)
+        .count();
     assert_eq!(
         unpinned_count, 0,
         "Disabled rule should not produce diagnostics"
@@ -183,7 +189,7 @@ jobs:
 
     let mut lint_config = Lint::default();
     lint_config.rules.insert(
-        "unpinned".to_owned(),
+        gx::lint::RuleName::Unpinned,
         gx::config::Rule {
             level: Level::Error,
             ignore: vec![gx::config::IgnoreTarget {
@@ -198,7 +204,10 @@ jobs:
         lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {})
             .expect("Should succeed");
 
-    let unpinned_count = diagnostics.iter().filter(|d| d.rule == "unpinned").count();
+    let unpinned_count = diagnostics
+        .iter()
+        .filter(|d| d.rule == gx::lint::RuleName::Unpinned)
+        .count();
     assert_eq!(
         unpinned_count, 0,
         "Ignored action should not produce diagnostics"
@@ -234,7 +243,7 @@ jobs:
 
     let sha_mismatch = diagnostics
         .iter()
-        .filter(|d| d.rule == "sha-mismatch")
+        .filter(|d| d.rule == gx::lint::RuleName::ShaMismatch)
         .count();
     assert!(
         sha_mismatch > 0,
@@ -268,9 +277,9 @@ jobs:
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v4"),
         CommitSha::from("def456789012345678901234567890abcd123456"),
-        "actions/checkout".to_owned(),
+        Repository::from("actions/checkout"),
         Some(RefType::Tag),
-        "2026-01-01T00:00:00Z".to_owned(),
+        CommitDate::from("2026-01-01T00:00:00Z"),
     ));
 
     let scanner = FileWorkflowScanner::new(repo_root);
@@ -282,7 +291,7 @@ jobs:
 
     let stale_comment = diagnostics
         .iter()
-        .filter(|d| d.rule == "stale-comment")
+        .filter(|d| d.rule == gx::lint::RuleName::StaleComment)
         .count();
     assert!(stale_comment > 0, "Should detect stale-comment");
 }
@@ -318,9 +327,9 @@ jobs:
         ActionId::from("actions/setup-node"),
         Specifier::from_v1("v3"),
         CommitSha::from("def456789012345678901234567890abcd123456"),
-        "actions/setup-node".to_owned(),
+        Repository::from("actions/setup-node"),
         Some(RefType::Tag),
-        "2026-01-01T00:00:00Z".to_owned(),
+        CommitDate::from("2026-01-01T00:00:00Z"),
     ));
 
     let scanner = FileWorkflowScanner::new(repo_root);
@@ -367,30 +376,30 @@ jobs:
         ActionId::from("actions/setup-node"),
         Specifier::from_v1("v3"),
         CommitSha::from("def456789012345678901234567890abcd123456"),
-        "actions/setup-node".to_owned(),
+        Repository::from("actions/setup-node"),
         Some(RefType::Tag),
-        "2026-01-01T00:00:00Z".to_owned(),
+        CommitDate::from("2026-01-01T00:00:00Z"),
     ));
 
     let scanner = FileWorkflowScanner::new(repo_root);
 
     let mut lint_config = Lint::default();
     lint_config.rules.insert(
-        "unpinned".to_owned(),
+        gx::lint::RuleName::Unpinned,
         gx::config::Rule {
             level: Level::Off,
             ignore: vec![],
         },
     );
     lint_config.rules.insert(
-        "sha-mismatch".to_owned(),
+        gx::lint::RuleName::ShaMismatch,
         gx::config::Rule {
             level: Level::Off,
             ignore: vec![],
         },
     );
     lint_config.rules.insert(
-        "unsynced-manifest".to_owned(),
+        gx::lint::RuleName::UnsyncedManifest,
         gx::config::Rule {
             level: Level::Off,
             ignore: vec![],
@@ -466,16 +475,16 @@ jobs:
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v4"),
         CommitSha::from("def456789012345678901234567890abcd123456"),
-        "actions/checkout".to_owned(),
+        Repository::from("actions/checkout"),
         Some(RefType::Tag),
-        "2026-01-01T00:00:00Z".to_owned(),
+        CommitDate::from("2026-01-01T00:00:00Z"),
     ));
 
     let scanner = FileWorkflowScanner::new(repo_root);
 
     let mut lint_config = Lint::default();
     lint_config.rules.insert(
-        "stale-comment".to_owned(),
+        gx::lint::RuleName::StaleComment,
         gx::config::Rule {
             level: Level::Error,
             ignore: vec![],
@@ -488,7 +497,7 @@ jobs:
 
     let stale_comment_errors = diagnostics
         .iter()
-        .filter(|d| d.rule == "stale-comment" && d.level == Level::Error)
+        .filter(|d| d.rule == gx::lint::RuleName::StaleComment && d.level == Level::Error)
         .count();
     assert!(
         stale_comment_errors > 0,
@@ -537,7 +546,7 @@ jobs:
 
     let mut lint_config = Lint::default();
     lint_config.rules.insert(
-        "unpinned".to_owned(),
+        gx::lint::RuleName::Unpinned,
         gx::config::Rule {
             level: Level::Error,
             ignore: vec![gx::config::IgnoreTarget {
@@ -555,13 +564,19 @@ jobs:
     let ci_unpinned = diagnostics
         .iter()
         .filter(|d| {
-            d.rule == "unpinned" && d.workflow.as_ref().is_none_or(|w| w.contains("ci.yml"))
+            d.rule == gx::lint::RuleName::Unpinned
+                && d.workflow
+                    .as_ref()
+                    .is_none_or(|w| w.as_str().contains("ci.yml"))
         })
         .count();
     let test_unpinned = diagnostics
         .iter()
         .filter(|d| {
-            d.rule == "unpinned" && d.workflow.as_ref().is_none_or(|w| w.contains("test.yml"))
+            d.rule == gx::lint::RuleName::Unpinned
+                && d.workflow
+                    .as_ref()
+                    .is_none_or(|w| w.as_str().contains("test.yml"))
         })
         .count();
 

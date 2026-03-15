@@ -24,7 +24,7 @@ pub enum Error {
 #[derive(Debug, Clone, Default)]
 pub struct Settings {
     /// Github API token for authenticated requests.
-    pub github_token: Option<String>,
+    pub github_token: Option<GitHubToken>,
 }
 
 /// Severity level for a lint rule.
@@ -66,18 +66,41 @@ pub struct Rule {
 pub struct Lint {
     /// Per-rule configuration, keyed by rule name.
     #[serde(default)]
-    pub rules: BTreeMap<String, Rule>,
+    pub rules: BTreeMap<crate::lint::RuleName, Rule>,
 }
 
 impl Lint {
     /// Get the effective configuration for a rule, applying defaults if not explicitly configured.
     /// Each rule has its own default level; unconfigured rules use their defaults.
     #[must_use]
-    pub fn get_rule(&self, name: &str, default_level: Level) -> Rule {
-        self.rules.get(name).cloned().unwrap_or(Rule {
+    pub fn get_rule(&self, name: crate::lint::RuleName, default_level: Level) -> Rule {
+        self.rules.get(&name).cloned().unwrap_or(Rule {
             level: default_level,
             ignore: Vec::new(),
         })
+    }
+}
+
+/// A GitHub API token with masked debug output.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct GitHubToken(String);
+
+impl GitHubToken {
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for GitHubToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("GitHubToken(***)")
+    }
+}
+
+impl From<String> for GitHubToken {
+    fn from(s: String) -> Self {
+        Self(s)
     }
 }
 
@@ -99,7 +122,7 @@ impl Settings {
     #[must_use]
     pub fn from_env() -> Self {
         Self {
-            github_token: env::var("GITHUB_TOKEN").ok(),
+            github_token: env::var("GITHUB_TOKEN").ok().map(GitHubToken::from),
         }
     }
 }
@@ -138,7 +161,8 @@ impl Config {
 )]
 mod tests {
     use super::{
-        Config, Deserialize, IgnoreTarget, Level, Lint, Lock, Manifest, PathBuf, Rule, Settings,
+        Config, Deserialize, GitHubToken, IgnoreTarget, Level, Lint, Lock, Manifest, PathBuf, Rule,
+        Settings,
     };
 
     #[derive(Deserialize)]
@@ -156,7 +180,7 @@ mod tests {
     fn app_config_can_be_constructed_directly() {
         let config = Config {
             settings: Settings {
-                github_token: Some("test_token".into()),
+                github_token: Some(GitHubToken::from("test_token".to_owned())),
             },
             manifest: Manifest::default(),
             lock: Lock::default(),
@@ -165,7 +189,14 @@ mod tests {
             lock_path: PathBuf::from("gx.lock"),
             manifest_migrated: false,
         };
-        assert_eq!(config.settings.github_token, Some("test_token".to_owned()));
+        assert_eq!(
+            config
+                .settings
+                .github_token
+                .as_ref()
+                .map(GitHubToken::as_str),
+            Some("test_token")
+        );
     }
 
     #[test]
@@ -259,10 +290,22 @@ job = "build"
         "#;
         let config: Lint = toml::from_str(toml_str).unwrap();
         assert_eq!(config.rules.len(), 3);
-        assert_eq!(config.rules["sha-mismatch"].level, Level::Error);
-        assert_eq!(config.rules["unpinned"].level, Level::Error);
-        assert_eq!(config.rules["unpinned"].ignore.len(), 1);
-        assert_eq!(config.rules["stale-comment"].level, Level::Off);
+        assert_eq!(
+            config.rules[&crate::lint::RuleName::ShaMismatch].level,
+            Level::Error
+        );
+        assert_eq!(
+            config.rules[&crate::lint::RuleName::Unpinned].level,
+            Level::Error
+        );
+        assert_eq!(
+            config.rules[&crate::lint::RuleName::Unpinned].ignore.len(),
+            1
+        );
+        assert_eq!(
+            config.rules[&crate::lint::RuleName::StaleComment].level,
+            Level::Off
+        );
     }
 
     #[test]
@@ -274,7 +317,7 @@ job = "build"
     #[test]
     fn lint_config_get_rule_uses_default_when_unconfigured() {
         let config = Lint::default();
-        let rule = config.get_rule("sha-mismatch", Level::Error);
+        let rule = config.get_rule(crate::lint::RuleName::ShaMismatch, Level::Error);
         assert_eq!(rule.level, Level::Error);
         assert!(rule.ignore.is_empty());
     }
@@ -283,7 +326,7 @@ job = "build"
     fn lint_config_get_rule_returns_configured_value() {
         let mut config = Lint::default();
         config.rules.insert(
-            "unpinned".to_owned(),
+            crate::lint::RuleName::Unpinned,
             Rule {
                 level: Level::Warn,
                 ignore: vec![IgnoreTarget {
@@ -293,7 +336,7 @@ job = "build"
                 }],
             },
         );
-        let rule = config.get_rule("unpinned", Level::Error);
+        let rule = config.get_rule(crate::lint::RuleName::Unpinned, Level::Error);
         assert_eq!(rule.level, Level::Warn);
         assert_eq!(rule.ignore.len(), 1);
     }
@@ -302,13 +345,13 @@ job = "build"
     fn lint_config_get_rule_respects_off_level() {
         let mut config = Lint::default();
         config.rules.insert(
-            "stale-comment".to_owned(),
+            crate::lint::RuleName::StaleComment,
             Rule {
                 level: Level::Off,
                 ignore: vec![],
             },
         );
-        let rule = config.get_rule("stale-comment", Level::Warn);
+        let rule = config.get_rule(crate::lint::RuleName::StaleComment, Level::Warn);
         assert_eq!(rule.level, Level::Off);
     }
 }

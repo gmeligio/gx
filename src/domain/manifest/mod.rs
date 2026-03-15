@@ -216,12 +216,12 @@ impl Manifest {
 )]
 mod tests {
     use super::{ActionId, ActionOverride, Manifest, Specifier};
-    use crate::domain::workflow_actions::{Location, StepIndex};
+    use crate::domain::workflow_actions::{JobId, Location, StepIndex, WorkflowPath};
 
     fn make_loc(workflow: &str, job: Option<&str>, step: Option<u16>) -> Location {
         Location {
-            workflow: workflow.to_owned(),
-            job: job.map(str::to_string),
+            workflow: WorkflowPath::new(workflow),
+            job: job.map(JobId::from),
             step: step.map(StepIndex::from),
         }
     }
@@ -252,7 +252,7 @@ mod tests {
         m.add_override(
             ActionId::from("actions/checkout"),
             ActionOverride {
-                workflow: ".github/workflows/ci.yml".to_owned(),
+                workflow: WorkflowPath::new(".github/workflows/ci.yml"),
                 job: None,
                 step: None,
                 version: Specifier::parse("^3"),
@@ -373,7 +373,7 @@ mod tests {
         after.add_override(
             ActionId::from("actions/checkout"),
             ActionOverride {
-                workflow: ".github/workflows/ci.yml".to_owned(),
+                workflow: WorkflowPath::new(".github/workflows/ci.yml"),
                 job: None,
                 step: None,
                 version: Specifier::parse("^3"),
@@ -392,7 +392,7 @@ mod tests {
         before.add_override(
             ActionId::from("actions/checkout"),
             ActionOverride {
-                workflow: ".github/workflows/ci.yml".to_owned(),
+                workflow: WorkflowPath::new(".github/workflows/ci.yml"),
                 job: None,
                 step: None,
                 version: Specifier::parse("^3"),
@@ -425,7 +425,7 @@ mod tests {
         m.add_override(
             ActionId::from("actions/checkout"),
             ActionOverride {
-                workflow: ".github/workflows/windows.yml".to_owned(),
+                workflow: WorkflowPath::new(".github/workflows/windows.yml"),
                 job: None,
                 step: None,
                 version: Specifier::parse("^3"),
@@ -443,7 +443,7 @@ mod tests {
         m.add_override(
             ActionId::from("actions/checkout"),
             ActionOverride {
-                workflow: ".github/workflows/ci.yml".to_owned(),
+                workflow: WorkflowPath::new(".github/workflows/ci.yml"),
                 job: None,
                 step: None,
                 version: Specifier::parse("^3"),
@@ -452,7 +452,7 @@ mod tests {
         m.add_override(
             ActionId::from("actions/checkout"),
             ActionOverride {
-                workflow: ".github/workflows/deploy.yml".to_owned(),
+                workflow: WorkflowPath::new(".github/workflows/deploy.yml"),
                 job: None,
                 step: None,
                 version: Specifier::parse("^3"),

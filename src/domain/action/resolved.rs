@@ -1,4 +1,4 @@
-use super::identity::{ActionId, CommitSha};
+use super::identity::{ActionId, CommitDate, CommitSha, Repository};
 use super::specifier::Specifier;
 use super::uses_ref::RefType;
 
@@ -6,9 +6,9 @@ use super::uses_ref::RefType;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Commit {
     pub sha: CommitSha,
-    pub repository: String,
+    pub repository: Repository,
     pub ref_type: Option<RefType>,
-    pub date: String,
+    pub date: CommitDate,
 }
 
 /// A fully resolved action with its commit SHA and metadata.
@@ -28,9 +28,9 @@ impl Resolved {
         id: ActionId,
         version: Specifier,
         sha: CommitSha,
-        repository: String,
+        repository: Repository,
         ref_type: Option<RefType>,
-        date: String,
+        date: CommitDate,
     ) -> Self {
         Self {
             id,
@@ -64,7 +64,7 @@ impl Resolved {
 
 #[cfg(test)]
 mod tests {
-    use super::{ActionId, CommitSha, RefType, Resolved, Specifier};
+    use super::{ActionId, CommitDate, CommitSha, RefType, Repository, Resolved, Specifier};
 
     #[test]
     fn resolved_action_to_workflow_ref() {
@@ -72,9 +72,9 @@ mod tests {
             ActionId::from("actions/checkout"),
             Specifier::parse("^4"),
             CommitSha::from("abc123def456789012345678901234567890abcd"),
-            "actions/checkout".to_owned(),
+            Repository::from("actions/checkout"),
             Some(RefType::Tag),
-            "2026-01-01T00:00:00Z".to_owned(),
+            CommitDate::from("2026-01-01T00:00:00Z"),
         );
         assert_eq!(
             resolved.to_workflow_ref(),
@@ -88,9 +88,9 @@ mod tests {
             ActionId::from("actions/checkout"),
             Specifier::parse("^4"),
             CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-            "actions/checkout".to_owned(),
+            Repository::from("actions/checkout"),
             Some(RefType::Tag),
-            "2026-01-01T00:00:00Z".to_owned(),
+            CommitDate::from("2026-01-01T00:00:00Z"),
         );
         let updated =
             resolved.with_sha(CommitSha::from("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
@@ -98,7 +98,7 @@ mod tests {
             updated.commit.sha,
             CommitSha::from("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
         );
-        assert_eq!(updated.commit.repository, "actions/checkout");
+        assert_eq!(updated.commit.repository.as_str(), "actions/checkout");
         assert_eq!(updated.id.as_str(), "actions/checkout");
     }
 }

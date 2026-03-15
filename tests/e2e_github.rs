@@ -15,7 +15,9 @@ use gx::domain::resolution::VersionRegistry as _;
 use gx::infra::github::Registry as GithubRegistry;
 
 fn github_registry() -> GithubRegistry {
-    let token = std::env::var("GITHUB_TOKEN").ok();
+    let token = std::env::var("GITHUB_TOKEN")
+        .ok()
+        .map(gx::config::GitHubToken::from);
     GithubRegistry::new(token).expect("Failed to create GithubRegistry")
 }
 

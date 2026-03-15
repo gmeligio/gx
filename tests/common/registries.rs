@@ -2,7 +2,7 @@
     dead_code,
     reason = "shared test helpers: not every integration test crate uses every item"
 )]
-use gx::domain::action::identity::{ActionId, CommitSha, Version};
+use gx::domain::action::identity::{ActionId, CommitDate, CommitSha, Version};
 use gx::domain::action::spec::Spec as ActionSpec;
 use gx::domain::action::specifier::Specifier;
 use gx::domain::action::uses_ref::RefType;
@@ -67,7 +67,7 @@ impl VersionRegistry for FakeRegistry {
             CommitSha::from(Self::fake_sha(id.as_str(), version.as_str())),
             id.base_repo(),
             Some(RefType::Tag),
-            "2026-01-01T00:00:00Z".to_owned(),
+            CommitDate::from("2026-01-01T00:00:00Z"),
         ))
     }
 
@@ -115,7 +115,7 @@ impl VersionRegistry for FakeRegistry {
         Ok(ShaDescription {
             tags,
             repository: id.base_repo(),
-            date: "2026-01-01T00:00:00Z".to_owned(),
+            date: CommitDate::from("2026-01-01T00:00:00Z"),
         })
     }
 }
@@ -165,7 +165,7 @@ impl VersionRegistry for EmptyDateRegistry {
             CommitSha::from(FakeRegistry::fake_sha(id.as_str(), version.as_str())),
             id.base_repo(),
             Some(RefType::Tag),
-            String::new(),
+            CommitDate::from(""),
         ))
     }
 
@@ -189,7 +189,7 @@ impl VersionRegistry for EmptyDateRegistry {
         Ok(ShaDescription {
             tags: vec![],
             repository: id.base_repo(),
-            date: String::new(),
+            date: CommitDate::from(""),
         })
     }
 }
@@ -205,7 +205,7 @@ impl VersionRegistry for FailingDescribeRegistry {
             CommitSha::from(FakeRegistry::fake_sha(id.as_str(), version.as_str())),
             id.base_repo(),
             Some(RefType::Tag),
-            "2026-01-01T00:00:00Z".to_owned(),
+            CommitDate::from("2026-01-01T00:00:00Z"),
         ))
     }
 

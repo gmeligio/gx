@@ -14,8 +14,8 @@ impl ActionId {
     /// Extract the base repository (owner/repo) from the action ID.
     /// Handles subpath actions like "github/codeql-action/upload-sarif".
     #[must_use]
-    pub fn base_repo(&self) -> String {
-        self.0.split('/').take(2).collect::<Vec<_>>().join("/")
+    pub fn base_repo(&self) -> Repository {
+        Repository::from(self.0.split('/').take(2).collect::<Vec<_>>().join("/"))
     }
 }
 
@@ -216,6 +216,93 @@ impl From<&str> for CommitSha {
     }
 }
 
+/// An owner/repo identifier (e.g., "actions/checkout").
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Repository(String);
+
+impl Repository {
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for Repository {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<String> for Repository {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl From<&str> for Repository {
+    fn from(s: &str) -> Self {
+        Self(s.to_owned())
+    }
+}
+
+/// A derived version comment (e.g., "v6" from specifier "^6").
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct VersionComment(String);
+
+impl VersionComment {
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for VersionComment {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<String> for VersionComment {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl From<&str> for VersionComment {
+    fn from(s: &str) -> Self {
+        Self(s.to_owned())
+    }
+}
+
+/// An ISO 8601 date string from commit metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CommitDate(String);
+
+impl CommitDate {
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for CommitDate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<String> for CommitDate {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl From<&str> for CommitDate {
+    fn from(s: &str) -> Self {
+        Self(s.to_owned())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{ActionId, CommitSha, Version, VersionPrecision};
@@ -223,10 +310,10 @@ mod tests {
     #[test]
     fn action_id_base_repo() {
         let simple = ActionId::from("actions/checkout");
-        assert_eq!(simple.base_repo(), "actions/checkout");
+        assert_eq!(simple.base_repo().as_str(), "actions/checkout");
 
         let subpath = ActionId::from("github/codeql-action/upload-sarif");
-        assert_eq!(subpath.base_repo(), "github/codeql-action");
+        assert_eq!(subpath.base_repo().as_str(), "github/codeql-action");
     }
 
     #[test]

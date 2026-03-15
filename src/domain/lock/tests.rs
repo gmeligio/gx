@@ -1,5 +1,5 @@
 use super::{ActionId, ActionKey, Commit, Lock, Spec};
-use crate::domain::action::identity::{CommitSha, Version};
+use crate::domain::action::identity::{CommitDate, CommitSha, Repository, Version, VersionComment};
 use crate::domain::action::specifier::Specifier;
 use crate::domain::action::uses_ref::RefType;
 
@@ -10,16 +10,16 @@ fn make_key(action: &str, specifier: &str) -> Spec {
 fn make_commit(sha: &str) -> Commit {
     Commit {
         sha: CommitSha::from(sha),
-        repository: "actions/checkout".to_owned(),
+        repository: Repository::from("actions/checkout"),
         ref_type: Some(RefType::Tag),
-        date: "2026-01-01T00:00:00Z".to_owned(),
+        date: CommitDate::from("2026-01-01T00:00:00Z"),
     }
 }
 
 fn set_action(lock: &mut Lock, action: &str, specifier: &str, sha: &str, version: &str) {
     let spec = make_key(action, specifier);
     let ver = Version::from(version);
-    let comment = Specifier::parse(specifier).to_comment().to_owned();
+    let comment = VersionComment::from(Specifier::parse(specifier).to_comment());
     lock.set(&spec, ver, make_commit(sha), comment);
 }
 
@@ -47,7 +47,7 @@ fn set_and_get() {
         CommitSha::from("abc123def456789012345678901234567890abcd")
     );
     assert_eq!(res.version, Version::from("v4.2.1"));
-    assert_eq!(res.comment, "v4");
+    assert_eq!(res.comment.as_str(), "v4");
     assert!(lock.get(&make_key("actions/checkout", "^3")).is_none());
 }
 
@@ -233,7 +233,7 @@ fn is_complete_stale_comment() {
         &spec,
         Version::from("v4.1.0"),
         make_commit("abc123def456789012345678901234567890abcd"),
-        "v4".to_owned(),
+        VersionComment::from("v4"),
     );
     assert!(!lock.is_complete(&spec));
 }
@@ -247,11 +247,11 @@ fn is_complete_non_semver_ref() {
         Version::from("main"),
         Commit {
             sha: CommitSha::from("abc123def456789012345678901234567890abcd"),
-            repository: "actions/checkout".to_owned(),
+            repository: Repository::from("actions/checkout"),
             ref_type: Some(RefType::Branch),
-            date: "2026-01-01T00:00:00Z".to_owned(),
+            date: CommitDate::from("2026-01-01T00:00:00Z"),
         },
-        String::new(),
+        VersionComment::from(""),
     );
     assert!(lock.is_complete(&spec));
 }

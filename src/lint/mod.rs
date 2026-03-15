@@ -13,15 +13,54 @@ use crate::config::{Config, IgnoreTarget, Level, Lint as LintConfig};
 use crate::domain::lock::Lock;
 use crate::domain::manifest::Manifest;
 use crate::domain::workflow::{Error as WorkflowError, Scanner as WorkflowScanner};
-use crate::domain::workflow_actions::{ActionSet as WorkflowActionSet, Located as LocatedAction};
+use crate::domain::workflow_actions::{
+    ActionSet as WorkflowActionSet, Located as LocatedAction, WorkflowPath,
+};
 use crate::infra::workflow_scan::FileScanner as FileWorkflowScanner;
 use report::Report;
+use serde::{Deserialize, Serialize};
 use sha_mismatch::ShaMismatchRule;
 use stale_comment::StaleCommentRule;
 use std::path::Path;
+use std::str::FromStr;
 use thiserror::Error;
 use unpinned::UnpinnedRule;
 use unsynced_manifest::UnsyncedManifestRule;
+
+/// Canonical identifier for a lint rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RuleName {
+    ShaMismatch,
+    Unpinned,
+    StaleComment,
+    UnsyncedManifest,
+}
+
+impl std::fmt::Display for RuleName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ShaMismatch => write!(f, "sha-mismatch"),
+            Self::Unpinned => write!(f, "unpinned"),
+            Self::StaleComment => write!(f, "stale-comment"),
+            Self::UnsyncedManifest => write!(f, "unsynced-manifest"),
+        }
+    }
+}
+
+impl FromStr for RuleName {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "sha-mismatch" => Ok(Self::ShaMismatch),
+            "unpinned" => Ok(Self::Unpinned),
+            "stale-comment" => Ok(Self::StaleComment),
+            "unsynced-manifest" => Ok(Self::UnsyncedManifest),
+            other => Err(format!("unrecognized rule name: {other}")),
+        }
+    }
+}
 
 /// Errors that can occur during the lint command.
 #[derive(Debug, Error)]
@@ -35,20 +74,20 @@ pub enum Error {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Diagnostic {
     /// Name of the rule that produced this diagnostic.
-    pub rule: String,
+    pub rule: RuleName,
     /// Severity level.
     pub level: Level,
     /// Human-readable message.
     pub message: String,
     /// Optional workflow file path where the issue was found.
-    pub workflow: Option<String>,
+    pub workflow: Option<WorkflowPath>,
 }
 
 impl Diagnostic {
     /// Create a new diagnostic.
-    pub fn new<R: Into<String>, M: Into<String>>(rule: R, level: Level, message: M) -> Self {
+    pub fn new<S: Into<String>>(rule: RuleName, level: Level, message: S) -> Self {
         Self {
-            rule: rule.into(),
+            rule,
             level,
             message: message.into(),
             workflow: None,
@@ -57,8 +96,8 @@ impl Diagnostic {
 
     /// Set the workflow field.
     #[must_use]
-    pub fn with_workflow<W: Into<String>>(mut self, workflow: W) -> Self {
-        self.workflow = Some(workflow.into());
+    pub fn with_workflow(mut self, workflow: WorkflowPath) -> Self {
+        self.workflow = Some(workflow);
         self
     }
 }
@@ -77,8 +116,8 @@ pub struct Context<'ctx> {
 
 /// Trait for a lint rule.
 pub trait Rule {
-    /// Returns the rule's name (e.g., "sha-mismatch").
-    fn name(&self) -> &str;
+    /// Returns the rule's name.
+    fn name(&self) -> RuleName;
 
     /// Returns this rule's default severity level.
     fn default_level(&self) -> Level;
@@ -118,7 +157,7 @@ fn matches_ignore(
     }
 
     if let Some(target_workflow) = &target.workflow
-        && !diag_workflow.ends_with(target_workflow.as_str())
+        && !diag_workflow.as_str().ends_with(target_workflow.as_str())
     {
         return false;
     }
@@ -154,9 +193,13 @@ pub fn collect_diagnostics(
     on_progress: &mut dyn FnMut(&str),
 ) -> Result<Vec<Diagnostic>, Error> {
     on_progress("Scanning workflows...");
-    let sha_mismatch_level = lint_config.get_rule("sha-mismatch", Level::Error).level;
-    let unpinned_level = lint_config.get_rule("unpinned", Level::Error).level;
-    let stale_comment_level = lint_config.get_rule("stale-comment", Level::Warn).level;
+    let sha_mismatch_level = lint_config
+        .get_rule(RuleName::ShaMismatch, Level::Error)
+        .level;
+    let unpinned_level = lint_config.get_rule(RuleName::Unpinned, Level::Error).level;
+    let stale_comment_level = lint_config
+        .get_rule(RuleName::StaleComment, Level::Warn)
+        .level;
 
     let mut all_diagnostics = Vec::new();
     let mut located = Vec::new();
@@ -171,7 +214,13 @@ pub fn collect_diagnostics(
             && let Some(mut diag) = ShaMismatchRule::check_action(&action, lock)
         {
             diag.level = sha_mismatch_level;
-            if !is_ignored(&diag, "sha-mismatch", Level::Error, lint_config, &action) {
+            if !is_ignored(
+                &diag,
+                RuleName::ShaMismatch,
+                Level::Error,
+                lint_config,
+                &action,
+            ) {
                 all_diagnostics.push(diag);
             }
         }
@@ -179,7 +228,13 @@ pub fn collect_diagnostics(
             && let Some(mut diag) = UnpinnedRule::check_action(&action)
         {
             diag.level = unpinned_level;
-            if !is_ignored(&diag, "unpinned", Level::Error, lint_config, &action) {
+            if !is_ignored(
+                &diag,
+                RuleName::Unpinned,
+                Level::Error,
+                lint_config,
+                &action,
+            ) {
                 all_diagnostics.push(diag);
             }
         }
@@ -187,7 +242,13 @@ pub fn collect_diagnostics(
             && let Some(mut diag) = StaleCommentRule::check_action(&action, lock)
         {
             diag.level = stale_comment_level;
-            if !is_ignored(&diag, "stale-comment", Level::Warn, lint_config, &action) {
+            if !is_ignored(
+                &diag,
+                RuleName::StaleComment,
+                Level::Warn,
+                lint_config,
+                &action,
+            ) {
                 all_diagnostics.push(diag);
             }
         }
@@ -198,7 +259,7 @@ pub fn collect_diagnostics(
 
     // Phase 2: Run global rules that need the full picture
     let unsynced_level = lint_config
-        .get_rule("unsynced-manifest", Level::Error)
+        .get_rule(RuleName::UnsyncedManifest, Level::Error)
         .level;
     if unsynced_level != Level::Off {
         let ctx = Context {
@@ -211,7 +272,7 @@ pub fn collect_diagnostics(
         for mut diag in rule.check(&ctx) {
             diag.level = unsynced_level;
             let ignored = lint_config
-                .get_rule("unsynced-manifest", Level::Error)
+                .get_rule(RuleName::UnsyncedManifest, Level::Error)
                 .ignore
                 .iter()
                 .any(|target| matches_ignore(&diag, target, &located));
@@ -227,7 +288,7 @@ pub fn collect_diagnostics(
 /// Check if a per-action diagnostic is ignored via lint config.
 fn is_ignored(
     diag: &Diagnostic,
-    rule_name: &str,
+    rule_name: RuleName,
     default_level: Level,
     lint_config: &LintConfig,
     action: &LocatedAction,
@@ -252,7 +313,7 @@ fn matches_ignore_action(diag: &Diagnostic, target: &IgnoreTarget, action: &Loca
     }
 
     if let Some(target_workflow) = &target.workflow
-        && !diag_workflow.ends_with(target_workflow.as_str())
+        && !diag_workflow.as_str().ends_with(target_workflow.as_str())
     {
         return false;
     }
@@ -292,13 +353,18 @@ impl Command for Lint {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::unwrap_used,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
 mod tests {
-    use super::{Diagnostic, Level};
+    use super::{Diagnostic, Level, RuleName, WorkflowPath};
+    use std::str::FromStr as _;
 
     #[test]
     fn diagnostic_can_be_created() {
-        let diag = Diagnostic::new("test-rule", Level::Error, "test message");
-        assert_eq!(diag.rule, "test-rule");
+        let diag = Diagnostic::new(RuleName::ShaMismatch, Level::Error, "test message");
+        assert_eq!(diag.rule, RuleName::ShaMismatch);
         assert_eq!(diag.level, Level::Error);
         assert_eq!(diag.message, "test message");
         assert!(diag.workflow.is_none());
@@ -306,8 +372,46 @@ mod tests {
 
     #[test]
     fn diagnostic_with_workflow() {
-        let diag = Diagnostic::new("test-rule", Level::Warn, "test")
-            .with_workflow(".github/workflows/ci.yml");
-        assert_eq!(diag.workflow, Some(".github/workflows/ci.yml".to_owned()));
+        let diag = Diagnostic::new(RuleName::Unpinned, Level::Warn, "test")
+            .with_workflow(WorkflowPath::new(".github/workflows/ci.yml"));
+        assert_eq!(
+            diag.workflow,
+            Some(WorkflowPath::new(".github/workflows/ci.yml"))
+        );
+    }
+
+    #[test]
+    fn rule_name_display_roundtrip() {
+        for name in [
+            RuleName::ShaMismatch,
+            RuleName::Unpinned,
+            RuleName::StaleComment,
+            RuleName::UnsyncedManifest,
+        ] {
+            let s = name.to_string();
+            assert_eq!(RuleName::from_str(&s), Ok(name));
+        }
+    }
+
+    #[test]
+    fn rule_name_from_str_valid() {
+        assert_eq!(
+            RuleName::from_str("sha-mismatch"),
+            Ok(RuleName::ShaMismatch)
+        );
+        assert_eq!(RuleName::from_str("unpinned"), Ok(RuleName::Unpinned));
+        assert_eq!(
+            RuleName::from_str("stale-comment"),
+            Ok(RuleName::StaleComment)
+        );
+        assert_eq!(
+            RuleName::from_str("unsynced-manifest"),
+            Ok(RuleName::UnsyncedManifest)
+        );
+    }
+
+    #[test]
+    fn rule_name_from_str_invalid() {
+        RuleName::from_str("nonexistent-rule").unwrap_err();
     }
 }

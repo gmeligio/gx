@@ -1,5 +1,5 @@
 use super::{Error as ResolutionError, ResolvedRef, ShaDescription, VersionRegistry};
-use crate::domain::action::identity::{ActionId, CommitSha, Version};
+use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Version};
 use crate::domain::action::uses_ref::RefType;
 
 /// Registry that always fails with `AuthRequired` on every method.
@@ -100,7 +100,7 @@ impl VersionRegistry for FakeRegistry {
             CommitSha::from(sha),
             id.base_repo(),
             Some(RefType::Tag),
-            "2026-01-01T00:00:00Z".to_owned(),
+            CommitDate::from("2026-01-01T00:00:00Z"),
         ))
     }
 
@@ -146,7 +146,7 @@ impl VersionRegistry for FakeRegistry {
         Ok(ShaDescription {
             tags,
             repository: id.base_repo(),
-            date: "2026-01-01T00:00:00Z".to_owned(),
+            date: CommitDate::from("2026-01-01T00:00:00Z"),
         })
     }
 }

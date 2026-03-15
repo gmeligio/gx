@@ -1,4 +1,4 @@
-use super::{Context, Diagnostic, Rule};
+use super::{Context, Diagnostic, Rule, RuleName};
 use crate::config::Level;
 use std::collections::HashSet;
 
@@ -6,8 +6,8 @@ use std::collections::HashSet;
 pub struct UnsyncedManifestRule;
 
 impl Rule for UnsyncedManifestRule {
-    fn name(&self) -> &'static str {
-        "unsynced-manifest"
+    fn name(&self) -> RuleName {
+        RuleName::UnsyncedManifest
     }
 
     fn default_level(&self) -> Level {
@@ -25,7 +25,11 @@ impl Rule for UnsyncedManifestRule {
             let msg = format!(
                 "action {action_id} is used in workflows but not declared in manifest (gx.toml)"
             );
-            diagnostics.push(Diagnostic::new(self.name(), self.default_level(), msg));
+            diagnostics.push(Diagnostic::new(
+                RuleName::UnsyncedManifest,
+                self.default_level(),
+                msg,
+            ));
         }
 
         // Actions in manifest but not in any workflow
@@ -33,7 +37,11 @@ impl Rule for UnsyncedManifestRule {
             let msg = format!(
                 "action {action_id} is declared in manifest (gx.toml) but not used in any workflow"
             );
-            diagnostics.push(Diagnostic::new(self.name(), self.default_level(), msg));
+            diagnostics.push(Diagnostic::new(
+                RuleName::UnsyncedManifest,
+                self.default_level(),
+                msg,
+            ));
         }
 
         diagnostics
@@ -42,12 +50,12 @@ impl Rule for UnsyncedManifestRule {
 
 #[cfg(test)]
 mod tests {
-    use super::{Level, Rule as _, UnsyncedManifestRule};
+    use super::{Level, Rule as _, RuleName, UnsyncedManifestRule};
 
     #[test]
     fn unsynced_manifest_rule_has_correct_metadata() {
         let rule = UnsyncedManifestRule;
-        assert_eq!(rule.name(), "unsynced-manifest");
+        assert_eq!(rule.name(), RuleName::UnsyncedManifest);
         assert_eq!(rule.default_level(), Level::Error);
     }
 }

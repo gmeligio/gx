@@ -59,7 +59,9 @@ pub struct WorkflowPatch {
 #[cfg(test)]
 mod tests {
     use super::{ActionId, Commit, LockDiff, ManifestDiff, Resolution, Spec, Specifier};
-    use crate::domain::action::identity::{CommitSha, Version};
+    use crate::domain::action::identity::{
+        CommitDate, CommitSha, Repository, Version, VersionComment,
+    };
     use crate::domain::action::uses_ref::RefType;
 
     #[test]
@@ -90,13 +92,13 @@ mod tests {
                 Spec::new(ActionId::from("actions/checkout"), Specifier::parse("^4")),
                 Resolution {
                     version: Version::from("v4"),
-                    comment: String::new(),
+                    comment: VersionComment::from(""),
                 },
                 Commit {
                     sha: CommitSha::from("abc123"),
-                    repository: "actions/checkout".to_owned(),
+                    repository: Repository::from("actions/checkout"),
                     ref_type: Some(RefType::Tag),
-                    date: "2026-01-01T00:00:00Z".to_owned(),
+                    date: CommitDate::from("2026-01-01T00:00:00Z"),
                 },
             )],
             ..Default::default()

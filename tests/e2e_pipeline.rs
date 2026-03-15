@@ -29,7 +29,9 @@ use std::fs;
 use tempfile::TempDir;
 
 fn github_registry() -> GithubRegistry {
-    let token = std::env::var("GITHUB_TOKEN").ok();
+    let token = std::env::var("GITHUB_TOKEN")
+        .ok()
+        .map(gx::config::GitHubToken::from);
     GithubRegistry::new(token).expect("Failed to create GithubRegistry")
 }
 
@@ -318,7 +320,9 @@ fn e2e_lint_detects_unsynced_manifest() {
     );
 
     let diagnostics = run_lint(&root);
-    let has_unsynced = diagnostics.iter().any(|d| d.rule == "unsynced-manifest");
+    let has_unsynced = diagnostics
+        .iter()
+        .any(|d| d.rule.to_string() == "unsynced-manifest");
     assert!(
         has_unsynced,
         "Lint should detect unsynced-manifest for setup-node, got: {diagnostics:?}"

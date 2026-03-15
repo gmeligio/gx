@@ -1,4 +1,4 @@
-use super::action::identity::{ActionId, CommitSha, Version};
+use super::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
 use super::action::resolved::Resolved as ResolvedAction;
 use super::action::spec::Spec as ActionSpec;
 use super::action::specifier::Specifier;
@@ -34,17 +34,17 @@ impl Error {
 #[derive(Debug, Clone)]
 pub struct ShaDescription {
     pub tags: Vec<Version>,
-    pub repository: String,
-    pub date: String,
+    pub repository: Repository,
+    pub date: CommitDate,
 }
 
 /// The result of resolving a ref to its metadata.
 #[derive(Debug, Clone)]
 pub struct ResolvedRef {
     pub sha: CommitSha,
-    pub repository: String,
+    pub repository: Repository,
     pub ref_type: Option<RefType>,
-    pub date: String,
+    pub date: CommitDate,
 }
 
 impl ResolvedRef {
@@ -52,9 +52,9 @@ impl ResolvedRef {
     #[must_use]
     pub fn new(
         sha: CommitSha,
-        repository: String,
+        repository: Repository,
         ref_type: Option<RefType>,
-        date: String,
+        date: CommitDate,
     ) -> Self {
         Self {
             sha,
@@ -203,8 +203,8 @@ pub(crate) mod testutil;
 )]
 mod tests {
     use super::{
-        ActionId, ActionResolver, ActionSpec, CommitSha, Error, RefType, ResolvedRef,
-        ShaDescription, ShaIndex, Specifier, Version, VersionRegistry,
+        ActionId, ActionResolver, ActionSpec, CommitDate, CommitSha, Error, RefType, Repository,
+        ResolvedRef, ShaDescription, ShaIndex, Specifier, Version, VersionRegistry,
     };
 
     struct MockRegistry {
@@ -241,9 +241,9 @@ mod tests {
         let mock_registry = MockRegistry {
             resolve_result: Ok(ResolvedRef::new(
                 CommitSha::from("abc123def456789012345678901234567890abcd"),
-                "actions/checkout".to_owned(),
+                Repository::from("actions/checkout"),
                 Some(RefType::Tag),
-                "2026-01-01T00:00:00Z".to_owned(),
+                CommitDate::from("2026-01-01T00:00:00Z"),
             )),
             tags_result: Ok(vec![]),
         };
@@ -283,9 +283,9 @@ mod tests {
         let registry = MockRegistry {
             resolve_result: Ok(ResolvedRef::new(
                 CommitSha::from("abc123def456789012345678901234567890abcd"),
-                "actions/checkout".to_owned(),
+                Repository::from("actions/checkout"),
                 Some(RefType::Tag),
-                "2026-01-01T00:00:00Z".to_owned(),
+                CommitDate::from("2026-01-01T00:00:00Z"),
             )),
             tags_result: Ok(vec![Version::from("v4"), Version::from("v4.0.0")]),
         };
@@ -307,9 +307,9 @@ mod tests {
         let registry = MockRegistry {
             resolve_result: Ok(ResolvedRef::new(
                 CommitSha::from("abc123def456789012345678901234567890abcd"),
-                "actions/checkout".to_owned(),
+                Repository::from("actions/checkout"),
                 Some(RefType::Tag),
-                "2026-01-01T00:00:00Z".to_owned(),
+                CommitDate::from("2026-01-01T00:00:00Z"),
             )),
             tags_result: Ok(vec![Version::from("v5"), Version::from("v5.0.0")]),
         };
@@ -332,9 +332,9 @@ mod tests {
         let registry = MockRegistry {
             resolve_result: Ok(ResolvedRef::new(
                 sha.clone(),
-                "owner/repo".to_owned(),
+                Repository::from("owner/repo"),
                 Some(RefType::Commit),
-                "2026-01-01T00:00:00Z".to_owned(),
+                CommitDate::from("2026-01-01T00:00:00Z"),
             )),
             tags_result: Ok(vec![
                 Version::from("v3"),
@@ -353,7 +353,7 @@ mod tests {
         assert_eq!(result.version.to_comment(), "v3.6.1");
         assert_eq!(result.commit.sha, sha);
         assert_eq!(result.commit.ref_type, Some(RefType::Tag));
-        assert_eq!(result.commit.repository, "owner/repo");
+        assert_eq!(result.commit.repository.as_str(), "owner/repo");
     }
 
     #[test]
@@ -362,9 +362,9 @@ mod tests {
         let registry = MockRegistry {
             resolve_result: Ok(ResolvedRef::new(
                 sha.clone(),
-                "owner/repo".to_owned(),
+                Repository::from("owner/repo"),
                 Some(RefType::Commit),
-                "2026-01-01T00:00:00Z".to_owned(),
+                CommitDate::from("2026-01-01T00:00:00Z"),
             )),
             tags_result: Ok(vec![]),
         };

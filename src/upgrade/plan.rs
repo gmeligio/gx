@@ -2,7 +2,7 @@ use super::types::{
     Error as UpgradeError, Mode as UpgradeMode, Plan as UpgradePlan, Request as UpgradeRequest,
     Scope as UpgradeScope,
 };
-use crate::domain::action::identity::{ActionId, Version};
+use crate::domain::action::identity::{ActionId, Version, VersionComment};
 use crate::domain::action::spec::Spec as ActionSpec;
 use crate::domain::action::upgrade::{
     Action as UpgradeAction, Candidate as UpgradeCandidate, find_upgrade_candidate,
@@ -239,7 +239,7 @@ pub(super) fn resolve_and_store<R: VersionRegistry>(
                 spec,
                 Version::from(resolved_version.as_str()),
                 resolved.commit,
-                comment.to_owned(),
+                VersionComment::from(comment),
             );
         }
         Err(e) => {
@@ -289,7 +289,7 @@ pub fn apply_upgrade_workflows<W: WorkflowUpdater>(
 )]
 mod tests {
     use super::{ActionId, Lock, Manifest, UpgradeMode, UpgradeRequest, UpgradeScope, plan};
-    use crate::domain::action::identity::CommitSha;
+    use crate::domain::action::identity::{CommitDate, CommitSha, Repository};
     use crate::domain::action::resolved::Resolved as ResolvedAction;
     use crate::domain::action::spec::Spec as ActionSpec;
     use crate::domain::action::specifier::Specifier;
@@ -306,9 +306,9 @@ mod tests {
             ActionId::from("actions/checkout"),
             Specifier::parse("^4"),
             CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-            "actions/checkout".to_owned(),
+            Repository::from("actions/checkout"),
             Some(RefType::Tag),
-            "2026-01-01T00:00:00Z".to_owned(),
+            CommitDate::from("2026-01-01T00:00:00Z"),
         ));
 
         // Registry returns no tags → nothing to upgrade
@@ -332,9 +332,9 @@ mod tests {
             ActionId::from("actions/checkout"),
             Specifier::parse("^4"),
             CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-            "actions/checkout".to_owned(),
+            Repository::from("actions/checkout"),
             Some(RefType::Tag),
-            "2026-01-01T00:00:00Z".to_owned(),
+            CommitDate::from("2026-01-01T00:00:00Z"),
         ));
         lock.set_version(
             &ActionSpec::new(ActionId::from("actions/checkout"), Specifier::parse("^4")),
@@ -373,9 +373,9 @@ mod tests {
             ActionId::from("actions/checkout"),
             Specifier::parse("^3"),
             CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-            "actions/checkout".to_owned(),
+            Repository::from("actions/checkout"),
             Some(RefType::Tag),
-            "2026-01-01T00:00:00Z".to_owned(),
+            CommitDate::from("2026-01-01T00:00:00Z"),
         ));
         lock.set_version(
             &ActionSpec::new(ActionId::from("actions/checkout"), Specifier::parse("^3")),

@@ -83,6 +83,56 @@ impl ActionSet {
     }
 }
 
+/// A workflow file path with forward-slash normalization.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct WorkflowPath(String);
+
+impl WorkflowPath {
+    pub fn new<S: Into<String>>(path: S) -> Self {
+        Self(path.into().replace('\\', "/"))
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for WorkflowPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// A workflow job identifier.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct JobId(String);
+
+impl JobId {
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for JobId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<String> for JobId {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl From<&str> for JobId {
+    fn from(s: &str) -> Self {
+        Self(s.to_owned())
+    }
+}
+
 /// A 0-based step index within a workflow job.
 ///
 /// Wraps `u16` to make `From<StepIndex> for i64` infallible,
@@ -140,9 +190,9 @@ impl std::fmt::Display for StepIndex {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Location {
     /// Relative path from repo root, e.g. ".github/workflows/ci.yml".
-    pub workflow: String,
+    pub workflow: WorkflowPath,
     /// Job id, e.g. "build".
-    pub job: Option<String>,
+    pub job: Option<JobId>,
     /// 0-based step index within the job.
     pub step: Option<StepIndex>,
 }
@@ -157,7 +207,10 @@ pub struct Located {
 
 #[cfg(test)]
 mod tests {
-    use super::{ActionId, ActionSet, InterpretedRef, Located, Location, StepIndex, Version};
+    use super::{
+        ActionId, ActionSet, InterpretedRef, JobId, Located, Location, StepIndex, Version,
+        WorkflowPath,
+    };
     use crate::domain::action::identity::CommitSha;
 
     fn make_interpreted(name: &str, version: &str, sha: Option<&str>) -> InterpretedRef {
@@ -196,13 +249,13 @@ mod tests {
     #[test]
     fn workflow_location_equality() {
         let loc1 = Location {
-            workflow: ".github/workflows/ci.yml".to_owned(),
-            job: Some("build".to_owned()),
+            workflow: WorkflowPath::new(".github/workflows/ci.yml"),
+            job: Some(JobId::from("build")),
             step: Some(StepIndex::from(0_u16)),
         };
         let loc2 = Location {
-            workflow: ".github/workflows/ci.yml".to_owned(),
-            job: Some("build".to_owned()),
+            workflow: WorkflowPath::new(".github/workflows/ci.yml"),
+            job: Some(JobId::from("build")),
             step: Some(StepIndex::from(0_u16)),
         };
         assert_eq!(loc1, loc2);
@@ -211,8 +264,8 @@ mod tests {
     #[test]
     fn located_action_stores_location() {
         let loc = Location {
-            workflow: ".github/workflows/ci.yml".to_owned(),
-            job: Some("build".to_owned()),
+            workflow: WorkflowPath::new(".github/workflows/ci.yml"),
+            job: Some(JobId::from("build")),
             step: Some(StepIndex::from(0_u16)),
         };
         let action = Located {

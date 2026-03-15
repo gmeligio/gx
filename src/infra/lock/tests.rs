@@ -1,5 +1,7 @@
 use super::Store;
-use crate::domain::action::identity::{ActionId, CommitSha, Version};
+use crate::domain::action::identity::{
+    ActionId, CommitDate, CommitSha, Repository, Version, VersionComment,
+};
 use crate::domain::action::resolved::Commit;
 use crate::domain::action::spec::Spec;
 use crate::domain::action::specifier::Specifier;
@@ -24,7 +26,7 @@ fn make_resolved(
         CommitSha::from(sha),
         ActionId::from(action).base_repo(),
         Some(RefType::Tag),
-        "2026-01-01T00:00:00Z".to_owned(),
+        CommitDate::from("2026-01-01T00:00:00Z"),
     )
 }
 
@@ -86,7 +88,7 @@ fn load_two_tier_format() {
         commit.sha,
         CommitSha::from("abc123def456789012345678901234567890abcd")
     );
-    assert_eq!(res.comment, "v4");
+    assert_eq!(res.comment.as_str(), "v4");
 }
 
 #[test]
@@ -103,7 +105,7 @@ fn load_flat_format() {
     let lock = store.load().unwrap();
     let (res, commit) = lock.get(&make_key("actions/checkout", "^6")).unwrap();
     assert_eq!(res.version.as_str(), "v6.2.3");
-    assert_eq!(res.comment, "v6");
+    assert_eq!(res.comment.as_str(), "v6");
     assert_eq!(
         commit.sha,
         CommitSha::from("de0fac2e4500dabe0009e67214ff5f5447ce83dd")
@@ -217,13 +219,13 @@ fn save_roundtrip_preserves_all_fields() {
     let spec = make_key("actions/checkout", "^4");
     let resolution = Resolution {
         version: Version::from("v4.2.0"),
-        comment: "v4".to_owned(),
+        comment: VersionComment::from("v4"),
     };
     let commit = Commit {
         sha: CommitSha::from("abc123def456789012345678901234567890abcd"),
-        repository: "actions/checkout".to_owned(),
+        repository: Repository::from("actions/checkout"),
         ref_type: Some(RefType::Release),
-        date: "2026-01-15T10:30:00Z".to_owned(),
+        date: CommitDate::from("2026-01-15T10:30:00Z"),
     };
     lock.resolutions.insert(spec.clone(), resolution.clone());
     lock.actions.insert(
@@ -240,8 +242,11 @@ fn save_roundtrip_preserves_all_fields() {
     let (loaded_res, loaded_commit) = loaded.get(&spec).expect("Entry must exist");
     assert_eq!(loaded_commit.sha, commit.sha);
     assert_eq!(loaded_res.version.as_str(), resolution.version.as_str());
-    assert_eq!(loaded_res.comment, resolution.comment);
-    assert_eq!(loaded_commit.repository, commit.repository);
+    assert_eq!(loaded_res.comment.as_str(), resolution.comment.as_str());
+    assert_eq!(
+        loaded_commit.repository.as_str(),
+        commit.repository.as_str()
+    );
     assert_eq!(loaded_commit.ref_type, commit.ref_type);
-    assert_eq!(loaded_commit.date, commit.date);
+    assert_eq!(loaded_commit.date.as_str(), commit.date.as_str());
 }

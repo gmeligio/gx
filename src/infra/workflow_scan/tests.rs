@@ -39,7 +39,11 @@ jobs:
     // Find the build-job checkout entry
     let build_checkout = located.iter().find(|a| {
         a.action.id == ActionId::from("actions/checkout")
-            && a.location.job.as_deref() == Some("build")
+            && a.location
+                .job
+                .as_ref()
+                .map(crate::domain::workflow_actions::JobId::as_str)
+                == Some("build")
     });
     assert!(build_checkout.is_some());
     let bc = build_checkout.unwrap();
@@ -48,7 +52,11 @@ jobs:
 
     let test_checkout = located.iter().find(|a| {
         a.action.id == ActionId::from("actions/checkout")
-            && a.location.job.as_deref() == Some("test")
+            && a.location
+                .job
+                .as_ref()
+                .map(crate::domain::workflow_actions::JobId::as_str)
+                == Some("test")
     });
     assert!(test_checkout.is_some());
     assert_eq!(test_checkout.unwrap().action.version.as_str(), "v3");

@@ -1,4 +1,4 @@
-use crate::domain::action::identity::{ActionId, CommitSha, Version};
+use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Version};
 use crate::domain::action::spec::Spec as ActionSpec;
 use crate::domain::action::specifier::Specifier;
 use crate::domain::action::uses_ref::RefType;
@@ -58,7 +58,7 @@ pub struct Registry {
     /// The HTTP client used for API requests.
     pub client: reqwest::blocking::Client,
     /// Optional personal access token for authenticated requests.
-    pub token: Option<String>,
+    pub token: Option<crate::config::GitHubToken>,
 }
 
 impl Registry {
@@ -73,7 +73,7 @@ impl Registry {
     ///
     /// This method panics if called from within an async runtime. See docs on
     /// [`reqwest::blocking`][crate::blocking] for details.
-    pub fn new(token: Option<String>) -> Result<Self, Error> {
+    pub fn new(token: Option<crate::config::GitHubToken>) -> Result<Self, Error> {
         let client = reqwest::blocking::Client::builder()
             .user_agent(USER_AGENT)
             .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
@@ -87,7 +87,7 @@ impl Registry {
     pub(super) fn authenticated_get(&self, url: &str) -> reqwest::blocking::RequestBuilder {
         let req = self.client.get(url);
         match &self.token {
-            Some(token) => req.header("Authorization", format!("Bearer {token}")),
+            Some(token) => req.header("Authorization", format!("Bearer {}", token.as_str())),
             None => req,
         }
     }
@@ -151,26 +151,27 @@ impl VersionRegistry for Registry {
                 })?;
 
         let base_repo = id.base_repo();
+        let base_repo_str = base_repo.as_str();
 
         // Fetch date with priority: release > annotated tag > commit
         let date = if ref_type == Some(RefType::Tag) {
             // For tags, try release first, then tag object, then commit
-            self.fetch_release_date(&base_repo, version.as_str())
+            self.fetch_release_date(base_repo_str, version.as_str())
                 .ok()
                 .flatten()
-                .or_else(|| self.fetch_tag_date(&base_repo, &sha).ok().flatten())
-                .or_else(|| self.fetch_commit_date(&base_repo, &sha).ok().flatten())
+                .or_else(|| self.fetch_tag_date(base_repo_str, &sha).ok().flatten())
+                .or_else(|| self.fetch_commit_date(base_repo_str, &sha).ok().flatten())
                 .unwrap_or_default()
         } else if ref_type == Some(RefType::Release) {
             // For releases, try release first, then fall back to commit
-            self.fetch_release_date(&base_repo, version.as_str())
+            self.fetch_release_date(base_repo_str, version.as_str())
                 .ok()
                 .flatten()
-                .or_else(|| self.fetch_commit_date(&base_repo, &sha).ok().flatten())
+                .or_else(|| self.fetch_commit_date(base_repo_str, &sha).ok().flatten())
                 .unwrap_or_default()
         } else {
             // For branches and commits, just get the commit date
-            self.fetch_commit_date(&base_repo, &sha)
+            self.fetch_commit_date(base_repo_str, &sha)
                 .ok()
                 .flatten()
                 .unwrap_or_default()
@@ -180,7 +181,7 @@ impl VersionRegistry for Registry {
             CommitSha::from(sha),
             base_repo,
             ref_type,
-            date,
+            CommitDate::from(date),
         ))
     }
 
@@ -231,7 +232,7 @@ impl VersionRegistry for Registry {
 
         // Fetch commit date directly — no tag/branch fallback chain needed since SHA is trusted
         let date = self
-            .fetch_commit_date(&base_repo, sha.as_str())
+            .fetch_commit_date(base_repo.as_str(), sha.as_str())
             .map_err(|e| match e {
                 Error::RateLimited { .. } => ResolutionError::RateLimited,
                 Error::Unauthorized { .. } => ResolutionError::AuthRequired,
@@ -257,7 +258,7 @@ impl VersionRegistry for Registry {
         Ok(ShaDescription {
             tags,
             repository: base_repo,
-            date,
+            date: CommitDate::from(date),
         })
     }
 }

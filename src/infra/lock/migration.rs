@@ -1,4 +1,4 @@
-use crate::domain::action::identity::{CommitSha, Version};
+use crate::domain::action::identity::{CommitDate, CommitSha, Repository, Version, VersionComment};
 use crate::domain::action::resolved::Commit;
 use crate::domain::action::spec::Spec;
 use crate::domain::action::uses_ref::RefType;
@@ -76,7 +76,7 @@ fn lock_from_flat(data: FlatData) -> Lock {
             spec.clone(),
             Resolution {
                 version: version.clone(),
-                comment: entry_data.comment,
+                comment: VersionComment::from(entry_data.comment),
             },
         );
         let key = ActionKey {
@@ -87,9 +87,9 @@ fn lock_from_flat(data: FlatData) -> Lock {
             key,
             Commit {
                 sha: CommitSha::from(entry_data.sha),
-                repository: entry_data.repository,
+                repository: Repository::from(entry_data.repository),
                 ref_type: RefType::parse(&entry_data.ref_type),
-                date: entry_data.date,
+                date: CommitDate::from(entry_data.date),
             },
         );
     }
@@ -124,7 +124,7 @@ mod tests {
         let lock = result.unwrap();
         let (res, commit) = lock.get(&make_key("actions/checkout", "^6")).unwrap();
         assert_eq!(res.version.as_str(), "v6.2.3");
-        assert_eq!(res.comment, "v6");
+        assert_eq!(res.comment.as_str(), "v6");
         assert_eq!(
             commit.sha,
             CommitSha::from("de0fac2e4500dabe0009e67214ff5f5447ce83dd")

@@ -1,6 +1,6 @@
 use crate::domain::action::uses_ref::UsesRef;
 use crate::domain::workflow::Error as WorkflowError;
-use crate::domain::workflow_actions::StepIndex;
+use crate::domain::workflow_actions::{JobId, StepIndex, WorkflowPath};
 use glob::glob;
 use regex::Regex;
 use serde::Deserialize;
@@ -136,12 +136,14 @@ impl FileScanner {
     }
 
     /// Compute the path relative to the repo root for use in `WorkflowLocation`.
-    fn rel_path(&self, workflow_path: &Path) -> String {
-        workflow_path
-            .strip_prefix(&self.repo_root)
-            .unwrap_or(workflow_path)
-            .to_string_lossy()
-            .replace('\\', "/")
+    fn rel_path(&self, workflow_path: &Path) -> WorkflowPath {
+        WorkflowPath::new(
+            workflow_path
+                .strip_prefix(&self.repo_root)
+                .unwrap_or(workflow_path)
+                .to_string_lossy()
+                .into_owned(),
+        )
     }
 
     /// Find all workflow files in the repository's `.github/workflows` folder.
@@ -162,7 +164,7 @@ impl FileScanner {
     /// Returns an error if the file cannot be read, parsed as YAML, or the regex pattern is invalid.
     fn extract_actions(
         workflow_path: &Path,
-        workflow_rel_path: &str,
+        workflow_rel_path: &WorkflowPath,
     ) -> Result<Vec<ExtractedAction>, IoWorkflowError> {
         let content =
             fs::read_to_string(workflow_path).map_err(|source| IoWorkflowError::Read {
@@ -214,8 +216,8 @@ impl FileScanner {
                     actions.push(ExtractedAction {
                         uses_ref: UsesRef::new(action_name, uses_ref, comment),
                         location: crate::domain::workflow_actions::Location {
-                            workflow: workflow_rel_path.to_owned(),
-                            job: Some(job_id.clone()),
+                            workflow: workflow_rel_path.clone(),
+                            job: Some(JobId::from(job_id.clone())),
                             step: StepIndex::try_from(step_idx).ok(),
                         },
                     });
@@ -247,7 +249,7 @@ impl FileScanner {
     /// Convert extracted actions from a single file into `LocatedAction` items.
     fn located_from_file(
         workflow_path: &Path,
-        workflow_rel_path: &str,
+        workflow_rel_path: &WorkflowPath,
     ) -> Result<Vec<crate::domain::workflow_actions::Located>, WorkflowError> {
         let actions =
             Self::extract_actions(workflow_path, workflow_rel_path).map_err(WorkflowError::from)?;
