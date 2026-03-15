@@ -16,7 +16,7 @@ use report::Report as UpgradeReport;
 use thiserror::Error;
 use types::{Error as UpgradeError, Request as UpgradeRequest};
 
-/// Errors that can occur during the upgrade command's run phase (I/O + domain)
+/// Errors that can occur during the upgrade command's run phase (I/O + domain).
 #[derive(Debug, Error)]
 pub enum RunError {
     #[error(transparent)]
@@ -68,17 +68,18 @@ impl Command for Upgrade {
                 &config.manifest_path,
                 &upgrade_plan.manifest,
             )?;
-            crate::infra::lock::apply_lock_diff(&config.lock_path, &upgrade_plan.lock)?;
+            let lock_store = crate::infra::lock::Store::new(&config.lock_path);
+            lock_store.save(&upgrade_plan.lock)?;
         }
 
-        let workflows_updated =
-            plan::apply_upgrade_workflows(&updater, &upgrade_plan.lock, &upgrade_plan.upgrades)?;
+        let workflows_updated = plan::apply_upgrade_workflows(
+            &updater,
+            &upgrade_plan.lock_changes,
+            &upgrade_plan.upgrades,
+        )?;
 
         if config.manifest_migrated {
             on_progress("migrated gx.toml → semver specifiers");
-        }
-        if config.lock_migrated {
-            on_progress("migrated gx.lock → v1.4");
         }
 
         let upgrades = upgrade_plan

@@ -1,4 +1,8 @@
-#![allow(unused_crate_dependencies)]
+#![expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
 
 //! End-to-end GitHub registry tests using the real GitHub API.
 //!
@@ -7,7 +11,7 @@
 
 use gx::domain::action::identity::{ActionId, CommitSha};
 use gx::domain::action::uses_ref::RefType;
-use gx::domain::resolution::VersionRegistry;
+use gx::domain::resolution::VersionRegistry as _;
 use gx::infra::github::Registry as GithubRegistry;
 
 fn github_registry() -> GithubRegistry {
@@ -16,7 +20,7 @@ fn github_registry() -> GithubRegistry {
 }
 
 #[test]
-fn test_resolve_ref_returns_release_for_tag_with_release() {
+fn resolve_ref_returns_release_for_tag_with_release() {
     // This test requires a valid GITHUB_TOKEN to call the GitHub API
     // It verifies that a tag with an associated release returns RefType::Release
     let client = github_registry();
@@ -27,7 +31,7 @@ fn test_resolve_ref_returns_release_for_tag_with_release() {
 }
 
 #[test]
-fn test_get_tags_for_sha_includes_annotated_tags() {
+fn get_tags_for_sha_includes_annotated_tags() {
     let client = github_registry();
     // actions/checkout v6 is an annotated tag
     // First resolve v6 to get the commit SHA
@@ -44,7 +48,7 @@ fn test_get_tags_for_sha_includes_annotated_tags() {
 /// not the tag object SHA. The tag object SHA is a git internal reference that
 /// cannot be used in `uses: owner/repo@sha` workflow pins.
 #[test]
-fn test_resolve_ref_annotated_tag_returns_commit_sha_not_tag_object() {
+fn resolve_ref_annotated_tag_returns_commit_sha_not_tag_object() {
     let client = github_registry();
     // release-plz/action@v0.5 uses an annotated tag
     let (sha, ref_type) = client.resolve_ref("release-plz/action", "v0.5").unwrap();

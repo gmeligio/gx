@@ -6,11 +6,11 @@ use crate::output::lines::Line as OutputLine;
 /// Report from the lint command.
 #[derive(Debug, Default)]
 pub struct Report {
-    /// All diagnostics found
+    /// All diagnostics found.
     pub diagnostics: Vec<Diagnostic>,
-    /// Number of error-level diagnostics
+    /// Number of error-level diagnostics.
     pub error_count: usize,
-    /// Number of warning-level diagnostics
+    /// Number of warning-level diagnostics.
     pub warning_count: usize,
 }
 
@@ -38,7 +38,7 @@ impl CommandReport for Report {
     fn render(&self) -> Vec<OutputLine> {
         if self.diagnostics.is_empty() {
             return vec![OutputLine::Summary {
-                text: "No lint issues found".to_string(),
+                text: "No lint issues found".to_owned(),
             }];
         }
 
@@ -55,18 +55,18 @@ impl CommandReport for Report {
 
         lines.push(OutputLine::Blank);
 
-        let e = self.error_count;
-        let w = self.warning_count;
-        let summary = match (e, w) {
-            (0, 0) => "No lint issues found".to_string(),
-            (e, 0) => format!("{e} error{}", if e == 1 { "" } else { "s" }),
-            (0, w) => format!("{w} warning{}", if w == 1 { "" } else { "s" }),
-            (e, w) => format!(
+        let err_count = self.error_count;
+        let warn_count = self.warning_count;
+        let summary = match (err_count, warn_count) {
+            (0, 0) => "No lint issues found".to_owned(),
+            (errs, 0) => format!("{errs} error{}", if errs == 1 { "" } else { "s" }),
+            (0, warns) => format!("{warns} warning{}", if warns == 1 { "" } else { "s" }),
+            (errs, warns) => format!(
                 "{} error{} · {} warning{}",
-                e,
-                if e == 1 { "" } else { "s" },
-                w,
-                if w == 1 { "" } else { "s" }
+                errs,
+                if errs == 1 { "" } else { "s" },
+                warns,
+                if warns == 1 { "" } else { "s" }
             ),
         };
         lines.push(OutputLine::Summary { text: summary });
@@ -80,6 +80,10 @@ impl CommandReport for Report {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::indexing_slicing,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
 mod tests {
     use super::*;
 
@@ -127,7 +131,7 @@ mod tests {
             }
         )));
         assert!(lines.contains(&OutputLine::Summary {
-            text: "1 error · 1 warning".to_string(),
+            text: "1 error · 1 warning".to_owned(),
         }));
     }
 }

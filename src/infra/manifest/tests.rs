@@ -3,20 +3,21 @@ use crate::domain::action::identity::ActionId;
 use crate::domain::action::specifier::Specifier;
 use crate::domain::manifest::overrides::ActionOverride;
 use crate::domain::plan::ManifestDiff;
+use crate::domain::workflow_actions::StepIndex;
 use std::fs;
-use std::io::Write;
+use std::io::Write as _;
 use std::path::Path;
 use tempfile::NamedTempFile;
 
 #[test]
-fn test_parse_missing_returns_empty() {
+fn parse_missing_returns_empty() {
     let result = parse(Path::new("/nonexistent/gx.toml")).unwrap();
     assert!(result.value.is_empty());
     assert!(!result.migrated);
 }
 
 #[test]
-fn test_parse_reads_file() {
+fn parse_reads_file() {
     // v1 format
     let content = "[actions]\n\"actions/checkout\" = \"v4\"\n";
     let mut file = NamedTempFile::new().unwrap();
@@ -29,7 +30,7 @@ fn test_parse_reads_file() {
 }
 
 #[test]
-fn test_load_manifest_with_overrides() {
+fn load_manifest_with_overrides() {
     // v1 format — values like "v4", "v3", "v2" converted via from_v1
     let content = r#"
 [actions]
@@ -62,7 +63,7 @@ fn test_load_manifest_with_overrides() {
 }
 
 #[test]
-fn test_save_and_load_roundtrip_with_overrides() {
+fn save_and_load_roundtrip_with_overrides() {
     let file = NamedTempFile::new().unwrap();
     let store = Store::new(file.path());
 
@@ -95,7 +96,7 @@ fn test_save_and_load_roundtrip_with_overrides() {
 }
 
 #[test]
-fn test_load_override_without_global_is_error() {
+fn load_override_without_global_is_error() {
     let content = r#"
 [actions]
 "actions/setup-node" = "v4"
@@ -116,7 +117,7 @@ fn test_load_override_without_global_is_error() {
 }
 
 #[test]
-fn test_load_override_step_without_job_is_error() {
+fn load_override_step_without_job_is_error() {
     let content = r#"
 [actions]
 "actions/checkout" = "v4"
@@ -134,7 +135,7 @@ fn test_load_override_step_without_job_is_error() {
 }
 
 #[test]
-fn test_load_duplicate_scope_is_error() {
+fn load_duplicate_scope_is_error() {
     let content = r#"
 [actions]
 "actions/checkout" = "v4"
@@ -153,7 +154,7 @@ fn test_load_duplicate_scope_is_error() {
 }
 
 #[test]
-fn test_save_no_overrides_section_when_empty() {
+fn save_no_overrides_section_when_empty() {
     let file = NamedTempFile::new().unwrap();
     let store = Store::new(file.path());
 
@@ -166,7 +167,7 @@ fn test_save_no_overrides_section_when_empty() {
 }
 
 #[test]
-fn test_save_and_load_roundtrip_generates_correct_toml_format() {
+fn save_and_load_roundtrip_generates_correct_toml_format() {
     let file = NamedTempFile::new().unwrap();
     let store = Store::new(file.path());
 
@@ -177,7 +178,7 @@ fn test_save_and_load_roundtrip_generates_correct_toml_format() {
         ActionOverride {
             workflow: ".github/workflows/windows.yml".to_owned(),
             job: Some("test_windows".to_owned()),
-            step: Some(0),
+            step: Some(StepIndex::from(0_u16)),
             version: Specifier::parse("^5"),
         },
     );
@@ -213,7 +214,7 @@ fn test_save_and_load_roundtrip_generates_correct_toml_format() {
     assert_eq!(overrides.len(), 1);
     assert_eq!(overrides[0].workflow, ".github/workflows/windows.yml");
     assert_eq!(overrides[0].job.as_deref(), Some("test_windows"));
-    assert_eq!(overrides[0].step, Some(0));
+    assert_eq!(overrides[0].step, Some(StepIndex::from(0_u16)));
     assert_eq!(overrides[0].version.as_str(), "^5");
 }
 
@@ -298,7 +299,7 @@ unpinned = { level = "warn", ignore = [
 // ========== create tests ==========
 
 #[test]
-fn test_create_from_diff_with_3_actions() {
+fn create_from_diff_with_3_actions() {
     let file = NamedTempFile::new().unwrap();
 
     let diff = ManifestDiff {
@@ -331,7 +332,7 @@ fn test_create_from_diff_with_3_actions() {
 }
 
 #[test]
-fn test_create_with_overrides() {
+fn create_with_overrides() {
     let file = NamedTempFile::new().unwrap();
 
     let diff = ManifestDiff {
@@ -368,7 +369,7 @@ fn test_create_with_overrides() {
 // ========== v1 migration tests ==========
 
 #[test]
-fn test_v1_migration_sets_migrated_flag() {
+fn v1_migration_sets_migrated_flag() {
     // v1 format: no [gx] section, values like "v4" style
     let content = r#"
 [actions]
@@ -393,7 +394,7 @@ fn test_v1_migration_sets_migrated_flag() {
 }
 
 #[test]
-fn test_current_format_not_migrated() {
+fn current_format_not_migrated() {
     // Current format: no [gx] section, semver specifiers
     let content = r#"
 [actions]
@@ -411,7 +412,7 @@ fn test_current_format_not_migrated() {
 }
 
 #[test]
-fn test_gx_section_ignored_and_triggers_migration() {
+fn gx_section_ignored_and_triggers_migration() {
     // Old v2 format with [gx] section — should be ignored and trigger migration
     let content = r#"
 [gx]

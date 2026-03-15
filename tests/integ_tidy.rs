@@ -1,4 +1,10 @@
-#![allow(unused_crate_dependencies)]
+#![expect(
+    clippy::unwrap_used,
+    clippy::string_slice,
+    clippy::assertions_on_result_states,
+    clippy::shadow_unrelated,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
 
 mod common;
 
@@ -6,14 +12,14 @@ use common::registries::{AuthRequiredRegistry, FakeRegistry};
 use common::setup::{create_empty_manifest, create_test_repo};
 use gx::domain::manifest::Manifest;
 use gx::domain::resolution::VersionRegistry;
-use gx::infra::lock::{self, apply_lock_diff};
+use gx::infra::lock::Store as LockStore;
 use gx::infra::manifest::patch::apply_manifest_diff;
 use gx::infra::manifest::{self};
 use gx::infra::workflow_scan::FileScanner as FileWorkflowScanner;
 use gx::infra::workflow_update::FileUpdater as FileWorkflowUpdater;
 use gx::tidy;
 use std::fs;
-use std::io::Write;
+use std::io::Write as _;
 use std::path::Path;
 use tempfile::TempDir;
 
@@ -33,20 +39,17 @@ fn run_tidy_with_registry<R: VersionRegistry + Clone>(
     } else {
         Manifest::default()
     };
-    let lock = lock::parse(&lock_path)?.value;
+    let lock_store = LockStore::new(&lock_path);
+    let lock = lock_store.load()?;
 
     let plan = tidy::plan(&manifest, &lock, registry, &scanner, |_| {})?;
 
     if !plan.is_empty() {
         if has_manifest {
             apply_manifest_diff(&manifest_path, &plan.manifest)?;
-            if lock_path.exists() {
-                apply_lock_diff(&lock_path, &plan.lock)?;
-            } else {
-                lock::create(&lock_path, &plan.lock)?;
-            }
+            lock_store.save(&plan.lock)?;
         }
-        tidy::apply_workflow_patches(&updater, &plan.workflows, &plan.corrections)?;
+        tidy::apply_workflow_patches(&updater, &plan.workflows)?;
     }
 
     Ok(())
@@ -57,7 +60,7 @@ fn run_tidy(repo_root: &Path) -> Result<(), gx::tidy::RunError> {
 }
 
 #[test]
-fn test_gx_tidy_memory_only_mode_no_manifest_created() {
+fn gx_tidy_memory_only_mode_no_manifest_created() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -105,7 +108,7 @@ jobs:
 }
 
 #[test]
-fn test_gx_tidy_file_mode_creates_manifest_from_workflows() {
+fn gx_tidy_file_mode_creates_manifest_from_workflows() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -140,7 +143,7 @@ jobs:
 }
 
 #[test]
-fn test_gx_tidy_updates_workflows_from_manifest() {
+fn gx_tidy_updates_workflows_from_manifest() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -188,7 +191,7 @@ jobs:
 }
 
 #[test]
-fn test_gx_tidy_removes_unused_actions() {
+fn gx_tidy_removes_unused_actions() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -224,7 +227,7 @@ jobs:
 }
 
 #[test]
-fn test_gx_tidy_adds_missing_actions() {
+fn gx_tidy_adds_missing_actions() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -262,7 +265,7 @@ jobs:
 }
 
 #[test]
-fn test_gx_tidy_preserves_existing_versions() {
+fn gx_tidy_preserves_existing_versions() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -303,7 +306,7 @@ jobs:
 }
 
 #[test]
-fn test_gx_tidy_multiple_workflows() {
+fn gx_tidy_multiple_workflows() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -339,7 +342,7 @@ jobs:
 }
 
 #[test]
-fn test_gx_tidy_skips_local_actions() {
+fn gx_tidy_skips_local_actions() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -370,7 +373,7 @@ jobs:
 }
 
 #[test]
-fn test_gx_tidy_no_workflows() {
+fn gx_tidy_no_workflows() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -379,7 +382,7 @@ fn test_gx_tidy_no_workflows() {
 }
 
 #[test]
-fn test_gx_tidy_workflow_without_actions() {
+fn gx_tidy_workflow_without_actions() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -402,7 +405,7 @@ jobs:
 }
 
 #[test]
-fn test_gx_tidy_multiple_versions_picks_highest() {
+fn gx_tidy_multiple_versions_picks_highest() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -436,7 +439,7 @@ jobs:
 }
 
 #[test]
-fn test_gx_tidy_multiple_workflows_unified_version() {
+fn gx_tidy_multiple_workflows_unified_version() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -473,7 +476,7 @@ jobs:
 }
 
 #[test]
-fn test_gx_tidy_idempotent() {
+fn gx_tidy_idempotent() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -508,7 +511,7 @@ jobs:
 }
 
 #[test]
-fn test_gx_tidy_with_sha_and_comment() {
+fn gx_tidy_with_sha_and_comment() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -541,7 +544,7 @@ jobs:
 }
 
 #[test]
-fn test_gx_tidy_real_world_workflow_format() {
+fn gx_tidy_real_world_workflow_format() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -600,7 +603,7 @@ jobs:
 }
 
 #[test]
-fn test_gx_tidy_tag_not_resolved_without_token() {
+fn gx_tidy_tag_not_resolved_without_token() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -629,7 +632,7 @@ jobs:
 }
 
 #[test]
-fn test_gx_tidy_resolves_tag_to_sha() {
+fn gx_tidy_resolves_tag_to_sha() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -679,7 +682,7 @@ jobs:
 }
 
 #[test]
-fn test_gx_tidy_respects_override_for_specific_workflow() {
+fn gx_tidy_respects_override_for_specific_workflow() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -720,7 +723,7 @@ fn test_gx_tidy_respects_override_for_specific_workflow() {
 }
 
 #[test]
-fn test_gx_tidy_override_job_level() {
+fn gx_tidy_override_job_level() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -757,7 +760,7 @@ jobs:
 }
 
 #[test]
-fn test_gx_tidy_removes_stale_override() {
+fn gx_tidy_removes_stale_override() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 

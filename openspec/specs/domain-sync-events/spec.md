@@ -71,9 +71,10 @@ Each `SyncEvent` variant SHALL implement `Display` to produce a human-readable m
 - **WHEN** an override references a workflow file that no longer exists in the located actions
 - **THEN** `prune_stale_overrides` SHALL remove that override
 
-### Requirement: Manifest lock key computation as domain method
-`Manifest` SHALL provide a `lock_keys(&self) -> Vec<LockKey>` method that computes all lock keys needed (global + override versions).
+### Requirement: Manifest lock key computation uses Spec type
+
+`Manifest` SHALL provide a `lock_keys(&self) -> Vec<Spec>` method that computes all lock keys needed (global + override versions). `Spec` serves as the lock lookup key (see domain-composition spec for `LockKey` deletion and `Spec` derive requirements).
 
 #### Scenario: Manifest with overrides
 - **WHEN** a manifest has action `A@^4` globally and an override `A@^3` for a specific workflow
-- **THEN** `lock_keys()` SHALL return keys for both `A@^4` and `A@^3`
+- **THEN** `lock_keys()` SHALL return `Spec` values for both `A@^4` and `A@^3`

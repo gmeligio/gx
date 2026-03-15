@@ -1,4 +1,10 @@
-#![allow(unused_crate_dependencies)]
+#![expect(
+    clippy::unwrap_used,
+    clippy::string_slice,
+    clippy::assertions_on_result_states,
+    clippy::shadow_reuse,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
 
 mod common;
 
@@ -8,12 +14,12 @@ use common::setup::{
 };
 use gx::domain::action::identity::{ActionId, CommitSha, Version};
 use gx::domain::action::resolved::Resolved as ResolvedAction;
-use gx::domain::action::spec::LockKey;
+use gx::domain::action::spec::Spec;
 use gx::domain::action::specifier::Specifier;
 use gx::domain::action::uses_ref::RefType;
 use gx::domain::lock::Lock;
 use gx::domain::manifest::Manifest;
-use gx::infra::lock::{self, apply_lock_diff};
+use gx::infra::lock::Store as LockStore;
 use gx::infra::manifest::patch::apply_manifest_diff;
 use gx::infra::manifest::{self};
 use gx::infra::workflow_update::FileUpdater as FileWorkflowUpdater;
@@ -25,7 +31,7 @@ use tempfile::TempDir;
 
 /// Helper to run upgrade with file-backed stores using `FakeRegistry`.
 fn run_upgrade_file_backed(repo_root: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap();
+    let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All);
     run_upgrade_file_backed_with_request(repo_root, &request)
 }
 
@@ -37,15 +43,16 @@ fn run_upgrade_file_backed_with_request(
     let mp = manifest_path(repo_root);
     let lp = lock_path(repo_root);
     let manifest = manifest::parse(&mp)?.value;
-    let lock = lock::parse(&lp)?.value;
+    let lock_store = LockStore::new(&lp);
+    let lock = lock_store.load()?;
     let updater = FileWorkflowUpdater::new(repo_root);
 
     let plan = upgrade::plan::plan(&manifest, &lock, &FakeRegistry::new(), request, |_| {})?;
 
     if !plan.is_empty() {
         apply_manifest_diff(&mp, &plan.manifest)?;
-        apply_lock_diff(&lp, &plan.lock)?;
-        upgrade::plan::apply_upgrade_workflows(&updater, &plan.lock, &plan.upgrades)?;
+        lock_store.save(&plan.lock)?;
+        upgrade::plan::apply_upgrade_workflows(&updater, &plan.lock_changes, &plan.upgrades)?;
     }
 
     Ok(())
@@ -54,7 +61,7 @@ fn run_upgrade_file_backed_with_request(
 // --- Tests that don't require GitHub API ---
 
 #[test]
-fn test_upgrade_empty_manifest_is_noop() {
+fn upgrade_empty_manifest_is_noop() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -67,14 +74,14 @@ fn test_upgrade_empty_manifest_is_noop() {
     let mut manifest = Manifest::default();
     manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
     let lock = Lock::default();
-    let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap();
+    let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All);
     let result = upgrade::plan::plan(&manifest, &lock, &FakeRegistry::new(), &request, |_| {});
     assert!(result.is_ok());
     assert!(result.unwrap().is_empty(), "No tags available means noop");
 }
 
 #[test]
-fn test_upgrade_empty_file_manifest_is_noop() {
+fn upgrade_empty_file_manifest_is_noop() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -94,21 +101,21 @@ fn test_upgrade_empty_file_manifest_is_noop() {
 }
 
 #[test]
-fn test_upgrade_non_semver_versions_skipped() {
+fn upgrade_non_semver_versions_skipped() {
     let manifest = Manifest::default();
     let lock = Lock::default();
     let result = upgrade::plan::plan(
         &manifest,
         &lock,
         &FakeRegistry::new(),
-        &UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap(),
+        &UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All),
         |_| {},
     );
     assert!(result.is_ok());
 }
 
 #[test]
-fn test_upgrade_preserves_workflow_structure() {
+fn upgrade_preserves_workflow_structure() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -133,7 +140,7 @@ jobs:
 }
 
 #[test]
-fn test_upgrade_no_lock_file_created_when_empty_manifest() {
+fn upgrade_no_lock_file_created_when_empty_manifest() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -150,7 +157,7 @@ fn test_upgrade_no_lock_file_created_when_empty_manifest() {
 }
 
 #[test]
-fn test_upgrade_with_existing_lock_and_empty_manifest() {
+fn upgrade_with_existing_lock_and_empty_manifest() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -171,7 +178,7 @@ fn test_upgrade_with_existing_lock_and_empty_manifest() {
 }
 
 #[test]
-fn test_upgrade_memory_stores_no_side_effects() {
+fn upgrade_memory_stores_no_side_effects() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -188,7 +195,7 @@ fn test_upgrade_memory_stores_no_side_effects() {
         &manifest,
         &lock,
         &FakeRegistry::new(),
-        &UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap(),
+        &UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All),
         |_| {},
     );
     assert!(result.is_ok());
@@ -198,7 +205,7 @@ fn test_upgrade_memory_stores_no_side_effects() {
 }
 
 #[test]
-fn test_upgrade_multiple_workflows_empty_manifest() {
+fn upgrade_multiple_workflows_empty_manifest() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -225,7 +232,7 @@ fn test_upgrade_multiple_workflows_empty_manifest() {
 /// Reproduces the bug where `upgrade` replaces SHAs with bare version tags
 /// for actions that have no available upgrade.
 #[test]
-fn test_upgrade_preserves_sha_for_non_upgraded_actions() {
+fn upgrade_preserves_sha_for_non_upgraded_actions() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -262,7 +269,7 @@ jobs:
         Specifier::from_v1("v6.0.2"),
     );
 
-    lock.set(&ResolvedAction::new(
+    lock.set_resolved(ResolvedAction::new(
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v6.0.2"),
         CommitSha::from(checkout_new_sha),
@@ -271,10 +278,10 @@ jobs:
         String::new(),
     ));
 
-    let keys_to_retain: Vec<LockKey> = manifest.specs().map(LockKey::from).collect();
+    let keys_to_retain: Vec<Spec> = manifest.specs().cloned().collect();
     lock.retain(&keys_to_retain);
 
-    let upgraded_keys = vec![LockKey::new(
+    let upgraded_keys = vec![Spec::new(
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v6.0.2"),
     )];
@@ -302,7 +309,7 @@ jobs:
 }
 
 #[test]
-fn test_upgrade_repins_branch_ref() {
+fn upgrade_repins_branch_ref() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -320,7 +327,7 @@ fn test_upgrade_repins_branch_ref() {
     );
 
     let mut lock = Lock::default();
-    lock.set(&ResolvedAction::new(
+    lock.set_resolved(ResolvedAction::new(
         ActionId::from("my-org/my-action"),
         Specifier::from_v1("main"),
         CommitSha::from(old_sha),
@@ -329,13 +336,13 @@ fn test_upgrade_repins_branch_ref() {
         String::new(),
     ));
 
-    let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap();
+    let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All);
     let plan = upgrade::plan::plan(&manifest, &lock, &FakeRegistry::new(), &request, |_| {});
     assert!(plan.is_ok(), "upgrade failed: {:?}", plan.unwrap_err());
     let plan = plan.unwrap();
 
     let updater = FileWorkflowUpdater::new(&root);
-    upgrade::plan::apply_upgrade_workflows(&updater, &plan.lock, &plan.upgrades).unwrap();
+    upgrade::plan::apply_upgrade_workflows(&updater, &plan.lock_changes, &plan.upgrades).unwrap();
 
     let expected_sha = FakeRegistry::fake_sha("my-org/my-action", "main");
     let updated_workflow =
@@ -347,7 +354,7 @@ fn test_upgrade_repins_branch_ref() {
 }
 
 #[test]
-fn test_upgrade_latest_also_repins_branch_ref() {
+fn upgrade_latest_also_repins_branch_ref() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -365,7 +372,7 @@ fn test_upgrade_latest_also_repins_branch_ref() {
     );
 
     let mut lock = Lock::default();
-    lock.set(&ResolvedAction::new(
+    lock.set_resolved(ResolvedAction::new(
         ActionId::from("my-org/my-action"),
         Specifier::from_v1("main"),
         CommitSha::from(old_sha),
@@ -374,13 +381,13 @@ fn test_upgrade_latest_also_repins_branch_ref() {
         String::new(),
     ));
 
-    let request = UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::All).unwrap();
+    let request = UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::All);
     let plan = upgrade::plan::plan(&manifest, &lock, &FakeRegistry::new(), &request, |_| {});
     assert!(plan.is_ok());
     let plan = plan.unwrap();
 
     let updater = FileWorkflowUpdater::new(&root);
-    upgrade::plan::apply_upgrade_workflows(&updater, &plan.lock, &plan.upgrades).unwrap();
+    upgrade::plan::apply_upgrade_workflows(&updater, &plan.lock_changes, &plan.upgrades).unwrap();
 
     let expected_sha = FakeRegistry::fake_sha("my-org/my-action", "main");
     let updated_workflow =
@@ -392,7 +399,7 @@ fn test_upgrade_latest_also_repins_branch_ref() {
 }
 
 #[test]
-fn test_upgrade_targeted_does_not_repin_branch_ref() {
+fn upgrade_targeted_does_not_repin_branch_ref() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -412,7 +419,7 @@ fn test_upgrade_targeted_does_not_repin_branch_ref() {
     manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
 
     let mut lock = Lock::default();
-    lock.set(&ResolvedAction::new(
+    lock.set_resolved(ResolvedAction::new(
         ActionId::from("my-org/my-action"),
         Specifier::from_v1("main"),
         CommitSha::from(branch_sha),
@@ -420,7 +427,7 @@ fn test_upgrade_targeted_does_not_repin_branch_ref() {
         Some(RefType::Branch),
         String::new(),
     ));
-    lock.set(&ResolvedAction::new(
+    lock.set_resolved(ResolvedAction::new(
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v4"),
         CommitSha::from(checkout_sha),
@@ -432,16 +439,15 @@ fn test_upgrade_targeted_does_not_repin_branch_ref() {
     let registry = FakeRegistry::new().with_all_tags("actions/checkout", vec!["v4", "v5"]);
 
     let request = UpgradeRequest::new(
-        UpgradeMode::Pinned(Version::from("v5")),
-        UpgradeScope::Single(ActionId::from("actions/checkout")),
-    )
-    .unwrap();
+        UpgradeMode::Safe,
+        UpgradeScope::Pinned(ActionId::from("actions/checkout"), Version::from("v5")),
+    );
     let plan = upgrade::plan::plan(&manifest, &lock, &registry, &request, |_| {});
     assert!(plan.is_ok());
     let plan = plan.unwrap();
 
     let updater = FileWorkflowUpdater::new(&root);
-    upgrade::plan::apply_upgrade_workflows(&updater, &plan.lock, &plan.upgrades).unwrap();
+    upgrade::plan::apply_upgrade_workflows(&updater, &plan.lock_changes, &plan.upgrades).unwrap();
 
     let updated_workflow =
         fs::read_to_string(root.join(".github").join("workflows").join("ci.yml")).unwrap();
@@ -453,7 +459,7 @@ fn test_upgrade_targeted_does_not_repin_branch_ref() {
 }
 
 #[test]
-fn test_upgrade_mixed_semver_and_branch() {
+fn upgrade_mixed_semver_and_branch() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -473,7 +479,7 @@ fn test_upgrade_mixed_semver_and_branch() {
     manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
 
     let mut lock = Lock::default();
-    lock.set(&ResolvedAction::new(
+    lock.set_resolved(ResolvedAction::new(
         ActionId::from("my-org/my-action"),
         Specifier::from_v1("main"),
         CommitSha::from(old_branch_sha),
@@ -481,7 +487,7 @@ fn test_upgrade_mixed_semver_and_branch() {
         Some(RefType::Branch),
         String::new(),
     ));
-    lock.set(&ResolvedAction::new(
+    lock.set_resolved(ResolvedAction::new(
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v4"),
         CommitSha::from(old_checkout_sha),
@@ -492,13 +498,13 @@ fn test_upgrade_mixed_semver_and_branch() {
 
     let registry = FakeRegistry::new().with_all_tags("actions/checkout", vec!["v4", "v5"]);
 
-    let request = UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::All).unwrap();
+    let request = UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::All);
     let plan = upgrade::plan::plan(&manifest, &lock, &registry, &request, |_| {});
     assert!(plan.is_ok());
     let plan = plan.unwrap();
 
     let updater = FileWorkflowUpdater::new(&root);
-    upgrade::plan::apply_upgrade_workflows(&updater, &plan.lock, &plan.upgrades).unwrap();
+    upgrade::plan::apply_upgrade_workflows(&updater, &plan.lock_changes, &plan.upgrades).unwrap();
 
     let updated_workflow =
         fs::read_to_string(root.join(".github").join("workflows").join("ci.yml")).unwrap();
@@ -517,7 +523,7 @@ fn test_upgrade_mixed_semver_and_branch() {
 }
 
 #[test]
-fn test_upgrade_skips_bare_sha() {
+fn upgrade_skips_bare_sha() {
     let temp_dir = TempDir::new().unwrap();
     let root = create_test_repo(&temp_dir);
 
@@ -535,14 +541,15 @@ fn test_upgrade_skips_bare_sha() {
     );
 
     let lock = Lock::default();
-    let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap();
+    let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All);
     let plan = upgrade::plan::plan(&manifest, &lock, &FakeRegistry::new(), &request, |_| {});
     assert!(plan.is_ok());
     let plan = plan.unwrap();
 
     if !plan.is_empty() {
         let updater = FileWorkflowUpdater::new(&root);
-        upgrade::plan::apply_upgrade_workflows(&updater, &plan.lock, &plan.upgrades).unwrap();
+        upgrade::plan::apply_upgrade_workflows(&updater, &plan.lock_changes, &plan.upgrades)
+            .unwrap();
     }
 
     let updated_workflow =
@@ -556,7 +563,7 @@ fn test_upgrade_skips_bare_sha() {
 // --- Tests for scoped upgrades ---
 
 #[test]
-fn test_upgrade_safe_single_action() {
+fn upgrade_safe_single_action() {
     let mut manifest = Manifest::default();
     manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
     manifest.set(
@@ -572,14 +579,13 @@ fn test_upgrade_safe_single_action() {
     let request = UpgradeRequest::new(
         UpgradeMode::Safe,
         UpgradeScope::Single(ActionId::from("actions/checkout")),
-    )
-    .unwrap();
+    );
     let result = upgrade::plan::plan(&manifest, &lock, &registry, &request, |_| {});
     assert!(result.is_ok());
 }
 
 #[test]
-fn test_upgrade_latest_single_action() {
+fn upgrade_latest_single_action() {
     let mut manifest = Manifest::default();
     manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
     manifest.set(
@@ -595,22 +601,20 @@ fn test_upgrade_latest_single_action() {
     let request = UpgradeRequest::new(
         UpgradeMode::Latest,
         UpgradeScope::Single(ActionId::from("actions/checkout")),
-    )
-    .unwrap();
+    );
     let result = upgrade::plan::plan(&manifest, &lock, &registry, &request, |_| {});
     assert!(result.is_ok());
 }
 
 #[test]
-fn test_upgrade_single_action_not_found() {
+fn upgrade_single_action_not_found() {
     let manifest = Manifest::default();
 
     let lock = Lock::default();
     let request = UpgradeRequest::new(
         UpgradeMode::Safe,
         UpgradeScope::Single(ActionId::from("actions/nonexistent")),
-    )
-    .unwrap();
+    );
     let result = upgrade::plan::plan(&manifest, &lock, &FakeRegistry::new(), &request, |_| {});
     assert!(
         result.is_err(),
@@ -619,7 +623,7 @@ fn test_upgrade_single_action_not_found() {
 }
 
 #[test]
-fn test_cli_rejection_latest_with_version() {
+fn cli_rejection_latest_with_version() {
     let action_str = "actions/checkout@v5";
     let contains_at = action_str.contains('@');
     assert!(contains_at, "Test setup: action string should contain @");

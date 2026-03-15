@@ -5,9 +5,9 @@ use std::time::Duration;
 
 /// Terminal output handler: detects CI/TTY/color and prints `OutputLine` values.
 pub struct Printer {
-    /// Whether to use ANSI colors
+    /// Whether to use ANSI colors.
     pub use_color: bool,
-    /// Whether we're running in CI mode
+    /// Whether we're running in CI mode.
     pub is_ci: bool,
 }
 
@@ -37,14 +37,20 @@ impl Printer {
                 .unwrap_or_else(|_| ProgressStyle::default_spinner()),
         );
         pb.enable_steady_tick(Duration::from_millis(80));
-        pb.set_message(message.to_string());
+        pb.set_message(message.to_owned());
         Some(pb)
     }
 
     /// Print a list of `OutputLine` values to stdout with optional color.
+    /// # Panics
+    ///
+    /// Panics if writing to stdout fails.
     pub fn print_lines(&self, lines: &[OutputLine]) {
+        use std::io::Write as _;
+        let stdout = std::io::stdout();
+        let mut handle = stdout.lock();
         for line in lines {
-            println!("{}", line.format_line(self.use_color));
+            drop(writeln!(handle, "{}", line.format_line(self.use_color)));
         }
     }
 }

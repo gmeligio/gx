@@ -3,7 +3,7 @@ use super::types::{
     Scope as UpgradeScope,
 };
 use crate::domain::action::identity::{ActionId, Version};
-use crate::domain::action::spec::{LockKey, Spec as ActionSpec};
+use crate::domain::action::spec::Spec as ActionSpec;
 use crate::domain::action::upgrade::{
     Action as UpgradeAction, Candidate as UpgradeCandidate, find_upgrade_candidate,
 };
@@ -37,7 +37,8 @@ where
     else {
         return Ok(UpgradePlan {
             manifest: ManifestDiff::default(),
-            lock: LockDiff::default(),
+            lock: lock.clone(),
+            lock_changes: LockDiff::default(),
             workflows: vec![],
             upgrades: vec![],
         });
@@ -88,7 +89,7 @@ where
         );
     }
 
-    let keys_to_retain: Vec<LockKey> = planned_manifest.specs().map(LockKey::from).collect();
+    let keys_to_retain: Vec<ActionSpec> = planned_manifest.specs().cloned().collect();
     planned_lock.retain(&keys_to_retain);
 
     // Diff original vs planned
@@ -97,7 +98,8 @@ where
 
     Ok(UpgradePlan {
         manifest: manifest_diff,
-        lock: lock_diff,
+        lock: planned_lock,
+        lock_changes: lock_diff,
         workflows: vec![], // Workflow patches computed during apply phase
         upgrades,
     })
@@ -118,80 +120,8 @@ fn determine_upgrades<R: VersionRegistry>(
     request: &UpgradeRequest,
     on_progress: &mut dyn FnMut(&str),
 ) -> Result<DetermineResult, UpgradeError> {
-    match &request.mode {
-        UpgradeMode::Safe | UpgradeMode::Latest => {
-            let mut specs: Vec<&ActionSpec> = manifest.specs().collect();
-
-            // Filter to a single action if scope requires it
-            if let UpgradeScope::Single(target_id) = &request.scope {
-                specs.retain(|s| &s.id == target_id);
-                if specs.is_empty() {
-                    return Err(UpgradeError::ActionNotInManifest(target_id.clone()));
-                }
-            }
-
-            if specs.is_empty() {
-                return Ok(None);
-            }
-
-            on_progress("Checking for upgrades...");
-            let mut upgrades = Vec::new();
-            let mut repins: Vec<ActionSpec> = Vec::new();
-
-            for spec in &specs {
-                if spec.version.precision().is_none() {
-                    if spec.version.is_sha() {
-                        on_progress(&format!("Skipping {spec} (bare SHA)"));
-                    } else {
-                        on_progress(&format!("Re-pinning {spec} (non-semver ref)"));
-                        repins.push((*spec).clone());
-                    }
-                    continue;
-                }
-
-                match service.registry().all_tags(&spec.id) {
-                    Ok(tags) => {
-                        // Get lock version as floor (if entry exists)
-                        let lock_key = LockKey::from(*spec);
-                        let lock_version_str =
-                            lock.get(&lock_key).and_then(|entry| entry.version.as_ref());
-                        let lock_version = lock_version_str.map(|v| Version::from(v.as_str()));
-
-                        let allow_major = matches!(request.mode, UpgradeMode::Latest);
-                        let action = find_upgrade_candidate(
-                            &spec.version,
-                            lock_version.as_ref(),
-                            &tags,
-                            allow_major,
-                        );
-
-                        if let Some(upgrade_action) = action {
-                            upgrades.push(UpgradeCandidate {
-                                id: spec.id.clone(),
-                                current: spec.version.clone(),
-                                action: upgrade_action,
-                            });
-                        }
-                    }
-                    Err(e) => {
-                        on_progress(&format!(
-                            "Warning: could not check upgrades for {spec}: {e}"
-                        ));
-                    }
-                }
-            }
-
-            if upgrades.is_empty() && repins.is_empty() {
-                return Ok(None);
-            }
-
-            Ok(Some((upgrades, repins)))
-        }
-        UpgradeMode::Pinned(version) => {
-            let UpgradeScope::Single(id) = &request.scope else {
-                // Pinned mode requires Single scope (validated in Request::new)
-                return Ok(None);
-            };
+    match &request.scope {
+        UpgradeScope::Pinned(id, version) => {
             let current = manifest
                 .get(id)
                 .ok_or_else(|| UpgradeError::ActionNotInManifest(id.clone()))?;
@@ -225,6 +155,71 @@ fn determine_upgrades<R: VersionRegistry>(
                 vec![],
             )))
         }
+        UpgradeScope::All | UpgradeScope::Single(_) => {
+            let mut specs: Vec<&ActionSpec> = manifest.specs().collect();
+
+            // Filter to a single action if scope requires it
+            if let UpgradeScope::Single(target_id) = &request.scope {
+                specs.retain(|s| &s.id == target_id);
+                if specs.is_empty() {
+                    return Err(UpgradeError::ActionNotInManifest(target_id.clone()));
+                }
+            }
+
+            if specs.is_empty() {
+                return Ok(None);
+            }
+
+            on_progress("Checking for upgrades...");
+            let mut upgrades = Vec::new();
+            let mut repins: Vec<ActionSpec> = Vec::new();
+
+            for spec in &specs {
+                if spec.version.precision().is_none() {
+                    if spec.version.is_sha() {
+                        on_progress(&format!("Skipping {spec} (bare SHA)"));
+                    } else {
+                        on_progress(&format!("Re-pinning {spec} (non-semver ref)"));
+                        repins.push((*spec).clone());
+                    }
+                    continue;
+                }
+
+                match service.registry().all_tags(&spec.id) {
+                    Ok(tags) => {
+                        // Get lock version as floor (if entry exists)
+                        let lock_version = lock.get(spec).map(|(res, _)| res.version.clone());
+
+                        let allow_major = matches!(request.mode, UpgradeMode::Latest);
+                        let action = find_upgrade_candidate(
+                            &spec.version,
+                            lock_version.as_ref(),
+                            &tags,
+                            allow_major,
+                        );
+
+                        if let Some(upgrade_action) = action {
+                            upgrades.push(UpgradeCandidate {
+                                id: spec.id.clone(),
+                                current: spec.version.clone(),
+                                action: upgrade_action,
+                            });
+                        }
+                    }
+                    Err(e) => {
+                        on_progress(&format!(
+                            "Warning: could not check upgrades for {spec}: {e}"
+                        ));
+                    }
+                }
+            }
+
+            if upgrades.is_empty() && repins.is_empty() {
+                return Ok(None);
+            }
+
+            Ok(Some((upgrades, repins)))
+        }
     }
 }
 
@@ -239,9 +234,13 @@ pub(super) fn resolve_and_store<R: VersionRegistry>(
 ) {
     match service.resolve(spec) {
         Ok(resolved) => {
-            let key = LockKey::from(spec);
-            lock.set(&resolved);
-            lock.set_comment(&key, comment.to_owned());
+            let resolved_version = resolved.version.to_comment().to_owned();
+            lock.set(
+                spec,
+                Version::from(resolved_version.as_str()),
+                resolved.commit,
+                comment.to_owned(),
+            );
         }
         Err(e) => {
             on_progress(&format!("{unresolved_msg} {spec}: {e}"));
@@ -259,16 +258,14 @@ pub fn apply_upgrade_workflows<W: WorkflowUpdater>(
     lock_diff: &LockDiff,
     upgrades: &[UpgradeCandidate],
 ) -> Result<usize, UpgradeError> {
-    use crate::domain::lock::entry::Entry as LockEntry;
-
     let update_map: std::collections::HashMap<ActionId, String> = lock_diff
         .added
         .iter()
-        .map(|(key, entry): &(LockKey, LockEntry)| {
+        .map(|(key, resolution, commit)| {
             let ref_str = if key.version.is_sha() {
-                entry.sha.to_string()
+                commit.sha.to_string()
             } else {
-                format!("{} # {}", entry.sha, entry.comment)
+                format!("{} # {}", commit.sha, resolution.comment)
             };
             (key.id.clone(), ref_str)
         })
@@ -286,24 +283,26 @@ pub fn apply_upgrade_workflows<W: WorkflowUpdater>(
 }
 
 #[cfg(test)]
-#[expect(clippy::unwrap_used, reason = "tests use unwrap freely")]
+#[expect(
+    clippy::unwrap_used,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
 mod tests {
-    use super::{
-        ActionId, Lock, LockKey, Manifest, UpgradeMode, UpgradeRequest, UpgradeScope, plan,
-    };
+    use super::{ActionId, Lock, Manifest, UpgradeMode, UpgradeRequest, UpgradeScope, plan};
     use crate::domain::action::identity::CommitSha;
     use crate::domain::action::resolved::Resolved as ResolvedAction;
+    use crate::domain::action::spec::Spec as ActionSpec;
     use crate::domain::action::specifier::Specifier;
     use crate::domain::action::uses_ref::RefType;
     use crate::domain::resolution::testutil::FakeRegistry;
 
     #[test]
-    fn test_plan_no_upgradable_actions_returns_empty() {
+    fn plan_no_upgradable_actions_returns_empty() {
         let mut manifest = Manifest::default();
         manifest.set(ActionId::from("actions/checkout"), Specifier::parse("^4"));
 
         let mut lock = Lock::default();
-        lock.set(&ResolvedAction::new(
+        lock.set_resolved(ResolvedAction::new(
             ActionId::from("actions/checkout"),
             Specifier::parse("^4"),
             CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
@@ -314,7 +313,7 @@ mod tests {
 
         // Registry returns no tags → nothing to upgrade
         let registry = FakeRegistry::new();
-        let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap();
+        let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All);
 
         let result = plan(&manifest, &lock, &registry, &request, |_| {}).unwrap();
         assert!(
@@ -324,12 +323,12 @@ mod tests {
     }
 
     #[test]
-    fn test_plan_one_upgradable_action_produces_diffs() {
+    fn plan_one_upgradable_action_produces_diffs() {
         let mut manifest = Manifest::default();
         manifest.set(ActionId::from("actions/checkout"), Specifier::parse("^4"));
 
         let mut lock = Lock::default();
-        lock.set(&ResolvedAction::new(
+        lock.set_resolved(ResolvedAction::new(
             ActionId::from("actions/checkout"),
             Specifier::parse("^4"),
             CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
@@ -338,7 +337,7 @@ mod tests {
             "2026-01-01T00:00:00Z".to_owned(),
         ));
         lock.set_version(
-            &LockKey::new(ActionId::from("actions/checkout"), Specifier::parse("^4")),
+            &ActionSpec::new(ActionId::from("actions/checkout"), Specifier::parse("^4")),
             Some("v4.1.0".to_owned()),
         );
 
@@ -346,7 +345,7 @@ mod tests {
         let registry =
             FakeRegistry::new().with_all_tags("actions/checkout", vec!["v4", "v4.1.0", "v4.2.0"]);
 
-        let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All).unwrap();
+        let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All);
 
         let result = plan(&manifest, &lock, &registry, &request, |_| {}).unwrap();
 
@@ -356,21 +355,21 @@ mod tests {
             "Plan must include upgrade candidates, got none"
         );
 
-        // Lock should have a new entry for the upgraded version
+        // Lock changes should have a new entry for the upgraded version
         assert!(
-            !result.lock.added.is_empty(),
+            !result.lock_changes.added.is_empty(),
             "Plan must include lock additions for resolved upgrade, got: {:?}",
-            result.lock
+            result.lock_changes
         );
     }
 
     #[test]
-    fn test_plan_latest_mode_produces_major_version_bump() {
+    fn plan_latest_mode_produces_major_version_bump() {
         let mut manifest = Manifest::default();
         manifest.set(ActionId::from("actions/checkout"), Specifier::parse("^3"));
 
         let mut lock = Lock::default();
-        lock.set(&ResolvedAction::new(
+        lock.set_resolved(ResolvedAction::new(
             ActionId::from("actions/checkout"),
             Specifier::parse("^3"),
             CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
@@ -379,7 +378,7 @@ mod tests {
             "2026-01-01T00:00:00Z".to_owned(),
         ));
         lock.set_version(
-            &LockKey::new(ActionId::from("actions/checkout"), Specifier::parse("^3")),
+            &ActionSpec::new(ActionId::from("actions/checkout"), Specifier::parse("^3")),
             Some("v3.0.0".to_owned()),
         );
 
@@ -387,7 +386,7 @@ mod tests {
         let registry = FakeRegistry::new()
             .with_all_tags("actions/checkout", vec!["v3", "v3.0.0", "v4", "v4.0.0"]);
 
-        let request = UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::All).unwrap();
+        let request = UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::All);
 
         let result = plan(&manifest, &lock, &registry, &request, |_| {}).unwrap();
 

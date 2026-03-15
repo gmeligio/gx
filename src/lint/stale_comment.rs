@@ -1,6 +1,6 @@
 use super::{Context, Diagnostic, Rule};
 use crate::config::Level;
-use crate::domain::action::spec::LockKey;
+use crate::domain::action::spec::Spec;
 use crate::domain::action::specifier::Specifier;
 
 /// stale-comment rule: detects when a version comment doesn't match the lock file.
@@ -12,25 +12,25 @@ impl StaleCommentRule {
         action: &crate::domain::workflow_actions::Located,
         lock: &crate::domain::lock::Lock,
     ) -> Option<Diagnostic> {
-        let sha = action.sha.as_ref()?;
+        let sha = action.action.sha.as_ref()?;
 
-        let key = LockKey::new(
-            action.id.clone(),
-            Specifier::from_v1(action.version.as_str()),
+        let key = Spec::new(
+            action.action.id.clone(),
+            Specifier::from_v1(action.action.version.as_str()),
         );
-        let lock_entry = lock.get(&key)?;
+        let (_, commit) = lock.get(&key)?;
 
-        if lock_entry.sha == *sha {
+        if commit.sha == *sha {
             return None;
         }
 
         let msg = format!(
             "{}: action {} version {} has stale comment (SHA {} does not match lock SHA {})",
             &action.location.workflow,
-            &action.id,
-            action.version.as_str(),
+            &action.action.id,
+            action.action.version.as_str(),
             sha.as_str(),
-            lock_entry.sha.as_str()
+            commit.sha.as_str()
         );
         Some(
             Diagnostic::new("stale-comment", Level::Warn, msg)
@@ -57,8 +57,12 @@ impl Rule for StaleCommentRule {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::indexing_slicing,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
 mod tests {
-    use super::{Level, Rule, StaleCommentRule};
+    use super::{Level, Rule as _, StaleCommentRule};
     use crate::domain::action::identity::{ActionId, CommitSha, Version};
     use crate::domain::action::resolved::Resolved as ResolvedAction;
     use crate::domain::action::specifier::Specifier;
@@ -69,24 +73,27 @@ mod tests {
 
     fn make_lock(action: &str, version: &str, sha: &str) -> Lock {
         let mut lock = Lock::default();
-        lock.set(&ResolvedAction::new(
+        lock.set_resolved(ResolvedAction::new(
             ActionId::from(action),
             Specifier::from_v1(version),
             CommitSha::from(sha),
             ActionId::from(action).base_repo(),
             Some(RefType::Tag),
-            "2026-01-01T00:00:00Z".to_string(),
+            "2026-01-01T00:00:00Z".to_owned(),
         ));
         lock
     }
 
     fn make_located(action: &str, version: &str, sha: Option<&str>, workflow: &str) -> Located {
+        use crate::domain::action::uses_ref::InterpretedRef;
         Located {
-            id: ActionId::from(action),
-            version: Version::from(version),
-            sha: sha.map(CommitSha::from),
+            action: InterpretedRef {
+                id: ActionId::from(action),
+                version: Version::from(version),
+                sha: sha.map(CommitSha::from),
+            },
             location: Location {
-                workflow: workflow.to_string(),
+                workflow: workflow.to_owned(),
                 job: None,
                 step: None,
             },

@@ -6,8 +6,9 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Writer for updating action versions in workflow files
+/// Writer for updating action versions in workflow files.
 pub struct FileUpdater {
+    /// Path to the `.github/workflows` directory.
     workflows_dir: PathBuf,
 }
 
@@ -67,7 +68,7 @@ impl FileUpdater {
                 reason: format!("failed to read {}: {}", workflow_path.display(), source),
             })?;
 
-        let mut updated_content = content.clone();
+        let mut updated_content = content;
         let mut changes = Vec::new();
 
         // Compile all regexes upfront before modifying content
@@ -153,12 +154,17 @@ impl crate::domain::workflow::Updater for FileUpdater {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
 mod tests {
     use super::FileUpdater;
     use crate::domain::action::identity::ActionId;
     use std::collections::HashMap;
     use std::fs;
-    use std::io::Write;
+    use std::io::Write as _;
     use std::path::{Path, PathBuf};
     use tempfile::TempDir;
 
@@ -172,7 +178,7 @@ mod tests {
     }
 
     #[test]
-    fn test_update_workflow() {
+    fn update_workflow() {
         let temp_dir = TempDir::new().unwrap();
         let content = "name: CI
 on: push
@@ -187,7 +193,7 @@ jobs:
 
         let writer = FileUpdater::new(temp_dir.path());
         let mut actions = HashMap::new();
-        actions.insert(ActionId::from("actions/checkout"), "v4".to_string());
+        actions.insert(ActionId::from("actions/checkout"), "v4".to_owned());
 
         let result = writer.update_workflow(&workflow_path, &actions).unwrap();
 
@@ -200,7 +206,7 @@ jobs:
     }
 
     #[test]
-    fn test_update_workflow_uses_commit_sha() {
+    fn update_workflow_uses_commit_sha() {
         let temp_dir = TempDir::new().unwrap();
         let content = "name: CI
 on: push
@@ -217,7 +223,7 @@ jobs:
         // Simulate the format from lock.build_update_map(): "SHA # version"
         actions.insert(
             ActionId::from("actions/checkout"),
-            "abc123def456 # v4".to_string(),
+            "abc123def456 # v4".to_owned(),
         );
 
         let result = writer.update_workflow(&workflow_path, &actions).unwrap();
@@ -237,7 +243,7 @@ jobs:
     }
 
     #[test]
-    fn test_update_workflow_no_duplicate_comments() {
+    fn update_workflow_no_duplicate_comments() {
         let temp_dir = TempDir::new().unwrap();
         // Start with a workflow that already has a comment
         let content = "name: CI
@@ -256,11 +262,11 @@ jobs:
         // Update both actions with new SHAs
         actions.insert(
             ActionId::from("actions/checkout"),
-            "abc123def456 # v4".to_string(),
+            "abc123def456 # v4".to_owned(),
         );
         actions.insert(
             ActionId::from("actions/setup-node"),
-            "xyz789012345 # v3".to_string(),
+            "xyz789012345 # v3".to_owned(),
         );
 
         let result = writer.update_workflow(&workflow_path, &actions).unwrap();

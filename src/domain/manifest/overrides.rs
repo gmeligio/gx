@@ -1,21 +1,22 @@
 use crate::domain::action::identity::ActionId;
-use crate::domain::action::spec::{LockKey, Spec};
+use crate::domain::action::spec::Spec;
 use crate::domain::action::specifier::Specifier;
 use crate::domain::workflow_actions::{
     ActionSet as WorkflowActionSet, Located as LocatedAction, Location as WorkflowLocation,
+    StepIndex,
 };
 use std::collections::HashSet;
 
 /// A version override for a specific workflow location.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActionOverride {
-    /// Relative path from repo root, e.g. ".github/workflows/deploy.yml"
+    /// Relative path from repo root, e.g. ".github/workflows/deploy.yml".
     pub workflow: String,
-    /// Job id, if scoped to a job
+    /// Job id, if scoped to a job.
     pub job: Option<String>,
-    /// 0-based step index, if scoped to a step (requires job)
-    pub step: Option<usize>,
-    /// The specifier to use at this location
+    /// 0-based step index, if scoped to a step (requires job).
+    pub step: Option<StepIndex>,
+    /// The specifier to use at this location.
     pub version: Specifier,
 }
 
@@ -27,10 +28,10 @@ pub struct ActionOverride {
 /// 3. Workflow-level override (workflow only)
 /// 4. Global default (returned as `None` — caller falls back to it)
 #[must_use]
-pub fn resolve_version<'a>(
-    overrides: &'a [ActionOverride],
+pub fn resolve_version<'ovr>(
+    overrides: &'ovr [ActionOverride],
     location: &WorkflowLocation,
-) -> Option<&'a Specifier> {
+) -> Option<&'ovr Specifier> {
     // Step-level: workflow + job + step all match
     if let (Some(job), Some(step)) = (&location.job, location.step) {
         for exc in overrides {
@@ -66,20 +67,20 @@ pub fn resolve_version<'a>(
 }
 
 /// Compute all lock keys needed for overrides: one per (action, version) pair.
-pub fn override_lock_keys<'a>(
-    id: &'a ActionId,
-    overrides: &'a [ActionOverride],
-) -> impl Iterator<Item = LockKey> + 'a {
+pub fn override_lock_keys<'ovr>(
+    id: &'ovr ActionId,
+    overrides: &'ovr [ActionOverride],
+) -> impl Iterator<Item = Spec> + 'ovr {
     overrides
         .iter()
-        .map(move |exc| LockKey::new(id.clone(), exc.version.clone()))
+        .map(move |exc| Spec::new(id.clone(), exc.version.clone()))
 }
 
 /// Ensure overrides exist for every located step whose version differs from the manifest
 /// global, **only when** multiple distinct versions of that action appear across workflows.
 ///
 /// When only one version appears in workflows, no override is created.
-#[allow(clippy::implicit_hasher)]
+#[expect(clippy::implicit_hasher, reason = "callers always use std HashMap")]
 pub fn sync(
     actions_overrides: &mut std::collections::HashMap<ActionId, Vec<ActionOverride>>,
     actions_global: &std::collections::HashMap<ActionId, Spec>,
@@ -87,25 +88,26 @@ pub fn sync(
     action_set: &WorkflowActionSet,
 ) {
     for action in located {
-        let version_count = action_set.versions_for(&action.id).count();
+        let version_count = action_set.versions_for(&action.action.id).count();
         if version_count <= 1 {
             continue;
         }
 
-        let global_specifier = match actions_global.get(&action.id) {
+        let global_specifier = match actions_global.get(&action.action.id) {
             Some(spec) => spec.version.clone(),
             None => continue,
         };
 
-        let action_specifier = Specifier::from_v1(action.version.as_str());
+        let action_specifier = Specifier::from_v1(action.action.version.as_str());
 
         if action_specifier == global_specifier {
             continue;
         }
 
+        let empty: &[ActionOverride] = &[];
         let existing_overrides = actions_overrides
-            .get(&action.id)
-            .map_or(&[] as &[_], Vec::as_slice);
+            .get(&action.action.id)
+            .map_or(empty, Vec::as_slice);
 
         let already_covered = existing_overrides.iter().any(|o| {
             o.workflow == action.location.workflow
@@ -115,7 +117,7 @@ pub fn sync(
 
         if !already_covered {
             actions_overrides
-                .entry(action.id.clone())
+                .entry(action.action.id.clone())
                 .or_default()
                 .push(ActionOverride {
                     workflow: action.location.workflow.clone(),
@@ -129,7 +131,7 @@ pub fn sync(
 
 /// Remove override entries whose referenced workflow/job/step no longer exists in the
 /// scanned set.
-#[allow(clippy::implicit_hasher)]
+#[expect(clippy::implicit_hasher, reason = "callers always use std HashMap")]
 pub fn prune_stale(
     actions_overrides: &mut std::collections::HashMap<ActionId, Vec<ActionOverride>>,
     located: &[LocatedAction],
@@ -185,44 +187,54 @@ pub fn prune_stale(
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::get_unwrap,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
 mod tests {
     use super::{ActionOverride, LocatedAction, prune_stale, resolve_version, sync};
     use crate::domain::action::identity::{ActionId, Version};
     use crate::domain::action::spec::Spec;
     use crate::domain::action::specifier::Specifier;
     use crate::domain::workflow_actions::{
-        ActionSet as WorkflowActionSet, Location as WorkflowLocation,
+        ActionSet as WorkflowActionSet, Location as WorkflowLocation, StepIndex,
     };
 
     use std::collections::HashMap;
-    fn make_loc(workflow: &str, job: Option<&str>, step: Option<usize>) -> WorkflowLocation {
+    fn make_loc(workflow: &str, job: Option<&str>, step: Option<u16>) -> WorkflowLocation {
         WorkflowLocation {
-            workflow: workflow.to_string(),
+            workflow: workflow.to_owned(),
             job: job.map(str::to_string),
-            step,
+            step: step.map(StepIndex::from),
         }
     }
 
     fn make_located(workflow: &str, action: &str, version: &str) -> LocatedAction {
+        use crate::domain::action::uses_ref::InterpretedRef;
         LocatedAction {
-            id: ActionId::from(action),
-            version: Version::from(version),
-            sha: None,
+            action: InterpretedRef {
+                id: ActionId::from(action),
+                version: Version::from(version),
+                sha: None,
+            },
             location: make_loc(workflow, None, None),
         }
     }
 
     #[test]
-    fn test_resolve_version_returns_none_when_no_overrides() {
+    fn resolve_version_returns_none_when_no_overrides() {
         let overrides: Vec<ActionOverride> = vec![];
         let loc = make_loc(".github/workflows/ci.yml", Some("build"), Some(0));
         assert_eq!(resolve_version(&overrides, &loc), None);
     }
 
     #[test]
-    fn test_resolve_version_workflow_level() {
+    fn resolve_version_workflow_level() {
         let overrides = vec![ActionOverride {
-            workflow: ".github/workflows/ci.yml".to_string(),
+            workflow: ".github/workflows/ci.yml".to_owned(),
             job: None,
             step: None,
             version: Specifier::parse("^3"),
@@ -235,18 +247,18 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_version_step_level_wins_over_workflow() {
+    fn resolve_version_step_level_wins_over_workflow() {
         let overrides = vec![
             ActionOverride {
-                workflow: ".github/workflows/ci.yml".to_string(),
+                workflow: ".github/workflows/ci.yml".to_owned(),
                 job: None,
                 step: None,
                 version: Specifier::parse("^3"),
             },
             ActionOverride {
-                workflow: ".github/workflows/ci.yml".to_string(),
-                job: Some("build".to_string()),
-                step: Some(0),
+                workflow: ".github/workflows/ci.yml".to_owned(),
+                job: Some("build".to_owned()),
+                step: Some(StepIndex::from(0_u16)),
                 version: Specifier::parse("^2"),
             },
         ];
@@ -273,7 +285,7 @@ mod tests {
             "v4",
         )];
         for a in &located {
-            action_set.add_located(a);
+            action_set.add(&a.action);
         }
 
         sync(
@@ -305,7 +317,7 @@ mod tests {
             make_located(".github/workflows/windows.yml", "actions/checkout", "v3"),
         ];
         for a in &located {
-            action_set.add_located(a);
+            action_set.add(&a.action);
         }
 
         sync(
@@ -328,7 +340,7 @@ mod tests {
         actions_overrides.insert(
             ActionId::from("actions/checkout"),
             vec![ActionOverride {
-                workflow: ".github/workflows/deploy.yml".to_string(),
+                workflow: ".github/workflows/deploy.yml".to_owned(),
                 job: None,
                 step: None,
                 version: Specifier::parse("v3"),
@@ -355,7 +367,7 @@ mod tests {
         actions_overrides.insert(
             ActionId::from("actions/checkout"),
             vec![ActionOverride {
-                workflow: ".github/workflows/ci.yml".to_string(),
+                workflow: ".github/workflows/ci.yml".to_owned(),
                 job: None,
                 step: None,
                 version: Specifier::parse("v3"),
@@ -400,7 +412,7 @@ mod tests {
             make_located(".github/workflows/windows.yml", "actions/checkout", "v5"),
         ];
         for a in &located {
-            action_set.add_located(a);
+            action_set.add(&a.action);
         }
 
         sync(
@@ -432,7 +444,7 @@ mod tests {
         actions_overrides.insert(
             ActionId::from("actions/checkout"),
             vec![ActionOverride {
-                workflow: ".github/workflows/deploy.yml".to_string(),
+                workflow: ".github/workflows/deploy.yml".to_owned(),
                 job: None,
                 step: None,
                 version: Specifier::from_v1("v3"),

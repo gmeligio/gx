@@ -3,7 +3,6 @@
 use super::{Error as TidyError, apply_workflow_patches, plan};
 use crate::domain::action::identity::{ActionId, CommitSha, Version};
 use crate::domain::action::resolved::Resolved as ResolvedAction;
-use crate::domain::action::spec::LockKey;
 use crate::domain::action::specifier::Specifier;
 use crate::domain::action::uses_ref::RefType;
 use crate::domain::lock::Lock;
@@ -60,7 +59,7 @@ impl crate::domain::resolution::VersionRegistry for NoopRegistry {
 ///   1. Record the minority version as an override in the manifest (Bug #1 / init)
 ///   2. Not overwrite windows.yml with the v6.0.1 SHA (Bug #2 / tidy)
 #[test]
-fn test_tidy_records_minority_version_as_override_and_does_not_overwrite_file() {
+fn tidy_records_minority_version_as_override_and_does_not_overwrite_file() {
     // ---- Setup temp repo ----
     let temp_dir = tempfile::TempDir::new().unwrap();
     let repo_root = temp_dir.path();
@@ -95,50 +94,38 @@ jobs:
     let lock_path = github_dir.join("gx.lock");
 
     // Pre-seed lock with both versions already resolved (simulates a pre-existing lock)
-    let seed_diff = crate::domain::plan::LockDiff {
-        added: vec![
-            (
-                LockKey::new(
-                    ActionId::from("actions/checkout"),
-                    Specifier::from_v1("v6.0.1"),
-                ),
-                crate::domain::lock::entry::Entry::with_version_and_comment(
-                    CommitSha::from("8e8c483db84b4bee98b60c0593521ed34d9990e8"),
-                    Some("v6.0.1".to_owned()),
-                    String::new(),
-                    "actions/checkout".to_owned(),
-                    Some(RefType::Tag),
-                    "2026-01-01T00:00:00Z".to_owned(),
-                ),
-            ),
-            (
-                LockKey::new(ActionId::from("actions/checkout"), Specifier::from_v1("v5")),
-                crate::domain::lock::entry::Entry::with_version_and_comment(
-                    CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-                    Some("v5".to_owned()),
-                    String::new(),
-                    "actions/checkout".to_owned(),
-                    Some(RefType::Tag),
-                    "2026-01-01T00:00:00Z".to_owned(),
-                ),
-            ),
-        ],
-        ..Default::default()
-    };
-    lock::create(&lock_path, &seed_diff).unwrap();
+    let mut seeded_lock = Lock::default();
+    seeded_lock.set_resolved(ResolvedAction::new(
+        ActionId::from("actions/checkout"),
+        Specifier::from_v1("v6.0.1"),
+        CommitSha::from("8e8c483db84b4bee98b60c0593521ed34d9990e8"),
+        "actions/checkout".to_owned(),
+        Some(RefType::Tag),
+        "2026-01-01T00:00:00Z".to_owned(),
+    ));
+    seeded_lock.set_resolved(ResolvedAction::new(
+        ActionId::from("actions/checkout"),
+        Specifier::from_v1("v5"),
+        CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+        "actions/checkout".to_owned(),
+        Some(RefType::Tag),
+        "2026-01-01T00:00:00Z".to_owned(),
+    ));
+    let lock_store = lock::Store::new(&lock_path);
+    lock_store.save(&seeded_lock).unwrap();
 
-    // Load manifest and lock via free functions
+    // Load manifest and lock
     let manifest = manifest::parse(&manifest_path).unwrap().value; // empty on first run
-    let lock = lock::parse(&lock_path).unwrap().value;
+    let lock = lock_store.load().unwrap();
     let scanner = FileWorkflowScanner::new(repo_root);
     let updater = FileWorkflowUpdater::new(repo_root);
 
     let tidy_plan = plan(&manifest, &lock, &NoopRegistry, &scanner, |_| {}).unwrap();
 
-    // Apply the plan — manifest doesn't exist yet so use create, lock exists so use apply
+    // Apply the plan
     crate::infra::manifest::create(&manifest_path, &tidy_plan.manifest).unwrap();
-    crate::infra::lock::apply_lock_diff(&lock_path, &tidy_plan.lock).unwrap();
-    apply_workflow_patches(&updater, &tidy_plan.workflows, &tidy_plan.corrections).unwrap();
+    lock_store.save(&tidy_plan.lock).unwrap();
+    apply_workflow_patches(&updater, &tidy_plan.workflows).unwrap();
 
     // ---- Assert: manifest has global v6.0.1 + override for windows.yml v5 ----
     let saved_manifest = manifest::parse(&manifest_path).unwrap().value;
@@ -184,7 +171,7 @@ jobs:
 /// have a stale SHA pointing at v3.  The manifest is the source of truth for
 /// existing actions; tidy must never downgrade it from workflow state.
 #[test]
-fn test_manifest_authority_not_overwritten_by_workflow_sha() {
+fn manifest_authority_not_overwritten_by_workflow_sha() {
     let temp_dir = tempfile::TempDir::new().unwrap();
     let repo_root = temp_dir.path();
     let workflows_dir = repo_root.join(".github").join("workflows");
@@ -206,7 +193,7 @@ jobs:
 
     // Pre-seed lock so tidy doesn't need to resolve
     let mut lock = Lock::default();
-    lock.set(&ResolvedAction::new(
+    lock.set_resolved(ResolvedAction::new(
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v4"),
         CommitSha::from("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
@@ -240,7 +227,7 @@ jobs:
 // ========== Step 8: tidy::plan() tests ==========
 
 #[test]
-fn test_plan_empty_workflows_returns_empty_plan() {
+fn plan_empty_workflows_returns_empty_plan() {
     let temp_dir = tempfile::TempDir::new().unwrap();
     let repo_root = temp_dir.path();
     // Create .github/workflows dir but no workflow files
@@ -256,7 +243,7 @@ fn test_plan_empty_workflows_returns_empty_plan() {
 }
 
 #[test]
-fn test_plan_one_new_action_produces_added_entries() {
+fn plan_one_new_action_produces_added_entries() {
     let temp_dir = tempfile::TempDir::new().unwrap();
     let repo_root = temp_dir.path();
     let workflows_dir = repo_root.join(".github").join("workflows");
@@ -270,7 +257,7 @@ fn test_plan_one_new_action_produces_added_entries() {
 
     // Pre-seed lock so plan doesn't need to resolve via registry
     let mut lock = Lock::default();
-    lock.set(&ResolvedAction::new(
+    lock.set_resolved(ResolvedAction::new(
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v4"),
         CommitSha::from(sha),
@@ -296,7 +283,7 @@ fn test_plan_one_new_action_produces_added_entries() {
 }
 
 #[test]
-fn test_plan_removed_action_produces_removed_entries() {
+fn plan_removed_action_produces_removed_entries() {
     let temp_dir = tempfile::TempDir::new().unwrap();
     let repo_root = temp_dir.path();
     let workflows_dir = repo_root.join(".github").join("workflows");
@@ -316,7 +303,7 @@ fn test_plan_removed_action_produces_removed_entries() {
 
     // Pre-seed lock for both
     let mut lock = Lock::default();
-    lock.set(&ResolvedAction::new(
+    lock.set_resolved(ResolvedAction::new(
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v4"),
         CommitSha::from("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
@@ -324,7 +311,7 @@ fn test_plan_removed_action_produces_removed_entries() {
         Some(RefType::Tag),
         "2026-01-01T00:00:00Z".to_owned(),
     ));
-    lock.set(&ResolvedAction::new(
+    lock.set_resolved(ResolvedAction::new(
         ActionId::from("actions/setup-node"),
         Specifier::from_v1("v3"),
         CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
@@ -356,17 +343,17 @@ fn test_plan_removed_action_produces_removed_entries() {
     // Lock should also have checkout removed
     assert!(
         result
-            .lock
+            .lock_changes
             .removed
             .iter()
             .any(|k| k.id == ActionId::from("actions/checkout")),
         "Plan must include actions/checkout in lock.removed, got: {:?}",
-        result.lock.removed
+        result.lock_changes.removed
     );
 }
 
 #[test]
-fn test_plan_everything_in_sync_returns_empty_plan() {
+fn plan_everything_in_sync_returns_empty_plan() {
     let temp_dir = tempfile::TempDir::new().unwrap();
     let repo_root = temp_dir.path();
     let workflows_dir = repo_root.join(".github").join("workflows");
@@ -384,7 +371,7 @@ fn test_plan_everything_in_sync_returns_empty_plan() {
 
     // Lock already has the entry fully populated
     let mut lock = Lock::default();
-    lock.set(&ResolvedAction::new(
+    lock.set_resolved(ResolvedAction::new(
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v4"),
         CommitSha::from(sha),
@@ -409,13 +396,13 @@ fn test_plan_everything_in_sync_returns_empty_plan() {
         result.manifest.removed
     );
     assert!(
-        result.lock.added.is_empty(),
+        result.lock_changes.added.is_empty(),
         "No lock additions expected, got: {:?}",
-        result.lock.added
+        result.lock_changes.added
     );
     assert!(
-        result.lock.removed.is_empty(),
+        result.lock_changes.removed.is_empty(),
         "No lock removals expected, got: {:?}",
-        result.lock.removed
+        result.lock_changes.removed
     );
 }

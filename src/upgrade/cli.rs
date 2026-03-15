@@ -22,22 +22,15 @@ pub enum Error {
 /// # Errors
 ///
 /// Returns [`Error`] for invalid upgrade mode combinations.
-///
-/// # Panics
-///
-/// Panics if `Request::new` rejects a known-valid mode/scope combination.
 pub fn resolve_upgrade_mode(action: Option<&str>, latest: bool) -> Result<Request, Error> {
     match (action, latest) {
-        (None, true) => {
-            Ok(Request::new(Mode::Latest, Scope::All).expect("Latest + All is always valid"))
-        }
+        (None, true) => Ok(Request::new(Mode::Latest, Scope::All)),
         (Some(action_str), true) => {
             if action_str.contains('@') {
                 return Err(Error::LatestWithVersionPin);
             }
             let id = ActionId::from(action_str);
-            Ok(Request::new(Mode::Latest, Scope::Single(id))
-                .expect("Latest + Single is always valid"))
+            Ok(Request::new(Mode::Latest, Scope::Single(id)))
         }
         (Some(action_str), false) => {
             if action_str.contains('@') {
@@ -46,25 +39,25 @@ pub fn resolve_upgrade_mode(action: Option<&str>, latest: bool) -> Result<Reques
                     action_str
                         .rsplit_once('@')
                         .ok_or_else(|| Error::InvalidActionFormat {
-                            input: action_str.to_string(),
+                            input: action_str.to_owned(),
                         })?;
                 let id = ActionId::from(action_part);
                 let version = Version::from(version_part);
-                Ok(Request::new(Mode::Pinned(version), Scope::Single(id))
-                    .expect("Pinned + Single is always valid"))
+                Ok(Request::new(Mode::Safe, Scope::Pinned(id, version)))
             } else {
                 let id = ActionId::from(action_str);
-                Ok(Request::new(Mode::Safe, Scope::Single(id))
-                    .expect("Safe + Single is always valid"))
+                Ok(Request::new(Mode::Safe, Scope::Single(id)))
             }
         }
-        (None, false) => {
-            Ok(Request::new(Mode::Safe, Scope::All).expect("Safe + All is always valid"))
-        }
+        (None, false) => Ok(Request::new(Mode::Safe, Scope::All)),
     }
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::unwrap_used,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
 mod tests {
     use super::{Error, Mode, Scope, resolve_upgrade_mode};
 
@@ -99,8 +92,8 @@ mod tests {
     #[test]
     fn resolve_action_with_version_returns_pinned() {
         let req = resolve_upgrade_mode(Some("actions/checkout@v5"), false).unwrap();
-        assert!(matches!(req.mode, Mode::Pinned(_)));
-        assert!(matches!(req.scope, Scope::Single(_)));
+        assert!(matches!(req.mode, Mode::Safe));
+        assert!(matches!(req.scope, Scope::Pinned(_, _)));
     }
 
     #[test]

@@ -3,29 +3,29 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use thiserror::Error;
 
-/// Errors that can occur when working with workflow files
+/// Errors that can occur when working with workflow files.
 #[derive(Debug, Error)]
 pub enum Error {
-    /// Failed to scan workflow files
+    /// Failed to scan workflow files.
     #[error("failed to scan workflows: {reason}")]
     ScanFailed { reason: String },
 
-    /// Failed to parse a workflow file
+    /// Failed to parse a workflow file.
     #[error("failed to parse workflow {path}: {reason}")]
     ParseFailed { path: String, reason: String },
 
-    /// Failed to update a workflow file
+    /// Failed to update a workflow file.
     #[error("failed to update workflow {path}: {reason}")]
     UpdateFailed { path: String, reason: String },
 }
 
-/// Result of updating a single workflow file
+/// Result of updating a single workflow file.
 pub struct UpdateResult {
     pub file: PathBuf,
     pub changes: Vec<String>,
 }
 
-/// Trait for scanning workflow files and extracting action references
+/// Trait for scanning workflow files and extracting action references.
 pub trait Scanner {
     /// Scan all workflow files, yielding one `LocatedAction` per step.
     ///
@@ -59,7 +59,7 @@ pub trait Scanner {
     }
 }
 
-/// Trait for updating action references in workflow files
+/// Trait for updating action references in workflow files.
 pub trait Updater {
     /// Update all workflow files, replacing action references according to the map.
     ///

@@ -1,13 +1,15 @@
+/// Lock file synchronization: resolving and updating lock entries.
 mod lock_sync;
+/// Manifest synchronization: adding, removing, and upgrading action specs.
 mod manifest_sync;
+/// Workflow patch computation for updating pinned SHAs in workflow files.
 mod patches;
 pub mod report;
 
 use crate::command::Command;
 use crate::config::Config;
 use crate::domain::action::identity::{ActionId, CommitSha};
-use crate::domain::action::resolved::VersionCorrection;
-use crate::domain::action::spec::LockKey;
+use crate::domain::action::spec::Spec;
 use crate::domain::action::tag_selection::ShaIndex;
 use crate::domain::lock::Lock;
 use crate::domain::manifest::Manifest;
@@ -18,7 +20,7 @@ use crate::domain::workflow::{
 };
 use crate::domain::workflow_actions::ActionSet as WorkflowActionSet;
 use crate::infra::github::{Error as GithubError, Registry as GithubRegistry};
-use crate::infra::lock::{Error as LockFileError, apply_lock_diff, create};
+use crate::infra::lock::{Error as LockFileError, Store as LockStore};
 use crate::infra::manifest::Error as ManifestError;
 use crate::infra::manifest::patch::apply_manifest_diff;
 use crate::infra::workflow_scan::FileScanner as FileWorkflowScanner;
@@ -32,19 +34,21 @@ use thiserror::Error;
 #[derive(Debug, Default)]
 pub struct Plan {
     pub manifest: ManifestDiff,
-    pub lock: LockDiff,
+    /// The final lock state — written by `Store::save()`.
+    pub lock: Lock,
+    /// The diff between the original and planned lock — for reporting only.
+    pub lock_changes: LockDiff,
     pub workflows: Vec<WorkflowPatch>,
-    pub corrections: Vec<VersionCorrection>,
 }
 
 impl Plan {
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.manifest.is_empty() && self.lock.is_empty() && self.workflows.is_empty()
+        self.manifest.is_empty() && self.lock_changes.is_empty() && self.workflows.is_empty()
     }
 }
 
-/// Errors that can occur during the tidy command
+/// Errors that can occur during the tidy command.
 #[derive(Debug, Error)]
 pub enum Error {
     /// One or more actions could not be resolved to a commit SHA.
@@ -65,14 +69,15 @@ pub enum Error {
 ///
 /// Returns [`Error::Workflow`] if workflows cannot be scanned.
 /// Returns [`Error::ResolutionFailed`] if actions cannot be resolved.
-pub fn plan<R, P>(
+pub fn plan<R, P, F>(
     manifest: &Manifest,
     lock: &Lock,
     registry: &R,
     scanner: &P,
-    mut on_progress: impl FnMut(&str),
+    mut on_progress: F,
 ) -> Result<Plan, Error>
 where
+    F: FnMut(&str),
     R: VersionRegistry,
     P: WorkflowScanner,
 {
@@ -80,7 +85,7 @@ where
     let mut action_set = WorkflowActionSet::new();
     for result in scanner.scan() {
         let action = result?;
-        action_set.add_located(&action);
+        action_set.add(&action.action);
         located.push(action);
     }
     if located.is_empty() {
@@ -119,18 +124,18 @@ where
     planned_manifest.prune_stale_overrides(&located);
 
     // Build SHA map: workflow SHA for each (action, manifest_version) pair
-    let workflow_shas: HashMap<LockKey, CommitSha> = located
+    let workflow_shas: HashMap<Spec, CommitSha> = located
         .iter()
         .filter_map(|loc| {
-            let sha = loc.sha.as_ref()?;
-            let manifest_version = planned_manifest.get(&loc.id)?;
-            let key = LockKey::new(loc.id.clone(), manifest_version.clone());
+            let sha = loc.action.sha.as_ref()?;
+            let manifest_version = planned_manifest.get(&loc.action.id)?;
+            let key = Spec::new(loc.action.id.clone(), manifest_version.clone());
             Some((key, sha.clone()))
         })
         .collect();
 
     // Phase 3: Resolve lock
-    let (corrections, lock_events) = lock_sync::update_lock(
+    let lock_events = lock_sync::update_lock(
         &mut planned_lock,
         &mut planned_manifest,
         &resolver,
@@ -142,6 +147,7 @@ where
     }
     let keys_to_retain = planned_manifest.lock_keys();
     planned_lock.retain(&keys_to_retain);
+    planned_lock.cleanup_orphans();
 
     // Phase 4: Compute workflow patches (instead of writing files)
     let workflow_patches =
@@ -153,9 +159,9 @@ where
 
     Ok(Plan {
         manifest: manifest_diff,
-        lock: lock_diff,
+        lock: planned_lock,
+        lock_changes: lock_diff,
         workflows: workflow_patches,
-        corrections,
     })
 }
 
@@ -167,7 +173,6 @@ where
 pub fn apply_workflow_patches<W: WorkflowUpdater>(
     writer: &W,
     patches: &[WorkflowPatch],
-    corrections: &[VersionCorrection],
 ) -> Result<usize, Error> {
     let mut results = Vec::new();
     for patch in patches {
@@ -177,11 +182,10 @@ pub fn apply_workflow_patches<W: WorkflowUpdater>(
             results.push(result);
         }
     }
-    let _ = corrections;
     Ok(results.len())
 }
 
-/// Errors that can occur during the tidy command's run phase (I/O + domain)
+/// Errors that can occur during the tidy command's run phase (I/O + domain).
 #[derive(Debug, thiserror::Error)]
 pub enum RunError {
     #[error(transparent)]
@@ -211,9 +215,6 @@ impl Command for Tidy {
         if config.manifest_migrated {
             on_progress("migrated gx.toml → semver specifiers");
         }
-        if config.lock_migrated {
-            on_progress("migrated gx.lock → v1.4");
-        }
         if config.settings.github_token.is_none() {
             on_progress(
                 "Warning: No GITHUB_TOKEN set — using unauthenticated GitHub API (60 requests/hour limit).",
@@ -239,46 +240,26 @@ impl Command for Tidy {
 
         if has_manifest {
             apply_manifest_diff(&config.manifest_path, &tidy_plan.manifest)?;
-            if config.lock_path.exists() {
-                apply_lock_diff(&config.lock_path, &tidy_plan.lock)?;
-            } else {
-                create(&config.lock_path, &tidy_plan.lock)?;
-            }
+            let lock_store = LockStore::new(&config.lock_path);
+            lock_store.save(&tidy_plan.lock)?;
         }
 
-        let workflows_updated =
-            apply_workflow_patches(&updater, &tidy_plan.workflows, &tidy_plan.corrections)?;
+        let workflows_updated = apply_workflow_patches(&updater, &tidy_plan.workflows)?;
 
         let report = Report {
-            removed: tidy_plan
-                .manifest
-                .removed
-                .iter()
-                .map(std::string::ToString::to_string)
-                .collect(),
-            added: tidy_plan
-                .manifest
-                .added
-                .iter()
-                .map(|(id, v)| (id.to_string(), v.to_string()))
-                .collect(),
+            removed: tidy_plan.manifest.removed,
+            added: tidy_plan.manifest.added,
             upgraded: tidy_plan
                 .manifest
                 .updated
-                .iter()
+                .into_iter()
                 .map(|(id, new_v)| {
-                    let old_v = original_manifest.get(id).map_or_else(
-                        || {
-                            // Fallback: use new version as "from" if original not found
-                            let _ = LockKey::new(id.clone(), new_v.clone());
-                            "?".to_string()
-                        },
-                        std::string::ToString::to_string,
-                    );
-                    (id.to_string(), old_v, new_v.to_string())
+                    let old_v = original_manifest
+                        .get(&id)
+                        .map_or_else(|| "?".to_owned(), std::string::ToString::to_string);
+                    (id, old_v, new_v)
                 })
                 .collect(),
-            corrections: tidy_plan.corrections.len(),
             workflows_updated,
         };
 
@@ -287,4 +268,8 @@ impl Command for Tidy {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::unwrap_used,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
 mod tests;

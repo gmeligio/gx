@@ -7,14 +7,14 @@ pub struct UnpinnedRule;
 impl UnpinnedRule {
     /// Check a single action for the unpinned rule.
     pub fn check_action(action: &crate::domain::workflow_actions::Located) -> Option<Diagnostic> {
-        if action.version.is_sha() {
+        if action.action.version.is_sha() {
             return None;
         }
         let msg = format!(
             "{}: action {} uses tag reference {} instead of SHA pin",
             &action.location.workflow,
-            &action.id,
-            action.version.as_str()
+            &action.action.id,
+            action.action.version.as_str()
         );
         Some(
             Diagnostic::new("unpinned", Level::Error, msg).with_workflow(&action.location.workflow),
@@ -41,7 +41,7 @@ impl Rule for UnpinnedRule {
 
 #[cfg(test)]
 mod tests {
-    use super::{Level, Rule, UnpinnedRule};
+    use super::{Level, Rule as _, UnpinnedRule};
 
     #[test]
     fn unpinned_rule_has_correct_metadata() {

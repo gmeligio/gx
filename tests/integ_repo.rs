@@ -1,4 +1,7 @@
-#![allow(unused_crate_dependencies)]
+#![expect(
+    clippy::unwrap_used,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
 
 use gx::infra::repo;
 use std::fs;
@@ -12,7 +15,7 @@ fn init_git_repo(root: &std::path::Path) {
 }
 
 #[test]
-fn test_find_root_with_github_folder() {
+fn find_root_with_github_folder() {
     let temp_dir = TempDir::new().unwrap();
     let root = temp_dir.path();
 
@@ -26,7 +29,7 @@ fn test_find_root_with_github_folder() {
 }
 
 #[test]
-fn test_find_root_without_github_folder() {
+fn find_root_without_github_folder() {
     let temp_dir = TempDir::new().unwrap();
     let root = temp_dir.path();
 

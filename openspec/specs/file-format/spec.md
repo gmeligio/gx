@@ -1,7 +1,7 @@
 ## Versionless Format
 
 ### Requirement: Versionless file formats
-Neither `gx.toml` nor `gx.lock` SHALL contain a format version field. There is no `min_version`, no `version = "1.4"`, and no `[gx]` section.
+Neither `gx.toml` nor `gx.lock` SHALL contain a format version field.
 
 #### Scenario: New manifest has no gx section
 - **GIVEN** a manifest written by the current gx version
@@ -10,19 +10,24 @@ Neither `gx.toml` nor `gx.lock` SHALL contain a format version field. There is n
 
 #### Scenario: New lock has no version field
 - **GIVEN** a lock file written by the current gx version
-- **THEN** the file contains `[actions]` with standard TOML tables
+- **THEN** the file contains `[resolutions]` and `[actions]` sections with standard TOML tables
 - **AND** there is no top-level `version` field
 
 ### Requirement: Forward-compatible reads
-The parser SHALL ignore unknown TOML keys and sections without erroring.
+The parser SHALL ignore unknown TOML keys and sections without erroring. This applies to both `[resolutions]` and `[actions]` sections.
 
 #### Scenario: Manifest with unknown top-level section
 - **GIVEN** a manifest containing an unknown section `[metadata]`
 - **WHEN** the manifest is parsed
 - **THEN** parsing succeeds and the unknown section is ignored
 
-#### Scenario: Lock entry with unknown field
-- **GIVEN** a lock entry containing an unknown field `checksum = "abc123"`
+#### Scenario: Resolution entry with unknown field
+- **GIVEN** a resolution entry containing an unknown field `priority = "high"`
+- **WHEN** the lock file is parsed
+- **THEN** parsing succeeds and the unknown field is ignored
+
+#### Scenario: Action entry with unknown field
+- **GIVEN** an action entry containing an unknown field `checksum = "abc123"`
 - **WHEN** the lock file is parsed
 - **THEN** parsing succeeds and the unknown field is ignored
 
@@ -79,12 +84,128 @@ Overrides SHALL be written as inline tables within arrays. Empty `[actions.overr
 
 ## Lock Format
 
-### Requirement: Lock file entry format
-Each action entry in the lock file SHALL be a standard TOML table under `[actions]` with six fields: `sha`, `version`, `comment`, `repository`, `ref_type`, and `date`.
+### Requirement: Lock file structure
 
-#### Scenario: Standard lock entry with all fields
-- **GIVEN** an action `actions/checkout@^6` resolved to SHA `de0fac2e...` from a GitHub Release published at `2026-02-15T10:35:00Z`, where the SHA matches tag `v6.2.3`
-- **THEN** the lock file entry is:
+The lock file SHALL have two top-level sections: `[resolutions]` and `[actions]`.
+
+- `[resolutions]` maps `(ActionId, Specifier)` to a resolved version and comment, using nested TOML tables keyed by action ID then specifier string.
+- `[actions]` maps `(ActionId, Version)` to commit metadata (sha, repository, ref_type, date), using nested TOML tables keyed by action ID then version string.
+
+The `comment` field belongs in `[resolutions]` because it depends on specifier precision, not on the resolved version.
+
+#### Scenario: Standard lock with resolutions and actions
+- **GIVEN** an action `actions/checkout@^6` resolved to SHA `de0fac2e...` at version `v6.2.3`, from a GitHub Release published at `2026-02-15T10:35:00Z`
+- **THEN** the lock file is:
+  ```toml
+  [resolutions."actions/checkout"."^6"]
+  version = "v6.2.3"
+  comment = "v6"
+
+  [actions."actions/checkout"."v6.2.3"]
+  sha = "de0fac2e..."
+  repository = "actions/checkout"
+  ref_type = "release"
+  date = "2026-02-15T10:35:00Z"
+  ```
+
+#### Scenario: Subpath action stores base repository in actions tier
+- **GIVEN** an action `github/codeql-action/upload-sarif@^3` resolved to version `v3.28.0` against repository `github/codeql-action`
+- **THEN** the lock file contains:
+  ```toml
+  [resolutions."github/codeql-action/upload-sarif"."^3"]
+  version = "v3.28.0"
+  comment = "v3"
+
+  [actions."github/codeql-action/upload-sarif"."v3.28.0"]
+  sha = "..."
+  repository = "github/codeql-action"
+  ref_type = "tag"
+  date = "..."
+  ```
+
+#### Scenario: Multiple specifiers share one action entry
+- **GIVEN** actions `actions/checkout@^4` and `actions/checkout@^4.2` both resolve to `v4.2.1`
+- **THEN** the lock file has two resolution entries pointing to one action entry:
+  ```toml
+  [resolutions."actions/checkout"."^4"]
+  version = "v4.2.1"
+  comment = "v4"
+
+  [resolutions."actions/checkout"."^4.2"]
+  version = "v4.2.1"
+  comment = "v4.2"
+
+  [actions."actions/checkout"."v4.2.1"]
+  sha = "abc123..."
+  repository = "actions/checkout"
+  ref_type = "tag"
+  date = "2026-01-01T00:00:00Z"
+  ```
+
+#### Scenario: Non-semver branch ref in resolution
+- **GIVEN** an action `actions/checkout@main` resolved to SHA `abc123...`
+- **THEN** the resolution uses the branch name as both specifier key and version:
+  ```toml
+  [resolutions."actions/checkout"."main"]
+  version = "main"
+  comment = ""
+
+  [actions."actions/checkout"."main"]
+  sha = "abc123..."
+  repository = "actions/checkout"
+  ref_type = "branch"
+  date = "2026-03-01T00:00:00Z"
+  ```
+
+#### Scenario: Resolutions are sorted by action ID then specifier
+- **GIVEN** resolutions for `actions/setup-node@^3` and `actions/checkout@^6`
+- **WHEN** the lock is written
+- **THEN** `actions/checkout` resolutions appear before `actions/setup-node` resolutions
+
+#### Scenario: Actions are sorted by action ID then version
+- **GIVEN** action entries for `actions/setup-node@v3.7.0` and `actions/checkout@v6.2.3`
+- **WHEN** the lock is written
+- **THEN** `actions/checkout` entries appear before `actions/setup-node` entries
+
+### Requirement: Roundtrip integrity
+Lock file serialization and deserialization SHALL be lossless for known fields across both tiers.
+
+#### Scenario: Two-tier roundtrip
+- **GIVEN** a two-tier lock file with resolutions and action entries
+- **WHEN** the lock is read and then written back
+- **THEN** the output is byte-for-byte identical to the input
+
+---
+
+## Format Migration
+
+### Requirement: Write-time migration
+Migration SHALL occur transparently when a write command (tidy, init, upgrade) outputs files. Read-only commands (lint) do not modify files. The lock file is always written in the current two-tier format via full rewrite — no diff-based patching, no migration flags, no migration messages.
+
+#### Scenario: Flat lock is silently migrated on tidy
+- **WHEN** a flat-format lock file exists and `gx tidy` runs
+- **THEN** the lock file is rewritten in two-tier format
+- **AND** no "migrated" message is printed
+
+#### Scenario: Flat lock is silently migrated on upgrade
+- **WHEN** a flat-format lock file exists and `gx upgrade` runs
+- **THEN** the lock file is rewritten in two-tier format
+- **AND** no "migrated" message is printed
+
+#### Scenario: Two-tier lock is rewritten identically
+- **WHEN** a two-tier lock file exists and a write command runs with no logical changes
+- **THEN** the lock file content is byte-for-byte identical after the write
+
+#### Scenario: Lock save is always a full rewrite
+- **WHEN** `Store::save()` is called
+- **THEN** the entire `Lock` domain model is serialized to disk
+- **AND** no prior file content is read or patched
+
+### Requirement: Migration from flat lock to two-tier
+The system SHALL transparently read flat-format lock files (single `[actions]` section with `"action@specifier"` composite keys) and convert them to the domain `Lock` model. The next write produces the two-tier format.
+
+#### Scenario: Flat lock migrates to two-tier
+- **GIVEN** a flat lock file:
   ```toml
   [actions."actions/checkout@^6"]
   sha = "de0fac2e..."
@@ -94,38 +215,67 @@ Each action entry in the lock file SHALL be a standard TOML table under `[action
   ref_type = "release"
   date = "2026-02-15T10:35:00Z"
   ```
+- **WHEN** a write command (tidy, init, upgrade) runs
+- **THEN** the output is two-tier format:
+  ```toml
+  [resolutions."actions/checkout"."^6"]
+  version = "v6.2.3"
+  comment = "v6"
 
-#### Scenario: Subpath action stores base repository
-- **GIVEN** an action `github/codeql-action/upload-sarif@^3` resolved against repository `github/codeql-action`
-- **THEN** the `repository` field is `"github/codeql-action"`
+  [actions."actions/checkout"."v6.2.3"]
+  sha = "de0fac2e..."
+  repository = "actions/checkout"
+  ref_type = "release"
+  date = "2026-02-15T10:35:00Z"
+  ```
 
-#### Scenario: Entries are sorted alphabetically
-- **GIVEN** a lock with entries for `actions/checkout@^6` and `actions/setup-node@^3`
-- **WHEN** the lock is written
-- **THEN** `actions/checkout@^6` appears before `actions/setup-node@^3`
+#### Scenario: Flat entries deduplicating to one action entry
+- **GIVEN** a flat lock file with two entries resolving to the same version:
+  ```toml
+  [actions."actions/checkout@^4"]
+  sha = "abc123..."
+  version = "v4.2.1"
+  comment = "v4"
+  repository = "actions/checkout"
+  ref_type = "tag"
+  date = "2026-01-01T00:00:00Z"
 
-### Requirement: Roundtrip integrity
-Lock file serialization and deserialization SHALL be lossless for known fields.
+  [actions."actions/checkout@^4.2"]
+  sha = "abc123..."
+  version = "v4.2.1"
+  comment = "v4.2"
+  repository = "actions/checkout"
+  ref_type = "tag"
+  date = "2026-01-01T00:00:00Z"
+  ```
+- **WHEN** migration runs
+- **THEN** the output has two resolution entries and one action entry
 
----
+#### Scenario: Flat entry with missing version migrates with specifier fallback
+- **GIVEN** a flat lock entry with `version` absent or empty
+- **WHEN** migration runs
+- **THEN** the resolution is created with the specifier as the version fallback
+- **AND** the entry is detected as incomplete on next tidy run
 
-## Format Migration
+#### Scenario: v1.4 inline tables parsed as flat format
+- **GIVEN** a lock file with `version = "1.4"` and inline table entries under `[actions]`
+- **WHEN** `Store::load()` is called
+- **THEN** the file is parsed as flat format (the `version` field is ignored by serde)
+- **AND** the entries are converted to the domain `Lock` model
 
-### Requirement: Write-time migration
-Migration SHALL occur transparently when a write command (tidy, init, upgrade) outputs files. Read-only commands (lint) do not modify files.
+#### Scenario: Empty lock file returns default
+- **GIVEN** a lock file that exists but is empty
+- **WHEN** `Store::load()` is called
+- **THEN** an empty `Lock::default()` is returned
 
-#### Scenario: Migration message is concise
-- **WHEN** migration occurs
-- **THEN** output includes `migrated gx.toml -> semver specifiers` and/or `migrated gx.lock`
-
-### Requirement: Migration from v1.0 to current format
-The system SHALL transparently migrate v1.0 lock files (plain string SHA values with `version` field) to the current format.
-
-### Requirement: Migration from v1.3 to current format
-The system SHALL transparently migrate v1.3 lock files (`specifier` field and `@v6` style keys) to current `@^6` format.
-
-### Requirement: Migration from v1.4 inline tables
-The system SHALL transparently migrate v1.4 lock files (inline tables with `version = "1.4"`) to the new standard-table format.
+#### Scenario: Unrecognized format produces an error
+- **GIVEN** a lock file with non-TOML content or unrecognized TOML structure
+- **WHEN** `Store::load()` is called
+- **THEN** an error is returned indicating the format is unrecognized
 
 ### Requirement: Manifest v1 migration
-v1 manifests (no `[gx]` section with `"v4"` style values) are parsed directly with specifier values converted via `from_v1()`. v2 manifests (with `[gx]` section) have the section stripped. Both set `migrated = true`.
+v1 manifests (no `[gx]` section with `"v4"` style values) are parsed directly with specifier values converted via `from_v1()`. v2 manifests (with `[gx]` section) have the section stripped. The `manifest_migrated` flag is preserved for manifest migration messages. The lock-specific `lock_migrated` flag and `Parsed<T>` wrapper for locks are removed; manifest migration uses a simpler mechanism.
+
+#### Scenario: Manifest migration still reports
+- **WHEN** a v1 manifest is loaded and a write command runs
+- **THEN** the output includes `migrated gx.toml -> semver specifiers`

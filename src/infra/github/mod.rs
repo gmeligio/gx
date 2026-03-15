@@ -8,13 +8,17 @@ use crate::domain::resolution::{
 use std::time::Duration;
 use thiserror::Error;
 
+/// Ref resolution and tag lookup against the GitHub API.
 mod resolve;
+/// GitHub API response deserialization types.
 mod responses;
 
+/// HTTP User-Agent header value sent with all GitHub API requests.
 const USER_AGENT: &str = "gx-cli";
+/// Timeout in seconds for each HTTP request to the GitHub API.
 const REQUEST_TIMEOUT_SECS: u64 = 30;
 
-/// Errors that can occur when interacting with the Github API
+/// Errors that can occur when interacting with the Github API.
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("failed to create HTTP client")]
@@ -48,14 +52,17 @@ pub enum Error {
     },
 }
 
+/// GitHub API client for resolving action versions and commit SHAs.
 #[derive(Clone)]
 pub struct Registry {
-    pub(super) client: reqwest::blocking::Client,
-    pub(super) token: Option<String>,
+    /// The HTTP client used for API requests.
+    pub client: reqwest::blocking::Client,
+    /// Optional personal access token for authenticated requests.
+    pub token: Option<String>,
 }
 
 impl Registry {
-    /// Create a new Github client with a custom token
+    /// Create a new Github client with a custom token.
     ///
     /// # Errors
     ///
@@ -90,7 +97,7 @@ impl Registry {
         let status = response.status();
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             return Error::RateLimited {
-                url: url.to_string(),
+                url: url.to_owned(),
             };
         }
         if status == reqwest::StatusCode::FORBIDDEN {
@@ -102,26 +109,26 @@ impl Registry {
                 .unwrap_or(1);
             if remaining == 0 {
                 return Error::RateLimited {
-                    url: url.to_string(),
+                    url: url.to_owned(),
                 };
             }
             return Error::Unauthorized {
-                url: url.to_string(),
+                url: url.to_owned(),
             };
         }
         if status == reqwest::StatusCode::UNAUTHORIZED {
             return Error::Unauthorized {
-                url: url.to_string(),
+                url: url.to_owned(),
             };
         }
         if status == reqwest::StatusCode::NOT_FOUND {
             return Error::NotFound {
-                url: url.to_string(),
+                url: url.to_owned(),
             };
         }
         Error::ApiError {
             status: status.as_u16(),
-            url: url.to_string(),
+            url: url.to_owned(),
         }
     }
 }
@@ -133,7 +140,11 @@ impl VersionRegistry for Registry {
                 .map_err(|e| match e {
                     Error::RateLimited { .. } => ResolutionError::RateLimited,
                     Error::Unauthorized { .. } => ResolutionError::AuthRequired,
-                    _ => ResolutionError::ResolveFailed {
+                    Error::ClientInit(_)
+                    | Error::Request { .. }
+                    | Error::NotFound { .. }
+                    | Error::ApiError { .. }
+                    | Error::ParseResponse { .. } => ResolutionError::ResolveFailed {
                         spec: ActionSpec::new(id.clone(), Specifier::from_v1(version.as_str())),
                         reason: e.to_string(),
                     },
@@ -183,7 +194,11 @@ impl VersionRegistry for Registry {
             .map_err(|e| match e {
                 Error::RateLimited { .. } => ResolutionError::RateLimited,
                 Error::Unauthorized { .. } => ResolutionError::AuthRequired,
-                _ => ResolutionError::NoTagsForSha {
+                Error::ClientInit(_)
+                | Error::Request { .. }
+                | Error::NotFound { .. }
+                | Error::ApiError { .. }
+                | Error::ParseResponse { .. } => ResolutionError::NoTagsForSha {
                     action: id.clone(),
                     sha: sha.clone(),
                 },
@@ -196,7 +211,11 @@ impl VersionRegistry for Registry {
             .map_err(|e| match e {
                 Error::RateLimited { .. } => ResolutionError::RateLimited,
                 Error::Unauthorized { .. } => ResolutionError::AuthRequired,
-                _ => ResolutionError::ResolveFailed {
+                Error::ClientInit(_)
+                | Error::Request { .. }
+                | Error::NotFound { .. }
+                | Error::ApiError { .. }
+                | Error::ParseResponse { .. } => ResolutionError::ResolveFailed {
                     spec: ActionSpec::new(id.clone(), Specifier::Ref(String::new())),
                     reason: e.to_string(),
                 },
@@ -216,8 +235,12 @@ impl VersionRegistry for Registry {
             .map_err(|e| match e {
                 Error::RateLimited { .. } => ResolutionError::RateLimited,
                 Error::Unauthorized { .. } => ResolutionError::AuthRequired,
-                _ => ResolutionError::ResolveFailed {
-                    spec: ActionSpec::new(id.clone(), Specifier::Sha(sha.as_str().to_string())),
+                Error::ClientInit(_)
+                | Error::Request { .. }
+                | Error::NotFound { .. }
+                | Error::ApiError { .. }
+                | Error::ParseResponse { .. } => ResolutionError::ResolveFailed {
+                    spec: ActionSpec::new(id.clone(), Specifier::Sha(sha.as_str().to_owned())),
                     reason: e.to_string(),
                 },
             })?
@@ -236,11 +259,5 @@ impl VersionRegistry for Registry {
             repository: base_repo,
             date,
         })
-    }
-}
-
-impl Default for Registry {
-    fn default() -> Self {
-        Self::new(None).expect("Failed to create Github client")
     }
 }

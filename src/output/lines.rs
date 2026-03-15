@@ -48,7 +48,7 @@ impl Line {
                 let arrow = if use_color {
                     style("↑").cyan().to_string()
                 } else {
-                    "↑".to_string()
+                    "↑".to_owned()
                 };
                 format!(" {arrow} {action:<30} {from} → {to}")
             }
@@ -56,7 +56,7 @@ impl Line {
                 let plus = if use_color {
                     style("+").green().to_string()
                 } else {
-                    "+".to_string()
+                    "+".to_owned()
                 };
                 format!(" {plus} {action:<30} {version}")
             }
@@ -64,7 +64,7 @@ impl Line {
                 let minus = if use_color {
                     style("−").red().to_string()
                 } else {
-                    "−".to_string()
+                    "−".to_owned()
                 };
                 format!(" {minus} {action}")
             }
@@ -78,7 +78,7 @@ impl Line {
                 let prefix = if use_color {
                     style("⚠").yellow().to_string()
                 } else {
-                    "⚠".to_string()
+                    "⚠".to_owned()
                 };
                 format!(" {prefix} {message}")
             }
@@ -93,14 +93,14 @@ impl Line {
                         if use_color {
                             style("✗").red().to_string()
                         } else {
-                            "✗".to_string()
+                            "✗".to_owned()
                         }
                     }
                     Level::Warn => {
                         if use_color {
                             style("⚠").yellow().to_string()
                         } else {
-                            "⚠".to_string()
+                            "⚠".to_owned()
                         }
                     }
                     Level::Off => String::new(),
@@ -115,7 +115,7 @@ impl Line {
                 let check = if use_color {
                     style("✓").green().to_string()
                 } else {
-                    "✓".to_string()
+                    "✓".to_owned()
                 };
                 format!("\n {check} {text}")
             }
@@ -123,7 +123,7 @@ impl Line {
                 let icon = if use_color {
                     style("📋").to_string()
                 } else {
-                    "📋".to_string()
+                    "📋".to_owned()
                 };
                 format!(" {icon} {}", path.display())
             }
@@ -131,7 +131,7 @@ impl Line {
                 let prefix = if use_color {
                     style("ℹ").blue().to_string()
                 } else {
-                    "ℹ".to_string()
+                    "ℹ".to_owned()
                 };
                 format!(" {prefix} {message}")
             }
@@ -148,9 +148,9 @@ mod tests {
     #[test]
     fn format_line_upgraded_no_color() {
         let line = Line::Upgraded {
-            action: "actions/checkout".to_string(),
-            from: "v3".to_string(),
-            to: "v4".to_string(),
+            action: "actions/checkout".to_owned(),
+            from: "v3".to_owned(),
+            to: "v4".to_owned(),
         };
         let result = line.format_line(false);
         assert!(result.contains("↑"));
@@ -163,9 +163,9 @@ mod tests {
     fn format_line_lint_diag_no_color() {
         let line = Line::LintDiag {
             level: Level::Error,
-            workflow: Some("ci.yml".to_string()),
-            rule: "pinned-version".to_string(),
-            message: "action must be pinned".to_string(),
+            workflow: Some("ci.yml".to_owned()),
+            rule: "pinned-version".to_owned(),
+            message: "action must be pinned".to_owned(),
         };
         let result = line.format_line(false);
         assert!(result.contains("✗"));
@@ -177,7 +177,7 @@ mod tests {
     #[test]
     fn format_line_summary_no_color() {
         let line = Line::Summary {
-            text: "All done".to_string(),
+            text: "All done".to_owned(),
         };
         let result = line.format_line(false);
         assert!(result.contains("✓"));
@@ -194,8 +194,8 @@ mod tests {
     #[test]
     fn format_line_added_no_color() {
         let line = Line::Added {
-            action: "actions/setup-node".to_string(),
-            version: "v4".to_string(),
+            action: "actions/setup-node".to_owned(),
+            version: "v4".to_owned(),
         };
         let result = line.format_line(false);
         assert!(result.contains('+'));

@@ -11,16 +11,16 @@ pub enum Action {
     /// Candidate is outside the manifest's range.
     /// Manifest must change.
     CrossRange {
-        /// The candidate version tag to resolve (e.g., "v6.1.0")
+        /// The candidate version tag to resolve (e.g., "v6.1.0").
         candidate: Version,
-        /// The new specifier to write to the manifest (e.g., "^6")
+        /// The new specifier to write to the manifest (e.g., "^6").
         new_specifier: Specifier,
-        /// The new comment for the lock entry and workflow (e.g., "v6")
+        /// The new comment for the lock entry and workflow (e.g., "v6").
         new_comment: String,
     },
 }
 
-/// An available upgrade for an action
+/// An available upgrade for an action.
 #[derive(Debug)]
 pub struct Candidate {
     pub id: ActionId,
@@ -29,7 +29,7 @@ pub struct Candidate {
 }
 
 impl Candidate {
-    /// Get the candidate version that will be resolved
+    /// Get the candidate version that will be resolved.
     #[must_use]
     pub fn candidate(&self) -> &Version {
         match &self.action {
@@ -37,7 +37,7 @@ impl Candidate {
         }
     }
 
-    /// Get the specifier to store in the manifest
+    /// Get the specifier to store in the manifest.
     #[must_use]
     pub fn manifest_specifier(&self) -> &Specifier {
         match &self.action {
@@ -76,34 +76,14 @@ fn extract_at_precision(
     let base = stripped.split('-').next().unwrap_or(stripped);
     let parts: Vec<&str> = base.split('.').collect();
 
-    let version_part = match precision {
-        VersionPrecision::Major => {
-            if parts.is_empty() {
-                stripped.to_string()
-            } else {
-                parts[0].to_string()
-            }
+    let version_part = match (precision, parts.as_slice()) {
+        (VersionPrecision::Patch, [major, minor, patch, ..]) => {
+            format!("{major}.{minor}.{patch}")
         }
-        VersionPrecision::Minor => {
-            if parts.len() >= 2 {
-                format!("{}.{}", parts[0], parts[1])
-            } else if !parts.is_empty() {
-                parts[0].to_string()
-            } else {
-                stripped.to_string()
-            }
-        }
-        VersionPrecision::Patch => {
-            if parts.len() >= 3 {
-                format!("{}.{}.{}", parts[0], parts[1], parts[2])
-            } else if parts.len() >= 2 {
-                format!("{}.{}", parts[0], parts[1])
-            } else if !parts.is_empty() {
-                parts[0].to_string()
-            } else {
-                stripped.to_string()
-            }
-        }
+        (VersionPrecision::Minor, [major, minor, ..])
+        | (VersionPrecision::Patch, [major, minor]) => format!("{major}.{minor}"),
+        (VersionPrecision::Major, [major, ..]) | (_, [major]) => (*major).to_owned(),
+        (_, _) => stripped.to_owned(),
     };
 
     let raw = format!("{operator}{version_part}");
@@ -206,7 +186,7 @@ pub fn find_upgrade_candidate(
         } else {
             let operator = specifier.operator().unwrap_or('^');
             let new_specifier = extract_at_precision(&best_tag, precision, operator);
-            let new_comment = new_specifier.to_comment().to_string();
+            let new_comment = new_specifier.to_comment().to_owned();
             Some(Action::CrossRange {
                 candidate: best_tag,
                 new_specifier,
@@ -219,7 +199,7 @@ pub fn find_upgrade_candidate(
 }
 
 /// Attempts to parse a version string into a semver Version.
-/// Handles common formats like "v4", "v4.1", "v4.1.2", "4.1.2"
+/// Handles common formats like "v4", "v4.1", "v4.1.2", "4.1.2".
 fn parse_semver(version: &str) -> Option<semver::Version> {
     // Strip leading 'v' or 'V' if present; also strip operators
     let normalized = version
@@ -259,7 +239,7 @@ mod tests {
     use super::{Action, ActionId, Candidate, Specifier, Version, find_upgrade_candidate};
 
     #[test]
-    fn test_find_upgrade_candidate_safe_mode_major_precision_in_range() {
+    fn find_upgrade_candidate_safe_mode_major_precision_in_range() {
         let specifier = Specifier::parse("^4");
         let candidates = vec![
             Version::from("v3"),
@@ -279,7 +259,7 @@ mod tests {
     }
 
     #[test]
-    fn test_find_upgrade_candidate_latest_mode_crosses_major() {
+    fn find_upgrade_candidate_latest_mode_crosses_major() {
         let specifier = Specifier::parse("^4");
         let candidates = vec![
             Version::from("v4"),
@@ -293,13 +273,13 @@ mod tests {
             Some(Action::CrossRange {
                 candidate: Version::from("v6.1.0"),
                 new_specifier: Specifier::parse("^6"),
-                new_comment: "v6".to_string(),
+                new_comment: "v6".to_owned(),
             })
         );
     }
 
     #[test]
-    fn test_find_upgrade_candidate_latest_mode_preserves_minor_precision() {
+    fn find_upgrade_candidate_latest_mode_preserves_minor_precision() {
         let specifier = Specifier::parse("^4.1");
         let candidates = vec![Version::from("v5.0.0")];
         // Latest mode with minor precision: result should preserve minor precision
@@ -308,13 +288,13 @@ mod tests {
             Some(Action::CrossRange {
                 candidate: Version::from("v5.0.0"),
                 new_specifier: Specifier::parse("^5.0"),
-                new_comment: "v5.0".to_string(),
+                new_comment: "v5.0".to_owned(),
             })
         );
     }
 
     #[test]
-    fn test_find_upgrade_candidate_latest_mode_preserves_patch_precision() {
+    fn find_upgrade_candidate_latest_mode_preserves_patch_precision() {
         let specifier = Specifier::parse("~4.1.2");
         let candidates = vec![Version::from("v5.0.0")];
         // Latest mode with patch precision (tilde): result should preserve tilde and patch precision
@@ -323,13 +303,13 @@ mod tests {
             Some(Action::CrossRange {
                 candidate: Version::from("v5.0.0"),
                 new_specifier: Specifier::parse("~5.0.0"),
-                new_comment: "v5.0.0".to_string(),
+                new_comment: "v5.0.0".to_owned(),
             })
         );
     }
 
     #[test]
-    fn test_find_upgrade_candidate_with_lock_floor() {
+    fn find_upgrade_candidate_with_lock_floor() {
         let specifier = Specifier::parse("^4");
         let lock_version = Some(Version::from("v4.2.1"));
         let candidates = vec![
@@ -347,7 +327,7 @@ mod tests {
     }
 
     #[test]
-    fn test_find_upgrade_candidate_stable_filters_prerelease() {
+    fn find_upgrade_candidate_stable_filters_prerelease() {
         let specifier = Specifier::parse("^2");
         let candidates = vec![
             Version::from("v2.2.1"),
@@ -360,28 +340,28 @@ mod tests {
             Some(Action::CrossRange {
                 candidate: Version::from("v3.0.0"),
                 new_specifier: Specifier::parse("^3"),
-                new_comment: "v3".to_string(),
+                new_comment: "v3".to_owned(),
             })
         );
     }
 
     #[test]
-    fn test_find_upgrade_candidate_non_semver_specifier() {
-        let specifier = Specifier::Ref("main".to_string());
+    fn find_upgrade_candidate_non_semver_specifier() {
+        let specifier = Specifier::Ref("main".to_owned());
         let candidates = vec![Version::from("v5")];
         // Non-semver specifier returns None (no precision)
         assert!(find_upgrade_candidate(&specifier, None, &candidates, true).is_none());
     }
 
     #[test]
-    fn test_find_upgrade_candidate_no_candidates() {
+    fn find_upgrade_candidate_no_candidates() {
         let specifier = Specifier::parse("^4");
         let candidates: Vec<Version> = vec![];
         assert!(find_upgrade_candidate(&specifier, None, &candidates, true).is_none());
     }
 
     #[test]
-    fn test_upgrade_candidate_display_in_range() {
+    fn upgrade_candidate_display_in_range() {
         let candidate = Candidate {
             id: ActionId::from("actions/checkout"),
             current: Specifier::parse("^4"),
@@ -393,14 +373,14 @@ mod tests {
     }
 
     #[test]
-    fn test_upgrade_candidate_display_cross_range() {
+    fn upgrade_candidate_display_cross_range() {
         let candidate = Candidate {
             id: ActionId::from("actions/checkout"),
             current: Specifier::parse("^4"),
             action: Action::CrossRange {
                 candidate: Version::from("v5.0.0"),
                 new_specifier: Specifier::parse("^5"),
-                new_comment: "v5".to_string(),
+                new_comment: "v5".to_owned(),
             },
         };
         assert_eq!(candidate.to_string(), "actions/checkout ^4 -> v5.0.0");

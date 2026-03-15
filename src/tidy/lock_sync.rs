@@ -2,8 +2,7 @@ use std::collections::HashMap;
 
 use super::Error as TidyError;
 use crate::domain::action::identity::CommitSha;
-use crate::domain::action::resolved::{Resolved as ResolvedAction, VersionCorrection};
-use crate::domain::action::spec::{LockKey, Spec as ActionSpec};
+use crate::domain::action::spec::Spec as ActionSpec;
 use crate::domain::action::tag_selection::ShaIndex;
 use crate::domain::event::Event as SyncEvent;
 use crate::domain::lock::Lock;
@@ -12,7 +11,7 @@ use crate::domain::resolution::{ActionResolver, Error as ResolutionError, Versio
 
 /// Resolve all specs in the manifest into the lock.
 ///
-/// Returns `(corrections, events)` where events include skip/warning events for recoverable errors.
+/// Returns events including skip/warning events for recoverable errors.
 ///
 /// # Errors
 ///
@@ -21,10 +20,9 @@ pub(super) fn update_lock<R: VersionRegistry>(
     lock: &mut Lock,
     manifest: &mut Manifest,
     resolver: &ActionResolver<'_, R>,
-    workflow_shas: &HashMap<LockKey, CommitSha>,
+    workflow_shas: &HashMap<ActionSpec, CommitSha>,
     sha_index: &mut ShaIndex,
-) -> Result<(Vec<VersionCorrection>, Vec<SyncEvent>), TidyError> {
-    let corrections = Vec::new();
+) -> Result<Vec<SyncEvent>, TidyError> {
     let mut events: Vec<SyncEvent> = Vec::new();
     let mut unresolved = Vec::new();
     let mut recoverable_count: usize = 0;
@@ -40,10 +38,10 @@ pub(super) fn update_lock<R: VersionRegistry>(
         }))
         .collect();
 
-    let needs_resolving = all_specs.iter().any(|spec| !lock.has(&LockKey::from(spec)));
+    let needs_resolving = all_specs.iter().any(|spec| !lock.has(spec));
 
     if !needs_resolving {
-        return Ok((corrections, events));
+        return Ok(events);
     }
 
     for spec in &all_specs {
@@ -53,7 +51,7 @@ pub(super) fn update_lock<R: VersionRegistry>(
                     spec: spec.clone(),
                     reason: e.to_string(),
                 });
-                recoverable_count += 1;
+                recoverable_count = recoverable_count.saturating_add(1);
             } else {
                 unresolved.push(format!("{spec}: {e}"));
             }
@@ -73,7 +71,7 @@ pub(super) fn update_lock<R: VersionRegistry>(
         });
     }
 
-    Ok((corrections, events))
+    Ok(events)
 }
 
 /// Resolve a single spec into the lock if missing, then populate version/specifier fields.
@@ -84,22 +82,17 @@ fn populate_lock_entry<R: VersionRegistry>(
     lock: &mut Lock,
     resolver: &ActionResolver<'_, R>,
     spec: &ActionSpec,
-    workflow_shas: &HashMap<LockKey, CommitSha>,
+    workflow_shas: &HashMap<ActionSpec, CommitSha>,
     sha_index: &mut ShaIndex,
 ) -> Result<(), ResolutionError> {
-    let key = LockKey::from(spec);
-
-    let needs_population = match lock.get(&key) {
-        Some(entry) => !entry.is_complete(&spec.version),
-        None => true,
-    };
+    let needs_population = !lock.is_complete(spec);
 
     if !needs_population {
         return Ok(());
     }
 
-    if !lock.has(&key) {
-        let result = if let Some(sha) = workflow_shas.get(&key) {
+    if !lock.has(spec) {
+        let result = if let Some(sha) = workflow_shas.get(spec) {
             resolver
                 .resolve_from_sha(&spec.id, sha, sha_index)
                 .or_else(|_| resolver.resolve(spec))
@@ -109,21 +102,14 @@ fn populate_lock_entry<R: VersionRegistry>(
 
         match result {
             Ok(action) => {
-                let entry_version = action.version.to_comment().to_string();
-                // Always store at the spec key (manifest version) so lookups are consistent.
-                // For SHA-first, action.version is the most specific tag (e.g. v3.6.1) while
-                // spec.version is the manifest version (e.g. v4); they differ, so we need the
-                // proxy to ensure the correct lock key.
-                let proxy = ResolvedAction::new(
-                    action.id,
-                    spec.version.clone(),
-                    action.sha,
-                    action.repository,
-                    action.ref_type,
-                    action.date,
+                let resolved_version = action.version.to_comment().to_owned();
+                let comment = spec.version.to_comment().to_owned();
+                lock.set(
+                    spec,
+                    crate::domain::action::identity::Version::from(resolved_version.as_str()),
+                    action.commit,
+                    comment,
                 );
-                lock.set(&proxy);
-                lock.set_version(&key, Some(entry_version));
             }
             Err(e) => {
                 return Err(e);
@@ -131,19 +117,24 @@ fn populate_lock_entry<R: VersionRegistry>(
         }
     }
 
-    if lock.get(&key).is_some() {
-        let comment = spec.version.to_comment().to_string();
-        lock.set_comment(&key, comment);
+    if lock.has(spec) {
+        let comment = spec.version.to_comment().to_owned();
+        lock.set_comment(spec, comment);
     }
 
     Ok(())
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
 mod tests {
     use super::*;
     use crate::domain::action::identity::{ActionId, CommitSha, Version};
-    use crate::domain::action::spec::LockKey;
+    use crate::domain::action::spec::Spec as ActionSpec;
     use crate::domain::action::specifier::Specifier;
     use crate::domain::action::tag_selection::ShaIndex;
     use crate::domain::action::uses_ref::RefType;
@@ -174,7 +165,7 @@ mod tests {
                     CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
                     id.base_repo(),
                     Some(RefType::Tag),
-                    "2026-01-01T00:00:00Z".to_string(),
+                    "2026-01-01T00:00:00Z".to_owned(),
                 ))
             }
         }
@@ -209,11 +200,11 @@ mod tests {
 
     /// SHA-first: workflow SHA is used directly; registry only provides metadata.
     #[test]
-    fn test_lock_resolves_from_workflow_sha_first() {
+    fn lock_resolves_from_workflow_sha_first() {
         let workflow_sha = "cccccccccccccccccccccccccccccccccccccccc";
         let mut manifest = make_manifest_with("actions/checkout", "v4");
         let mut lock = Lock::default();
-        let key = LockKey::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
+        let key = ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
         let mut workflow_shas = HashMap::new();
         workflow_shas.insert(key.clone(), CommitSha::from(workflow_sha));
 
@@ -229,9 +220,9 @@ mod tests {
         )
         .unwrap();
 
-        let entry = lock.get(&key).expect("lock entry must exist");
+        let (_, commit) = lock.get(&key).expect("lock entry must exist");
         assert_eq!(
-            entry.sha.as_str(),
+            commit.sha.as_str(),
             workflow_sha,
             "SHA must come from workflow (SHA-first)"
         );
@@ -239,11 +230,11 @@ mod tests {
 
     /// SHA-first: most specific tag from registry is stored as lock version.
     #[test]
-    fn test_sha_first_lock_uses_workflow_sha_and_most_specific_version() {
+    fn sha_first_lock_uses_workflow_sha_and_most_specific_version() {
         let workflow_sha = "6d1e696000000000000000000000000000000000";
         let mut manifest = make_manifest_with("jdx/mise-action", "v3");
         let mut lock = Lock::default();
-        let key = LockKey::new(ActionId::from("jdx/mise-action"), Specifier::from_v1("v3"));
+        let key = ActionSpec::new(ActionId::from("jdx/mise-action"), Specifier::from_v1("v3"));
         let mut workflow_shas = HashMap::new();
         workflow_shas.insert(key.clone(), CommitSha::from(workflow_sha));
 
@@ -263,26 +254,26 @@ mod tests {
         )
         .unwrap();
 
-        let entry = lock.get(&key).expect("lock entry must exist");
+        let (resolution, commit) = lock.get(&key).expect("lock entry must exist");
         assert_eq!(
-            entry.sha.as_str(),
+            commit.sha.as_str(),
             workflow_sha,
             "SHA must be from workflow"
         );
         assert_eq!(
-            entry.version.as_deref(),
-            Some("v3.6.1"),
+            resolution.version.as_str(),
+            "v3.6.1",
             "version must be most specific tag"
         );
     }
 
     /// Registry fallback: when no workflow SHA is present, registry provides the SHA.
     #[test]
-    fn test_version_ref_falls_back_to_registry_resolution() {
+    fn version_ref_falls_back_to_registry_resolution() {
         let registry_sha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
         let mut manifest = make_manifest_with("actions/checkout", "v4");
         let mut lock = Lock::default();
-        let key = LockKey::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
+        let key = ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
         let workflow_shas = HashMap::new(); // no SHA in workflow
 
         let registry = FakeRegistry::new().with_fixed_sha(registry_sha).fail_tags();
@@ -297,9 +288,9 @@ mod tests {
         )
         .unwrap();
 
-        let entry = lock.get(&key).expect("lock entry must exist");
+        let (_, commit) = lock.get(&key).expect("lock entry must exist");
         assert_eq!(
-            entry.sha.as_str(),
+            commit.sha.as_str(),
             registry_sha,
             "SHA must come from registry when no workflow SHA"
         );
@@ -311,7 +302,7 @@ mod tests {
 
     /// Recoverable `AuthRequired` errors are skipped; other actions still resolve.
     #[test]
-    fn test_update_lock_recoverable_errors_are_skipped() {
+    fn update_lock_recoverable_errors_are_skipped() {
         let mut manifest = Manifest::default();
         manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
         manifest.set(
@@ -333,7 +324,7 @@ mod tests {
         )
         .unwrap();
 
-        let setup_node_key = LockKey::new(
+        let setup_node_key = ActionSpec::new(
             ActionId::from("actions/setup-node"),
             Specifier::from_v1("v4"),
         );
@@ -343,7 +334,7 @@ mod tests {
         );
 
         let checkout_key =
-            LockKey::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
+            ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
         assert!(
             lock.get(&checkout_key).is_none(),
             "checkout must be skipped (AuthRequired)"

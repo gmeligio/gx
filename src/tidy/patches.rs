@@ -1,6 +1,6 @@
 use super::Error as TidyError;
 use crate::domain::action::identity::ActionId;
-use crate::domain::action::spec::LockKey;
+use crate::domain::action::spec::Spec;
 use crate::domain::lock::Lock;
 use crate::domain::manifest::Manifest;
 use crate::domain::plan::WorkflowPatch;
@@ -57,16 +57,16 @@ fn build_file_update_map(
 ) -> HashMap<ActionId, String> {
     let mut map: HashMap<ActionId, String> = HashMap::new();
     for action in steps {
-        if let Some(version) = manifest.resolve_version(&action.id, &action.location) {
-            let key = LockKey::new(action.id.clone(), version.clone());
-            if let Some(entry) = lock.get(&key) {
+        if let Some(version) = manifest.resolve_version(&action.action.id, &action.location) {
+            let key = Spec::new(action.action.id.clone(), version.clone());
+            if let Some((res, commit)) = lock.get(&key) {
                 // Omit comment when resolved version is a raw SHA
                 let workflow_ref = if version.is_sha() {
-                    entry.sha.to_string()
+                    commit.sha.to_string()
                 } else {
-                    format!("{} # {}", entry.sha, entry.comment)
+                    format!("{} # {}", commit.sha, res.comment)
                 };
-                map.insert(action.id.clone(), workflow_ref);
+                map.insert(action.action.id.clone(), workflow_ref);
             }
         }
     }
@@ -74,21 +74,24 @@ fn build_file_update_map(
 }
 
 #[cfg(test)]
-#[expect(clippy::unwrap_used, reason = "tests use unwrap freely")]
+#[expect(
+    clippy::unwrap_used,
+    clippy::get_unwrap,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
 mod tests {
     use super::{Lock, Manifest, build_file_update_map};
     use crate::domain::action::identity::{ActionId, CommitSha, Version};
-    use crate::domain::action::spec::LockKey;
+    use crate::domain::action::resolved::Commit;
+    use crate::domain::action::spec::Spec;
     use crate::domain::action::specifier::Specifier;
     use crate::domain::action::uses_ref::RefType;
-    use crate::domain::lock::entry::Entry as LockEntry;
-    use crate::domain::workflow_actions::Location as WorkflowLocation;
-    use std::collections::HashMap;
+    use crate::domain::workflow_actions::{Location as WorkflowLocation, StepIndex};
 
     /// Task 4.2: SHA-only manifest version produces `@SHA` without trailing
     /// `# SHA` comment in workflow output.
     #[test]
-    fn test_sha_only_version_no_trailing_comment() {
+    fn sha_only_version_no_trailing_comment() {
         let sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
         // Manifest has SHA as version
@@ -96,26 +99,31 @@ mod tests {
         manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1(sha));
 
         // Lock has an entry for this SHA version
-        let key = LockKey::new(ActionId::from("actions/checkout"), Specifier::from_v1(sha));
-        let entry = LockEntry::with_version_and_comment(
-            CommitSha::from(sha),
-            None,
+        let spec = Spec::new(ActionId::from("actions/checkout"), Specifier::from_v1(sha));
+        let mut lock = Lock::default();
+        lock.set(
+            &spec,
+            Version::from(sha),
+            Commit {
+                sha: CommitSha::from(sha),
+                repository: "actions/checkout".to_owned(),
+                ref_type: Some(RefType::Tag),
+                date: "2026-01-01T00:00:00Z".to_owned(),
+            },
             String::new(),
-            "actions/checkout".to_owned(),
-            Some(RefType::Tag),
-            "2026-01-01T00:00:00Z".to_owned(),
         );
-        let lock = Lock::new(HashMap::from([(key, entry)]));
 
         // A located action referencing this action
         let located = crate::domain::workflow_actions::Located {
-            id: ActionId::from("actions/checkout"),
-            version: Version::from(sha),
-            sha: Some(CommitSha::from(sha)),
+            action: crate::domain::action::uses_ref::InterpretedRef {
+                id: ActionId::from("actions/checkout"),
+                version: Version::from(sha),
+                sha: Some(CommitSha::from(sha)),
+            },
             location: WorkflowLocation {
                 workflow: ".github/workflows/ci.yml".to_owned(),
                 job: Some("build".to_owned()),
-                step: Some(0),
+                step: Some(StepIndex::from(0_u16)),
             },
         };
 

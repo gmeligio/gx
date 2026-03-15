@@ -1,7 +1,8 @@
 use super::action::identity::ActionId;
-use super::action::spec::LockKey;
+use super::action::resolved::Commit;
+use super::action::spec::Spec;
 use super::action::specifier::Specifier;
-use super::lock::entry::Entry as LockEntry;
+use super::lock::resolution::Resolution;
 use super::manifest::overrides::ActionOverride;
 use std::path::PathBuf;
 
@@ -36,9 +37,9 @@ pub struct LockEntryPatch {
 /// Describes the changes to apply to a lock file.
 #[derive(Debug, Default)]
 pub struct LockDiff {
-    pub added: Vec<(LockKey, LockEntry)>,
-    pub removed: Vec<LockKey>,
-    pub updated: Vec<(LockKey, LockEntryPatch)>,
+    pub added: Vec<(Spec, Resolution, Commit)>,
+    pub removed: Vec<Spec>,
+    pub updated: Vec<(Spec, LockEntryPatch)>,
 }
 
 impl LockDiff {
@@ -57,8 +58,8 @@ pub struct WorkflowPatch {
 
 #[cfg(test)]
 mod tests {
-    use super::{ActionId, LockDiff, LockEntry, LockKey, ManifestDiff, Specifier};
-    use crate::domain::action::identity::CommitSha;
+    use super::{ActionId, Commit, LockDiff, ManifestDiff, Resolution, Spec, Specifier};
+    use crate::domain::action::identity::{CommitSha, Version};
     use crate::domain::action::uses_ref::RefType;
 
     #[test]
@@ -86,13 +87,17 @@ mod tests {
     fn lock_diff_is_not_empty_after_adding_entry() {
         let diff = LockDiff {
             added: vec![(
-                LockKey::new(ActionId::from("actions/checkout"), Specifier::parse("^4")),
-                LockEntry::new(
-                    CommitSha::from("abc123"),
-                    "actions/checkout".to_string(),
-                    Some(RefType::Tag),
-                    "2026-01-01T00:00:00Z".to_string(),
-                ),
+                Spec::new(ActionId::from("actions/checkout"), Specifier::parse("^4")),
+                Resolution {
+                    version: Version::from("v4"),
+                    comment: String::new(),
+                },
+                Commit {
+                    sha: CommitSha::from("abc123"),
+                    repository: "actions/checkout".to_owned(),
+                    ref_type: Some(RefType::Tag),
+                    date: "2026-01-01T00:00:00Z".to_owned(),
+                },
             )],
             ..Default::default()
         };

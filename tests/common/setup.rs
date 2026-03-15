@@ -1,9 +1,12 @@
-#![allow(dead_code)]
+#![expect(
+    dead_code,
+    reason = "shared test helpers: not every integration test crate uses every item"
+)]
 use gx::config::Lint;
 use gx::domain::lock::Lock;
 use gx::domain::manifest::Manifest;
 use gx::domain::resolution::VersionRegistry;
-use gx::infra::lock::{self, apply_lock_diff};
+use gx::infra::lock::Store as LockStore;
 use gx::infra::manifest::patch::apply_manifest_diff;
 use gx::infra::manifest::{self};
 use gx::infra::workflow_scan::FileScanner as FileWorkflowScanner;
@@ -11,7 +14,7 @@ use gx::infra::workflow_update::FileUpdater as FileWorkflowUpdater;
 use gx::upgrade::types::Request as UpgradeRequest;
 use gx::{lint, tidy, upgrade};
 use std::fs;
-use std::io::Write as IoWrite;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
@@ -68,8 +71,9 @@ pub fn run_init<R: VersionRegistry + Clone>(root: &Path, registry: &R) {
     let plan = tidy::plan(&manifest, &lock, registry, &scanner, |_| {}).unwrap();
     if !plan.is_empty() {
         manifest::create(&mp, &plan.manifest).unwrap();
-        lock::create(&lp, &plan.lock).unwrap();
-        tidy::apply_workflow_patches(&updater, &plan.workflows, &plan.corrections).unwrap();
+        let lock_store = LockStore::new(&lp);
+        lock_store.save(&plan.lock).unwrap();
+        tidy::apply_workflow_patches(&updater, &plan.workflows).unwrap();
     }
 }
 
@@ -86,19 +90,16 @@ pub fn run_tidy<R: VersionRegistry + Clone>(root: &Path, registry: &R) {
     } else {
         Manifest::default()
     };
-    let lock = lock::parse(&lp).unwrap();
+    let lock_store = LockStore::new(&lp);
+    let lock = lock_store.load().unwrap();
 
-    let plan = tidy::plan(&manifest, &lock.value, registry, &scanner, |_| {}).unwrap();
+    let plan = tidy::plan(&manifest, &lock, registry, &scanner, |_| {}).unwrap();
     if !plan.is_empty() {
         if has_manifest {
             apply_manifest_diff(&mp, &plan.manifest).unwrap();
-            if lp.exists() {
-                apply_lock_diff(&lp, &plan.lock).unwrap();
-            } else {
-                lock::create(&lp, &plan.lock).unwrap();
-            }
+            lock_store.save(&plan.lock).unwrap();
         }
-        tidy::apply_workflow_patches(&updater, &plan.workflows, &plan.corrections).unwrap();
+        tidy::apply_workflow_patches(&updater, &plan.workflows).unwrap();
     }
 }
 
@@ -111,15 +112,16 @@ pub fn run_upgrade<R: VersionRegistry + Clone>(
     let mp = manifest_path(root);
     let lp = lock_path(root);
     let manifest = manifest::parse(&mp).unwrap();
-    let lock = lock::parse(&lp).unwrap();
+    let lock_store = LockStore::new(&lp);
+    let lock = lock_store.load().unwrap();
     let updater = FileWorkflowUpdater::new(root);
 
-    let plan =
-        upgrade::plan::plan(&manifest.value, &lock.value, registry, request, |_| {}).unwrap();
+    let plan = upgrade::plan::plan(&manifest.value, &lock, registry, request, |_| {}).unwrap();
     if !plan.is_empty() {
         apply_manifest_diff(&mp, &plan.manifest).unwrap();
-        apply_lock_diff(&lp, &plan.lock).unwrap();
-        upgrade::plan::apply_upgrade_workflows(&updater, &plan.lock, &plan.upgrades).unwrap();
+        lock_store.save(&plan.lock).unwrap();
+        upgrade::plan::apply_upgrade_workflows(&updater, &plan.lock_changes, &plan.upgrades)
+            .unwrap();
     }
 }
 
@@ -128,15 +130,9 @@ pub fn run_lint(root: &Path) -> Vec<lint::Diagnostic> {
     let mp = manifest_path(root);
     let lp = lock_path(root);
     let manifest = manifest::parse(&mp).unwrap();
-    let lock = lock::parse(&lp).unwrap();
+    let lock_store = LockStore::new(&lp);
+    let lock = lock_store.load().unwrap();
     let scanner = FileWorkflowScanner::new(root);
     let lint_config = Lint::default();
-    lint::collect_diagnostics(
-        &manifest.value,
-        &lock.value,
-        &scanner,
-        &lint_config,
-        &mut |_| {},
-    )
-    .unwrap()
+    lint::collect_diagnostics(&manifest.value, &lock, &scanner, &lint_config, &mut |_| {}).unwrap()
 }
