@@ -15,8 +15,6 @@ pub enum Action {
         candidate: Version,
         /// The new specifier to write to the manifest (e.g., "^6").
         new_specifier: Specifier,
-        /// The new comment for the lock entry and workflow (e.g., "v6").
-        new_comment: String,
     },
 }
 
@@ -186,11 +184,9 @@ pub fn find_upgrade_candidate(
         } else {
             let operator = specifier.operator().unwrap_or('^');
             let new_specifier = extract_at_precision(&best_tag, precision, operator);
-            let new_comment = new_specifier.to_comment().to_owned();
             Some(Action::CrossRange {
                 candidate: best_tag,
                 new_specifier,
-                new_comment,
             })
         }
     } else {
@@ -273,7 +269,6 @@ mod tests {
             Some(Action::CrossRange {
                 candidate: Version::from("v6.1.0"),
                 new_specifier: Specifier::parse("^6"),
-                new_comment: "v6".to_owned(),
             })
         );
     }
@@ -288,7 +283,6 @@ mod tests {
             Some(Action::CrossRange {
                 candidate: Version::from("v5.0.0"),
                 new_specifier: Specifier::parse("^5.0"),
-                new_comment: "v5.0".to_owned(),
             })
         );
     }
@@ -303,7 +297,6 @@ mod tests {
             Some(Action::CrossRange {
                 candidate: Version::from("v5.0.0"),
                 new_specifier: Specifier::parse("~5.0.0"),
-                new_comment: "v5.0.0".to_owned(),
             })
         );
     }
@@ -340,7 +333,6 @@ mod tests {
             Some(Action::CrossRange {
                 candidate: Version::from("v3.0.0"),
                 new_specifier: Specifier::parse("^3"),
-                new_comment: "v3".to_owned(),
             })
         );
     }
@@ -380,7 +372,6 @@ mod tests {
             action: Action::CrossRange {
                 candidate: Version::from("v5.0.0"),
                 new_specifier: Specifier::parse("^5"),
-                new_comment: "v5".to_owned(),
             },
         };
         assert_eq!(candidate.to_string(), "actions/checkout ^4 -> v5.0.0");

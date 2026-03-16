@@ -2,7 +2,7 @@
 
 use super::{Error as TidyError, apply_workflow_patches, plan};
 use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
-use crate::domain::action::resolved::Resolved as ResolvedAction;
+use crate::domain::action::resolved::RegistryResolution;
 use crate::domain::action::specifier::Specifier;
 use crate::domain::action::uses_ref::RefType;
 use crate::domain::lock::Lock;
@@ -10,7 +10,7 @@ use crate::domain::manifest::Manifest;
 use crate::infra::lock;
 use crate::infra::manifest;
 use crate::infra::workflow_scan::FileScanner as FileWorkflowScanner;
-use crate::infra::workflow_update::FileUpdater as FileWorkflowUpdater;
+use crate::infra::workflow_update::WorkflowWriter;
 use std::fs;
 
 #[test]
@@ -95,7 +95,7 @@ jobs:
 
     // Pre-seed lock with both versions already resolved (simulates a pre-existing lock)
     let mut seeded_lock = Lock::default();
-    seeded_lock.set_resolved(ResolvedAction::new(
+    seeded_lock.set_from_registry(RegistryResolution::new(
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v6.0.1"),
         CommitSha::from("8e8c483db84b4bee98b60c0593521ed34d9990e8"),
@@ -103,7 +103,7 @@ jobs:
         Some(RefType::Tag),
         CommitDate::from("2026-01-01T00:00:00Z"),
     ));
-    seeded_lock.set_resolved(ResolvedAction::new(
+    seeded_lock.set_from_registry(RegistryResolution::new(
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v5"),
         CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
@@ -118,7 +118,7 @@ jobs:
     let manifest = manifest::parse(&manifest_path).unwrap().value; // empty on first run
     let lock = lock_store.load().unwrap();
     let scanner = FileWorkflowScanner::new(repo_root);
-    let updater = FileWorkflowUpdater::new(repo_root);
+    let updater = WorkflowWriter::new(repo_root);
 
     let tidy_plan = plan(&manifest, &lock, &NoopRegistry, &scanner, |_| {}).unwrap();
 
@@ -193,7 +193,7 @@ jobs:
 
     // Pre-seed lock so tidy doesn't need to resolve
     let mut lock = Lock::default();
-    lock.set_resolved(ResolvedAction::new(
+    lock.set_from_registry(RegistryResolution::new(
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v4"),
         CommitSha::from("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
@@ -257,7 +257,7 @@ fn plan_one_new_action_produces_added_entries() {
 
     // Pre-seed lock so plan doesn't need to resolve via registry
     let mut lock = Lock::default();
-    lock.set_resolved(ResolvedAction::new(
+    lock.set_from_registry(RegistryResolution::new(
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v4"),
         CommitSha::from(sha),
@@ -303,7 +303,7 @@ fn plan_removed_action_produces_removed_entries() {
 
     // Pre-seed lock for both
     let mut lock = Lock::default();
-    lock.set_resolved(ResolvedAction::new(
+    lock.set_from_registry(RegistryResolution::new(
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v4"),
         CommitSha::from("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
@@ -311,7 +311,7 @@ fn plan_removed_action_produces_removed_entries() {
         Some(RefType::Tag),
         CommitDate::from("2026-01-01T00:00:00Z"),
     ));
-    lock.set_resolved(ResolvedAction::new(
+    lock.set_from_registry(RegistryResolution::new(
         ActionId::from("actions/setup-node"),
         Specifier::from_v1("v3"),
         CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
@@ -371,7 +371,7 @@ fn plan_everything_in_sync_returns_empty_plan() {
 
     // Lock already has the entry fully populated
     let mut lock = Lock::default();
-    lock.set_resolved(ResolvedAction::new(
+    lock.set_from_registry(RegistryResolution::new(
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v4"),
         CommitSha::from(sha),

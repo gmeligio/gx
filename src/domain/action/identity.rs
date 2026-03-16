@@ -245,35 +245,6 @@ impl From<&str> for Repository {
     }
 }
 
-/// A derived version comment (e.g., "v6" from specifier "^6").
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct VersionComment(String);
-
-impl VersionComment {
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Display for VersionComment {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl From<String> for VersionComment {
-    fn from(s: String) -> Self {
-        Self(s)
-    }
-}
-
-impl From<&str> for VersionComment {
-    fn from(s: &str) -> Self {
-        Self(s.to_owned())
-    }
-}
-
 /// An ISO 8601 date string from commit metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CommitDate(String);

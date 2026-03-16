@@ -83,15 +83,6 @@ The following newtypes SHALL wrap bare `String` fields to provide type-safe doma
 
 `JobId` SHALL represent a workflow job identifier. Defined in `domain::workflow_actions`. Standard construction via `From<String>` and `From<&str>`. No validation — wraps the string as-is.
 
-#### VersionComment
-
-`VersionComment` SHALL represent a derived version comment (e.g., `"v6"` from specifier `^6`). Defined in `domain::action::identity` (not `domain::lock::resolution`) to avoid a reverse dependency from `domain::action` → `domain::lock`, since `Specifier::Range` in `domain::action::specifier` uses this type. Standard construction via `From<String>` and `From<&str>`.
-
-##### Scenario: VersionComment is a type-level marker
-- **GIVEN** a `VersionComment` value
-- **THEN** it SHALL wrap a string without validation
-- **BECAUSE** the invariant (comments are derived from specifiers) is enforced at the call site, not in the constructor
-
 #### Repository
 
 `Repository` SHALL represent an `owner/repo` identifier. Defined in `domain::action::identity`. Standard construction via `From<String>` and `From<&str>`. No validation at construction time — the string is wrapped as-is. If validation (e.g., must contain exactly one `/`) is needed later, the private field ensures the constructor is the single entry point.

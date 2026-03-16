@@ -1,5 +1,5 @@
 use super::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
-use super::action::resolved::Resolved as ResolvedAction;
+use super::action::resolved::RegistryResolution;
 use super::action::spec::Spec as ActionSpec;
 use super::action::specifier::Specifier;
 use super::action::tag_selection::{ShaIndex, select_most_specific_tag};
@@ -119,10 +119,10 @@ impl<'reg, R: VersionRegistry> ActionResolver<'reg, R> {
     /// # Errors
     ///
     /// Returns `Error` if the registry lookup fails.
-    pub fn resolve(&self, spec: &ActionSpec) -> Result<ResolvedAction, Error> {
-        let lookup_version = Version::from(spec.version.to_comment());
+    pub fn resolve(&self, spec: &ActionSpec) -> Result<RegistryResolution, Error> {
+        let lookup_version = Version::from(spec.version.to_lookup_tag());
         let resolved_ref = self.registry.lookup_sha(&spec.id, &lookup_version)?;
-        Ok(ResolvedAction::new(
+        Ok(RegistryResolution::new(
             spec.id.clone(),
             spec.version.clone(),
             resolved_ref.sha,
@@ -143,7 +143,7 @@ impl<'reg, R: VersionRegistry> ActionResolver<'reg, R> {
         id: &ActionId,
         sha: &CommitSha,
         sha_index: &mut ShaIndex,
-    ) -> Result<ResolvedAction, Error> {
+    ) -> Result<RegistryResolution, Error> {
         let desc = sha_index.get_or_describe(self.registry, id, sha)?;
         let version =
             select_most_specific_tag(&desc.tags).unwrap_or_else(|| Version::from(sha.as_str()));
@@ -152,7 +152,7 @@ impl<'reg, R: VersionRegistry> ActionResolver<'reg, R> {
         } else {
             Some(RefType::Tag)
         };
-        Ok(ResolvedAction::new(
+        Ok(RegistryResolution::new(
             id.clone(),
             Specifier::from_v1(version.as_str()),
             sha.clone(),
@@ -254,7 +254,7 @@ mod tests {
 
         let resolved = result.expect("Expected Ok result");
         assert_eq!(resolved.id.as_str(), "actions/checkout");
-        assert_eq!(resolved.version.to_comment(), "v4");
+        assert_eq!(resolved.specifier.to_lookup_tag(), "v4");
         assert_eq!(
             resolved.commit.sha.as_str(),
             "abc123def456789012345678901234567890abcd"
@@ -350,7 +350,7 @@ mod tests {
             .resolve_from_sha(&id, &sha, &mut sha_index)
             .expect("Expected Ok result");
 
-        assert_eq!(result.version.to_comment(), "v3.6.1");
+        assert_eq!(result.specifier.to_lookup_tag(), "v3.6.1");
         assert_eq!(result.commit.sha, sha);
         assert_eq!(result.commit.ref_type, Some(RefType::Tag));
         assert_eq!(result.commit.repository.as_str(), "owner/repo");
@@ -376,7 +376,7 @@ mod tests {
             .resolve_from_sha(&id, &sha, &mut sha_index)
             .expect("Expected Ok result");
 
-        assert_eq!(result.version.as_str(), sha.as_str());
+        assert_eq!(result.specifier.as_str(), sha.as_str());
         assert_eq!(result.commit.sha, sha);
         assert_eq!(result.commit.ref_type, Some(RefType::Commit));
     }

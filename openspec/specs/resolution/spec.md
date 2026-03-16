@@ -37,7 +37,11 @@ When workflow files pin an action to a SHA, lock resolution SHALL use that SHA d
 - **THEN** the command fails with `TidyError::ResolutionFailed`
 
 ### Requirement: resolve_from_sha derives all lock fields from SHA
-`ActionResolver` SHALL provide a `resolve_from_sha` method that takes an `ActionId`, `CommitSha`, and `&mut ShaIndex` and returns a `ResolvedAction` with version, ref_type, and date derived from the SHA. It obtains the `ShaDescription` from the `ShaIndex` (which handles deduplication).
+`ActionResolver` SHALL provide a `resolve_from_sha` method that takes an `ActionId`, `CommitSha`, and `&mut ShaIndex` and returns a `RegistryResolution` with version, ref_type, and date derived from the SHA. It obtains the `ShaDescription` from the `ShaIndex` (which handles deduplication).
+
+**Note**: After `serialization-boundary` introduces a new `ResolvedAction` (workflow output type), these are two distinct types:
+- `RegistryResolution` — what the registry returned (has `repository`, `ref_type`, `date`, `specifier`)
+- `ResolvedAction` — what goes into the workflow (has `id`, `sha`, `version`)
 
 #### Scenario: SHA with tags resolves to most specific version
 - **GIVEN** action `actions/checkout` with SHA `abc123...`
@@ -120,7 +124,32 @@ The version registry SHALL return the ref_type, repository, and date alongside t
 Release `published_at` > tag `tagger.date` > commit `committer.date`. The date is read from `commit.committer.date` (nested), NOT the top-level `committer` field.
 
 ### Requirement: ResolvedAction carries metadata
-The `ResolvedAction` struct SHALL include `repository` (`Repository`), `ref_type`, and `date` (`CommitDate`). It SHALL NOT carry `resolved_version` or `specifier` (these are outputs of REFINE and DERIVE).
+The registry result type described here is renamed to `RegistryResolution`. The `RegistryResolution` struct SHALL include `repository` (`Repository`), `ref_type`, and `date` (`CommitDate`). The field previously named `version: Specifier` is now `specifier: Specifier`. It SHALL NOT carry `resolved_version` (this is an output of REFINE and DERIVE).
+
+The `ResolvedAction` defined in this spec (registry resolution result with `repository`, `ref_type`, `date`) is renamed to `RegistryResolution` by the subsequent `rename-resolved` proposal. The `serialization-boundary` proposal introduces a **new** `ResolvedAction` struct for workflow output:
+
+```
+ResolvedAction { id: ActionId, sha: CommitSha, version: Option<Version> }
+```
+
+This is a different type from the registry result. Both types coexist in `domain/action/resolved.rs` during the interim. The name clash is temporary — after `rename-resolved` applies, the two types are:
+- `RegistryResolution` — what the registry returned (has `repository`, `ref_type`, `date`)
+- `ResolvedAction` — what goes into the workflow (has `id`, `sha`, `version`)
+
+#### Scenario: ResolvedAction for workflow output
+- **GIVEN** a specifier `^4` resolved to version `v4.2.1` with SHA `abc123...`
+- **WHEN** `ResolvedAction` is constructed for workflow output
+- **THEN** it has `id = "actions/checkout"`, `sha = "abc123..."`, `version = Some("v4.2.1")`
+
+#### Scenario: Bare SHA specifier produces no version annotation
+- **GIVEN** a bare SHA specifier
+- **WHEN** `ResolvedAction` is constructed
+- **THEN** `version` is `None`
+- **BECAUSE** bare SHA specifiers need no `# comment` annotation in the workflow
+
+### Requirement: Lock::set_resolved renamed
+
+`Lock::set_resolved()` SHALL be renamed to `Lock::set_from_registry()` to match the `RegistryResolution` type name.
 
 ### Requirement: ResolvedRef carries commit metadata
 

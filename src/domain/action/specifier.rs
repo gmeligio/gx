@@ -1,4 +1,4 @@
-use super::identity::{CommitSha, Version, VersionComment, VersionPrecision};
+use super::identity::{CommitSha, Version, VersionPrecision};
 use std::fmt;
 
 /// A specifier for an action version in the manifest or lock key.
@@ -13,8 +13,6 @@ pub enum Specifier {
         req: semver::VersionReq,
         /// Raw specifier string for serialization roundtrip (e.g., `"^6"`).
         raw: String,
-        /// Human-readable comment for workflow output (e.g., `"v6"`).
-        comment: VersionComment,
     },
     /// Non-semver ref: `"main"`, `"develop"`.
     Ref(String),
@@ -31,15 +29,14 @@ impl Specifier {
     #[must_use]
     pub fn parse(s: &str) -> Self {
         // Semver range: starts with ^ or ~
-        if let Some(rest) = s.strip_prefix('^').or_else(|| s.strip_prefix('~'))
+        if s.strip_prefix('^')
+            .or_else(|| s.strip_prefix('~'))
+            .is_some()
             && let Ok(req) = semver::VersionReq::parse(s)
         {
-            // Comment: strip operator, add v prefix
-            let comment = VersionComment::from(format!("v{rest}"));
             return Self::Range {
                 req,
                 raw: s.to_owned(),
-                comment,
             };
         }
         // SHA
@@ -79,12 +76,18 @@ impl Specifier {
         }
     }
 
-    /// Get the human-readable comment string for workflow output (e.g., "v6").
+    /// Get the tag name used for GitHub API lookups (e.g., `"^6"` → `"v6"`).
     #[must_use]
-    pub fn to_comment(&self) -> &str {
+    pub fn to_lookup_tag(&self) -> String {
         match self {
-            Self::Range { comment, .. } => comment.as_str(),
-            Self::Ref(s) | Self::Sha(s) => s.as_str(),
+            Self::Range { raw, .. } => {
+                let rest = raw
+                    .strip_prefix('^')
+                    .or_else(|| raw.strip_prefix('~'))
+                    .unwrap_or(raw);
+                format!("v{rest}")
+            }
+            Self::Ref(s) | Self::Sha(s) => s.clone(),
         }
     }
 

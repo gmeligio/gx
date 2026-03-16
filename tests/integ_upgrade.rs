@@ -13,7 +13,8 @@ use common::setup::{
     create_test_repo, lock_path, manifest_path, write_lock, write_manifest, write_workflow,
 };
 use gx::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
-use gx::domain::action::resolved::Resolved as ResolvedAction;
+use gx::domain::action::resolved::RegistryResolution;
+use gx::domain::action::resolved::ResolvedAction;
 use gx::domain::action::spec::Spec;
 use gx::domain::action::specifier::Specifier;
 use gx::domain::action::uses_ref::RefType;
@@ -22,7 +23,7 @@ use gx::domain::manifest::Manifest;
 use gx::infra::lock::Store as LockStore;
 use gx::infra::manifest::patch::apply_manifest_diff;
 use gx::infra::manifest::{self};
-use gx::infra::workflow_update::FileUpdater as FileWorkflowUpdater;
+use gx::infra::workflow_update::WorkflowWriter;
 use gx::upgrade;
 use gx::upgrade::types::{Mode as UpgradeMode, Request as UpgradeRequest, Scope as UpgradeScope};
 use std::fs;
@@ -45,7 +46,7 @@ fn run_upgrade_file_backed_with_request(
     let manifest = manifest::parse(&mp)?.value;
     let lock_store = LockStore::new(&lp);
     let lock = lock_store.load()?;
-    let updater = FileWorkflowUpdater::new(repo_root);
+    let updater = WorkflowWriter::new(repo_root);
 
     let plan = upgrade::plan::plan(&manifest, &lock, &FakeRegistry::new(), request, |_| {})?;
 
@@ -269,7 +270,7 @@ jobs:
         Specifier::from_v1("v6.0.2"),
     );
 
-    lock.set_resolved(ResolvedAction::new(
+    lock.set_from_registry(RegistryResolution::new(
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v6.0.2"),
         CommitSha::from(checkout_new_sha),
@@ -281,13 +282,13 @@ jobs:
     let keys_to_retain: Vec<Spec> = manifest.specs().cloned().collect();
     lock.retain(&keys_to_retain);
 
-    let upgraded_keys = vec![Spec::new(
-        ActionId::from("actions/checkout"),
-        Specifier::from_v1("v6.0.2"),
-    )];
-    let update_map = lock.build_update_map(&upgraded_keys);
-    let writer = FileWorkflowUpdater::new(&root);
-    let _results = writer.update_all(&update_map).unwrap();
+    let pins = vec![ResolvedAction {
+        id: ActionId::from("actions/checkout"),
+        sha: CommitSha::from(checkout_new_sha),
+        version: Some(Version::from("v6.0.2")),
+    }];
+    let writer = WorkflowWriter::new(&root);
+    let _results = writer.update_all_with_pins(&pins).unwrap();
 
     let updated =
         fs::read_to_string(root.join(".github").join("workflows").join("ci.yml")).unwrap();
@@ -327,7 +328,7 @@ fn upgrade_repins_branch_ref() {
     );
 
     let mut lock = Lock::default();
-    lock.set_resolved(ResolvedAction::new(
+    lock.set_from_registry(RegistryResolution::new(
         ActionId::from("my-org/my-action"),
         Specifier::from_v1("main"),
         CommitSha::from(old_sha),
@@ -341,7 +342,7 @@ fn upgrade_repins_branch_ref() {
     assert!(plan.is_ok(), "upgrade failed: {:?}", plan.unwrap_err());
     let plan = plan.unwrap();
 
-    let updater = FileWorkflowUpdater::new(&root);
+    let updater = WorkflowWriter::new(&root);
     upgrade::plan::apply_upgrade_workflows(&updater, &plan.lock_changes, &plan.upgrades).unwrap();
 
     let expected_sha = FakeRegistry::fake_sha("my-org/my-action", "main");
@@ -372,7 +373,7 @@ fn upgrade_latest_also_repins_branch_ref() {
     );
 
     let mut lock = Lock::default();
-    lock.set_resolved(ResolvedAction::new(
+    lock.set_from_registry(RegistryResolution::new(
         ActionId::from("my-org/my-action"),
         Specifier::from_v1("main"),
         CommitSha::from(old_sha),
@@ -386,7 +387,7 @@ fn upgrade_latest_also_repins_branch_ref() {
     assert!(plan.is_ok());
     let plan = plan.unwrap();
 
-    let updater = FileWorkflowUpdater::new(&root);
+    let updater = WorkflowWriter::new(&root);
     upgrade::plan::apply_upgrade_workflows(&updater, &plan.lock_changes, &plan.upgrades).unwrap();
 
     let expected_sha = FakeRegistry::fake_sha("my-org/my-action", "main");
@@ -419,7 +420,7 @@ fn upgrade_targeted_does_not_repin_branch_ref() {
     manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
 
     let mut lock = Lock::default();
-    lock.set_resolved(ResolvedAction::new(
+    lock.set_from_registry(RegistryResolution::new(
         ActionId::from("my-org/my-action"),
         Specifier::from_v1("main"),
         CommitSha::from(branch_sha),
@@ -427,7 +428,7 @@ fn upgrade_targeted_does_not_repin_branch_ref() {
         Some(RefType::Branch),
         CommitDate::from(""),
     ));
-    lock.set_resolved(ResolvedAction::new(
+    lock.set_from_registry(RegistryResolution::new(
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v4"),
         CommitSha::from(checkout_sha),
@@ -446,7 +447,7 @@ fn upgrade_targeted_does_not_repin_branch_ref() {
     assert!(plan.is_ok());
     let plan = plan.unwrap();
 
-    let updater = FileWorkflowUpdater::new(&root);
+    let updater = WorkflowWriter::new(&root);
     upgrade::plan::apply_upgrade_workflows(&updater, &plan.lock_changes, &plan.upgrades).unwrap();
 
     let updated_workflow =
@@ -479,7 +480,7 @@ fn upgrade_mixed_semver_and_branch() {
     manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
 
     let mut lock = Lock::default();
-    lock.set_resolved(ResolvedAction::new(
+    lock.set_from_registry(RegistryResolution::new(
         ActionId::from("my-org/my-action"),
         Specifier::from_v1("main"),
         CommitSha::from(old_branch_sha),
@@ -487,7 +488,7 @@ fn upgrade_mixed_semver_and_branch() {
         Some(RefType::Branch),
         CommitDate::from(""),
     ));
-    lock.set_resolved(ResolvedAction::new(
+    lock.set_from_registry(RegistryResolution::new(
         ActionId::from("actions/checkout"),
         Specifier::from_v1("v4"),
         CommitSha::from(old_checkout_sha),
@@ -503,7 +504,7 @@ fn upgrade_mixed_semver_and_branch() {
     assert!(plan.is_ok());
     let plan = plan.unwrap();
 
-    let updater = FileWorkflowUpdater::new(&root);
+    let updater = WorkflowWriter::new(&root);
     upgrade::plan::apply_upgrade_workflows(&updater, &plan.lock_changes, &plan.upgrades).unwrap();
 
     let updated_workflow =
@@ -547,7 +548,7 @@ fn upgrade_skips_bare_sha() {
     let plan = plan.unwrap();
 
     if !plan.is_empty() {
-        let updater = FileWorkflowUpdater::new(&root);
+        let updater = WorkflowWriter::new(&root);
         upgrade::plan::apply_upgrade_workflows(&updater, &plan.lock_changes, &plan.upgrades)
             .unwrap();
     }

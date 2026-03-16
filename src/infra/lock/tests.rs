@@ -1,7 +1,5 @@
 use super::Store;
-use crate::domain::action::identity::{
-    ActionId, CommitDate, CommitSha, Repository, Version, VersionComment,
-};
+use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
 use crate::domain::action::resolved::Commit;
 use crate::domain::action::spec::Spec;
 use crate::domain::action::specifier::Specifier;
@@ -19,8 +17,8 @@ fn make_resolved(
     action: &str,
     specifier: &str,
     sha: &str,
-) -> crate::domain::action::resolved::Resolved {
-    crate::domain::action::resolved::Resolved::new(
+) -> crate::domain::action::resolved::RegistryResolution {
+    crate::domain::action::resolved::RegistryResolution::new(
         ActionId::from(action),
         Specifier::parse(specifier),
         CommitSha::from(sha),
@@ -37,14 +35,13 @@ fn two_tier_entry(
     key: &str,
     sha: &str,
     version: &str,
-    comment: &str,
     repository: &str,
     ref_type: &str,
     date: &str,
 ) -> String {
     let (action_id, specifier) = key.rsplit_once('@').unwrap();
     format!(
-        "[resolutions.\"{action_id}\".\"{specifier}\"]\nversion = \"{version}\"\ncomment = \"{comment}\"\n\n[actions.\"{action_id}\".\"{version}\"]\nsha = \"{sha}\"\nrepository = \"{repository}\"\nref_type = \"{ref_type}\"\ndate = \"{date}\"\n"
+        "[resolutions.\"{action_id}\".\"{specifier}\"]\nversion = \"{version}\"\n\n[actions.\"{action_id}\".\"{version}\"]\nsha = \"{sha}\"\nrepository = \"{repository}\"\nref_type = \"{ref_type}\"\ndate = \"{date}\"\n"
     )
 }
 
@@ -72,7 +69,6 @@ fn load_two_tier_format() {
         "actions/checkout@^4",
         "abc123def456789012345678901234567890abcd",
         "v4.0.0",
-        "v4",
         "actions/checkout",
         "tag",
         "2026-01-01T00:00:00Z",
@@ -88,7 +84,7 @@ fn load_two_tier_format() {
         commit.sha,
         CommitSha::from("abc123def456789012345678901234567890abcd")
     );
-    assert_eq!(res.comment.as_str(), "v4");
+    assert_eq!(res.version.as_str(), "v4.0.0");
 }
 
 #[test]
@@ -105,7 +101,6 @@ fn load_flat_format() {
     let lock = store.load().unwrap();
     let (res, commit) = lock.get(&make_key("actions/checkout", "^6")).unwrap();
     assert_eq!(res.version.as_str(), "v6.2.3");
-    assert_eq!(res.comment.as_str(), "v6");
     assert_eq!(
         commit.sha,
         CommitSha::from("de0fac2e4500dabe0009e67214ff5f5447ce83dd")
@@ -135,7 +130,7 @@ fn save_and_load_roundtrip() {
     let store = Store::new(file.path());
 
     let mut lock = crate::domain::lock::Lock::default();
-    lock.set_resolved(make_resolved(
+    lock.set_from_registry(make_resolved(
         "actions/checkout",
         "^4",
         "abc123def456789012345678901234567890abcd",
@@ -159,17 +154,17 @@ fn save_sorts_actions_alphabetically() {
     let store = Store::new(file.path());
 
     let mut lock = crate::domain::lock::Lock::default();
-    lock.set_resolved(make_resolved(
+    lock.set_from_registry(make_resolved(
         "docker/build-push-action",
         "^5",
         "def456789012345678901234567890abcdef123456",
     ));
-    lock.set_resolved(make_resolved(
+    lock.set_from_registry(make_resolved(
         "actions/checkout",
         "^4",
         "abc123def456789012345678901234567890abcdef",
     ));
-    lock.set_resolved(make_resolved(
+    lock.set_from_registry(make_resolved(
         "actions-rust-lang/rustfmt",
         "^1",
         "111222333444555666777888999000aaabbbcccddd",
@@ -195,7 +190,7 @@ fn save_produces_two_tier_format() {
     let store = Store::new(file.path());
 
     let mut lock = crate::domain::lock::Lock::default();
-    lock.set_resolved(make_resolved(
+    lock.set_from_registry(make_resolved(
         "actions/checkout",
         "^4",
         "abc123def456789012345678901234567890abcd",
@@ -219,7 +214,6 @@ fn save_roundtrip_preserves_all_fields() {
     let spec = make_key("actions/checkout", "^4");
     let resolution = Resolution {
         version: Version::from("v4.2.0"),
-        comment: VersionComment::from("v4"),
     };
     let commit = Commit {
         sha: CommitSha::from("abc123def456789012345678901234567890abcd"),
@@ -242,7 +236,6 @@ fn save_roundtrip_preserves_all_fields() {
     let (loaded_res, loaded_commit) = loaded.get(&spec).expect("Entry must exist");
     assert_eq!(loaded_commit.sha, commit.sha);
     assert_eq!(loaded_res.version.as_str(), resolution.version.as_str());
-    assert_eq!(loaded_res.comment.as_str(), resolution.comment.as_str());
     assert_eq!(
         loaded_commit.repository.as_str(),
         commit.repository.as_str()

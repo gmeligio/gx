@@ -11,7 +11,7 @@ use crate::domain::action::upgrade::Action;
 use crate::infra::github::Registry;
 use crate::infra::lock::Error as LockFileError;
 use crate::infra::manifest::Error as ManifestError;
-use crate::infra::workflow_update::FileUpdater;
+use crate::infra::workflow_update::WorkflowWriter;
 use report::Report as UpgradeReport;
 use thiserror::Error;
 use types::{Error as UpgradeError, Request as UpgradeRequest};
@@ -46,7 +46,7 @@ impl Command for Upgrade {
     ) -> Result<UpgradeReport, RunError> {
         let has_manifest = config.manifest_path.exists();
         let registry = Registry::new(config.settings.github_token)?;
-        let updater = FileUpdater::new(repo_root);
+        let updater = WorkflowWriter::new(repo_root);
 
         let upgrade_plan = plan::plan(
             &config.manifest,

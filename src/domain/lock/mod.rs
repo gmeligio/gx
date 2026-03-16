@@ -1,9 +1,8 @@
 pub mod resolution;
 
-use super::action::identity::{ActionId, Version, VersionComment};
-use super::action::resolved::{Commit, Resolved};
+use super::action::identity::{ActionId, Version};
+use super::action::resolved::{Commit, RegistryResolution};
 use super::action::spec::Spec;
-use super::action::specifier::Specifier;
 use super::plan::LockDiff;
 use resolution::Resolution;
 use std::collections::{HashMap, HashSet};
@@ -16,13 +15,13 @@ pub struct ActionKey {
 }
 
 /// Domain entity representing the resolved lock state with two tiers:
-/// - `resolutions`: maps `Spec` → `Resolution` (resolved version + comment)
+/// - `resolutions`: maps `Spec` → `Resolution` (resolved version)
 /// - `actions`: maps `ActionKey` → `Commit` (SHA + metadata)
 ///
 /// Contains all domain logic for querying and mutating the lock. No I/O.
 #[derive(Debug, Default, Clone)]
 pub struct Lock {
-    /// Tier 1: specifier → resolved version + comment.
+    /// Tier 1: specifier → resolved version.
     pub resolutions: HashMap<Spec, Resolution>,
     /// Tier 2: (action, version) → commit metadata.
     pub actions: HashMap<ActionKey, Commit>,
@@ -55,12 +54,11 @@ impl Lock {
     }
 
     /// Set or update both tiers for a spec.
-    pub fn set(&mut self, spec: &Spec, version: Version, commit: Commit, comment: VersionComment) {
+    pub fn set(&mut self, spec: &Spec, version: Version, commit: Commit) {
         self.resolutions.insert(
             spec.clone(),
             Resolution {
                 version: version.clone(),
-                comment,
             },
         );
         let action_key = ActionKey {
@@ -70,14 +68,13 @@ impl Lock {
         self.actions.insert(action_key, commit);
     }
 
-    /// Set from a `Resolved` action (convenience for callers that have a Resolved).
-    pub fn set_resolved(&mut self, resolved: Resolved) {
-        let spec = Spec::new(resolved.id.clone(), resolved.version.clone());
-        let comment_str = resolved.version.to_comment();
-        let comment = VersionComment::from(comment_str);
-        // Version initially set to the specifier's comment (e.g., "v4") — will be refined later
-        let version = Version::from(comment_str);
-        self.set(&spec, version, resolved.commit, comment);
+    /// Set from a `RegistryResolution` (convenience for callers that have a registry result).
+    pub fn set_from_registry(&mut self, resolved: RegistryResolution) {
+        let spec = Spec::new(resolved.id.clone(), resolved.specifier.clone());
+        let lookup_tag = resolved.specifier.to_lookup_tag();
+        // Version initially set to the specifier's lookup tag (e.g., "v4") — will be refined later
+        let version = Version::from(lookup_tag.as_str());
+        self.set(&spec, version, resolved.commit);
     }
 
     /// Check if the lock has a resolution for the given spec.
@@ -93,14 +90,6 @@ impl Lock {
             return false;
         };
         if resolution.version.as_str().is_empty() {
-            return false;
-        }
-        // For semver ranges, comment must match the specifier's expected comment
-        let comment_ok = match &spec.version {
-            Specifier::Range { .. } => resolution.comment.as_str() == spec.version.to_comment(),
-            Specifier::Ref(_) | Specifier::Sha(_) => true,
-        };
-        if !comment_ok {
             return false;
         }
         let key = ActionKey {
@@ -140,13 +129,6 @@ impl Lock {
         }
     }
 
-    /// Set the comment for a spec's resolution.
-    pub fn set_comment(&mut self, spec: &Spec, comment: VersionComment) {
-        if let Some(resolution) = self.resolutions.get_mut(spec) {
-            resolution.comment = comment;
-        }
-    }
-
     /// Retain only resolutions for the given specs, removing all others.
     /// Does NOT prune orphaned action entries — use `cleanup_orphans()` for that.
     pub fn retain(&mut self, keys: &[Spec]) {
@@ -165,21 +147,6 @@ impl Lock {
             })
             .collect();
         self.actions.retain(|k, _| referenced.contains(k));
-    }
-
-    /// Build a map of action IDs to "SHA # comment" strings for workflow updates.
-    /// Falls back to the key version string if no resolution/commit is found.
-    #[must_use]
-    pub fn build_update_map(&self, keys: &[Spec]) -> HashMap<ActionId, String> {
-        keys.iter()
-            .map(|spec| {
-                if let Some((res, commit)) = self.get(spec) {
-                    (spec.id.clone(), format!("{} # {}", commit.sha, res.comment))
-                } else {
-                    (spec.id.clone(), spec.version.to_string())
-                }
-            })
-            .collect()
     }
 
     /// Iterate over resolutions.
