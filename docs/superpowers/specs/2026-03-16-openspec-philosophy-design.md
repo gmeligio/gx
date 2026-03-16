@@ -57,16 +57,36 @@ The process for deriving new specs from the existing 15:
    serve the user's question "what version do I get?")
 3. **Write new specs** rooted in the user value, pulling in relevant
    GIVEN/WHEN/THEN scenarios from the old specs. Architectural guardrails are
-   included only if they pass the load-bearing test.
-4. **Delete old specs** once the new ones are written and reviewed
-5. **Leave archived changes alone** — they are historical snapshots, not living
+   included only if they pass the load-bearing test. The number of new specs
+   depends on grouping — expect many-to-one consolidation where old specs that
+   serve the same user capability merge into one new spec.
+4. **Review new specs** using the updated reviewer skill (with the new
+   philosophy checks in place). Each new spec must pass the user-value test.
+5. **Delete old specs** once the new ones pass review
+6. **Leave archived changes alone** — they are historical snapshots, not living
    documents
+
+### Ordering
+
+The extraction is a batch operation: all new specs are written, reviewed, and
+accepted before old specs are deleted. This avoids a mixed state where the
+reviewer's cross-reference corpus is partly old and partly new. The config.yaml
+and reviewer skill updates must land first, so the new philosophy is enforced
+during extraction.
 
 ## Config.yaml Structure
 
-The current `config.yaml` has `relevance_gate` and `altitude` rules as flat
-bullet points under `rules`. The new structure replaces these with a formal
-two-tier definition:
+The current `config.yaml` has top-level keys `schema`, `context`, and `rules`
+(with `proposal` and `specs` sub-keys). The new structure:
+
+- **`schema`** — preserved as-is (value: `spec-driven`)
+- **`context`** — preserved as-is (project description)
+- **`rules`** — replaced entirely by three new top-level keys:
+  - `spec_definition` replaces `rules.specs` (altitude rule)
+  - `relevance_gate` replaces `rules.proposal` (relevance gate bullets)
+  - `review_criteria` is new (currently implicit in the reviewer skill)
+
+Full target state:
 
 ```yaml
 spec_definition:
@@ -105,6 +125,14 @@ The `altitude` rule is replaced by the tier 1/tier 2 structure, which is more
 precise.
 
 ## Reviewer Skill Update
+
+### Relationship to existing checks
+
+The current reviewer has its own CRITICAL/WARNING/SUGGESTION checks for
+cross-artifact consistency (e.g., "task without requirement", "delta contradicts
+main spec", "design exceeds proposal scope"). These existing checks are
+**retained** — they cover artifact-level consistency which is orthogonal to the
+philosophy checks. The new checks below are **added** alongside them.
 
 ### New CRITICAL checks
 
