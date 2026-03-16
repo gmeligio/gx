@@ -8,23 +8,21 @@ pub mod report;
 
 use crate::command::Command;
 use crate::config::Config;
-use crate::domain::action::identity::{ActionId, CommitSha};
+use crate::domain::action::identity::CommitSha;
 use crate::domain::action::spec::Spec;
 use crate::domain::action::tag_selection::ShaIndex;
 use crate::domain::lock::Lock;
 use crate::domain::manifest::Manifest;
 use crate::domain::plan::{LockDiff, ManifestDiff, WorkflowPatch};
 use crate::domain::resolution::{ActionResolver, VersionRegistry};
-use crate::domain::workflow::{
-    Error as WorkflowError, Scanner as WorkflowScanner, Updater as WorkflowUpdater,
-};
+use crate::domain::workflow::{Error as WorkflowError, Scanner as WorkflowScanner};
 use crate::domain::workflow_actions::ActionSet as WorkflowActionSet;
 use crate::infra::github::{Error as GithubError, Registry as GithubRegistry};
 use crate::infra::lock::{Error as LockFileError, Store as LockStore};
 use crate::infra::manifest::Error as ManifestError;
 use crate::infra::manifest::patch::apply_manifest_diff;
 use crate::infra::workflow_scan::FileScanner as FileWorkflowScanner;
-use crate::infra::workflow_update::FileUpdater as FileWorkflowUpdater;
+use crate::infra::workflow_update::WorkflowWriter;
 use report::Report;
 use std::collections::HashMap;
 use std::path::Path;
@@ -170,18 +168,11 @@ where
 /// # Errors
 ///
 /// Returns [`Error::Workflow`] if any workflow file cannot be updated.
-pub fn apply_workflow_patches<W: WorkflowUpdater>(
-    writer: &W,
+pub fn apply_workflow_patches(
+    writer: &WorkflowWriter,
     patches: &[WorkflowPatch],
 ) -> Result<usize, Error> {
-    let mut results = Vec::new();
-    for patch in patches {
-        let map: HashMap<ActionId, String> = patch.pins.iter().cloned().collect();
-        let result = writer.update_file(&patch.path, &map)?;
-        if !result.changes.is_empty() {
-            results.push(result);
-        }
-    }
+    let results = writer.apply_patches(patches)?;
     Ok(results.len())
 }
 
@@ -222,7 +213,7 @@ impl Command for Tidy {
         }
         let registry = GithubRegistry::new(config.settings.github_token)?;
         let scanner = FileWorkflowScanner::new(repo_root);
-        let updater = FileWorkflowUpdater::new(repo_root);
+        let updater = WorkflowWriter::new(repo_root);
 
         let original_manifest = config.manifest.clone();
 

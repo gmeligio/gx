@@ -12,20 +12,20 @@ jobs:
         permissions:
             contents: write
         steps:
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
               with:
                   fetch-depth: 0
                   persist-credentials: false
             - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
             - name: Generate authentication token with GitHub App to trigger Actions
-              uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2
+              uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
               id: app-token
               with:
                   app-id: ${{ secrets.VERIFIED_COMMIT_ID }}
                   private-key: ${{ secrets.VERIFIED_COMMIT_KEY }}
                   repositories: ${{ github.event.repository.name }}
                   owner: ${{ github.repository_owner }}
-            - uses: release-plz/action@1528104d2ca23787631a1c1f022abb64b34c1e11 # v0.5
+            - uses: release-plz/action@1528104d2ca23787631a1c1f022abb64b34c1e11 # v0.5.128
               with:
                   command: release
               env:
@@ -41,20 +41,20 @@ jobs:
             group: release-plz-${{ github.ref }}
             cancel-in-progress: false
         steps:
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
               with:
                   fetch-depth: 0
                   persist-credentials: false
             - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
             - name: Generate authentication token with GitHub App to trigger Actions
-              uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2
+              uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
               id: app-token
               with:
                   app-id: ${{ secrets.VERIFIED_COMMIT_ID }}
                   private-key: ${{ secrets.VERIFIED_COMMIT_KEY }}
                   repositories: ${{ github.event.repository.name }}
                   owner: ${{ github.repository_owner }}
-            - uses: release-plz/action@1528104d2ca23787631a1c1f022abb64b34c1e11 # v0.5
+            - uses: release-plz/action@1528104d2ca23787631a1c1f022abb64b34c1e11 # v0.5.128
               with:
                   command: release-pr
               env:

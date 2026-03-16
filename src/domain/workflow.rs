@@ -1,5 +1,3 @@
-use super::action::identity::ActionId;
-use std::collections::HashMap;
 use std::path::PathBuf;
 use thiserror::Error;
 
@@ -57,28 +55,4 @@ pub trait Scanner {
     fn find_workflow_paths(&self) -> Result<Vec<std::path::PathBuf>, Error> {
         self.scan_paths().collect()
     }
-}
-
-/// Trait for updating action references in workflow files.
-pub trait Updater {
-    /// Update all workflow files, replacing action references according to the map.
-    ///
-    /// The map keys are action IDs; the values are the full replacement ref strings
-    /// (e.g. `"abc123...def456 # v4"`).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if any workflow file cannot be read or written.
-    fn update_all(&self, actions: &HashMap<ActionId, String>) -> Result<Vec<UpdateResult>, Error>;
-
-    /// Update a single workflow file with its specific action map.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the workflow file cannot be read or written.
-    fn update_file(
-        &self,
-        workflow_path: &std::path::Path,
-        actions: &HashMap<ActionId, String>,
-    ) -> Result<UpdateResult, Error>;
 }

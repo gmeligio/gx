@@ -18,9 +18,9 @@ The `LockKey` type SHALL be deleted. `Spec` SHALL be used everywhere a lock look
 - **THEN** `Specifier` SHALL also derive `Hash` and `Eq`
 - **AND** two `Specifier` values parsed from the same string SHALL be equal
 
-#### Scenario: Resolved to Spec conversion
-- **WHEN** a `Resolved` action needs a lock key
-- **THEN** `From<&Resolved> for Spec` SHALL produce a `Spec` from the resolved action's `id` and `version`
+#### Scenario: RegistryResolution to Spec conversion
+- **WHEN** a `RegistryResolution` needs a lock key
+- **THEN** `From<&RegistryResolution> for Spec` SHALL produce a `Spec` from the resolution's `id` and `specifier`
 
 ### Requirement: ResolvedCommit extracts shared commit metadata
 
@@ -30,10 +30,10 @@ A `ResolvedCommit` struct SHALL hold the four fields shared between `Resolved` a
 ResolvedCommit { sha: CommitSha, repository: Repository, ref_type: Option<RefType>, date: CommitDate }
 ```
 
-#### Scenario: Resolved uses ResolvedCommit
-- **GIVEN** a resolved action
-- **THEN** `Resolved` SHALL have fields `{ id: ActionId, version: Specifier, commit: ResolvedCommit }`
-- **AND** accessing the SHA is `resolved.commit.sha`
+#### Scenario: RegistryResolution uses ResolvedCommit
+- **GIVEN** a registry resolution
+- **THEN** `RegistryResolution` SHALL have fields `{ id: ActionId, specifier: Specifier, commit: ResolvedCommit }`
+- **AND** accessing the SHA is `resolution.commit.sha`
 
 #### Scenario: Entry uses ResolvedCommit
 - **GIVEN** a lock entry
@@ -100,8 +100,8 @@ Functions that clone every field of a borrowed parameter SHALL instead take the 
 - **WHEN** `ActionSet::add` needs to store the action's ID and version
 - **THEN** it SHALL accept `&InterpretedRef` (borrowing is acceptable here because only `id` and `version` are inserted into HashMaps which require owned values, and `InterpretedRef` may be used after the call)
 
-#### Scenario: Resolved::with_sha consumes self
-- **WHEN** replacing the SHA on a resolved action
+#### Scenario: RegistryResolution::with_sha consumes self
+- **WHEN** replacing the SHA on a registry resolution
 - **THEN** `with_sha(self, sha: CommitSha) -> Self` SHALL consume `self`
 - **AND** the caller SHALL not use the original value after the call
 
@@ -133,3 +133,45 @@ Report structs SHALL use domain identity types (`ActionId`, `Specifier`, `Versio
 - **WHEN** `render()` is called on a report
 - **THEN** `ActionId` and `Specifier` values SHALL be formatted via `Display` or `.as_str()` into the `OutputLine` string fields
 - **AND** no `.clone()` on inner strings SHALL be needed at the report-building boundary
+
+---
+
+## Serialization Boundary
+
+### Requirement: WorkflowPatch carries domain types
+
+`WorkflowPatch.pins` SHALL be `Vec<ResolvedAction>` instead of `Vec<(ActionId, String)>`. The domain plan struct SHALL NOT carry pre-formatted serialization strings.
+
+#### Scenario: WorkflowPatch uses ResolvedAction
+- **GIVEN** a tidy plan produces workflow patches
+- **WHEN** `WorkflowPatch` is constructed
+- **THEN** `pins` contains `ResolvedAction` values with `id`, `sha`, and `version`
+- **AND** no `"SHA # version"` string formatting has occurred yet
+
+### Requirement: Updater trait deleted
+
+The `Updater` trait in `domain/workflow.rs` SHALL be deleted. It has exactly one implementation (`FileUpdater`), is never mocked, and its `HashMap<ActionId, String>` signature forces callers to pre-format serialization strings. Callers SHALL use `WorkflowWriter` (renamed from `FileUpdater`) directly from the infra layer.
+
+### Requirement: FileUpdater renamed to WorkflowWriter
+
+`FileUpdater` in `infra/workflow_update.rs` SHALL be renamed to `WorkflowWriter`. It SHALL accept `&[WorkflowPatch]` instead of `HashMap<ActionId, String>`.
+
+### Requirement: Single serialization point for YAML comment syntax
+
+The `"SHA # version"` YAML comment formatting SHALL appear in exactly one function: `format_uses_ref()` in `infra/workflow_update.rs`. No other module SHALL construct this format string.
+
+#### Scenario: format_uses_ref with version annotation
+- **GIVEN** a `ResolvedAction` with `sha = "abc123..."` and `version = Some("v4.2.1")`
+- **WHEN** `format_uses_ref()` is called
+- **THEN** the output is `"abc123... # v4.2.1"`
+
+#### Scenario: format_uses_ref with bare SHA (no annotation)
+- **GIVEN** a `ResolvedAction` with `sha = "abc123..."` and `version = None`
+- **WHEN** `format_uses_ref()` is called
+- **THEN** the output is `"abc123..."` (no `#` comment)
+
+### Requirement: Lock::build_update_map deleted
+
+`Lock::build_update_map()` SHALL be deleted. It is dead code in production (never called from any command path). It also leaks serialization by producing `"SHA # version"` formatted strings.
+
+**Note**: This method is used in `tests/integ_upgrade.rs` — that test must be updated to use the new workflow output path instead.

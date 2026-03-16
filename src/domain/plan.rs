@@ -1,5 +1,5 @@
 use super::action::identity::ActionId;
-use super::action::resolved::Commit;
+use super::action::resolved::{Commit, ResolvedAction};
 use super::action::spec::Spec;
 use super::action::specifier::Specifier;
 use super::lock::resolution::Resolution;
@@ -53,15 +53,13 @@ impl LockDiff {
 #[derive(Debug)]
 pub struct WorkflowPatch {
     pub path: PathBuf,
-    pub pins: Vec<(ActionId, String)>,
+    pub pins: Vec<ResolvedAction>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::{ActionId, Commit, LockDiff, ManifestDiff, Resolution, Spec, Specifier};
-    use crate::domain::action::identity::{
-        CommitDate, CommitSha, Repository, Version, VersionComment,
-    };
+    use crate::domain::action::identity::{CommitDate, CommitSha, Repository, Version};
     use crate::domain::action::uses_ref::RefType;
 
     #[test]
@@ -92,7 +90,6 @@ mod tests {
                 Spec::new(ActionId::from("actions/checkout"), Specifier::parse("^4")),
                 Resolution {
                     version: Version::from("v4"),
-                    comment: VersionComment::from(""),
                 },
                 Commit {
                     sha: CommitSha::from("abc123"),

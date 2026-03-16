@@ -1,4 +1,6 @@
 use crate::domain::action::identity::ActionId;
+use crate::domain::action::resolved::ResolvedAction;
+use crate::domain::plan::WorkflowPatch;
 use crate::domain::workflow::{Error as WorkflowError, UpdateResult};
 use glob::glob;
 use regex::Regex;
@@ -6,13 +8,23 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// Format a `ResolvedAction` into the workflow ref string.
+///
+/// This is the **single place** where `"SHA # version"` formatting exists.
+fn format_uses_ref(action: &ResolvedAction) -> String {
+    match &action.version {
+        Some(v) => format!("{} # {v}", action.sha),
+        None => action.sha.to_string(),
+    }
+}
+
 /// Writer for updating action versions in workflow files.
-pub struct FileUpdater {
+pub struct WorkflowWriter {
     /// Path to the `.github/workflows` directory.
     workflows_dir: PathBuf,
 }
 
-impl FileUpdater {
+impl WorkflowWriter {
     #[must_use]
     pub fn new(repo_root: &Path) -> Self {
         Self {
@@ -45,17 +57,54 @@ impl FileUpdater {
         Ok(workflows)
     }
 
-    /// Update action versions in a single workflow file.
+    /// Apply a set of workflow patches, writing pin changes to workflow files.
     ///
     /// # Errors
     ///
-    /// Returns an error if the file cannot be read, the regex pattern is invalid, or the file cannot be written.
-    pub fn update_workflow(
+    /// Returns an error if any workflow file cannot be updated.
+    pub fn apply_patches(
         &self,
-        workflow_path: &Path,
-        actions: &HashMap<ActionId, String>,
-    ) -> Result<UpdateResult, WorkflowError> {
-        FileUpdater::update_workflow_internal(workflow_path, actions)
+        patches: &[WorkflowPatch],
+    ) -> Result<Vec<UpdateResult>, WorkflowError> {
+        let mut results = Vec::new();
+        for patch in patches {
+            let actions = Self::pins_to_map(&patch.pins);
+            let result = Self::update_workflow_internal(&patch.path, &actions)?;
+            if !result.changes.is_empty() {
+                results.push(result);
+            }
+        }
+        Ok(results)
+    }
+
+    /// Update all workflow files with the same set of pins.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any workflow file cannot be processed.
+    pub fn update_all_with_pins(
+        &self,
+        pins: &[ResolvedAction],
+    ) -> Result<Vec<UpdateResult>, WorkflowError> {
+        let actions = Self::pins_to_map(pins);
+        let workflows = self.find_workflows()?;
+        let mut results = Vec::new();
+
+        for workflow in workflows {
+            let result = Self::update_workflow_internal(&workflow, &actions)?;
+            if !result.changes.is_empty() {
+                results.push(result);
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// Convert `ResolvedAction` pins to a `HashMap` for the internal update logic.
+    fn pins_to_map(pins: &[ResolvedAction]) -> HashMap<ActionId, String> {
+        pins.iter()
+            .map(|pin| (pin.id.clone(), format_uses_ref(pin)))
+            .collect()
     }
 
     /// Internal implementation returning `WorkflowError` directly.
@@ -112,45 +161,6 @@ impl FileUpdater {
             changes,
         })
     }
-
-    /// Update action versions in all workflow files.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if any workflow file cannot be processed.
-    pub fn update_all(
-        &self,
-        actions: &HashMap<ActionId, String>,
-    ) -> Result<Vec<UpdateResult>, WorkflowError> {
-        let workflows = self.find_workflows()?;
-        let mut results = Vec::new();
-
-        for workflow in workflows {
-            let result = self.update_workflow(&workflow, actions)?;
-            if !result.changes.is_empty() {
-                results.push(result);
-            }
-        }
-
-        Ok(results)
-    }
-}
-
-impl crate::domain::workflow::Updater for FileUpdater {
-    fn update_all(
-        &self,
-        actions: &HashMap<ActionId, String>,
-    ) -> Result<Vec<UpdateResult>, WorkflowError> {
-        self.update_all(actions)
-    }
-
-    fn update_file(
-        &self,
-        workflow_path: &Path,
-        actions: &HashMap<ActionId, String>,
-    ) -> Result<UpdateResult, WorkflowError> {
-        self.update_workflow(workflow_path, actions)
-    }
 }
 
 #[cfg(test)]
@@ -160,9 +170,10 @@ impl crate::domain::workflow::Updater for FileUpdater {
     reason = "tests use unwrap, indexing, and other patterns freely"
 )]
 mod tests {
-    use super::FileUpdater;
-    use crate::domain::action::identity::ActionId;
-    use std::collections::HashMap;
+    use super::WorkflowWriter;
+    use crate::domain::action::identity::{ActionId, CommitSha, Version};
+    use crate::domain::action::resolved::ResolvedAction;
+    use crate::domain::plan::WorkflowPatch;
     use std::fs;
     use std::io::Write as _;
     use std::path::{Path, PathBuf};
@@ -178,7 +189,7 @@ mod tests {
     }
 
     #[test]
-    fn update_workflow() {
+    fn apply_patches_updates_workflow() {
         let temp_dir = TempDir::new().unwrap();
         let content = "name: CI
 on: push
@@ -191,22 +202,28 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let writer = FileUpdater::new(temp_dir.path());
-        let mut actions = HashMap::new();
-        actions.insert(ActionId::from("actions/checkout"), "v4".to_owned());
+        let writer = WorkflowWriter::new(temp_dir.path());
+        let patches = vec![WorkflowPatch {
+            path: workflow_path.clone(),
+            pins: vec![ResolvedAction {
+                id: ActionId::from("actions/checkout"),
+                sha: CommitSha::from("abc123def456"),
+                version: Some(Version::from("v4")),
+            }],
+        }];
 
-        let result = writer.update_workflow(&workflow_path, &actions).unwrap();
+        let results = writer.apply_patches(&patches).unwrap();
 
-        assert_eq!(result.changes.len(), 1);
-        assert!(result.changes[0].contains("actions/checkout@v4"));
+        assert_eq!(results.len(), 1);
+        assert!(results[0].changes[0].contains("actions/checkout@abc123def456 # v4"));
 
         let updated_workflow = fs::read_to_string(&workflow_path).unwrap();
-        assert!(updated_workflow.contains("actions/checkout@v4"));
+        assert!(updated_workflow.contains("actions/checkout@abc123def456 # v4"));
         assert!(updated_workflow.contains("actions/setup-node@v3")); // unchanged
     }
 
     #[test]
-    fn update_workflow_uses_commit_sha() {
+    fn apply_patches_uses_commit_sha_with_comment() {
         let temp_dir = TempDir::new().unwrap();
         let content = "name: CI
 on: push
@@ -218,32 +235,30 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let writer = FileUpdater::new(temp_dir.path());
-        let mut actions = HashMap::new();
-        // Simulate the format from lock.build_update_map(): "SHA # version"
-        actions.insert(
-            ActionId::from("actions/checkout"),
-            "abc123def456 # v4".to_owned(),
-        );
+        let writer = WorkflowWriter::new(temp_dir.path());
+        let patches = vec![WorkflowPatch {
+            path: workflow_path.clone(),
+            pins: vec![ResolvedAction {
+                id: ActionId::from("actions/checkout"),
+                sha: CommitSha::from("abc123def456"),
+                version: Some(Version::from("v4")),
+            }],
+        }];
 
-        let result = writer.update_workflow(&workflow_path, &actions).unwrap();
+        let results = writer.apply_patches(&patches).unwrap();
 
-        assert_eq!(result.changes.len(), 1);
+        assert_eq!(results.len(), 1);
 
-        // Verify the workflow was updated with the SHA, not the tag
+        // Verify the workflow was updated with the SHA and comment
         let updated = fs::read_to_string(&workflow_path).unwrap();
         assert!(
             updated.contains("actions/checkout@abc123def456 # v4"),
             "Expected SHA with comment, got: {updated}"
         );
-        assert!(
-            !updated.contains("actions/checkout@v4"),
-            "Should not contain tag without SHA"
-        );
     }
 
     #[test]
-    fn update_workflow_no_duplicate_comments() {
+    fn apply_patches_no_duplicate_comments() {
         let temp_dir = TempDir::new().unwrap();
         // Start with a workflow that already has a comment
         let content = "name: CI
@@ -257,21 +272,26 @@ jobs:
 ";
         let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
-        let writer = FileUpdater::new(temp_dir.path());
-        let mut actions = HashMap::new();
-        // Update both actions with new SHAs
-        actions.insert(
-            ActionId::from("actions/checkout"),
-            "abc123def456 # v4".to_owned(),
-        );
-        actions.insert(
-            ActionId::from("actions/setup-node"),
-            "xyz789012345 # v3".to_owned(),
-        );
+        let writer = WorkflowWriter::new(temp_dir.path());
+        let patches = vec![WorkflowPatch {
+            path: workflow_path.clone(),
+            pins: vec![
+                ResolvedAction {
+                    id: ActionId::from("actions/checkout"),
+                    sha: CommitSha::from("abc123def456"),
+                    version: Some(Version::from("v4")),
+                },
+                ResolvedAction {
+                    id: ActionId::from("actions/setup-node"),
+                    sha: CommitSha::from("xyz789012345"),
+                    version: Some(Version::from("v3")),
+                },
+            ],
+        }];
 
-        let result = writer.update_workflow(&workflow_path, &actions).unwrap();
+        let results = writer.apply_patches(&patches).unwrap();
 
-        assert_eq!(result.changes.len(), 2);
+        assert_eq!(results.len(), 1);
 
         // Verify no duplicate comments
         let updated = fs::read_to_string(&workflow_path).unwrap();
@@ -301,5 +321,25 @@ jobs:
             !updated.contains("# v3 # v2"),
             "Found duplicate comment in: {updated}"
         );
+    }
+
+    #[test]
+    fn format_uses_ref_bare_sha() {
+        let action = ResolvedAction {
+            id: ActionId::from("actions/checkout"),
+            sha: CommitSha::from("abc123"),
+            version: None,
+        };
+        assert_eq!(super::format_uses_ref(&action), "abc123");
+    }
+
+    #[test]
+    fn format_uses_ref_with_version() {
+        let action = ResolvedAction {
+            id: ActionId::from("actions/checkout"),
+            sha: CommitSha::from("abc123"),
+            version: Some(Version::from("v4.2.1")),
+        };
+        assert_eq!(super::format_uses_ref(&action), "abc123 # v4.2.1");
     }
 }

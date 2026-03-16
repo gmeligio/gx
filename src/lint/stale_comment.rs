@@ -64,7 +64,7 @@ impl Rule for StaleCommentRule {
 mod tests {
     use super::{Level, Rule as _, RuleName, StaleCommentRule};
     use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Version};
-    use crate::domain::action::resolved::Resolved as ResolvedAction;
+    use crate::domain::action::resolved::RegistryResolution;
     use crate::domain::action::specifier::Specifier;
     use crate::domain::action::uses_ref::RefType;
     use crate::domain::lock::Lock;
@@ -73,7 +73,7 @@ mod tests {
 
     fn make_lock(action: &str, version: &str, sha: &str) -> Lock {
         let mut lock = Lock::default();
-        lock.set_resolved(ResolvedAction::new(
+        lock.set_from_registry(RegistryResolution::new(
             ActionId::from(action),
             Specifier::from_v1(version),
             CommitSha::from(sha),

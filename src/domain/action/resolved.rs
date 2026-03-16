@@ -1,8 +1,8 @@
-use super::identity::{ActionId, CommitDate, CommitSha, Repository};
+use super::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
 use super::specifier::Specifier;
 use super::uses_ref::RefType;
 
-/// Commit metadata shared between `Resolved` and lock `Entry`.
+/// Commit metadata shared between `RegistryResolution` and lock `Entry`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Commit {
     pub sha: CommitSha,
@@ -11,22 +11,22 @@ pub struct Commit {
     pub date: CommitDate,
 }
 
-/// A fully resolved action with its commit SHA and metadata.
-/// The `version` field holds the manifest specifier (e.g., `"^6"`).
+/// A registry resolution: the result of looking up an action specifier in the registry.
+/// The `specifier` field holds the manifest specifier (e.g., `"^6"`).
 /// The resolved tag (e.g., `"v6.0.2"`) is stored in the lock entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Resolved {
+pub struct RegistryResolution {
     pub id: ActionId,
-    pub version: Specifier,
+    pub specifier: Specifier,
     pub commit: Commit,
 }
 
-impl Resolved {
-    /// Create a new resolved action with all metadata.
+impl RegistryResolution {
+    /// Create a new registry resolution with all metadata.
     #[must_use]
     pub fn new(
         id: ActionId,
-        version: Specifier,
+        specifier: Specifier,
         sha: CommitSha,
         repository: Repository,
         ref_type: Option<RefType>,
@@ -34,7 +34,7 @@ impl Resolved {
     ) -> Self {
         Self {
             id,
-            version,
+            specifier,
             commit: Commit {
                 sha,
                 repository,
@@ -44,14 +44,7 @@ impl Resolved {
         }
     }
 
-    /// Format as "SHA # comment" for workflow updates.
-    /// The comment is derived from the specifier (e.g., `"^6"` → `"v6"`).
-    #[must_use]
-    pub fn to_workflow_ref(&self) -> String {
-        format!("{} # {}", self.commit.sha, self.version.to_comment())
-    }
-
-    /// Create a new `Resolved` with the SHA replaced.
+    /// Create a new `RegistryResolution` with the SHA replaced.
     /// Used when a workflow has a pinned SHA that differs from the registry.
     #[must_use]
     pub fn with_sha(self, sha: CommitSha) -> Self {
@@ -62,29 +55,31 @@ impl Resolved {
     }
 }
 
+/// A resolved action ready for workflow output.
+///
+/// This is the domain representation of "what goes into the workflow file":
+/// the action ID, its pinned SHA, and an optional version annotation.
+/// `version` is `None` for bare SHA specifiers (no `# comment` needed).
+#[derive(Debug, Clone)]
+#[expect(
+    clippy::module_name_repetitions,
+    reason = "ResolvedAction is the canonical domain name for workflow-output actions"
+)]
+pub struct ResolvedAction {
+    pub id: ActionId,
+    pub sha: CommitSha,
+    pub version: Option<Version>,
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ActionId, CommitDate, CommitSha, RefType, Repository, Resolved, Specifier};
-
-    #[test]
-    fn resolved_action_to_workflow_ref() {
-        let resolved = Resolved::new(
-            ActionId::from("actions/checkout"),
-            Specifier::parse("^4"),
-            CommitSha::from("abc123def456789012345678901234567890abcd"),
-            Repository::from("actions/checkout"),
-            Some(RefType::Tag),
-            CommitDate::from("2026-01-01T00:00:00Z"),
-        );
-        assert_eq!(
-            resolved.to_workflow_ref(),
-            "abc123def456789012345678901234567890abcd # v4"
-        );
-    }
+    use super::{
+        ActionId, CommitDate, CommitSha, RefType, RegistryResolution, Repository, Specifier,
+    };
 
     #[test]
     fn with_sha_replaces_only_sha() {
-        let resolved = Resolved::new(
+        let resolved = RegistryResolution::new(
             ActionId::from("actions/checkout"),
             Specifier::parse("^4"),
             CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),

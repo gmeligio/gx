@@ -1,5 +1,5 @@
 use super::{ActionId, ActionKey, Commit, Lock, Spec};
-use crate::domain::action::identity::{CommitDate, CommitSha, Repository, Version, VersionComment};
+use crate::domain::action::identity::{CommitDate, CommitSha, Repository, Version};
 use crate::domain::action::specifier::Specifier;
 use crate::domain::action::uses_ref::RefType;
 
@@ -19,8 +19,7 @@ fn make_commit(sha: &str) -> Commit {
 fn set_action(lock: &mut Lock, action: &str, specifier: &str, sha: &str, version: &str) {
     let spec = make_key(action, specifier);
     let ver = Version::from(version);
-    let comment = VersionComment::from(Specifier::parse(specifier).to_comment());
-    lock.set(&spec, ver, make_commit(sha), comment);
+    lock.set(&spec, ver, make_commit(sha));
 }
 
 #[test]
@@ -47,7 +46,6 @@ fn set_and_get() {
         CommitSha::from("abc123def456789012345678901234567890abcd")
     );
     assert_eq!(res.version, Version::from("v4.2.1"));
-    assert_eq!(res.comment.as_str(), "v4");
     assert!(lock.get(&make_key("actions/checkout", "^3")).is_none());
 }
 
@@ -135,51 +133,6 @@ fn cleanup_orphans() {
 }
 
 #[test]
-fn build_update_map() {
-    let mut lock = Lock::default();
-    set_action(
-        &mut lock,
-        "actions/checkout",
-        "^4",
-        "abc123def456789012345678901234567890abcd",
-        "v4.2.1",
-    );
-    set_action(
-        &mut lock,
-        "actions/setup-node",
-        "^3",
-        "def456789012345678901234567890abcd123456",
-        "v3.1.0",
-    );
-
-    let keys = vec![
-        make_key("actions/checkout", "^4"),
-        make_key("actions/setup-node", "^3"),
-    ];
-    let map = lock.build_update_map(&keys);
-
-    assert_eq!(
-        map.get(&ActionId::from("actions/checkout")),
-        Some(&"abc123def456789012345678901234567890abcd # v4".to_owned())
-    );
-    assert_eq!(
-        map.get(&ActionId::from("actions/setup-node")),
-        Some(&"def456789012345678901234567890abcd123456 # v3".to_owned())
-    );
-}
-
-#[test]
-fn build_update_map_missing_sha_falls_back_to_version() {
-    let lock = Lock::default();
-    let keys = vec![make_key("actions/checkout", "^4")];
-    let map = lock.build_update_map(&keys);
-    assert_eq!(
-        map.get(&ActionId::from("actions/checkout")),
-        Some(&"^4".to_owned())
-    );
-}
-
-#[test]
 fn update_existing_sha() {
     let mut lock = Lock::default();
     set_action(
@@ -225,20 +178,6 @@ fn is_complete_missing_resolution() {
 }
 
 #[test]
-fn is_complete_stale_comment() {
-    let mut lock = Lock::default();
-    let spec = make_key("actions/checkout", "^4.1");
-    // Comment "v4" doesn't match expected "v4.1"
-    lock.set(
-        &spec,
-        Version::from("v4.1.0"),
-        make_commit("abc123def456789012345678901234567890abcd"),
-        VersionComment::from("v4"),
-    );
-    assert!(!lock.is_complete(&spec));
-}
-
-#[test]
 fn is_complete_non_semver_ref() {
     let mut lock = Lock::default();
     let spec = make_key("actions/checkout", "main");
@@ -251,7 +190,6 @@ fn is_complete_non_semver_ref() {
             ref_type: Some(RefType::Branch),
             date: CommitDate::from("2026-01-01T00:00:00Z"),
         },
-        VersionComment::from(""),
     );
     assert!(lock.is_complete(&spec));
 }

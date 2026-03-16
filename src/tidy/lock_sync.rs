@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use super::Error as TidyError;
-use crate::domain::action::identity::{CommitSha, VersionComment};
+use crate::domain::action::identity::CommitSha;
 use crate::domain::action::spec::Spec as ActionSpec;
 use crate::domain::action::tag_selection::ShaIndex;
 use crate::domain::event::Event as SyncEvent;
@@ -102,24 +102,17 @@ fn populate_lock_entry<R: VersionRegistry>(
 
         match result {
             Ok(action) => {
-                let resolved_version = action.version.to_comment().to_owned();
-                let comment = VersionComment::from(spec.version.to_comment());
+                let resolved_version = action.specifier.to_lookup_tag();
                 lock.set(
                     spec,
                     crate::domain::action::identity::Version::from(resolved_version.as_str()),
                     action.commit,
-                    comment,
                 );
             }
             Err(e) => {
                 return Err(e);
             }
         }
-    }
-
-    if lock.has(spec) {
-        let comment = VersionComment::from(spec.version.to_comment());
-        lock.set_comment(spec, comment);
     }
 
     Ok(())

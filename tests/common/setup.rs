@@ -10,7 +10,7 @@ use gx::infra::lock::Store as LockStore;
 use gx::infra::manifest::patch::apply_manifest_diff;
 use gx::infra::manifest::{self};
 use gx::infra::workflow_scan::FileScanner as FileWorkflowScanner;
-use gx::infra::workflow_update::FileUpdater as FileWorkflowUpdater;
+use gx::infra::workflow_update::WorkflowWriter;
 use gx::upgrade::types::Request as UpgradeRequest;
 use gx::{lint, tidy, upgrade};
 use std::fs;
@@ -66,7 +66,7 @@ pub fn run_init<R: VersionRegistry + Clone>(root: &Path, registry: &R) {
     let manifest = Manifest::default();
     let lock = Lock::default();
     let scanner = FileWorkflowScanner::new(root);
-    let updater = FileWorkflowUpdater::new(root);
+    let updater = WorkflowWriter::new(root);
 
     let plan = tidy::plan(&manifest, &lock, registry, &scanner, |_| {}).unwrap();
     if !plan.is_empty() {
@@ -82,7 +82,7 @@ pub fn run_tidy<R: VersionRegistry + Clone>(root: &Path, registry: &R) {
     let mp = manifest_path(root);
     let lp = lock_path(root);
     let scanner = FileWorkflowScanner::new(root);
-    let updater = FileWorkflowUpdater::new(root);
+    let updater = WorkflowWriter::new(root);
     let has_manifest = mp.exists();
 
     let manifest = if has_manifest {
@@ -114,7 +114,7 @@ pub fn run_upgrade<R: VersionRegistry + Clone>(
     let manifest = manifest::parse(&mp).unwrap();
     let lock_store = LockStore::new(&lp);
     let lock = lock_store.load().unwrap();
-    let updater = FileWorkflowUpdater::new(root);
+    let updater = WorkflowWriter::new(root);
 
     let plan = upgrade::plan::plan(&manifest.value, &lock, registry, request, |_| {}).unwrap();
     if !plan.is_empty() {

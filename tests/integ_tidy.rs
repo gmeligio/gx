@@ -16,7 +16,7 @@ use gx::infra::lock::Store as LockStore;
 use gx::infra::manifest::patch::apply_manifest_diff;
 use gx::infra::manifest::{self};
 use gx::infra::workflow_scan::FileScanner as FileWorkflowScanner;
-use gx::infra::workflow_update::FileUpdater as FileWorkflowUpdater;
+use gx::infra::workflow_update::WorkflowWriter;
 use gx::tidy;
 use std::fs;
 use std::io::Write as _;
@@ -31,7 +31,7 @@ fn run_tidy_with_registry<R: VersionRegistry + Clone>(
     let manifest_path = repo_root.join(".github").join("gx.toml");
     let lock_path = repo_root.join(".github").join("gx.lock");
     let scanner = FileWorkflowScanner::new(repo_root);
-    let updater = FileWorkflowUpdater::new(repo_root);
+    let updater = WorkflowWriter::new(repo_root);
     let has_manifest = manifest_path.exists();
 
     let manifest = if has_manifest {

@@ -1,6 +1,4 @@
-use crate::domain::action::identity::{
-    ActionId, CommitDate, CommitSha, Repository, Version, VersionComment,
-};
+use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
 use crate::domain::action::resolved::Commit;
 use crate::domain::action::spec::Spec;
 use crate::domain::action::specifier::Specifier;
@@ -17,9 +15,6 @@ use toml_edit::DocumentMut;
 pub struct ResolutionEntryData {
     /// The resolved version string (e.g. "v4.2.1").
     pub version: String,
-    /// Human-readable version comment (e.g. "v4").
-    #[serde(default)]
-    pub comment: String,
 }
 
 /// Action commit entry in the two-tier format.
@@ -74,7 +69,6 @@ fn lock_from_two_tier(data: TwoTierData) -> Lock {
                 spec,
                 Resolution {
                     version: Version::from(res_data.version.as_str()),
-                    comment: VersionComment::from(res_data.comment),
                 },
             );
         }
@@ -141,7 +135,6 @@ fn build_lock_document(lock: &Lock) -> DocumentMut {
 
         let mut entry_table = toml_edit::Table::new();
         entry_table.insert("version", toml_edit::value(resolution.version.as_str()));
-        entry_table.insert("comment", toml_edit::value(resolution.comment.as_str()));
         id_table.insert(specifier_str, toml_edit::Item::Table(entry_table));
     }
 
@@ -222,12 +215,12 @@ fn populate_action_table(
 mod tests {
     use super::*;
     use crate::domain::action::identity::{ActionId, CommitSha};
-    use crate::domain::action::resolved::Resolved as ResolvedAction;
+    use crate::domain::action::resolved::RegistryResolution;
     use crate::domain::action::specifier::Specifier;
     use crate::domain::action::uses_ref::RefType;
 
-    fn make_resolved(action: &str, specifier: &str, sha: &str) -> ResolvedAction {
-        ResolvedAction::new(
+    fn make_resolved(action: &str, specifier: &str, sha: &str) -> RegistryResolution {
+        RegistryResolution::new(
             ActionId::from(action),
             Specifier::parse(specifier),
             CommitSha::from(sha),
@@ -240,12 +233,12 @@ mod tests {
     #[test]
     fn roundtrip_write_then_parse() {
         let mut lock = Lock::default();
-        lock.set_resolved(make_resolved(
+        lock.set_from_registry(make_resolved(
             "actions/checkout",
             "^4",
             "abc123def456789012345678901234567890abcd",
         ));
-        lock.set_resolved(make_resolved(
+        lock.set_from_registry(make_resolved(
             "actions/setup-node",
             "^3",
             "def456789012345678901234567890abcdef1234",
@@ -293,12 +286,12 @@ mod tests {
     #[test]
     fn write_produces_sorted_output() {
         let mut lock = Lock::default();
-        lock.set_resolved(make_resolved(
+        lock.set_from_registry(make_resolved(
             "docker/build-push-action",
             "^5",
             "def456789012345678901234567890abcdef123456",
         ));
-        lock.set_resolved(make_resolved(
+        lock.set_from_registry(make_resolved(
             "actions/checkout",
             "^4",
             "abc123def456789012345678901234567890abcdef",

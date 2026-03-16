@@ -1,5 +1,6 @@
 use super::Error as TidyError;
 use crate::domain::action::identity::ActionId;
+use crate::domain::action::resolved::ResolvedAction;
 use crate::domain::action::spec::Spec;
 use crate::domain::lock::Lock;
 use crate::domain::manifest::Manifest;
@@ -39,9 +40,8 @@ pub(super) fn compute_workflow_patches<P: WorkflowScanner>(
             .iter()
             .find(|(loc, _)| abs_str.ends_with(loc.as_str()))
             .map_or(&[], |(_, steps)| steps.as_slice());
-        let file_map = build_file_update_map(manifest, lock, steps);
-        if !file_map.is_empty() {
-            let pins: Vec<(ActionId, String)> = file_map.into_iter().collect();
+        let pins = build_pins(manifest, lock, steps);
+        if !pins.is_empty() {
             patches.push(WorkflowPatch {
                 path: workflow_path.clone(),
                 pins,
@@ -52,28 +52,29 @@ pub(super) fn compute_workflow_patches<P: WorkflowScanner>(
     Ok(patches)
 }
 
-/// Build the per-file update map: resolves each step's version via override hierarchy.
-fn build_file_update_map(
-    manifest: &Manifest,
-    lock: &Lock,
-    steps: &[&LocatedAction],
-) -> HashMap<ActionId, String> {
-    let mut map: HashMap<ActionId, String> = HashMap::new();
+/// Build the per-file pins: resolves each step's version via override hierarchy.
+fn build_pins(manifest: &Manifest, lock: &Lock, steps: &[&LocatedAction]) -> Vec<ResolvedAction> {
+    let mut map = HashMap::<ActionId, ResolvedAction>::new();
     for action in steps {
         if let Some(version) = manifest.resolve_version(&action.action.id, &action.location) {
             let key = Spec::new(action.action.id.clone(), version.clone());
             if let Some((res, commit)) = lock.get(&key) {
-                // Omit comment when resolved version is a raw SHA
-                let workflow_ref = if version.is_sha() {
-                    commit.sha.to_string()
-                } else {
-                    format!("{} # {}", commit.sha, res.comment)
-                };
-                map.insert(action.action.id.clone(), workflow_ref);
+                map.insert(
+                    action.action.id.clone(),
+                    ResolvedAction {
+                        id: action.action.id.clone(),
+                        sha: commit.sha.clone(),
+                        version: if version.is_sha() {
+                            None
+                        } else {
+                            Some(res.version.clone())
+                        },
+                    },
+                );
             }
         }
     }
-    map
+    map.into_values().collect()
 }
 
 #[cfg(test)]
@@ -83,10 +84,8 @@ fn build_file_update_map(
     reason = "tests use unwrap, indexing, and other patterns freely"
 )]
 mod tests {
-    use super::{Lock, Manifest, build_file_update_map};
-    use crate::domain::action::identity::{
-        ActionId, CommitDate, CommitSha, Repository, Version, VersionComment,
-    };
+    use super::{Lock, Manifest, build_pins};
+    use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
     use crate::domain::action::resolved::Commit;
     use crate::domain::action::spec::Spec;
     use crate::domain::action::specifier::Specifier;
@@ -117,7 +116,6 @@ mod tests {
                 ref_type: Some(RefType::Tag),
                 date: CommitDate::from("2026-01-01T00:00:00Z"),
             },
-            VersionComment::from(""),
         );
 
         // A located action referencing this action
@@ -134,17 +132,21 @@ mod tests {
             },
         };
 
-        let map = build_file_update_map(&manifest, &lock, &[&located]);
+        let pins = build_pins(&manifest, &lock, &[&located]);
 
-        let workflow_ref = map.get(&ActionId::from("actions/checkout")).unwrap();
-        // Must be just the SHA, no "# SHA" comment
+        let pin = pins
+            .iter()
+            .find(|p| p.id == ActionId::from("actions/checkout"))
+            .unwrap();
+        // Must be just the SHA, no version annotation
         assert_eq!(
-            workflow_ref, sha,
+            pin.sha.as_str(),
+            sha,
             "SHA-only version must produce @SHA without trailing # comment"
         );
         assert!(
-            !workflow_ref.contains('#'),
-            "SHA-only version must not have a # comment"
+            pin.version.is_none(),
+            "SHA-only version must not have a version annotation"
         );
     }
 }

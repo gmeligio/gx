@@ -90,10 +90,8 @@ Overrides SHALL be written as inline tables within arrays. Empty `[actions.overr
 
 The lock file SHALL have two top-level sections: `[resolutions]` and `[actions]`.
 
-- `[resolutions]` maps `(ActionId, Specifier)` to a resolved version and comment, using nested TOML tables keyed by action ID then specifier string.
+- `[resolutions]` maps `(ActionId, Specifier)` to a resolved version, using nested TOML tables keyed by action ID then specifier string.
 - `[actions]` maps `(ActionId, Version)` to commit metadata (sha, repository, ref_type, date), using nested TOML tables keyed by action ID then version string.
-
-The `comment` field belongs in `[resolutions]` because it depends on specifier precision, not on the resolved version.
 
 #### Scenario: Standard lock with resolutions and actions
 - **GIVEN** an action `actions/checkout@^6` resolved to SHA `de0fac2e...` at version `v6.2.3`, from a GitHub Release published at `2026-02-15T10:35:00Z`
@@ -101,7 +99,6 @@ The `comment` field belongs in `[resolutions]` because it depends on specifier p
   ```toml
   [resolutions."actions/checkout"."^6"]
   version = "v6.2.3"
-  comment = "v6"
 
   [actions."actions/checkout"."v6.2.3"]
   sha = "de0fac2e..."
@@ -116,7 +113,6 @@ The `comment` field belongs in `[resolutions]` because it depends on specifier p
   ```toml
   [resolutions."github/codeql-action/upload-sarif"."^3"]
   version = "v3.28.0"
-  comment = "v3"
 
   [actions."github/codeql-action/upload-sarif"."v3.28.0"]
   sha = "..."
@@ -131,11 +127,9 @@ The `comment` field belongs in `[resolutions]` because it depends on specifier p
   ```toml
   [resolutions."actions/checkout"."^4"]
   version = "v4.2.1"
-  comment = "v4"
 
   [resolutions."actions/checkout"."^4.2"]
   version = "v4.2.1"
-  comment = "v4.2"
 
   [actions."actions/checkout"."v4.2.1"]
   sha = "abc123..."
@@ -150,7 +144,6 @@ The `comment` field belongs in `[resolutions]` because it depends on specifier p
   ```toml
   [resolutions."actions/checkout"."main"]
   version = "main"
-  comment = ""
 
   [actions."actions/checkout"."main"]
   sha = "abc123..."
@@ -170,12 +163,19 @@ The `comment` field belongs in `[resolutions]` because it depends on specifier p
 - **THEN** `actions/checkout` entries appear before `actions/setup-node` entries
 
 ### Requirement: Roundtrip integrity
-Lock file serialization and deserialization SHALL be lossless for known fields across both tiers.
+Lock file serialization and deserialization SHALL be lossless for known fields across both tiers. The roundtrip baseline is the current format (without `comment`).
 
 #### Scenario: Two-tier roundtrip
-- **GIVEN** a two-tier lock file with resolutions and action entries
+- **GIVEN** a two-tier lock file with resolutions (version only) and action entries
 - **WHEN** the lock is read and then written back
 - **THEN** the output is byte-for-byte identical to the input
+
+#### Scenario: Legacy comment fields are dropped on write
+- **GIVEN** a two-tier lock file with `comment` fields in resolution entries
+- **WHEN** a write command (tidy, init, upgrade) runs
+- **THEN** the `comment` fields are dropped silently
+- **AND** this is a one-way migration (same pattern as flat-to-two-tier migration)
+- **BECAUSE** the forward-compatible reads requirement ensures `comment` is ignored on parse; the write side produces the current format without `comment`
 
 ---
 
@@ -218,11 +218,10 @@ The system SHALL transparently read flat-format lock files (single `[actions]` s
   date = "2026-02-15T10:35:00Z"
   ```
 - **WHEN** a write command (tidy, init, upgrade) runs
-- **THEN** the output is two-tier format:
+- **THEN** the output is two-tier format without `comment`:
   ```toml
   [resolutions."actions/checkout"."^6"]
   version = "v6.2.3"
-  comment = "v6"
 
   [actions."actions/checkout"."v6.2.3"]
   sha = "de0fac2e..."
@@ -281,3 +280,22 @@ v1 manifests (no `[gx]` section with `"v4"` style values) are parsed directly wi
 #### Scenario: Manifest migration still reports
 - **WHEN** a v1 manifest is loaded and a write command runs
 - **THEN** the output includes `migrated gx.toml -> semver specifiers`
+
+---
+
+## Workflow Annotation
+
+### Requirement: Workflow annotation shows resolved version
+
+When gx writes a pinned action reference to a workflow file, the YAML comment SHALL show the resolved version from the lock, not a specifier-derived comment.
+
+#### Scenario: Version annotation uses resolved version
+- **GIVEN** a manifest specifier `^4` resolved to version `v4.2.1` with SHA `abc123...`
+- **WHEN** gx writes the workflow file
+- **THEN** the output is `uses: actions/checkout@abc123... # v4.2.1`
+- **AND** NOT `uses: actions/checkout@abc123... # v4`
+
+#### Scenario: Bare SHA specifier has no annotation
+- **GIVEN** a manifest specifier that is a bare SHA
+- **WHEN** gx writes the workflow file
+- **THEN** the output is `uses: actions/checkout@abc123...` (no `# comment`)

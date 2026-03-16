@@ -1,38 +1,29 @@
 [resolutions."actions-rust-lang/rustfmt"."^1"]
 version = "v1.1.2"
-comment = "v1"
 
 [resolutions."actions-rust-lang/setup-rust-toolchain"."~1.15.2"]
 version = "v1.15.2"
-comment = "v1.15.2"
 
 [resolutions."actions/checkout"."^6"]
 version = "v6.0.2"
-comment = "v6"
 
 [resolutions."actions/create-github-app-token"."^2"]
 version = "v2.2.1"
-comment = "v2"
 
 [resolutions."actions/download-artifact"."^7"]
 version = "v7.0.0"
-comment = "v7"
 
 [resolutions."actions/upload-artifact"."^6"]
 version = "v6.0.0"
-comment = "v6"
 
 [resolutions."jdx/mise-action"."^3"]
 version = "v3.6.1"
-comment = "v3"
 
 [resolutions."release-plz/action"."^0.5"]
 version = "v0.5.128"
-comment = "v0.5"
 
 [resolutions."rust-lang/crates-io-auth-action"."~1.0.3"]
 version = "v1.0.3"
-comment = "v1.0.3"
 
 [actions."actions-rust-lang/rustfmt"."v1.1.2"]
 sha = "4066006ec54a31931b9b1fddfd38f2fdf2d27143"

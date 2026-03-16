@@ -7,7 +7,7 @@ use crate::infra::github::{Error as GithubError, Registry as GithubRegistry};
 use crate::infra::lock::Error as LockFileError;
 use crate::infra::manifest::Error as ManifestError;
 use crate::infra::workflow_scan::FileScanner as FileWorkflowScanner;
-use crate::infra::workflow_update::FileUpdater as FileWorkflowUpdater;
+use crate::infra::workflow_update::WorkflowWriter;
 use crate::tidy::Error as TidyError;
 use report::Report;
 use std::path::Path;
@@ -54,7 +54,7 @@ impl Command for Init {
         }
         let registry = GithubRegistry::new(config.settings.github_token)?;
         let scanner = FileWorkflowScanner::new(repo_root);
-        let updater = FileWorkflowUpdater::new(repo_root);
+        let updater = WorkflowWriter::new(repo_root);
 
         let plan = crate::tidy::plan(
             &config.manifest,

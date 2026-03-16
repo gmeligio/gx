@@ -1,4 +1,4 @@
-use crate::domain::action::identity::{CommitDate, CommitSha, Repository, Version, VersionComment};
+use crate::domain::action::identity::{CommitDate, CommitSha, Repository, Version};
 use crate::domain::action::resolved::Commit;
 use crate::domain::action::spec::Spec;
 use crate::domain::action::uses_ref::RefType;
@@ -16,8 +16,12 @@ pub struct FlatEntryData {
     /// The resolved version string (e.g. "v4.0.0").
     #[serde(default)]
     pub version: Option<String>,
-    /// Human-readable version comment (e.g. "v4").
+    /// Legacy comment field — consumed by serde during deserialization but no longer used.
     #[serde(default)]
+    #[expect(
+        dead_code,
+        reason = "consumed by serde for forward-compatible parsing of legacy lock files"
+    )]
     pub comment: String,
     /// The source repository (e.g. "actions/checkout").
     pub repository: String,
@@ -76,7 +80,6 @@ fn lock_from_flat(data: FlatData) -> Lock {
             spec.clone(),
             Resolution {
                 version: version.clone(),
-                comment: VersionComment::from(entry_data.comment),
             },
         );
         let key = ActionKey {
@@ -124,7 +127,6 @@ mod tests {
         let lock = result.unwrap();
         let (res, commit) = lock.get(&make_key("actions/checkout", "^6")).unwrap();
         assert_eq!(res.version.as_str(), "v6.2.3");
-        assert_eq!(res.comment.as_str(), "v6");
         assert_eq!(
             commit.sha,
             CommitSha::from("de0fac2e4500dabe0009e67214ff5f5447ce83dd")

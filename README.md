@@ -161,9 +161,7 @@ Key differences between gx and the bots:
 - **Structured lint**: `gx lint` can block CI on unpinned actions or SHA mismatches, giving you a policy enforcement layer.
 - **Hierarchical overrides**: `gx.toml` supports per-workflow and per-job version overrides.
 
-## Deep Dive
-
-For architecture details, manifest/lock format, and internal design, explore the codebase interactively:
+## Need help?
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/gmeligio/gx)
 [![Ask NotebookLM](https://img.shields.io/badge/NotebookLM-000000.svg?style=for-the-badge&logo=NotebookLM&logoColor=white)](https://notebooklm.google.com/notebook/0e1bc78e-7f6b-4781-b2b1-17e5afc1dd19)

@@ -2,7 +2,8 @@ use super::types::{
     Error as UpgradeError, Mode as UpgradeMode, Plan as UpgradePlan, Request as UpgradeRequest,
     Scope as UpgradeScope,
 };
-use crate::domain::action::identity::{ActionId, Version, VersionComment};
+use crate::domain::action::identity::Version;
+use crate::domain::action::resolved::ResolvedAction;
 use crate::domain::action::spec::Spec as ActionSpec;
 use crate::domain::action::upgrade::{
     Action as UpgradeAction, Candidate as UpgradeCandidate, find_upgrade_candidate,
@@ -11,7 +12,7 @@ use crate::domain::lock::Lock;
 use crate::domain::manifest::Manifest;
 use crate::domain::plan::{LockDiff, ManifestDiff};
 use crate::domain::resolution::{ActionResolver, VersionRegistry};
-use crate::domain::workflow::Updater as WorkflowUpdater;
+use crate::infra::workflow_update::WorkflowWriter;
 
 /// Compute an `UpgradePlan` describing all changes without modifying the original manifest or lock.
 ///
@@ -55,35 +56,25 @@ where
     }
 
     for upgrade in &upgrades {
-        let (version_to_resolve, comment) = match &upgrade.action {
-            UpgradeAction::InRange { .. } => (
-                upgrade.current.clone(),
-                upgrade.current.to_comment().to_owned(),
-            ),
-            UpgradeAction::CrossRange {
-                new_specifier,
-                new_comment,
-                ..
-            } => (new_specifier.clone(), new_comment.clone()),
+        let version_to_resolve = match &upgrade.action {
+            UpgradeAction::InRange { .. } => upgrade.current.clone(),
+            UpgradeAction::CrossRange { new_specifier, .. } => new_specifier.clone(),
         };
         let spec = ActionSpec::new(upgrade.id.clone(), version_to_resolve);
         resolve_and_store(
             &service,
             &spec,
             &mut planned_lock,
-            &comment,
             "Could not resolve",
             &mut on_progress,
         );
     }
 
     for spec in &repins {
-        let comment = spec.version.to_comment().to_owned();
         resolve_and_store(
             &service,
             spec,
             &mut planned_lock,
-            &comment,
             "Could not re-pin",
             &mut on_progress,
         );
@@ -228,18 +219,16 @@ pub(super) fn resolve_and_store<R: VersionRegistry>(
     service: &ActionResolver<'_, R>,
     spec: &ActionSpec,
     lock: &mut Lock,
-    comment: &str,
     unresolved_msg: &str,
     on_progress: &mut dyn FnMut(&str),
 ) {
     match service.resolve(spec) {
         Ok(resolved) => {
-            let resolved_version = resolved.version.to_comment().to_owned();
+            let resolved_version = resolved.specifier.to_lookup_tag();
             lock.set(
                 spec,
                 Version::from(resolved_version.as_str()),
                 resolved.commit,
-                VersionComment::from(comment),
             );
         }
         Err(e) => {
@@ -253,29 +242,30 @@ pub(super) fn resolve_and_store<R: VersionRegistry>(
 /// # Errors
 ///
 /// Returns [`UpgradeError::Workflow`] if workflow files cannot be updated.
-pub fn apply_upgrade_workflows<W: WorkflowUpdater>(
-    writer: &W,
+pub fn apply_upgrade_workflows(
+    writer: &WorkflowWriter,
     lock_diff: &LockDiff,
     upgrades: &[UpgradeCandidate],
 ) -> Result<usize, UpgradeError> {
-    let update_map: std::collections::HashMap<ActionId, String> = lock_diff
+    let pins: Vec<ResolvedAction> = lock_diff
         .added
         .iter()
-        .map(|(key, resolution, commit)| {
-            let ref_str = if key.version.is_sha() {
-                commit.sha.to_string()
+        .map(|(key, resolution, commit)| ResolvedAction {
+            id: key.id.clone(),
+            sha: commit.sha.clone(),
+            version: if key.version.is_sha() {
+                None
             } else {
-                format!("{} # {}", commit.sha, resolution.comment)
-            };
-            (key.id.clone(), ref_str)
+                Some(resolution.version.clone())
+            },
         })
         .collect();
 
-    if update_map.is_empty() {
+    if pins.is_empty() {
         return Ok(0);
     }
 
-    let results = writer.update_all(&update_map)?;
+    let results = writer.update_all_with_pins(&pins)?;
 
     let _: &[UpgradeCandidate] = upgrades;
 
@@ -288,9 +278,9 @@ pub fn apply_upgrade_workflows<W: WorkflowUpdater>(
     reason = "tests use unwrap, indexing, and other patterns freely"
 )]
 mod tests {
-    use super::{ActionId, Lock, Manifest, UpgradeMode, UpgradeRequest, UpgradeScope, plan};
-    use crate::domain::action::identity::{CommitDate, CommitSha, Repository};
-    use crate::domain::action::resolved::Resolved as ResolvedAction;
+    use super::{Lock, Manifest, UpgradeMode, UpgradeRequest, UpgradeScope, plan};
+    use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository};
+    use crate::domain::action::resolved::RegistryResolution;
     use crate::domain::action::spec::Spec as ActionSpec;
     use crate::domain::action::specifier::Specifier;
     use crate::domain::action::uses_ref::RefType;
@@ -302,7 +292,7 @@ mod tests {
         manifest.set(ActionId::from("actions/checkout"), Specifier::parse("^4"));
 
         let mut lock = Lock::default();
-        lock.set_resolved(ResolvedAction::new(
+        lock.set_from_registry(RegistryResolution::new(
             ActionId::from("actions/checkout"),
             Specifier::parse("^4"),
             CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
@@ -328,7 +318,7 @@ mod tests {
         manifest.set(ActionId::from("actions/checkout"), Specifier::parse("^4"));
 
         let mut lock = Lock::default();
-        lock.set_resolved(ResolvedAction::new(
+        lock.set_from_registry(RegistryResolution::new(
             ActionId::from("actions/checkout"),
             Specifier::parse("^4"),
             CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
@@ -369,7 +359,7 @@ mod tests {
         manifest.set(ActionId::from("actions/checkout"), Specifier::parse("^3"));
 
         let mut lock = Lock::default();
-        lock.set_resolved(ResolvedAction::new(
+        lock.set_from_registry(RegistryResolution::new(
             ActionId::from("actions/checkout"),
             Specifier::parse("^3"),
             CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
