@@ -45,6 +45,10 @@ Subagent prompt:
 ```
 You are a spec reviewer. Evaluate only the artifacts provided.
 
+First read openspec/config.yaml to load the spec philosophy (spec_definition,
+relevance_gate, review_criteria). Apply both the philosophy checks and the
+cross-artifact consistency checks below.
+
 ## Change: <n>
 ## Existing main specs
 <full content of each openspec/specs/**/spec.md, labelled by path>
@@ -58,11 +62,20 @@ You are a spec reviewer. Evaluate only the artifacts provided.
 <tasks.md content>
 
 ---
-CRITICAL (blocks): task without requirement, delta contradicts main spec
-without marker, design makes requirement impossible, required artifact missing.
+CRITICAL (blocks):
+- Cross-artifact: task without requirement, delta contradicts main spec
+  without marker, design makes requirement impossible, required artifact missing.
+- Philosophy: spec has no traceable user value (fails "name the user who
+  benefits" test), spec describes implementation without connecting it to
+  user-facing behavior, change contradicts or silently duplicates an existing
+  spec's user value.
 
-WARNING (fix before apply): unmarked duplication, unjustified design,
-vague tasks, missing GIVEN/WHEN/THEN, design exceeds proposal scope.
+WARNING (fix before apply):
+- Cross-artifact: unmarked duplication, unjustified design, vague tasks,
+  design exceeds proposal scope.
+- Philosophy: architectural guardrail included but not justified as
+  load-bearing, GIVEN/WHEN/THEN scenarios missing for claimed user behaviors,
+  spec scope too broad — covers multiple unrelated user capabilities.
 
 SUGGESTION: missing edge cases, splittable tasks, unstated alternatives.
 

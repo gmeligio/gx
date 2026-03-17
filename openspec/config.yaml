@@ -5,28 +5,33 @@ context: |
   Tech stack: Rust, clap, tokio, reqwest. Built with mise tasks.
   Specs should only cover user-facing behavior and high-level project direction.
 
-rules:
-  proposal:
-    - >
-      RELEVANCE GATE — Before writing the proposal, evaluate whether this change
-      warrants a spec. A change WARRANTS a spec when it: adds, removes, or changes
-      user-facing behavior (CLI output, commands, flags, config); changes
-      project-level architectural direction or constraints; or introduces a new
-      domain concept or materially changes an existing one.
-    - >
-      A change does NOT warrant a spec when it: is internal refactoring, code
-      cleanup, or lint/style changes; is CI/tooling configuration with no
-      user-facing impact; is a straightforward bug fix with an obvious solution;
-      is dependency updates, version bumps, or packaging chores; or would duplicate
-      or overly detail something already covered by an existing spec.
-    - >
-      If the change does not warrant a spec, state this clearly in the Why section
-      with the reason, leave all other sections empty, and recommend implementing
-      directly without a spec.
-    - Do not create specs for implementation details that are better captured in code comments or tests.
-  specs:
-    - >
-      Spec requirements at the right altitude — specify WHAT the system does from
-      the user's perspective, not HOW it's implemented internally. If a requirement
-      reads like code documentation, it belongs in code, not a spec.
-    - Do not duplicate requirements already covered by an existing main spec unless modifying them.
+spec_definition:
+  user_value:
+    description: "Every spec must trace to something a user cares about"
+    test: "Name the user who benefits and describe what they'd notice"
+    format: "GIVEN/WHEN/THEN scenarios"
+  architectural_guardrails:
+    description: "Constraints on how value is delivered"
+    inclusion_test: "Violating this guardrail would degrade the user value"
+    examples:
+      - "Error classification determines whether user sees warning or hard failure"
+
+relevance_gate:
+  requires_spec:
+    - "Adds, removes, or changes user-facing behavior"
+    - "Introduces new domain concept that changes what users can do"
+  skip_spec:
+    - "Internal refactoring with no user-visible change"
+    - "CI/tooling, dependency updates, packaging chores"
+    - "Bug fix with obvious solution"
+    - "Would duplicate an existing spec"
+
+review_criteria:
+  critical:
+    - "Spec has no traceable user value"
+    - "Spec describes implementation without user-facing connection"
+    - "Change contradicts or duplicates existing spec's user value"
+  warning:
+    - "Guardrail not justified as load-bearing"
+    - "Missing GIVEN/WHEN/THEN for claimed behaviors"
+    - "Scope too broad — multiple unrelated user capabilities"
