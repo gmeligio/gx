@@ -149,4 +149,4 @@ Default (non-CI) output SHALL use these formatting rules:
 
 #### Scenario: Empty tidy output
 - **WHEN** tidy finds nothing to change
-- **THEN** output is ` ✓ Everything up to date`
+- **THEN** output is ` ✓ Up to date`

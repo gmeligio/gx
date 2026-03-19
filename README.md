@@ -6,22 +6,9 @@
 
 # gx
 
-Package manager for GitHub Actions. Like `npm` for your workflows.
+Package manager for GitHub Actions.
 
 ![gx tidy demo](docs/demo.gif)
-
-## Why gx?
-
-GitHub recommends [pinning actions to commit SHAs](https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions#using-third-party-actions) to prevent supply chain attacks, but maintaining SHAs by hand is tedious and error-prone. gx automates it.
-
-- **Security**: Resolves version tags to commit SHAs automatically.
-- **Automation**: Updates your workflows and keeps everything in sync.
-- **Flexibility**: Works with zero configuration or with a manifest for team reproducibility.
-- **Lint**: Catches unpinned actions, SHA mismatches, and stale version comments before they reach CI.
-
-See the [FAQ](#faq) for how gx compares to Renovate and Dependabot.
-
-## Quick Start
 
 Before:
 ```yaml
@@ -35,13 +22,11 @@ After running `gx tidy`:
 - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4
 ```
 
-```bash
-# Pin all actions in your workflows to commit SHAs
-gx tidy
+The tag `v4` can point to different code tomorrow. The commit SHA cannot. gx rewrites your workflows to use SHAs and keeps a comment with the version for readability.
 
-# Or initialize a manifest for reproducible team builds
-gx init
-```
+## Why pin to commits?
+
+When your workflow says `actions/checkout@v4`, that tag can be moved to point to different code at any time. Pinning to a commit SHA guarantees you always run the exact code you reviewed. [GitHub recommends this practice](https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions#using-third-party-actions), but doing it by hand is tedious. gx automates it.
 
 ## Installation
 
@@ -67,78 +52,48 @@ cargo install gx
 ## Commands
 
 ```bash
-gx tidy     # Resolve tags to SHAs and update workflows. Syncs manifest if gx.toml exists.
-gx init     # Create gx.toml and gx.lock from current workflows.
-gx upgrade  # Upgrade pinned actions to newer versions. Skips non-semver.
-gx lint     # Check for unpinned actions, SHA mismatches, stale comments, unsynced manifests.
+gx tidy      # Pin actions to commit SHAs and sync manifest if present
+gx upgrade   # Upgrade pinned actions to newer versions
+gx lint      # Check for unpinned or mismatched actions
+gx init      # Create a manifest and lock file from your current workflows
 ```
+
+## Already using another tool?
+
+gx works alongside your existing setup.
+
+| If you use… | gx adds… |
+|---|---|
+| No tool | SHA pinning, version upgrades, lint, and a manifest to keep your team in sync |
+| Renovate | A local CLI (no bot/PR required), lint checks, and a manifest/lock system for auditing |
+| Dependabot | Initial SHA pinning ([not yet supported](https://github.com/dependabot/dependabot-core/issues/7913) by Dependabot), lint, and a manifest/lock system |
+| ratchet | A manifest/lock system for team reproducibility, and standard version comments (no `# ratchet:` prefix) |
+| pinact | A manifest/lock system for team reproducibility |
 
 ## Configuration
 
-gx operates in two modes:
+gx works with no configuration. Run `gx tidy` and your workflows are pinned.
 
-- **Memory-only** (no `gx.toml`): Scans workflows, resolves SHAs, and updates workflow files in place.
-- **File-backed** (with `gx.toml`): Maintains a manifest (`.github/gx.toml`) and lock file (`.github/gx.lock`) for reproducible builds across your team.
-
-Global options: `-v, --verbose` for verbose output, `--version` for version info.
-
-For details on the manifest format, hierarchical overrides, and lock file schema, see the [DeepWiki documentation](https://deepwiki.com/gmeligio/gx).
+For teams that want reproducibility, `gx init` creates a manifest (`.github/gx.toml`) and lock file (`.github/gx.lock`) that track every pinned action. See the [documentation](https://deepwiki.com/gmeligio/gx) for details on the manifest format and overrides.
 
 ## FAQ
 
 <details>
 <summary>Do I need a GITHUB_TOKEN?</summary>
 
-No, but without it you are limited to 60 unauthenticated GitHub API requests per hour. For most projects `gx tidy` finishes well within that limit. Set `GITHUB_TOKEN` to avoid rate limits in CI or for large repos.
-
-```bash
-export GITHUB_TOKEN=<your-token>
-gx tidy
-```
-
-[Create a token](https://github.com/settings/tokens) with no extra scopes required (public repo access is enough).
-
-</details>
-
-<details>
-<summary>Do I need a gx.toml manifest?</summary>
-
-No. `gx tidy` works without any configuration. The manifest is optional and exists for teams that need reproducible builds: it locks every action to a specific SHA so that everyone on the team resolves the same versions.
+No, but without one you're limited to 60 GitHub API requests per hour. For most projects that's enough. Set `GITHUB_TOKEN` for CI or large repos.
 
 </details>
 
 <details>
 <summary>How do I use gx in CI?</summary>
 
-Add `gx lint` as a step in your CI workflow to enforce pinning policies on every PR:
+Add `gx lint` to your workflow to enforce pinning on every PR:
 
 ```yaml
 - name: Check action pins
   run: gx lint
-  env:
-    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
-
-Run `gx tidy` locally (or in a scheduled workflow) to keep pins up to date.
-
-</details>
-
-<details>
-<summary>How does gx compare to Renovate and Dependabot?</summary>
-
-These tools are complementary, not competing:
-
-| Tool | Approach | Scope |
-|---|---|---|
-| Renovate / Dependabot | Bot, opens PRs on a schedule | All dependency types (npm, Docker, Actions, ...) |
-| gx | CLI, rewrites in place | GitHub Actions only |
-
-Key differences between gx and the bots:
-
-- **Initial SHA pinning**: Dependabot cannot do initial SHA pinning (open feature request since 2021). gx handles this with `gx tidy`.
-- **Manifest + lock system**: gx tracks every pinned SHA in a lock file, similar to `go.sum`. This makes auditing and reproducibility straightforward.
-- **Structured lint**: `gx lint` can block CI on unpinned actions or SHA mismatches, giving you a policy enforcement layer.
-- **Hierarchical overrides**: `gx.toml` supports per-workflow and per-job version overrides.
 
 </details>
 
