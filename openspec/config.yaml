@@ -1,31 +1,31 @@
 schema: spec-driven
 
 context: |
-  gx is a Rust CLI tool for managing GitHub Actions versions.
-  Tech stack: Rust, clap, tokio, reqwest. Built with mise tasks.
-  Specs should only cover user-facing behavior and high-level project direction.
+    gx is a Rust CLI tool for managing GitHub Actions versions.
+    Tech stack: Rust, clap, tokio, reqwest. Built with mise tasks.
+    Specs should only cover user-facing behavior and high-level project direction.
 
-  Relevance gate — requires spec:
-  - Adds, removes, or changes user-facing behavior
-  - Introduces new domain concept that changes what users can do
-  Skip spec:
-  - Internal refactoring with no user-visible change
-  - CI/tooling, dependency updates, packaging chores
-  - Bug fix with obvious solution
-  - Would duplicate an existing spec
+    Relevance gate — requires spec:
+    - Adds, removes, or changes user-facing behavior
+    - Introduces new domain concept that changes what users can do
+    Skip spec:
+    - Internal refactoring with no user-visible change
+    - CI/tooling, dependency updates, packaging chores
+    - Bug fix with obvious solution
+    - Would duplicate an existing spec
 
 rules:
-  proposal:
-    - Justify why this change requires a spec (reference the relevance gate)
-  specs:
-    - Every spec must trace to something a user cares about
-    - Name the user who benefits and describe what they'd notice
-    - Use GIVEN/WHEN/THEN format for behavioral scenarios
-    - Architectural guardrails are constraints on how value is delivered — they must be load-bearing (violating one would degrade user value)
-    - "Error classification determines whether user sees warning or hard failure" is an example guardrail
-    - "CRITICAL: Reject if spec has no traceable user value"
-    - "CRITICAL: Reject if spec describes implementation without user-facing connection"
-    - "CRITICAL: Reject if change contradicts or duplicates existing spec's user value"
-    - "WARNING: Guardrail not justified as load-bearing"
-    - "WARNING: Missing GIVEN/WHEN/THEN for claimed behaviors"
-    - "WARNING: Scope too broad — multiple unrelated user capabilities"
+    proposal:
+        - Justify why this change requires a spec (reference the relevance gate)
+    specs:
+        - Every spec must trace to something a user cares about
+        - Name the user who benefits and describe what they'd notice
+        - Use GIVEN/WHEN/THEN format for behavioral scenarios
+        - Architectural guardrails are constraints on how value is delivered — they must be load-bearing (violating one would degrade user value)
+        - Error classification determines whether user sees warning or hard failure
+        - "CRITICAL: Reject if spec has no traceable user value"
+        - "CRITICAL: Reject if spec describes implementation without user-facing connection"
+        - "CRITICAL: Reject if change contradicts or duplicates existing spec's user value"
+        - "WARNING: Guardrail not justified as load-bearing"
+        - "WARNING: Missing GIVEN/WHEN/THEN for claimed behaviors"
+        - "WARNING: Scope too broad — multiple unrelated user capabilities"

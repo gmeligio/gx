@@ -23,7 +23,7 @@ impl CommandReport for Report {
 
         if !has_changes {
             return vec![OutputLine::Summary {
-                text: "Everything up to date".to_owned(),
+                text: "Up to date".to_owned(),
             }];
         }
 
@@ -86,9 +86,7 @@ mod tests {
         let report = Report::default();
         let lines = report.render();
         assert_eq!(lines.len(), 1);
-        assert!(
-            matches!(&lines[0], OutputLine::Summary { text } if text == "Everything up to date")
-        );
+        assert!(matches!(&lines[0], OutputLine::Summary { text } if text == "Up to date"));
     }
 
     #[test]

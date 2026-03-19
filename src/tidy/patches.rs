@@ -80,7 +80,6 @@ fn build_pins(manifest: &Manifest, lock: &Lock, steps: &[&LocatedAction]) -> Vec
 #[cfg(test)]
 #[expect(
     clippy::unwrap_used,
-    clippy::get_unwrap,
     reason = "tests use unwrap, indexing, and other patterns freely"
 )]
 mod tests {
