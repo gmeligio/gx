@@ -32,16 +32,23 @@ toml_edit = "0.22"
 tempfile = "3"
 
 [lints.rust]
+# Escalates all warnings to errors. This catches clippy::all (correctness,
+# suspicious, style, complexity, perf) which default to warn.
 warnings = "deny"
 
 [lints.clippy]
+# Group: pedantic (default: allow). Stricter, opinionated lints not in
+# clippy::all. Must be explicitly enabled.
 pedantic = "deny"
-perf = "deny"
+# All lints below are from the restriction group (default: allow). Restriction
+# lints are not enabled by any group — each must be opted into individually.
+# They ban specific language patterns rather than catching bugs.
 allow_attributes = "deny"
 allow_attributes_without_reason = "deny"
 arithmetic_side_effects = "deny"
 as_conversions = "deny"
 assertions_on_result_states = "deny"
+clone_on_ref_ptr = "deny"
 dbg_macro = "deny"
 doc_paragraphs_missing_punctuation = "deny"
 expect_used = "deny"
@@ -74,6 +81,8 @@ unused_trait_names = "deny"
 unwrap_in_result = "deny"
 unwrap_used = "deny"
 wildcard_enum_match_arm = "deny"
+# From the nursery group (default: allow). Nursery lints are experimental but
+# this one is stable enough to rely on.
 redundant_clone = "deny"
 
 [profile.dist]
