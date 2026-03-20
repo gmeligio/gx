@@ -64,7 +64,7 @@ fn e2e_init_creates_parseable_files_with_matching_pins() {
     assert!(lock.get(&setup_key).is_some(), "Lock must have setup-node");
 
     let wf = fs::read_to_string(root.join(".github/workflows/ci.yml")).unwrap();
-    let checkout_sha = lock.get(&checkout_key).unwrap().1.sha.to_string();
+    let checkout_sha = lock.get(&checkout_key).unwrap().commit.sha.to_string();
     assert!(
         wf.contains(&checkout_sha),
         "Workflow should contain checkout SHA {checkout_sha}"
@@ -131,7 +131,7 @@ fn e2e_tidy_adds_new_action() {
     // Add a new action to the workflow, using the already-pinned SHA for checkout
     let lock = LockStore::new(&lock_path(&root)).load().unwrap();
     let checkout_key = Spec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
-    let checkout_sha = lock.get(&checkout_key).unwrap().1.sha.to_string();
+    let checkout_sha = lock.get(&checkout_key).unwrap().commit.sha.to_string();
 
     write_workflow(
         &root,
@@ -183,7 +183,7 @@ fn e2e_tidy_removes_stale_action() {
     // Remove setup-node from workflow, keep checkout pinned
     let lock = LockStore::new(&lock_path(&root)).load().unwrap();
     let checkout_key = Spec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
-    let checkout_sha = lock.get(&checkout_key).unwrap().1.sha.to_string();
+    let checkout_sha = lock.get(&checkout_key).unwrap().commit.sha.to_string();
 
     write_workflow(
         &root,
@@ -270,7 +270,7 @@ fn e2e_upgrade_preserves_unaffected_entries() {
     let node_sha_before = lock_before
         .get(&node_key)
         .unwrap()
-        .1
+        .commit
         .sha
         .as_str()
         .to_owned();
@@ -284,7 +284,13 @@ fn e2e_upgrade_preserves_unaffected_entries() {
 
     // Setup-node lock entry should be unchanged
     let lock_after = LockStore::new(&lock_path(&root)).load().unwrap();
-    let node_sha_after = lock_after.get(&node_key).unwrap().1.sha.as_str().to_owned();
+    let node_sha_after = lock_after
+        .get(&node_key)
+        .unwrap()
+        .commit
+        .sha
+        .as_str()
+        .to_owned();
     assert_eq!(
         node_sha_before, node_sha_after,
         "Setup-node SHA should be unchanged after scoped checkout upgrade"
@@ -308,7 +314,7 @@ fn e2e_lint_detects_unsynced_manifest() {
 
     let lock = LockStore::new(&lock_path(&root)).load().unwrap();
     let checkout_key = Spec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
-    let checkout_sha = lock.get(&checkout_key).unwrap().1.sha.to_string();
+    let checkout_sha = lock.get(&checkout_key).unwrap().commit.sha.to_string();
 
     // Add an unmanaged action to the workflow (not in manifest)
     write_workflow(
@@ -345,7 +351,7 @@ fn e2e_init_sha_pinned_workflow_sets_version_not_sha() {
     run_init(&root1, &registry);
     let lock1 = LockStore::new(&lock_path(&root1)).load().unwrap();
     let key = Spec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
-    let checkout_sha = lock1.get(&key).unwrap().1.sha.to_string();
+    let checkout_sha = lock1.get(&key).unwrap().commit.sha.to_string();
 
     // Step 2: Init with a SHA-pinned workflow — tests the SHA-first resolution path
     let temp2 = TempDir::new().unwrap();
@@ -360,18 +366,18 @@ fn e2e_init_sha_pinned_workflow_sets_version_not_sha() {
     run_init(&root2, &registry);
 
     let lock2 = LockStore::new(&lock_path(&root2)).load().unwrap();
-    let (res, _commit) = lock2.get(&key).expect("Lock must have checkout@v4 entry");
+    let entry = lock2.get(&key).expect("Lock must have checkout@v4 entry");
 
     // The lock version must be a semver tag, not the raw SHA
     assert_ne!(
-        res.version.as_str(),
+        entry.version.as_str(),
         checkout_sha.as_str(),
         "Lock version for checkout must NOT be a raw SHA"
     );
     assert!(
-        res.version.as_str().starts_with('v'),
+        entry.version.as_str().starts_with('v'),
         "Lock version should be a semver tag, got: {:?}",
-        res.version
+        entry.version
     );
 }
 
@@ -391,7 +397,7 @@ fn e2e_tidy_after_sha_pinned_init_is_noop() {
     run_init(&root1, &registry);
     let lock1 = LockStore::new(&lock_path(&root1)).load().unwrap();
     let key = Spec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
-    let checkout_sha = lock1.get(&key).unwrap().1.sha.to_string();
+    let checkout_sha = lock1.get(&key).unwrap().commit.sha.to_string();
 
     // Init with SHA-pinned workflow
     let temp2 = TempDir::new().unwrap();
@@ -506,10 +512,10 @@ fn e2e_init_annotated_tag_action_produces_valid_commit_sha() {
         ActionId::from("release-plz/action"),
         Specifier::from_v1("v0.5"),
     );
-    let (_res, commit) = lock
+    let entry = lock
         .get(&key)
         .expect("Lock must have release-plz/action entry");
-    let sha = commit.sha.clone();
+    let sha = entry.commit.sha.clone();
 
     // The SHA in the lock must be a valid commit, not a tag object SHA.
     // describe_sha fetches the commit date via the commits API, which returns 422 for tag objects.
@@ -592,7 +598,7 @@ fn e2e_full_pipeline_init_tidy_modify_tidy_upgrade() {
     // Step 4: Add a new action to workflow
     let lock = LockStore::new(&lock_path(&root)).load().unwrap();
     let checkout_key = Spec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
-    let checkout_sha = lock.get(&checkout_key).unwrap().1.sha.to_string();
+    let checkout_sha = lock.get(&checkout_key).unwrap().commit.sha.to_string();
 
     write_workflow(
         &root,

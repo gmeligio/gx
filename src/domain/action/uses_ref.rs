@@ -1,4 +1,5 @@
 use super::identity::{ActionId, CommitSha, Version};
+use crate::domain::workflow_action::WorkflowAction;
 use std::fmt;
 
 /// The type of reference that was resolved.
@@ -71,7 +72,7 @@ impl UsesRef {
     /// - If comment exists and `uses_ref` is a 40-char hex SHA, store the SHA
     /// - If no comment, use `uses_ref` as version (could be tag like "v4" or SHA)
     #[must_use]
-    pub fn interpret(&self) -> InterpretedRef {
+    pub fn interpret(&self) -> WorkflowAction {
         let (version, sha) = self.comment.as_ref().map_or_else(
             || {
                 // No comment, use the ref as-is, no SHA stored
@@ -87,23 +88,12 @@ impl UsesRef {
             },
         );
 
-        InterpretedRef {
+        WorkflowAction {
             id: ActionId::from(self.action_name.as_str()),
             version,
             sha,
         }
     }
-}
-
-/// Result of interpreting a workflow reference.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InterpretedRef {
-    /// The parsed action identifier.
-    pub id: ActionId,
-    /// The resolved version.
-    pub version: Version,
-    /// The commit SHA, if the ref was a full SHA.
-    pub sha: Option<CommitSha>,
 }
 
 #[cfg(test)]

@@ -2,7 +2,6 @@ use super::types::{
     Error as UpgradeError, Mode as UpgradeMode, Plan as UpgradePlan, Request as UpgradeRequest,
     Scope as UpgradeScope,
 };
-use crate::domain::action::identity::Version;
 use crate::domain::action::resolved::ResolvedAction;
 use crate::domain::action::spec::Spec as ActionSpec;
 use crate::domain::action::upgrade::{
@@ -166,8 +165,8 @@ fn determine_upgrades<R: VersionRegistry>(
             let mut repins: Vec<ActionSpec> = Vec::new();
 
             for spec in &specs {
-                if spec.version.precision().is_none() {
-                    if spec.version.is_sha() {
+                if spec.specifier.precision().is_none() {
+                    if spec.specifier.is_sha() {
                         on_progress(&format!("Skipping {spec} (bare SHA)"));
                     } else {
                         on_progress(&format!("Re-pinning {spec} (non-semver ref)"));
@@ -179,11 +178,11 @@ fn determine_upgrades<R: VersionRegistry>(
                 match service.registry().all_tags(&spec.id) {
                     Ok(tags) => {
                         // Get lock version as floor (if entry exists)
-                        let lock_version = lock.get(spec).map(|(res, _)| res.version.clone());
+                        let lock_version = lock.get(spec).map(|entry| entry.version.clone());
 
                         let allow_major = matches!(request.mode, UpgradeMode::Latest);
                         let action = find_upgrade_candidate(
-                            &spec.version,
+                            &spec.specifier,
                             lock_version.as_ref(),
                             &tags,
                             allow_major,
@@ -192,7 +191,7 @@ fn determine_upgrades<R: VersionRegistry>(
                         if let Some(upgrade_action) = action {
                             upgrades.push(UpgradeCandidate {
                                 id: spec.id.clone(),
-                                current: spec.version.clone(),
+                                current: spec.specifier.clone(),
                                 action: upgrade_action,
                             });
                         }
@@ -224,12 +223,7 @@ pub(super) fn resolve_and_store<R: VersionRegistry>(
 ) {
     match service.resolve(spec) {
         Ok(resolved) => {
-            let resolved_version = resolved.specifier.to_lookup_tag();
-            lock.set(
-                spec,
-                Version::from(resolved_version.as_str()),
-                resolved.commit,
-            );
+            lock.set(spec, resolved.version, resolved.commit);
         }
         Err(e) => {
             on_progress(&format!("{unresolved_msg} {spec}: {e}"));
@@ -250,13 +244,13 @@ pub fn apply_upgrade_workflows(
     let pins: Vec<ResolvedAction> = lock_diff
         .added
         .iter()
-        .map(|(key, resolution, commit)| ResolvedAction {
+        .map(|(key, entry)| ResolvedAction {
             id: key.id.clone(),
-            sha: commit.sha.clone(),
-            version: if key.version.is_sha() {
+            sha: entry.commit.sha.clone(),
+            version: if key.specifier.is_sha() {
                 None
             } else {
-                Some(resolution.version.clone())
+                Some(entry.version.clone())
             },
         })
         .collect();
@@ -279,8 +273,8 @@ pub fn apply_upgrade_workflows(
 )]
 mod tests {
     use super::{Lock, Manifest, UpgradeMode, UpgradeRequest, UpgradeScope, plan};
-    use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository};
-    use crate::domain::action::resolved::RegistryResolution;
+    use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
+    use crate::domain::action::resolved::Commit;
     use crate::domain::action::spec::Spec as ActionSpec;
     use crate::domain::action::specifier::Specifier;
     use crate::domain::action::uses_ref::RefType;
@@ -292,14 +286,16 @@ mod tests {
         manifest.set(ActionId::from("actions/checkout"), Specifier::parse("^4"));
 
         let mut lock = Lock::default();
-        lock.set_from_registry(RegistryResolution::new(
-            ActionId::from("actions/checkout"),
-            Specifier::parse("^4"),
-            CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-            Repository::from("actions/checkout"),
-            Some(RefType::Tag),
-            CommitDate::from("2026-01-01T00:00:00Z"),
-        ));
+        lock.set(
+            &ActionSpec::new(ActionId::from("actions/checkout"), Specifier::parse("^4")),
+            Version::from("v4"),
+            Commit {
+                sha: CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+                repository: Repository::from("actions/checkout"),
+                ref_type: Some(RefType::Tag),
+                date: CommitDate::from("2026-01-01T00:00:00Z"),
+            },
+        );
 
         // Registry returns no tags → nothing to upgrade
         let registry = FakeRegistry::new();
@@ -318,14 +314,16 @@ mod tests {
         manifest.set(ActionId::from("actions/checkout"), Specifier::parse("^4"));
 
         let mut lock = Lock::default();
-        lock.set_from_registry(RegistryResolution::new(
-            ActionId::from("actions/checkout"),
-            Specifier::parse("^4"),
-            CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-            Repository::from("actions/checkout"),
-            Some(RefType::Tag),
-            CommitDate::from("2026-01-01T00:00:00Z"),
-        ));
+        lock.set(
+            &ActionSpec::new(ActionId::from("actions/checkout"), Specifier::parse("^4")),
+            Version::from("v4"),
+            Commit {
+                sha: CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+                repository: Repository::from("actions/checkout"),
+                ref_type: Some(RefType::Tag),
+                date: CommitDate::from("2026-01-01T00:00:00Z"),
+            },
+        );
         lock.set_version(
             &ActionSpec::new(ActionId::from("actions/checkout"), Specifier::parse("^4")),
             Some("v4.1.0".to_owned()),
@@ -359,14 +357,16 @@ mod tests {
         manifest.set(ActionId::from("actions/checkout"), Specifier::parse("^3"));
 
         let mut lock = Lock::default();
-        lock.set_from_registry(RegistryResolution::new(
-            ActionId::from("actions/checkout"),
-            Specifier::parse("^3"),
-            CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-            Repository::from("actions/checkout"),
-            Some(RefType::Tag),
-            CommitDate::from("2026-01-01T00:00:00Z"),
-        ));
+        lock.set(
+            &ActionSpec::new(ActionId::from("actions/checkout"), Specifier::parse("^3")),
+            Version::from("v3"),
+            Commit {
+                sha: CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+                repository: Repository::from("actions/checkout"),
+                ref_type: Some(RefType::Tag),
+                date: CommitDate::from("2026-01-01T00:00:00Z"),
+            },
+        );
         lock.set_version(
             &ActionSpec::new(ActionId::from("actions/checkout"), Specifier::parse("^3")),
             Some("v3.0.0".to_owned()),

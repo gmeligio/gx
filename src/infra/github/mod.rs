@@ -1,10 +1,9 @@
 use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Version};
+use crate::domain::action::resolved::Commit;
 use crate::domain::action::spec::Spec as ActionSpec;
 use crate::domain::action::specifier::Specifier;
 use crate::domain::action::uses_ref::RefType;
-use crate::domain::resolution::{
-    Error as ResolutionError, ResolvedRef, ShaDescription, VersionRegistry,
-};
+use crate::domain::resolution::{Error as ResolutionError, ShaDescription, VersionRegistry};
 use std::time::Duration;
 use thiserror::Error;
 
@@ -134,7 +133,7 @@ impl Registry {
 }
 
 impl VersionRegistry for Registry {
-    fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<ResolvedRef, ResolutionError> {
+    fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<Commit, ResolutionError> {
         let (sha, ref_type) =
             self.resolve_ref(id.as_str(), version.as_str())
                 .map_err(|e| match e {
@@ -177,12 +176,12 @@ impl VersionRegistry for Registry {
                 .unwrap_or_default()
         };
 
-        Ok(ResolvedRef::new(
-            CommitSha::from(sha),
-            base_repo,
+        Ok(Commit {
+            sha: CommitSha::from(sha),
+            repository: base_repo,
             ref_type,
-            CommitDate::from(date),
-        ))
+            date: CommitDate::from(date),
+        })
     }
 
     fn tags_for_sha(

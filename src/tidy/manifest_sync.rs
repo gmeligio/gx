@@ -85,8 +85,8 @@ pub(super) fn upgrade_sha_versions_to_tags<R: VersionRegistry>(
     // Collect only SHA specs (avoid cloning the full Vec when most specs are tags)
     let sha_specs: Vec<(ActionId, CommitSha)> = manifest
         .specs()
-        .filter(|s| s.version.is_sha())
-        .map(|s| (s.id.clone(), CommitSha::from(s.version.as_str())))
+        .filter(|s| s.specifier.is_sha())
+        .map(|s| (s.id.clone(), CommitSha::from(s.specifier.as_str())))
         .collect();
 
     for (id, sha) in &sha_specs {

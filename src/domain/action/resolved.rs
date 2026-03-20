@@ -1,8 +1,7 @@
 use super::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
-use super::specifier::Specifier;
 use super::uses_ref::RefType;
 
-/// Commit metadata shared between `RegistryResolution` and lock `Entry`.
+/// Commit metadata for a resolved action.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Commit {
     pub sha: CommitSha,
@@ -11,48 +10,14 @@ pub struct Commit {
     pub date: CommitDate,
 }
 
-/// A registry resolution: the result of looking up an action specifier in the registry.
-/// The `specifier` field holds the manifest specifier (e.g., `"^6"`).
-/// The resolved tag (e.g., `"v6.0.2"`) is stored in the lock entry.
+/// The result of resolving an action spec via the registry.
+///
+/// Contains only the discovered data — the `Spec` (id + specifier) is already
+/// known by the caller and not duplicated here.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RegistryResolution {
-    pub id: ActionId,
-    pub specifier: Specifier,
+pub struct Resolved {
+    pub version: Version,
     pub commit: Commit,
-}
-
-impl RegistryResolution {
-    /// Create a new registry resolution with all metadata.
-    #[must_use]
-    pub fn new(
-        id: ActionId,
-        specifier: Specifier,
-        sha: CommitSha,
-        repository: Repository,
-        ref_type: Option<RefType>,
-        date: CommitDate,
-    ) -> Self {
-        Self {
-            id,
-            specifier,
-            commit: Commit {
-                sha,
-                repository,
-                ref_type,
-                date,
-            },
-        }
-    }
-
-    /// Create a new `RegistryResolution` with the SHA replaced.
-    /// Used when a workflow has a pinned SHA that differs from the registry.
-    #[must_use]
-    pub fn with_sha(self, sha: CommitSha) -> Self {
-        Self {
-            commit: Commit { sha, ..self.commit },
-            ..self
-        }
-    }
 }
 
 /// A resolved action ready for workflow output.
@@ -73,27 +38,23 @@ pub struct ResolvedAction {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ActionId, CommitDate, CommitSha, RefType, RegistryResolution, Repository, Specifier,
-    };
+    use super::{Commit, CommitDate, CommitSha, RefType, Repository, Resolved, Version};
 
     #[test]
-    fn with_sha_replaces_only_sha() {
-        let resolved = RegistryResolution::new(
-            ActionId::from("actions/checkout"),
-            Specifier::parse("^4"),
-            CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-            Repository::from("actions/checkout"),
-            Some(RefType::Tag),
-            CommitDate::from("2026-01-01T00:00:00Z"),
-        );
-        let updated =
-            resolved.with_sha(CommitSha::from("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
+    fn resolved_holds_version_and_commit() {
+        let resolved = Resolved {
+            version: Version::from("v4.2.1"),
+            commit: Commit {
+                sha: CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+                repository: Repository::from("actions/checkout"),
+                ref_type: Some(RefType::Tag),
+                date: CommitDate::from("2026-01-01T00:00:00Z"),
+            },
+        };
+        assert_eq!(resolved.version.as_str(), "v4.2.1");
         assert_eq!(
-            updated.commit.sha,
-            CommitSha::from("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+            resolved.commit.sha,
+            CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         );
-        assert_eq!(updated.commit.repository.as_str(), "actions/checkout");
-        assert_eq!(updated.id.as_str(), "actions/checkout");
     }
 }

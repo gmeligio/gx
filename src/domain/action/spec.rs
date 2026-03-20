@@ -6,29 +6,29 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Spec {
     pub id: ActionId,
-    pub version: Specifier,
+    pub specifier: Specifier,
 }
 
 impl Spec {
     #[must_use]
-    pub fn new(id: ActionId, version: Specifier) -> Self {
-        Self { id, version }
+    pub fn new(id: ActionId, specifier: Specifier) -> Self {
+        Self { id, specifier }
     }
 
     /// Parse from "action@specifier" format (e.g., "actions/checkout@^6").
     #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
-        let (action, specifier) = s.rsplit_once('@')?;
+        let (action, spec) = s.rsplit_once('@')?;
         Some(Self {
             id: ActionId(action.to_owned()),
-            version: Specifier::parse(specifier),
+            specifier: Specifier::parse(spec),
         })
     }
 }
 
 impl fmt::Display for Spec {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}@{}", self.id, self.version)
+        write!(f, "{}@{}", self.id, self.specifier)
     }
 }
 
@@ -50,21 +50,21 @@ mod tests {
     fn spec_parse_specifier() {
         let spec = Spec::parse("actions/checkout@^6").unwrap();
         assert_eq!(spec.id.as_str(), "actions/checkout");
-        assert_eq!(spec.version.as_str(), "^6");
+        assert_eq!(spec.specifier.as_str(), "^6");
     }
 
     #[test]
     fn spec_parse_tilde() {
         let spec = Spec::parse("actions/checkout@~1.15.2").unwrap();
         assert_eq!(spec.id.as_str(), "actions/checkout");
-        assert_eq!(spec.version.as_str(), "~1.15.2");
+        assert_eq!(spec.specifier.as_str(), "~1.15.2");
     }
 
     #[test]
     fn spec_parse_with_subpath() {
         let spec = Spec::parse("github/codeql-action/upload-sarif@^3").unwrap();
         assert_eq!(spec.id.as_str(), "github/codeql-action/upload-sarif");
-        assert_eq!(spec.version.as_str(), "^3");
+        assert_eq!(spec.specifier.as_str(), "^3");
     }
 
     #[test]

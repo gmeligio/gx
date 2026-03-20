@@ -43,7 +43,7 @@ impl Manifest {
     /// Get the specifier pinned for an action (global default).
     #[must_use]
     pub fn get(&self, id: &ActionId) -> Option<&Specifier> {
-        self.actions.get(id).map(|s| &s.version)
+        self.actions.get(id).map(|s| &s.specifier)
     }
 
     /// Resolve the effective specifier for an action at a given workflow location.

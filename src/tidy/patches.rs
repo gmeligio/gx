@@ -58,16 +58,16 @@ fn build_pins(manifest: &Manifest, lock: &Lock, steps: &[&LocatedAction]) -> Vec
     for action in steps {
         if let Some(version) = manifest.resolve_version(&action.action.id, &action.location) {
             let key = Spec::new(action.action.id.clone(), version.clone());
-            if let Some((res, commit)) = lock.get(&key) {
+            if let Some(entry) = lock.get(&key) {
                 map.insert(
                     action.action.id.clone(),
                     ResolvedAction {
                         id: action.action.id.clone(),
-                        sha: commit.sha.clone(),
+                        sha: entry.commit.sha.clone(),
                         version: if version.is_sha() {
                             None
                         } else {
-                            Some(res.version.clone())
+                            Some(entry.version.clone())
                         },
                     },
                 );
@@ -119,7 +119,7 @@ mod tests {
 
         // A located action referencing this action
         let located = crate::domain::workflow_actions::Located {
-            action: crate::domain::action::uses_ref::InterpretedRef {
+            action: crate::domain::workflow_action::WorkflowAction {
                 id: ActionId::from("actions/checkout"),
                 version: Version::from(sha),
                 sha: Some(CommitSha::from(sha)),

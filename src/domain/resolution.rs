@@ -1,7 +1,7 @@
 use super::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
-use super::action::resolved::RegistryResolution;
+use super::action::resolved::{Commit, Resolved};
 use super::action::spec::Spec as ActionSpec;
-use super::action::specifier::Specifier;
+
 use super::action::tag_selection::{ShaIndex, select_most_specific_tag};
 use super::action::uses_ref::RefType;
 use thiserror::Error;
@@ -38,33 +38,6 @@ pub struct ShaDescription {
     pub date: CommitDate,
 }
 
-/// The result of resolving a ref to its metadata.
-#[derive(Debug, Clone)]
-pub struct ResolvedRef {
-    pub sha: CommitSha,
-    pub repository: Repository,
-    pub ref_type: Option<RefType>,
-    pub date: CommitDate,
-}
-
-impl ResolvedRef {
-    /// Create a new resolved reference.
-    #[must_use]
-    pub fn new(
-        sha: CommitSha,
-        repository: Repository,
-        ref_type: Option<RefType>,
-        date: CommitDate,
-    ) -> Self {
-        Self {
-            sha,
-            repository,
-            ref_type,
-            date,
-        }
-    }
-}
-
 /// Trait for querying available versions and commit SHAs from a remote registry.
 pub trait VersionRegistry {
     /// Look up the commit SHA and metadata for a version reference.
@@ -72,7 +45,7 @@ pub trait VersionRegistry {
     /// # Errors
     ///
     /// Returns an error if the lookup fails.
-    fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<ResolvedRef, Error>;
+    fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<Commit, Error>;
 
     /// Get all tags that point to a specific SHA.
     ///
@@ -119,17 +92,10 @@ impl<'reg, R: VersionRegistry> ActionResolver<'reg, R> {
     /// # Errors
     ///
     /// Returns `Error` if the registry lookup fails.
-    pub fn resolve(&self, spec: &ActionSpec) -> Result<RegistryResolution, Error> {
-        let lookup_version = Version::from(spec.version.to_lookup_tag());
-        let resolved_ref = self.registry.lookup_sha(&spec.id, &lookup_version)?;
-        Ok(RegistryResolution::new(
-            spec.id.clone(),
-            spec.version.clone(),
-            resolved_ref.sha,
-            resolved_ref.repository,
-            resolved_ref.ref_type,
-            resolved_ref.date,
-        ))
+    pub fn resolve(&self, spec: &ActionSpec) -> Result<Resolved, Error> {
+        let version = Version::from(spec.specifier.to_lookup_tag());
+        let commit = self.registry.lookup_sha(&spec.id, &version)?;
+        Ok(Resolved { version, commit })
     }
 
     /// Resolve an action from a known commit SHA.
@@ -143,7 +109,7 @@ impl<'reg, R: VersionRegistry> ActionResolver<'reg, R> {
         id: &ActionId,
         sha: &CommitSha,
         sha_index: &mut ShaIndex,
-    ) -> Result<RegistryResolution, Error> {
+    ) -> Result<Resolved, Error> {
         let desc = sha_index.get_or_describe(self.registry, id, sha)?;
         let version =
             select_most_specific_tag(&desc.tags).unwrap_or_else(|| Version::from(sha.as_str()));
@@ -152,14 +118,15 @@ impl<'reg, R: VersionRegistry> ActionResolver<'reg, R> {
         } else {
             Some(RefType::Tag)
         };
-        Ok(RegistryResolution::new(
-            id.clone(),
-            Specifier::from_v1(version.as_str()),
-            sha.clone(),
-            desc.repository.clone(),
-            ref_type,
-            desc.date.clone(),
-        ))
+        Ok(Resolved {
+            version,
+            commit: Commit {
+                sha: sha.clone(),
+                repository: desc.repository.clone(),
+                ref_type,
+                date: desc.date.clone(),
+            },
+        })
     }
 
     /// Correct a version based on the commit SHA it points to.
@@ -203,17 +170,18 @@ pub(crate) mod testutil;
 )]
 mod tests {
     use super::{
-        ActionId, ActionResolver, ActionSpec, CommitDate, CommitSha, Error, RefType, Repository,
-        ResolvedRef, ShaDescription, ShaIndex, Specifier, Version, VersionRegistry,
+        ActionId, ActionResolver, ActionSpec, Commit, CommitDate, CommitSha, Error, RefType,
+        Repository, ShaDescription, ShaIndex, Version, VersionRegistry,
     };
+    use crate::domain::action::specifier::Specifier;
 
     struct MockRegistry {
-        resolve_result: Result<ResolvedRef, Error>,
+        resolve_result: Result<Commit, Error>,
         tags_result: Result<Vec<Version>, Error>,
     }
 
     impl VersionRegistry for MockRegistry {
-        fn lookup_sha(&self, _id: &ActionId, _version: &Version) -> Result<ResolvedRef, Error> {
+        fn lookup_sha(&self, _id: &ActionId, _version: &Version) -> Result<Commit, Error> {
             self.resolve_result.clone()
         }
 
@@ -239,12 +207,12 @@ mod tests {
     #[test]
     fn resolve_success() {
         let mock_registry = MockRegistry {
-            resolve_result: Ok(ResolvedRef::new(
-                CommitSha::from("abc123def456789012345678901234567890abcd"),
-                Repository::from("actions/checkout"),
-                Some(RefType::Tag),
-                CommitDate::from("2026-01-01T00:00:00Z"),
-            )),
+            resolve_result: Ok(Commit {
+                sha: CommitSha::from("abc123def456789012345678901234567890abcd"),
+                repository: Repository::from("actions/checkout"),
+                ref_type: Some(RefType::Tag),
+                date: CommitDate::from("2026-01-01T00:00:00Z"),
+            }),
             tags_result: Ok(vec![]),
         };
         let service = ActionResolver::new(&mock_registry);
@@ -253,8 +221,7 @@ mod tests {
         let result = service.resolve(&spec);
 
         let resolved = result.expect("Expected Ok result");
-        assert_eq!(resolved.id.as_str(), "actions/checkout");
-        assert_eq!(resolved.specifier.to_lookup_tag(), "v4");
+        assert_eq!(resolved.version.as_str(), "v4");
         assert_eq!(
             resolved.commit.sha.as_str(),
             "abc123def456789012345678901234567890abcd"
@@ -281,12 +248,12 @@ mod tests {
     #[test]
     fn correct_version_no_correction_needed() {
         let registry = MockRegistry {
-            resolve_result: Ok(ResolvedRef::new(
-                CommitSha::from("abc123def456789012345678901234567890abcd"),
-                Repository::from("actions/checkout"),
-                Some(RefType::Tag),
-                CommitDate::from("2026-01-01T00:00:00Z"),
-            )),
+            resolve_result: Ok(Commit {
+                sha: CommitSha::from("abc123def456789012345678901234567890abcd"),
+                repository: Repository::from("actions/checkout"),
+                ref_type: Some(RefType::Tag),
+                date: CommitDate::from("2026-01-01T00:00:00Z"),
+            }),
             tags_result: Ok(vec![Version::from("v4"), Version::from("v4.0.0")]),
         };
         let service = ActionResolver::new(&registry);
@@ -305,12 +272,12 @@ mod tests {
     #[test]
     fn correct_version_correction_needed() {
         let registry = MockRegistry {
-            resolve_result: Ok(ResolvedRef::new(
-                CommitSha::from("abc123def456789012345678901234567890abcd"),
-                Repository::from("actions/checkout"),
-                Some(RefType::Tag),
-                CommitDate::from("2026-01-01T00:00:00Z"),
-            )),
+            resolve_result: Ok(Commit {
+                sha: CommitSha::from("abc123def456789012345678901234567890abcd"),
+                repository: Repository::from("actions/checkout"),
+                ref_type: Some(RefType::Tag),
+                date: CommitDate::from("2026-01-01T00:00:00Z"),
+            }),
             tags_result: Ok(vec![Version::from("v5"), Version::from("v5.0.0")]),
         };
         let service = ActionResolver::new(&registry);
@@ -330,12 +297,12 @@ mod tests {
     fn resolve_from_sha_with_tags() {
         let sha = CommitSha::from("abc123def456789012345678901234567890abcd");
         let registry = MockRegistry {
-            resolve_result: Ok(ResolvedRef::new(
-                sha.clone(),
-                Repository::from("owner/repo"),
-                Some(RefType::Commit),
-                CommitDate::from("2026-01-01T00:00:00Z"),
-            )),
+            resolve_result: Ok(Commit {
+                sha: sha.clone(),
+                repository: Repository::from("owner/repo"),
+                ref_type: Some(RefType::Commit),
+                date: CommitDate::from("2026-01-01T00:00:00Z"),
+            }),
             tags_result: Ok(vec![
                 Version::from("v3"),
                 Version::from("v3.6"),
@@ -350,7 +317,7 @@ mod tests {
             .resolve_from_sha(&id, &sha, &mut sha_index)
             .expect("Expected Ok result");
 
-        assert_eq!(result.specifier.to_lookup_tag(), "v3.6.1");
+        assert_eq!(result.version.as_str(), "v3.6.1");
         assert_eq!(result.commit.sha, sha);
         assert_eq!(result.commit.ref_type, Some(RefType::Tag));
         assert_eq!(result.commit.repository.as_str(), "owner/repo");
@@ -360,12 +327,12 @@ mod tests {
     fn resolve_from_sha_no_tags() {
         let sha = CommitSha::from("abc123def456789012345678901234567890abcd");
         let registry = MockRegistry {
-            resolve_result: Ok(ResolvedRef::new(
-                sha.clone(),
-                Repository::from("owner/repo"),
-                Some(RefType::Commit),
-                CommitDate::from("2026-01-01T00:00:00Z"),
-            )),
+            resolve_result: Ok(Commit {
+                sha: sha.clone(),
+                repository: Repository::from("owner/repo"),
+                ref_type: Some(RefType::Commit),
+                date: CommitDate::from("2026-01-01T00:00:00Z"),
+            }),
             tags_result: Ok(vec![]),
         };
         let service = ActionResolver::new(&registry);
@@ -376,7 +343,7 @@ mod tests {
             .resolve_from_sha(&id, &sha, &mut sha_index)
             .expect("Expected Ok result");
 
-        assert_eq!(result.specifier.as_str(), sha.as_str());
+        assert_eq!(result.version.as_str(), sha.as_str());
         assert_eq!(result.commit.sha, sha);
         assert_eq!(result.commit.ref_type, Some(RefType::Commit));
     }

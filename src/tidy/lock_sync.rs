@@ -102,12 +102,7 @@ fn populate_lock_entry<R: VersionRegistry>(
 
         match result {
             Ok(action) => {
-                let resolved_version = action.specifier.to_lookup_tag();
-                lock.set(
-                    spec,
-                    crate::domain::action::identity::Version::from(resolved_version.as_str()),
-                    action.commit,
-                );
+                lock.set(spec, action.version, action.commit);
             }
             Err(e) => {
                 return Err(e);
@@ -127,6 +122,7 @@ fn populate_lock_entry<R: VersionRegistry>(
 mod tests {
     use super::*;
     use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Version};
+    use crate::domain::action::resolved::Commit;
     use crate::domain::action::spec::Spec as ActionSpec;
     use crate::domain::action::specifier::Specifier;
     use crate::domain::action::tag_selection::ShaIndex;
@@ -135,7 +131,7 @@ mod tests {
     use crate::domain::manifest::Manifest;
     use crate::domain::resolution::testutil::FakeRegistry;
     use crate::domain::resolution::{
-        ActionResolver, Error as ResolutionError, ResolvedRef, ShaDescription, VersionRegistry,
+        ActionResolver, Error as ResolutionError, ShaDescription, VersionRegistry,
     };
 
     // ---------------------------------------------------------------------------
@@ -146,20 +142,16 @@ mod tests {
     #[derive(Clone)]
     struct MixedRegistry;
     impl VersionRegistry for MixedRegistry {
-        fn lookup_sha(
-            &self,
-            id: &ActionId,
-            _version: &Version,
-        ) -> Result<ResolvedRef, ResolutionError> {
+        fn lookup_sha(&self, id: &ActionId, _version: &Version) -> Result<Commit, ResolutionError> {
             if id.as_str() == "actions/checkout" {
                 Err(ResolutionError::AuthRequired)
             } else {
-                Ok(ResolvedRef::new(
-                    CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-                    id.base_repo(),
-                    Some(RefType::Tag),
-                    CommitDate::from("2026-01-01T00:00:00Z"),
-                ))
+                Ok(Commit {
+                    sha: CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+                    repository: id.base_repo(),
+                    ref_type: Some(RefType::Tag),
+                    date: CommitDate::from("2026-01-01T00:00:00Z"),
+                })
             }
         }
         fn tags_for_sha(
@@ -213,9 +205,9 @@ mod tests {
         )
         .unwrap();
 
-        let (_, commit) = lock.get(&key).expect("lock entry must exist");
+        let entry = lock.get(&key).expect("lock entry must exist");
         assert_eq!(
-            commit.sha.as_str(),
+            entry.commit.sha.as_str(),
             workflow_sha,
             "SHA must come from workflow (SHA-first)"
         );
@@ -247,14 +239,14 @@ mod tests {
         )
         .unwrap();
 
-        let (resolution, commit) = lock.get(&key).expect("lock entry must exist");
+        let entry = lock.get(&key).expect("lock entry must exist");
         assert_eq!(
-            commit.sha.as_str(),
+            entry.commit.sha.as_str(),
             workflow_sha,
             "SHA must be from workflow"
         );
         assert_eq!(
-            resolution.version.as_str(),
+            entry.version.as_str(),
             "v3.6.1",
             "version must be most specific tag"
         );
@@ -281,9 +273,9 @@ mod tests {
         )
         .unwrap();
 
-        let (_, commit) = lock.get(&key).expect("lock entry must exist");
+        let entry = lock.get(&key).expect("lock entry must exist");
         assert_eq!(
-            commit.sha.as_str(),
+            entry.commit.sha.as_str(),
             registry_sha,
             "SHA must come from registry when no workflow SHA"
         );

@@ -94,7 +94,7 @@ pub fn sync(
         }
 
         let global_specifier = match actions_global.get(&action.action.id) {
-            Some(spec) => spec.version.clone(),
+            Some(spec) => spec.specifier.clone(),
             None => continue,
         };
 
@@ -214,9 +214,9 @@ mod tests {
     }
 
     fn make_located(workflow: &str, action: &str, version: &str) -> LocatedAction {
-        use crate::domain::action::uses_ref::InterpretedRef;
+        use crate::domain::workflow_action::WorkflowAction;
         LocatedAction {
-            action: InterpretedRef {
+            action: WorkflowAction {
                 id: ActionId::from(action),
                 version: Version::from(version),
                 sha: None,

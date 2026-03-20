@@ -18,9 +18,9 @@ impl StaleCommentRule {
             action.action.id.clone(),
             Specifier::from_v1(action.action.version.as_str()),
         );
-        let (_, commit) = lock.get(&key)?;
+        let entry = lock.get(&key)?;
 
-        if commit.sha == *sha {
+        if entry.commit.sha == *sha {
             return None;
         }
 
@@ -30,7 +30,7 @@ impl StaleCommentRule {
             &action.action.id,
             action.action.version.as_str(),
             sha.as_str(),
-            commit.sha.as_str()
+            entry.commit.sha.as_str()
         );
         Some(
             Diagnostic::new(RuleName::StaleComment, Level::Warn, msg)
@@ -64,7 +64,8 @@ impl Rule for StaleCommentRule {
 mod tests {
     use super::{Level, Rule as _, RuleName, StaleCommentRule};
     use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Version};
-    use crate::domain::action::resolved::RegistryResolution;
+    use crate::domain::action::resolved::Commit;
+    use crate::domain::action::spec::Spec;
     use crate::domain::action::specifier::Specifier;
     use crate::domain::action::uses_ref::RefType;
     use crate::domain::lock::Lock;
@@ -73,21 +74,23 @@ mod tests {
 
     fn make_lock(action: &str, version: &str, sha: &str) -> Lock {
         let mut lock = Lock::default();
-        lock.set_from_registry(RegistryResolution::new(
-            ActionId::from(action),
-            Specifier::from_v1(version),
-            CommitSha::from(sha),
-            ActionId::from(action).base_repo(),
-            Some(RefType::Tag),
-            CommitDate::from("2026-01-01T00:00:00Z"),
-        ));
+        lock.set(
+            &Spec::new(ActionId::from(action), Specifier::from_v1(version)),
+            Version::from(version),
+            Commit {
+                sha: CommitSha::from(sha),
+                repository: ActionId::from(action).base_repo(),
+                ref_type: Some(RefType::Tag),
+                date: CommitDate::from("2026-01-01T00:00:00Z"),
+            },
+        );
         lock
     }
 
     fn make_located(action: &str, version: &str, sha: Option<&str>, workflow: &str) -> Located {
-        use crate::domain::action::uses_ref::InterpretedRef;
+        use crate::domain::workflow_action::WorkflowAction;
         Located {
-            action: InterpretedRef {
+            action: WorkflowAction {
                 id: ActionId::from(action),
                 version: Version::from(version),
                 sha: sha.map(CommitSha::from),

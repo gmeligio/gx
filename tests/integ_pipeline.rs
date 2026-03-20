@@ -42,16 +42,16 @@ fn init_sha_first_describe_sha_no_tags() {
 
     let lock = LockStore::new(&lock_path(&root)).load().unwrap();
     let key = Spec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
-    let (res, commit) = lock.get(&key).expect("Lock must have checkout@v4 entry");
+    let entry = lock.get(&key).expect("Lock must have checkout@v4 entry");
 
     assert_eq!(
-        commit.sha.as_str(),
+        entry.commit.sha.as_str(),
         checkout_sha.as_str(),
         "Lock SHA must match the workflow-pinned SHA"
     );
 
     assert_eq!(
-        res.version.as_str(),
+        entry.version.as_str(),
         checkout_sha.as_str(),
         "When describe_sha returns no tags, lock version should be the SHA itself"
     );
@@ -78,16 +78,16 @@ fn init_sha_first_describe_sha_empty_date() {
 
     let lock = LockStore::new(&lock_path(&root)).load().unwrap();
     let key = Spec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
-    let (_res, commit) = lock.get(&key).expect("Lock must have checkout@v4 entry");
+    let entry = lock.get(&key).expect("Lock must have checkout@v4 entry");
 
     assert_eq!(
-        commit.sha.as_str(),
+        entry.commit.sha.as_str(),
         checkout_sha.as_str(),
         "Lock SHA must match the workflow-pinned SHA"
     );
 
     assert_eq!(
-        commit.date.as_str(),
+        entry.commit.date.as_str(),
         "",
         "Date should be empty when commit date fetch fails"
     );
@@ -115,14 +115,14 @@ fn init_sha_first_describe_sha_fails_falls_back_to_resolve() {
 
     let lock = LockStore::new(&lock_path(&root)).load().unwrap();
     let key = Spec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
-    let (_res, commit) = lock.get(&key).expect("Lock must have checkout@v4 entry");
+    let entry = lock.get(&key).expect("Lock must have checkout@v4 entry");
 
     assert!(
-        !commit.sha.as_str().is_empty(),
+        !entry.commit.sha.as_str().is_empty(),
         "Lock entry must have a SHA"
     );
     assert_eq!(
-        commit.repository.as_str(),
+        entry.commit.repository.as_str(),
         "actions/checkout",
         "Repository must be set"
     );
