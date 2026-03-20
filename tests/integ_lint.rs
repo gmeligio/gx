@@ -5,8 +5,9 @@
 )]
 
 use gx::config::{Level, Lint};
-use gx::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository};
-use gx::domain::action::resolved::RegistryResolution;
+use gx::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
+use gx::domain::action::resolved::Commit;
+use gx::domain::action::spec::Spec as ActionSpec;
 use gx::domain::action::specifier::Specifier;
 use gx::domain::action::uses_ref::RefType;
 use gx::domain::lock::Lock;
@@ -273,14 +274,16 @@ jobs:
     manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
 
     let mut lock = Lock::default();
-    lock.set_from_registry(RegistryResolution::new(
-        ActionId::from("actions/checkout"),
-        Specifier::from_v1("v4"),
-        CommitSha::from("def456789012345678901234567890abcd123456"),
-        Repository::from("actions/checkout"),
-        Some(RefType::Tag),
-        CommitDate::from("2026-01-01T00:00:00Z"),
-    ));
+    lock.set(
+        &ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4")),
+        Version::from("v4"),
+        Commit {
+            sha: CommitSha::from("def456789012345678901234567890abcd123456"),
+            repository: Repository::from("actions/checkout"),
+            ref_type: Some(RefType::Tag),
+            date: CommitDate::from("2026-01-01T00:00:00Z"),
+        },
+    );
 
     let scanner = FileWorkflowScanner::new(repo_root);
     let lint_config = Lint::default();
@@ -323,14 +326,19 @@ jobs:
     );
 
     let mut lock = Lock::default();
-    lock.set_from_registry(RegistryResolution::new(
-        ActionId::from("actions/setup-node"),
-        Specifier::from_v1("v3"),
-        CommitSha::from("def456789012345678901234567890abcd123456"),
-        Repository::from("actions/setup-node"),
-        Some(RefType::Tag),
-        CommitDate::from("2026-01-01T00:00:00Z"),
-    ));
+    lock.set(
+        &ActionSpec::new(
+            ActionId::from("actions/setup-node"),
+            Specifier::from_v1("v3"),
+        ),
+        Version::from("v3"),
+        Commit {
+            sha: CommitSha::from("def456789012345678901234567890abcd123456"),
+            repository: Repository::from("actions/setup-node"),
+            ref_type: Some(RefType::Tag),
+            date: CommitDate::from("2026-01-01T00:00:00Z"),
+        },
+    );
 
     let scanner = FileWorkflowScanner::new(repo_root);
     let lint_config = Lint::default();
@@ -372,14 +380,19 @@ jobs:
     );
 
     let mut lock = Lock::default();
-    lock.set_from_registry(RegistryResolution::new(
-        ActionId::from("actions/setup-node"),
-        Specifier::from_v1("v3"),
-        CommitSha::from("def456789012345678901234567890abcd123456"),
-        Repository::from("actions/setup-node"),
-        Some(RefType::Tag),
-        CommitDate::from("2026-01-01T00:00:00Z"),
-    ));
+    lock.set(
+        &ActionSpec::new(
+            ActionId::from("actions/setup-node"),
+            Specifier::from_v1("v3"),
+        ),
+        Version::from("v3"),
+        Commit {
+            sha: CommitSha::from("def456789012345678901234567890abcd123456"),
+            repository: Repository::from("actions/setup-node"),
+            ref_type: Some(RefType::Tag),
+            date: CommitDate::from("2026-01-01T00:00:00Z"),
+        },
+    );
 
     let scanner = FileWorkflowScanner::new(repo_root);
 
@@ -471,14 +484,16 @@ jobs:
     manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
 
     let mut lock = Lock::default();
-    lock.set_from_registry(RegistryResolution::new(
-        ActionId::from("actions/checkout"),
-        Specifier::from_v1("v4"),
-        CommitSha::from("def456789012345678901234567890abcd123456"),
-        Repository::from("actions/checkout"),
-        Some(RefType::Tag),
-        CommitDate::from("2026-01-01T00:00:00Z"),
-    ));
+    lock.set(
+        &ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4")),
+        Version::from("v4"),
+        Commit {
+            sha: CommitSha::from("def456789012345678901234567890abcd123456"),
+            repository: Repository::from("actions/checkout"),
+            ref_type: Some(RefType::Tag),
+            date: CommitDate::from("2026-01-01T00:00:00Z"),
+        },
+    );
 
     let scanner = FileWorkflowScanner::new(repo_root);
 

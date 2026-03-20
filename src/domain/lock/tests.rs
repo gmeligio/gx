@@ -1,5 +1,8 @@
-use super::{ActionId, ActionKey, Commit, Lock, Spec};
+use super::Lock;
+use crate::domain::action::identity::ActionId;
 use crate::domain::action::identity::{CommitDate, CommitSha, Repository, Version};
+use crate::domain::action::resolved::Commit;
+use crate::domain::action::spec::Spec;
 use crate::domain::action::specifier::Specifier;
 use crate::domain::action::uses_ref::RefType;
 
@@ -40,12 +43,12 @@ fn set_and_get() {
     );
     let result = lock.get(&make_key("actions/checkout", "^4"));
     assert!(result.is_some());
-    let (res, commit) = result.unwrap();
+    let entry = result.unwrap();
     assert_eq!(
-        commit.sha,
+        entry.commit.sha,
         CommitSha::from("abc123def456789012345678901234567890abcd")
     );
-    assert_eq!(res.version, Version::from("v4.2.1"));
+    assert_eq!(entry.version, Version::from("v4.2.1"));
     assert!(lock.get(&make_key("actions/checkout", "^3")).is_none());
 }
 
@@ -97,39 +100,6 @@ fn retain() {
     assert!(lock.has(&make_key("actions/checkout", "^4")));
     assert!(lock.has(&make_key("actions/setup-node", "^3")));
     assert!(!lock.has(&make_key("actions/old-action", "^1")));
-    // Action entries are NOT pruned by retain — need cleanup_orphans
-    assert_eq!(lock.actions.len(), 3);
-}
-
-#[test]
-fn cleanup_orphans() {
-    let mut lock = Lock::default();
-    set_action(
-        &mut lock,
-        "actions/checkout",
-        "^4",
-        "abc123def456789012345678901234567890abcd",
-        "v4.2.1",
-    );
-    set_action(
-        &mut lock,
-        "actions/old-action",
-        "^1",
-        "xyz789012345678901234567890abcd12345678a",
-        "v1.0.0",
-    );
-
-    // Remove old-action resolution only
-    lock.resolutions
-        .remove(&make_key("actions/old-action", "^1"));
-    assert_eq!(lock.actions.len(), 2);
-
-    lock.cleanup_orphans();
-    assert_eq!(lock.actions.len(), 1);
-    assert!(lock.actions.contains_key(&ActionKey {
-        id: ActionId::from("actions/checkout"),
-        version: Version::from("v4.2.1"),
-    }));
 }
 
 #[test]
@@ -151,9 +121,9 @@ fn update_existing_sha() {
     );
     let result = lock.get(&make_key("actions/checkout", "^4"));
     assert!(result.is_some());
-    let (_, commit) = result.unwrap();
+    let entry = result.unwrap();
     assert_eq!(
-        commit.sha,
+        entry.commit.sha,
         CommitSha::from("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
     );
 }
@@ -195,7 +165,7 @@ fn is_complete_non_semver_ref() {
 }
 
 #[test]
-fn set_version_updates_action_key() {
+fn set_version_updates_entry() {
     let mut lock = Lock::default();
     set_action(
         &mut lock,
@@ -207,10 +177,10 @@ fn set_version_updates_action_key() {
     let spec = make_key("actions/checkout", "^4");
     lock.set_version(&spec, Some("v4.2.1".to_owned()));
 
-    let (res, commit) = lock.get(&spec).unwrap();
-    assert_eq!(res.version, Version::from("v4.2.1"));
+    let entry = lock.get(&spec).unwrap();
+    assert_eq!(entry.version, Version::from("v4.2.1"));
     assert_eq!(
-        commit.sha,
+        entry.commit.sha,
         CommitSha::from("abc123def456789012345678901234567890abcd")
     );
 }

@@ -145,7 +145,6 @@ where
     }
     let keys_to_retain = planned_manifest.lock_keys();
     planned_lock.retain(&keys_to_retain);
-    planned_lock.cleanup_orphans();
 
     // Phase 4: Compute workflow patches (instead of writing files)
     let workflow_patches =

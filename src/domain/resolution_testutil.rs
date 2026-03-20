@@ -1,16 +1,13 @@
-use super::{Error as ResolutionError, ResolvedRef, ShaDescription, VersionRegistry};
+use super::{Error as ResolutionError, ShaDescription, VersionRegistry};
 use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Version};
+use crate::domain::action::resolved::Commit;
 use crate::domain::action::uses_ref::RefType;
 
 /// Registry that always fails with `AuthRequired` on every method.
 pub struct AuthRequiredRegistry;
 
 impl VersionRegistry for AuthRequiredRegistry {
-    fn lookup_sha(
-        &self,
-        _id: &ActionId,
-        _version: &Version,
-    ) -> Result<ResolvedRef, ResolutionError> {
+    fn lookup_sha(&self, _id: &ActionId, _version: &Version) -> Result<Commit, ResolutionError> {
         Err(ResolutionError::AuthRequired)
     }
 
@@ -87,7 +84,7 @@ impl FakeRegistry {
 }
 
 impl VersionRegistry for FakeRegistry {
-    fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<ResolvedRef, ResolutionError> {
+    fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<Commit, ResolutionError> {
         let sha = self.fixed_sha.as_ref().map_or_else(
             || {
                 self.tags
@@ -96,12 +93,12 @@ impl VersionRegistry for FakeRegistry {
             },
             Clone::clone,
         );
-        Ok(ResolvedRef::new(
-            CommitSha::from(sha),
-            id.base_repo(),
-            Some(RefType::Tag),
-            CommitDate::from("2026-01-01T00:00:00Z"),
-        ))
+        Ok(Commit {
+            sha: CommitSha::from(sha),
+            repository: id.base_repo(),
+            ref_type: Some(RefType::Tag),
+            date: CommitDate::from("2026-01-01T00:00:00Z"),
+        })
     }
 
     fn tags_for_sha(

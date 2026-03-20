@@ -3,8 +3,7 @@ use crate::domain::action::resolved::Commit;
 use crate::domain::action::spec::Spec;
 use crate::domain::action::specifier::Specifier;
 use crate::domain::action::uses_ref::RefType;
-use crate::domain::lock::resolution::Resolution;
-use crate::domain::lock::{ActionKey, Lock};
+use crate::domain::lock::{Lock, LockEntry};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
@@ -33,10 +32,10 @@ pub struct ActionCommitData {
 /// Internal structure for two-tier TOML deserialization.
 #[derive(Debug, Deserialize, Default)]
 pub struct TwoTierData {
-    /// Map of action ID → specifier → resolution data.
+    /// Map of action ID -> specifier -> resolution data.
     #[serde(default)]
     pub resolutions: HashMap<String, HashMap<String, ResolutionEntryData>>,
-    /// Map of action ID → version → commit data.
+    /// Map of action ID -> version -> commit data.
     #[serde(default)]
     pub actions: HashMap<String, HashMap<String, ActionCommitData>>,
 }
@@ -51,48 +50,50 @@ pub fn try_parse(content: &str, path: &Path) -> Result<Option<Lock>, super::Erro
     }
 
     let data: TwoTierData = super::parse_toml(content, path)?;
-    Ok(Some(lock_from_two_tier(data)))
+    Ok(Some(lock_from_two_tier(&data)))
 }
 
 /// Convert deserialized two-tier lock data into a domain `Lock`.
-fn lock_from_two_tier(data: TwoTierData) -> Lock {
-    let mut resolutions = HashMap::new();
-    let mut actions = HashMap::new();
+fn lock_from_two_tier(data: &TwoTierData) -> Lock {
+    let mut entries = HashMap::new();
 
-    for (action_id, specifiers) in data.resolutions {
+    // First, index the action commit data by (action_id, version) for lookup.
+    let mut action_index: HashMap<(&str, &str), &ActionCommitData> = HashMap::new();
+    for (action_id, versions) in &data.actions {
+        for (version, commit_data) in versions {
+            action_index.insert((action_id.as_str(), version.as_str()), commit_data);
+        }
+    }
+
+    for (action_id, specifiers) in &data.resolutions {
         for (specifier, res_data) in specifiers {
             let spec = Spec::new(
                 ActionId::from(action_id.as_str()),
-                Specifier::parse(&specifier),
+                Specifier::parse(specifier),
             );
-            resolutions.insert(
-                spec,
-                Resolution {
-                    version: Version::from(res_data.version.as_str()),
-                },
-            );
+            let version = Version::from(res_data.version.as_str());
+
+            // Look up the corresponding action commit data.
+            if let Some(commit_data) =
+                action_index.get(&(action_id.as_str(), res_data.version.as_str()))
+            {
+                entries.insert(
+                    spec,
+                    LockEntry {
+                        version,
+                        commit: Commit {
+                            sha: CommitSha::from(commit_data.sha.as_str()),
+                            repository: Repository::from(commit_data.repository.as_str()),
+                            ref_type: RefType::parse(&commit_data.ref_type),
+                            date: CommitDate::from(commit_data.date.as_str()),
+                        },
+                    },
+                );
+            }
         }
     }
 
-    for (action_id, versions) in data.actions {
-        for (version, commit_data) in versions {
-            let key = ActionKey {
-                id: ActionId::from(action_id.as_str()),
-                version: Version::from(version.as_str()),
-            };
-            actions.insert(
-                key,
-                Commit {
-                    sha: CommitSha::from(commit_data.sha),
-                    repository: Repository::from(commit_data.repository),
-                    ref_type: RefType::parse(&commit_data.ref_type),
-                    date: CommitDate::from(commit_data.date),
-                },
-            );
-        }
-    }
-
-    Lock::new(resolutions, actions)
+    Lock::new(entries)
 }
 
 /// Serialize a `Lock` to the two-tier TOML format string.
@@ -109,20 +110,21 @@ pub(super) fn write(lock: &Lock) -> String {
 fn build_lock_document(lock: &Lock) -> DocumentMut {
     let mut doc = DocumentMut::new();
 
+    // Collect entries sorted by action ID then specifier.
+    let mut sorted_entries: Vec<_> = lock.entries().collect();
+    sorted_entries.sort_by(|(a, _), (b, _)| {
+        a.id.as_str()
+            .cmp(b.id.as_str())
+            .then_with(|| a.specifier.as_str().cmp(b.specifier.as_str()))
+    });
+
     // --- [resolutions] tier ---
     let mut resolutions = toml_edit::Table::new();
     resolutions.set_implicit(true);
 
-    let mut res_entries: Vec<_> = lock.resolution_entries().collect();
-    res_entries.sort_by(|(a, _), (b, _)| {
-        a.id.as_str()
-            .cmp(b.id.as_str())
-            .then_with(|| a.version.as_str().cmp(b.version.as_str()))
-    });
-
-    for (spec, resolution) in &res_entries {
+    for (spec, entry) in &sorted_entries {
         let id_str = spec.id.as_str();
-        let specifier_str = spec.version.as_str();
+        let specifier_str = spec.specifier.as_str();
 
         ensure_implicit_table(&mut resolutions, id_str);
 
@@ -134,26 +136,33 @@ fn build_lock_document(lock: &Lock) -> DocumentMut {
         };
 
         let mut entry_table = toml_edit::Table::new();
-        entry_table.insert("version", toml_edit::value(resolution.version.as_str()));
+        entry_table.insert("version", toml_edit::value(entry.version.as_str()));
         id_table.insert(specifier_str, toml_edit::Item::Table(entry_table));
     }
 
     doc.insert("resolutions", toml_edit::Item::Table(resolutions));
 
     // --- [actions] tier ---
+    // Deduplicate by (action_id, version) since multiple specs can share the same commit.
     let mut actions = toml_edit::Table::new();
     actions.set_implicit(true);
 
-    let mut action_entries: Vec<_> = lock.action_entries().collect();
-    action_entries.sort_by(|(a, _), (b, _)| {
-        a.id.as_str()
-            .cmp(b.id.as_str())
-            .then_with(|| a.version.as_str().cmp(b.version.as_str()))
-    });
+    // Collect unique (id, version) -> commit, sorted.
+    let mut action_map: HashMap<(&str, &str), &Commit> = HashMap::new();
+    for (spec, entry) in &sorted_entries {
+        action_map
+            .entry((spec.id.as_str(), entry.version.as_str()))
+            .or_insert(&entry.commit);
+    }
 
-    for (key, commit) in &action_entries {
-        let id_str = key.id.as_str();
-        let version_str = key.version.as_str();
+    let mut action_keys: Vec<_> = action_map.keys().copied().collect();
+    action_keys
+        .sort_by(|(a_id, a_ver), (b_id, b_ver)| a_id.cmp(b_id).then_with(|| a_ver.cmp(b_ver)));
+
+    for (id_str, version_str) in &action_keys {
+        let Some(commit) = action_map.get(&(*id_str, *version_str)) else {
+            continue;
+        };
 
         ensure_implicit_table(&mut actions, id_str);
 
@@ -215,34 +224,39 @@ fn populate_action_table(
 mod tests {
     use super::*;
     use crate::domain::action::identity::{ActionId, CommitSha};
-    use crate::domain::action::resolved::RegistryResolution;
     use crate::domain::action::specifier::Specifier;
     use crate::domain::action::uses_ref::RefType;
 
-    fn make_resolved(action: &str, specifier: &str, sha: &str) -> RegistryResolution {
-        RegistryResolution::new(
-            ActionId::from(action),
-            Specifier::parse(specifier),
-            CommitSha::from(sha),
-            ActionId::from(action).base_repo(),
-            Some(RefType::Tag),
-            CommitDate::from("2026-01-01T00:00:00Z"),
-        )
+    fn set_resolved(lock: &mut Lock, action: &str, specifier: &str, sha: &str) {
+        let spec = Spec::new(ActionId::from(action), Specifier::parse(specifier));
+        let version = Version::from(Specifier::parse(specifier).to_lookup_tag());
+        lock.set(
+            &spec,
+            version,
+            Commit {
+                sha: CommitSha::from(sha),
+                repository: ActionId::from(action).base_repo(),
+                ref_type: Some(RefType::Tag),
+                date: CommitDate::from("2026-01-01T00:00:00Z"),
+            },
+        );
     }
 
     #[test]
     fn roundtrip_write_then_parse() {
         let mut lock = Lock::default();
-        lock.set_from_registry(make_resolved(
+        set_resolved(
+            &mut lock,
             "actions/checkout",
             "^4",
             "abc123def456789012345678901234567890abcd",
-        ));
-        lock.set_from_registry(make_resolved(
+        );
+        set_resolved(
+            &mut lock,
             "actions/setup-node",
             "^3",
             "def456789012345678901234567890abcdef1234",
-        ));
+        );
 
         let output = write(&lock);
         let parsed = try_parse(&output, Path::new("test.lock"))
@@ -259,15 +273,15 @@ mod tests {
             "setup-node entry must survive roundtrip"
         );
 
-        let (_, commit1) = parsed.get(&spec1).unwrap();
+        let entry1 = parsed.get(&spec1).unwrap();
         assert_eq!(
-            commit1.sha,
+            entry1.commit.sha,
             CommitSha::from("abc123def456789012345678901234567890abcd")
         );
 
-        let (_, commit2) = parsed.get(&spec2).unwrap();
+        let entry2 = parsed.get(&spec2).unwrap();
         assert_eq!(
-            commit2.sha,
+            entry2.commit.sha,
             CommitSha::from("def456789012345678901234567890abcdef1234")
         );
     }
@@ -286,16 +300,18 @@ mod tests {
     #[test]
     fn write_produces_sorted_output() {
         let mut lock = Lock::default();
-        lock.set_from_registry(make_resolved(
+        set_resolved(
+            &mut lock,
             "docker/build-push-action",
             "^5",
             "def456789012345678901234567890abcdef123456",
-        ));
-        lock.set_from_registry(make_resolved(
+        );
+        set_resolved(
+            &mut lock,
             "actions/checkout",
             "^4",
             "abc123def456789012345678901234567890abcdef",
-        ));
+        );
 
         let output = write(&lock);
         let checkout_pos = output.find("actions/checkout").unwrap();

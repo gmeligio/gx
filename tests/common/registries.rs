@@ -3,12 +3,11 @@
     reason = "shared test helpers: not every integration test crate uses every item"
 )]
 use gx::domain::action::identity::{ActionId, CommitDate, CommitSha, Version};
+use gx::domain::action::resolved::Commit;
 use gx::domain::action::spec::Spec as ActionSpec;
 use gx::domain::action::specifier::Specifier;
 use gx::domain::action::uses_ref::RefType;
-use gx::domain::resolution::{
-    Error as ResolutionError, ResolvedRef, ShaDescription, VersionRegistry,
-};
+use gx::domain::resolution::{Error as ResolutionError, ShaDescription, VersionRegistry};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash as _, Hasher as _};
 
@@ -62,13 +61,13 @@ impl FakeRegistry {
 }
 
 impl VersionRegistry for FakeRegistry {
-    fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<ResolvedRef, ResolutionError> {
-        Ok(ResolvedRef::new(
-            CommitSha::from(Self::fake_sha(id.as_str(), version.as_str())),
-            id.base_repo(),
-            Some(RefType::Tag),
-            CommitDate::from("2026-01-01T00:00:00Z"),
-        ))
+    fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<Commit, ResolutionError> {
+        Ok(Commit {
+            sha: CommitSha::from(Self::fake_sha(id.as_str(), version.as_str())),
+            repository: id.base_repo(),
+            ref_type: Some(RefType::Tag),
+            date: CommitDate::from("2026-01-01T00:00:00Z"),
+        })
     }
 
     fn tags_for_sha(
@@ -125,11 +124,7 @@ impl VersionRegistry for FakeRegistry {
 pub struct AuthRequiredRegistry;
 
 impl VersionRegistry for AuthRequiredRegistry {
-    fn lookup_sha(
-        &self,
-        _id: &ActionId,
-        _version: &Version,
-    ) -> Result<ResolvedRef, ResolutionError> {
+    fn lookup_sha(&self, _id: &ActionId, _version: &Version) -> Result<Commit, ResolutionError> {
         Err(ResolutionError::AuthRequired)
     }
 
@@ -160,13 +155,13 @@ impl VersionRegistry for AuthRequiredRegistry {
 pub struct EmptyDateRegistry;
 
 impl VersionRegistry for EmptyDateRegistry {
-    fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<ResolvedRef, ResolutionError> {
-        Ok(ResolvedRef::new(
-            CommitSha::from(FakeRegistry::fake_sha(id.as_str(), version.as_str())),
-            id.base_repo(),
-            Some(RefType::Tag),
-            CommitDate::from(""),
-        ))
+    fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<Commit, ResolutionError> {
+        Ok(Commit {
+            sha: CommitSha::from(FakeRegistry::fake_sha(id.as_str(), version.as_str())),
+            repository: id.base_repo(),
+            ref_type: Some(RefType::Tag),
+            date: CommitDate::from(""),
+        })
     }
 
     fn tags_for_sha(
@@ -200,13 +195,13 @@ impl VersionRegistry for EmptyDateRegistry {
 pub struct FailingDescribeRegistry;
 
 impl VersionRegistry for FailingDescribeRegistry {
-    fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<ResolvedRef, ResolutionError> {
-        Ok(ResolvedRef::new(
-            CommitSha::from(FakeRegistry::fake_sha(id.as_str(), version.as_str())),
-            id.base_repo(),
-            Some(RefType::Tag),
-            CommitDate::from("2026-01-01T00:00:00Z"),
-        ))
+    fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<Commit, ResolutionError> {
+        Ok(Commit {
+            sha: CommitSha::from(FakeRegistry::fake_sha(id.as_str(), version.as_str())),
+            repository: id.base_repo(),
+            ref_type: Some(RefType::Tag),
+            date: CommitDate::from("2026-01-01T00:00:00Z"),
+        })
     }
 
     fn tags_for_sha(

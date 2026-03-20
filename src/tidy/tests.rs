@@ -2,7 +2,8 @@
 
 use super::{Error as TidyError, apply_workflow_patches, plan};
 use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
-use crate::domain::action::resolved::RegistryResolution;
+use crate::domain::action::resolved::Commit;
+use crate::domain::action::spec::Spec;
 use crate::domain::action::specifier::Specifier;
 use crate::domain::action::uses_ref::RefType;
 use crate::domain::lock::Lock;
@@ -32,7 +33,7 @@ impl crate::domain::resolution::VersionRegistry for NoopRegistry {
         &self,
         _id: &ActionId,
         _version: &Version,
-    ) -> Result<crate::domain::resolution::ResolvedRef, crate::domain::resolution::Error> {
+    ) -> Result<crate::domain::action::resolved::Commit, crate::domain::resolution::Error> {
         Err(crate::domain::resolution::Error::AuthRequired)
     }
     fn tags_for_sha(
@@ -95,22 +96,29 @@ jobs:
 
     // Pre-seed lock with both versions already resolved (simulates a pre-existing lock)
     let mut seeded_lock = Lock::default();
-    seeded_lock.set_from_registry(RegistryResolution::new(
-        ActionId::from("actions/checkout"),
-        Specifier::from_v1("v6.0.1"),
-        CommitSha::from("8e8c483db84b4bee98b60c0593521ed34d9990e8"),
-        Repository::from("actions/checkout"),
-        Some(RefType::Tag),
-        CommitDate::from("2026-01-01T00:00:00Z"),
-    ));
-    seeded_lock.set_from_registry(RegistryResolution::new(
-        ActionId::from("actions/checkout"),
-        Specifier::from_v1("v5"),
-        CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-        Repository::from("actions/checkout"),
-        Some(RefType::Tag),
-        CommitDate::from("2026-01-01T00:00:00Z"),
-    ));
+    seeded_lock.set(
+        &Spec::new(
+            ActionId::from("actions/checkout"),
+            Specifier::from_v1("v6.0.1"),
+        ),
+        Version::from("v6.0.1"),
+        Commit {
+            sha: CommitSha::from("8e8c483db84b4bee98b60c0593521ed34d9990e8"),
+            repository: Repository::from("actions/checkout"),
+            ref_type: Some(RefType::Tag),
+            date: CommitDate::from("2026-01-01T00:00:00Z"),
+        },
+    );
+    seeded_lock.set(
+        &Spec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v5")),
+        Version::from("v5"),
+        Commit {
+            sha: CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            repository: Repository::from("actions/checkout"),
+            ref_type: Some(RefType::Tag),
+            date: CommitDate::from("2026-01-01T00:00:00Z"),
+        },
+    );
     let lock_store = lock::Store::new(&lock_path);
     lock_store.save(&seeded_lock).unwrap();
 
@@ -193,14 +201,16 @@ jobs:
 
     // Pre-seed lock so tidy doesn't need to resolve
     let mut lock = Lock::default();
-    lock.set_from_registry(RegistryResolution::new(
-        ActionId::from("actions/checkout"),
-        Specifier::from_v1("v4"),
-        CommitSha::from("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
-        Repository::from("actions/checkout"),
-        Some(RefType::Tag),
-        CommitDate::from("2026-01-01T00:00:00Z"),
-    ));
+    lock.set(
+        &Spec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4")),
+        Version::from("v4"),
+        Commit {
+            sha: CommitSha::from("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+            repository: Repository::from("actions/checkout"),
+            ref_type: Some(RefType::Tag),
+            date: CommitDate::from("2026-01-01T00:00:00Z"),
+        },
+    );
 
     let scanner = FileWorkflowScanner::new(repo_root);
 
@@ -257,14 +267,16 @@ fn plan_one_new_action_produces_added_entries() {
 
     // Pre-seed lock so plan doesn't need to resolve via registry
     let mut lock = Lock::default();
-    lock.set_from_registry(RegistryResolution::new(
-        ActionId::from("actions/checkout"),
-        Specifier::from_v1("v4"),
-        CommitSha::from(sha),
-        Repository::from("actions/checkout"),
-        Some(RefType::Tag),
-        CommitDate::from("2026-01-01T00:00:00Z"),
-    ));
+    lock.set(
+        &Spec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4")),
+        Version::from("v4"),
+        Commit {
+            sha: CommitSha::from(sha),
+            repository: Repository::from("actions/checkout"),
+            ref_type: Some(RefType::Tag),
+            date: CommitDate::from("2026-01-01T00:00:00Z"),
+        },
+    );
 
     let manifest = Manifest::default(); // empty — action is "new"
     let scanner = FileWorkflowScanner::new(repo_root);
@@ -303,22 +315,29 @@ fn plan_removed_action_produces_removed_entries() {
 
     // Pre-seed lock for both
     let mut lock = Lock::default();
-    lock.set_from_registry(RegistryResolution::new(
-        ActionId::from("actions/checkout"),
-        Specifier::from_v1("v4"),
-        CommitSha::from("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
-        Repository::from("actions/checkout"),
-        Some(RefType::Tag),
-        CommitDate::from("2026-01-01T00:00:00Z"),
-    ));
-    lock.set_from_registry(RegistryResolution::new(
-        ActionId::from("actions/setup-node"),
-        Specifier::from_v1("v3"),
-        CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-        Repository::from("actions/setup-node"),
-        Some(RefType::Tag),
-        CommitDate::from("2026-01-01T00:00:00Z"),
-    ));
+    lock.set(
+        &Spec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4")),
+        Version::from("v4"),
+        Commit {
+            sha: CommitSha::from("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+            repository: Repository::from("actions/checkout"),
+            ref_type: Some(RefType::Tag),
+            date: CommitDate::from("2026-01-01T00:00:00Z"),
+        },
+    );
+    lock.set(
+        &Spec::new(
+            ActionId::from("actions/setup-node"),
+            Specifier::from_v1("v3"),
+        ),
+        Version::from("v3"),
+        Commit {
+            sha: CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            repository: Repository::from("actions/setup-node"),
+            ref_type: Some(RefType::Tag),
+            date: CommitDate::from("2026-01-01T00:00:00Z"),
+        },
+    );
 
     let scanner = FileWorkflowScanner::new(repo_root);
 
@@ -371,14 +390,16 @@ fn plan_everything_in_sync_returns_empty_plan() {
 
     // Lock already has the entry fully populated
     let mut lock = Lock::default();
-    lock.set_from_registry(RegistryResolution::new(
-        ActionId::from("actions/checkout"),
-        Specifier::from_v1("v4"),
-        CommitSha::from(sha),
-        Repository::from("actions/checkout"),
-        Some(RefType::Tag),
-        CommitDate::from("2026-01-01T00:00:00Z"),
-    ));
+    lock.set(
+        &Spec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4")),
+        Version::from("v4"),
+        Commit {
+            sha: CommitSha::from(sha),
+            repository: Repository::from("actions/checkout"),
+            ref_type: Some(RefType::Tag),
+            date: CommitDate::from("2026-01-01T00:00:00Z"),
+        },
+    );
 
     let scanner = FileWorkflowScanner::new(repo_root);
 

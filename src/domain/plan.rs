@@ -1,8 +1,8 @@
 use super::action::identity::ActionId;
-use super::action::resolved::{Commit, ResolvedAction};
+use super::action::resolved::ResolvedAction;
 use super::action::spec::Spec;
 use super::action::specifier::Specifier;
-use super::lock::resolution::Resolution;
+use super::lock::LockEntry;
 use super::manifest::overrides::ActionOverride;
 use std::path::PathBuf;
 
@@ -37,7 +37,7 @@ pub struct LockEntryPatch {
 /// Describes the changes to apply to a lock file.
 #[derive(Debug, Default)]
 pub struct LockDiff {
-    pub added: Vec<(Spec, Resolution, Commit)>,
+    pub added: Vec<(Spec, LockEntry)>,
     pub removed: Vec<Spec>,
     pub updated: Vec<(Spec, LockEntryPatch)>,
 }
@@ -58,8 +58,11 @@ pub struct WorkflowPatch {
 
 #[cfg(test)]
 mod tests {
-    use super::{ActionId, Commit, LockDiff, ManifestDiff, Resolution, Spec, Specifier};
-    use crate::domain::action::identity::{CommitDate, CommitSha, Repository, Version};
+    use super::{LockDiff, LockEntry, ManifestDiff};
+    use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
+    use crate::domain::action::resolved::Commit;
+    use crate::domain::action::spec::Spec;
+    use crate::domain::action::specifier::Specifier;
     use crate::domain::action::uses_ref::RefType;
 
     #[test]
@@ -88,14 +91,14 @@ mod tests {
         let diff = LockDiff {
             added: vec![(
                 Spec::new(ActionId::from("actions/checkout"), Specifier::parse("^4")),
-                Resolution {
+                LockEntry {
                     version: Version::from("v4"),
-                },
-                Commit {
-                    sha: CommitSha::from("abc123"),
-                    repository: Repository::from("actions/checkout"),
-                    ref_type: Some(RefType::Tag),
-                    date: CommitDate::from("2026-01-01T00:00:00Z"),
+                    commit: Commit {
+                        sha: CommitSha::from("abc123"),
+                        repository: Repository::from("actions/checkout"),
+                        ref_type: Some(RefType::Tag),
+                        date: CommitDate::from("2026-01-01T00:00:00Z"),
+                    },
                 },
             )],
             ..Default::default()

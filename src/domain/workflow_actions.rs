@@ -1,5 +1,5 @@
 use super::action::identity::{ActionId, Version};
-use super::action::uses_ref::InterpretedRef;
+use super::workflow_action::WorkflowAction;
 use std::collections::{HashMap, HashSet};
 
 /// Aggregates action versions discovered across all workflows.
@@ -31,7 +31,7 @@ impl ActionSet {
     }
 
     /// Add an interpreted action reference to the set.
-    pub fn add(&mut self, interpreted: &InterpretedRef) {
+    pub fn add(&mut self, interpreted: &WorkflowAction) {
         self.versions
             .entry(interpreted.id.clone())
             .or_default()
@@ -201,20 +201,20 @@ pub struct Location {
 #[derive(Debug, Clone)]
 pub struct Located {
     /// The interpreted action reference (id, version, optional SHA).
-    pub action: InterpretedRef,
+    pub action: WorkflowAction,
     pub location: Location,
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        ActionId, ActionSet, InterpretedRef, JobId, Located, Location, StepIndex, Version,
+        ActionId, ActionSet, JobId, Located, Location, StepIndex, Version, WorkflowAction,
         WorkflowPath,
     };
     use crate::domain::action::identity::CommitSha;
 
-    fn make_interpreted(name: &str, version: &str, sha: Option<&str>) -> InterpretedRef {
-        InterpretedRef {
+    fn make_interpreted(name: &str, version: &str, sha: Option<&str>) -> WorkflowAction {
+        WorkflowAction {
             id: ActionId::from(name),
             version: Version::from(version),
             sha: sha.map(CommitSha::from),
@@ -269,7 +269,7 @@ mod tests {
             step: Some(StepIndex::from(0_u16)),
         };
         let action = Located {
-            action: InterpretedRef {
+            action: WorkflowAction {
                 id: ActionId::from("actions/checkout"),
                 version: Version::from("v4"),
                 sha: None,

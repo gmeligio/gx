@@ -2,8 +2,7 @@ use crate::domain::action::identity::{CommitDate, CommitSha, Repository, Version
 use crate::domain::action::resolved::Commit;
 use crate::domain::action::spec::Spec;
 use crate::domain::action::uses_ref::RefType;
-use crate::domain::lock::resolution::Resolution;
-use crate::domain::lock::{ActionKey, Lock};
+use crate::domain::lock::{Lock, LockEntry};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
@@ -16,7 +15,7 @@ pub struct FlatEntryData {
     /// The resolved version string (e.g. "v4.0.0").
     #[serde(default)]
     pub version: Option<String>,
-    /// Legacy comment field — consumed by serde during deserialization but no longer used.
+    /// Legacy comment field -- consumed by serde during deserialization but no longer used.
     #[serde(default)]
     #[expect(
         dead_code,
@@ -34,7 +33,7 @@ pub struct FlatEntryData {
 /// Internal structure for flat TOML deserialization (legacy format).
 #[derive(Debug, Deserialize, Default)]
 pub struct FlatData {
-    /// Schema version string (ignored by serde — present in v1.4 files).
+    /// Schema version string (ignored by serde -- present in v1.4 files).
     #[serde(default)]
     #[expect(
         dead_code,
@@ -64,8 +63,7 @@ pub fn try_parse(content: &str, path: &Path) -> Result<Option<Lock>, super::Erro
 
 /// Convert deserialized flat lock data into a domain `Lock`.
 fn lock_from_flat(data: FlatData) -> Lock {
-    let mut resolutions = HashMap::new();
-    let mut actions = HashMap::new();
+    let mut entries = HashMap::new();
 
     for (k, entry_data) in data.actions {
         let Some(spec) = Spec::parse(&k) else {
@@ -74,30 +72,23 @@ fn lock_from_flat(data: FlatData) -> Lock {
         let version_str = entry_data
             .version
             .as_deref()
-            .unwrap_or(spec.version.as_str());
+            .unwrap_or(spec.specifier.as_str());
         let version = Version::from(version_str);
-        resolutions.insert(
-            spec.clone(),
-            Resolution {
-                version: version.clone(),
-            },
-        );
-        let key = ActionKey {
-            id: spec.id.clone(),
-            version,
-        };
-        actions.insert(
-            key,
-            Commit {
-                sha: CommitSha::from(entry_data.sha),
-                repository: Repository::from(entry_data.repository),
-                ref_type: RefType::parse(&entry_data.ref_type),
-                date: CommitDate::from(entry_data.date),
+        entries.insert(
+            spec,
+            LockEntry {
+                version,
+                commit: Commit {
+                    sha: CommitSha::from(entry_data.sha),
+                    repository: Repository::from(entry_data.repository),
+                    ref_type: RefType::parse(&entry_data.ref_type),
+                    date: CommitDate::from(entry_data.date),
+                },
             },
         );
     }
 
-    Lock::new(resolutions, actions)
+    Lock::new(entries)
 }
 
 #[cfg(test)]
@@ -125,10 +116,10 @@ mod tests {
         let result = try_parse(content, Path::new("test.lock")).unwrap();
         assert!(result.is_some(), "v1.4 format must be parsed as flat");
         let lock = result.unwrap();
-        let (res, commit) = lock.get(&make_key("actions/checkout", "^6")).unwrap();
-        assert_eq!(res.version.as_str(), "v6.2.3");
+        let entry = lock.get(&make_key("actions/checkout", "^6")).unwrap();
+        assert_eq!(entry.version.as_str(), "v6.2.3");
         assert_eq!(
-            commit.sha,
+            entry.commit.sha,
             CommitSha::from("de0fac2e4500dabe0009e67214ff5f5447ce83dd")
         );
     }
@@ -146,10 +137,10 @@ date = "2026-01-01T00:00:00Z"
         let result = try_parse(content, Path::new("test.lock")).unwrap();
         assert!(result.is_some(), "flat format without version must parse");
         let lock = result.unwrap();
-        let (res, commit) = lock.get(&make_key("actions/checkout", "^4")).unwrap();
-        assert_eq!(res.version.as_str(), "v4.0.0");
+        let entry = lock.get(&make_key("actions/checkout", "^4")).unwrap();
+        assert_eq!(entry.version.as_str(), "v4.0.0");
         assert_eq!(
-            commit.sha,
+            entry.commit.sha,
             CommitSha::from("abc123def456789012345678901234567890abcd")
         );
     }
@@ -166,9 +157,9 @@ date = ""
         let result = try_parse(content, Path::new("test.lock")).unwrap();
         assert!(result.is_some());
         let lock = result.unwrap();
-        let (res, _) = lock.get(&make_key("actions/checkout", "^4")).unwrap();
+        let entry = lock.get(&make_key("actions/checkout", "^4")).unwrap();
         assert_eq!(
-            res.version.as_str(),
+            entry.version.as_str(),
             "^4",
             "missing version must fall back to specifier"
         );
@@ -196,23 +187,18 @@ date = "2026-01-01T00:00:00Z"
         assert!(result.is_some());
         let lock = result.unwrap();
 
-        // Two resolution entries
+        // Two entries
         let spec1 = make_key("actions/checkout", "^4");
         let spec2 = make_key("actions/checkout", "^4.2");
         assert!(lock.has(&spec1));
         assert!(lock.has(&spec2));
 
-        // But only one action entry (same version v4.2.1)
-        let action_entries: Vec<_> = lock.action_entries().collect();
-        let checkout_actions: Vec<_> = action_entries
-            .iter()
-            .filter(|(k, _)| k.id == ActionId::from("actions/checkout"))
-            .collect();
-        assert_eq!(
-            checkout_actions.len(),
-            1,
-            "two flat entries with same version should deduplicate to one action entry"
-        );
+        // Both have same version and SHA
+        let entry1 = lock.get(&spec1).unwrap();
+        let entry2 = lock.get(&spec2).unwrap();
+        assert_eq!(entry1.version.as_str(), "v4.2.1");
+        assert_eq!(entry2.version.as_str(), "v4.2.1");
+        assert_eq!(entry1.commit.sha, entry2.commit.sha);
     }
 
     #[test]

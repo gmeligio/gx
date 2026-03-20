@@ -5,6 +5,7 @@ pub mod manifest;
 pub mod plan;
 pub mod resolution;
 pub mod workflow;
+pub mod workflow_action;
 pub mod workflow_actions;
 
 /// Wraps a parsed value with a flag indicating whether format migration occurred.

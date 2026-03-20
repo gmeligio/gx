@@ -168,7 +168,7 @@ pub fn build_manifest_document(manifest: &Manifest) -> DocumentMut {
     specs.sort_by_key(|s| s.id.as_str().to_owned());
 
     for spec in &specs {
-        actions.insert(spec.id.as_str(), toml_edit::value(spec.version.as_str()));
+        actions.insert(spec.id.as_str(), toml_edit::value(spec.specifier.as_str()));
     }
 
     // Build [actions.overrides] if any overrides exist

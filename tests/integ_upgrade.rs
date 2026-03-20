@@ -13,9 +13,8 @@ use common::setup::{
     create_test_repo, lock_path, manifest_path, write_lock, write_manifest, write_workflow,
 };
 use gx::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
-use gx::domain::action::resolved::RegistryResolution;
-use gx::domain::action::resolved::ResolvedAction;
-use gx::domain::action::spec::Spec;
+use gx::domain::action::resolved::{Commit, ResolvedAction};
+use gx::domain::action::spec::Spec as ActionSpec;
 use gx::domain::action::specifier::Specifier;
 use gx::domain::action::uses_ref::RefType;
 use gx::domain::lock::Lock;
@@ -270,16 +269,21 @@ jobs:
         Specifier::from_v1("v6.0.2"),
     );
 
-    lock.set_from_registry(RegistryResolution::new(
-        ActionId::from("actions/checkout"),
-        Specifier::from_v1("v6.0.2"),
-        CommitSha::from(checkout_new_sha),
-        Repository::from("actions/checkout"),
-        Some(RefType::Tag),
-        CommitDate::from(""),
-    ));
+    lock.set(
+        &ActionSpec::new(
+            ActionId::from("actions/checkout"),
+            Specifier::from_v1("v6.0.2"),
+        ),
+        Version::from("v6.0.2"),
+        Commit {
+            sha: CommitSha::from(checkout_new_sha),
+            repository: Repository::from("actions/checkout"),
+            ref_type: Some(RefType::Tag),
+            date: CommitDate::from(""),
+        },
+    );
 
-    let keys_to_retain: Vec<Spec> = manifest.specs().cloned().collect();
+    let keys_to_retain: Vec<ActionSpec> = manifest.specs().cloned().collect();
     lock.retain(&keys_to_retain);
 
     let pins = vec![ResolvedAction {
@@ -328,14 +332,19 @@ fn upgrade_repins_branch_ref() {
     );
 
     let mut lock = Lock::default();
-    lock.set_from_registry(RegistryResolution::new(
-        ActionId::from("my-org/my-action"),
-        Specifier::from_v1("main"),
-        CommitSha::from(old_sha),
-        Repository::from("my-org/my-action"),
-        Some(RefType::Branch),
-        CommitDate::from(""),
-    ));
+    lock.set(
+        &ActionSpec::new(
+            ActionId::from("my-org/my-action"),
+            Specifier::from_v1("main"),
+        ),
+        Version::from("main"),
+        Commit {
+            sha: CommitSha::from(old_sha),
+            repository: Repository::from("my-org/my-action"),
+            ref_type: Some(RefType::Branch),
+            date: CommitDate::from(""),
+        },
+    );
 
     let request = UpgradeRequest::new(UpgradeMode::Safe, UpgradeScope::All);
     let plan = upgrade::plan::plan(&manifest, &lock, &FakeRegistry::new(), &request, |_| {});
@@ -373,14 +382,19 @@ fn upgrade_latest_also_repins_branch_ref() {
     );
 
     let mut lock = Lock::default();
-    lock.set_from_registry(RegistryResolution::new(
-        ActionId::from("my-org/my-action"),
-        Specifier::from_v1("main"),
-        CommitSha::from(old_sha),
-        Repository::from("my-org/my-action"),
-        Some(RefType::Branch),
-        CommitDate::from(""),
-    ));
+    lock.set(
+        &ActionSpec::new(
+            ActionId::from("my-org/my-action"),
+            Specifier::from_v1("main"),
+        ),
+        Version::from("main"),
+        Commit {
+            sha: CommitSha::from(old_sha),
+            repository: Repository::from("my-org/my-action"),
+            ref_type: Some(RefType::Branch),
+            date: CommitDate::from(""),
+        },
+    );
 
     let request = UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::All);
     let plan = upgrade::plan::plan(&manifest, &lock, &FakeRegistry::new(), &request, |_| {});
@@ -420,22 +434,29 @@ fn upgrade_targeted_does_not_repin_branch_ref() {
     manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
 
     let mut lock = Lock::default();
-    lock.set_from_registry(RegistryResolution::new(
-        ActionId::from("my-org/my-action"),
-        Specifier::from_v1("main"),
-        CommitSha::from(branch_sha),
-        Repository::from("my-org/my-action"),
-        Some(RefType::Branch),
-        CommitDate::from(""),
-    ));
-    lock.set_from_registry(RegistryResolution::new(
-        ActionId::from("actions/checkout"),
-        Specifier::from_v1("v4"),
-        CommitSha::from(checkout_sha),
-        Repository::from("actions/checkout"),
-        Some(RefType::Tag),
-        CommitDate::from(""),
-    ));
+    lock.set(
+        &ActionSpec::new(
+            ActionId::from("my-org/my-action"),
+            Specifier::from_v1("main"),
+        ),
+        Version::from("main"),
+        Commit {
+            sha: CommitSha::from(branch_sha),
+            repository: Repository::from("my-org/my-action"),
+            ref_type: Some(RefType::Branch),
+            date: CommitDate::from(""),
+        },
+    );
+    lock.set(
+        &ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4")),
+        Version::from("v4"),
+        Commit {
+            sha: CommitSha::from(checkout_sha),
+            repository: Repository::from("actions/checkout"),
+            ref_type: Some(RefType::Tag),
+            date: CommitDate::from(""),
+        },
+    );
 
     let registry = FakeRegistry::new().with_all_tags("actions/checkout", vec!["v4", "v5"]);
 
@@ -480,22 +501,29 @@ fn upgrade_mixed_semver_and_branch() {
     manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
 
     let mut lock = Lock::default();
-    lock.set_from_registry(RegistryResolution::new(
-        ActionId::from("my-org/my-action"),
-        Specifier::from_v1("main"),
-        CommitSha::from(old_branch_sha),
-        Repository::from("my-org/my-action"),
-        Some(RefType::Branch),
-        CommitDate::from(""),
-    ));
-    lock.set_from_registry(RegistryResolution::new(
-        ActionId::from("actions/checkout"),
-        Specifier::from_v1("v4"),
-        CommitSha::from(old_checkout_sha),
-        Repository::from("actions/checkout"),
-        Some(RefType::Tag),
-        CommitDate::from(""),
-    ));
+    lock.set(
+        &ActionSpec::new(
+            ActionId::from("my-org/my-action"),
+            Specifier::from_v1("main"),
+        ),
+        Version::from("main"),
+        Commit {
+            sha: CommitSha::from(old_branch_sha),
+            repository: Repository::from("my-org/my-action"),
+            ref_type: Some(RefType::Branch),
+            date: CommitDate::from(""),
+        },
+    );
+    lock.set(
+        &ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4")),
+        Version::from("v4"),
+        Commit {
+            sha: CommitSha::from(old_checkout_sha),
+            repository: Repository::from("actions/checkout"),
+            ref_type: Some(RefType::Tag),
+            date: CommitDate::from(""),
+        },
+    );
 
     let registry = FakeRegistry::new().with_all_tags("actions/checkout", vec!["v4", "v5"]);
 
