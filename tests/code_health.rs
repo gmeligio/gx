@@ -176,6 +176,100 @@ fn parent_prefixes(file_path: &Path, src_dir: &Path) -> (Option<String>, Option<
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// Count non-test lines in a file, excluding `#[cfg(test)]` blocks and everything after.
+///
+/// Uses a simplified algorithm: finds the first `#[cfg(test)]` line and treats
+/// everything from that point to EOF as test code. This assumes `#[cfg(test)]`
+/// blocks always appear at the bottom of the file — a secondary assertion in
+/// `logic_line_budget` validates this invariant.
+///
+/// Known limitation: a single-line `#[cfg(test)] use ...` would trigger the
+/// cutoff too early. The invariant assertion catches this case.
+fn count_non_test_lines(content: &str) -> usize {
+    for (i, line) in content.lines().enumerate() {
+        if line.trim().starts_with("#[cfg(test)]") {
+            return i;
+        }
+    }
+    content.lines().count()
+}
+
+/// Classifies mod.rs lines as structural (mod/use/comments/attributes/blanks)
+/// vs. logic lines, with stateful tracking for multi-line `use {}` blocks.
+struct ModRsScanner {
+    in_use_block: bool,
+    use_brace_depth: usize,
+}
+
+impl ModRsScanner {
+    fn new() -> Self {
+        Self {
+            in_use_block: false,
+            use_brace_depth: 0,
+        }
+    }
+
+    fn is_structural_line(&mut self, line: &str) -> bool {
+        const MOD_PREFIXES: &[&str] = &["mod ", "pub mod ", "pub(crate) mod ", "pub(super) mod "];
+        const USE_PREFIXES: &[&str] = &["use ", "pub use ", "pub(crate) use ", "pub(super) use "];
+
+        let trimmed = line.trim();
+
+        // Inside a multi-line use block — track brace depth
+        if self.in_use_block {
+            let opens = trimmed.chars().filter(|&c| c == '{').count();
+            let closes = trimmed.chars().filter(|&c| c == '}').count();
+            if closes > self.use_brace_depth + opens {
+                self.use_brace_depth = 0;
+            } else {
+                self.use_brace_depth = self.use_brace_depth + opens - closes;
+            }
+            if self.use_brace_depth == 0 {
+                self.in_use_block = false;
+            }
+            return true;
+        }
+
+        // Blank lines
+        if trimmed.is_empty() {
+            return true;
+        }
+
+        // Comments
+        if trimmed.starts_with("//") || trimmed.starts_with("/*") || trimmed.starts_with("*/") {
+            return true;
+        }
+
+        // Attributes
+        if trimmed.starts_with("#[") || trimmed.starts_with("#![") {
+            return true;
+        }
+
+        // Module declarations
+        for prefix in MOD_PREFIXES {
+            if trimmed.starts_with(prefix) {
+                return true;
+            }
+        }
+
+        // Use/reexport statements
+        for prefix in USE_PREFIXES {
+            if trimmed.starts_with(prefix) {
+                // Check if this opens a multi-line use block
+                let opens = trimmed.chars().filter(|&c| c == '{').count();
+                let closes = trimmed.chars().filter(|&c| c == '}').count();
+                if opens > closes {
+                    self.in_use_block = true;
+                    self.use_brace_depth = opens - closes;
+                }
+                return true;
+            }
+        }
+
+        false
+    }
+}
+
 /// Recursively collect all `.rs` files under `dir` (excluding `code_health.rs` itself).
 fn collect_rs_files(dir: &Path) -> Vec<std::path::PathBuf> {
     let mut files = Vec::new();
@@ -536,4 +630,381 @@ fn folder_file_count_budget() {
         "Directories exceeding {max_files}-file budget (target: 8):\n  {}",
         violations.join("\n  ")
     );
+}
+
+// ---------------------------------------------------------------------------
+// Task 1.5 — Logic line budget
+// ---------------------------------------------------------------------------
+
+/// No `.rs` file in `src/` should exceed the logic line budget.
+///
+/// Logic lines = total lines minus `#[cfg(test)]` blocks (everything from the
+/// first `#[cfg(test)]` to EOF). Standalone `tests.rs` files are excluded
+/// entirely (they are 100% test code).
+///
+/// Budget: 440 (current max: 438 in infra/github/resolve.rs).
+/// Target: 300 once large files are split.
+#[test]
+fn logic_line_budget() {
+    let max_logic_lines: usize = 440;
+    // Target: 300 once infra/github/resolve.rs and lint/mod.rs are split.
+
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let src_dir = manifest_dir.join("src");
+
+    let mut violations: Vec<String> = Vec::new();
+    let mut invariant_violations: Vec<String> = Vec::new();
+
+    for file in collect_rs_files(&src_dir) {
+        // Skip standalone tests.rs files — entirely test code
+        if file.file_name().and_then(|n| n.to_str()) == Some("tests.rs") {
+            continue;
+        }
+
+        let Ok(content) = fs::read_to_string(&file) else {
+            continue;
+        };
+
+        let logic_lines = count_non_test_lines(&content);
+
+        // Secondary assertion: validate the "all production code precedes #[cfg(test)]"
+        // invariant. Check that no top-level item declaration (at column 0) appears
+        // after the first #[cfg(test)] line. Test module contents are indented, so
+        // only truly top-level production code at column 0 would indicate a violation.
+        let total_lines: Vec<&str> = content.lines().collect();
+        if logic_lines < total_lines.len() {
+            const TOP_LEVEL_ITEM_PREFIXES: &[&str] = &[
+                "pub fn ",
+                "pub(crate) fn ",
+                "pub async fn ",
+                "pub(crate) async fn ",
+                "pub struct ",
+                "pub enum ",
+                "pub type ",
+                "pub const ",
+                "pub static ",
+                "pub trait ",
+                "pub impl ", // not valid Rust but catches copy-paste errors
+            ];
+            for (offset, line) in total_lines[logic_lines..].iter().enumerate() {
+                // Only check lines at column 0 (no leading whitespace) — test
+                // module contents are indented and won't match.
+                if line.starts_with(char::is_whitespace) || line.is_empty() {
+                    continue;
+                }
+                let trimmed = line.trim();
+                for prefix in TOP_LEVEL_ITEM_PREFIXES {
+                    if trimmed.starts_with(prefix) {
+                        invariant_violations.push(format!(
+                            "{}:{}: production code after #[cfg(test)] — \
+                             upgrade to general brace-tracking algorithm. \
+                             Line: {trimmed}",
+                            file.strip_prefix(manifest_dir).unwrap_or(&file).display(),
+                            logic_lines + offset + 1,
+                        ));
+                        break;
+                    }
+                }
+            }
+        }
+
+        if logic_lines > max_logic_lines {
+            violations.push(format!(
+                "{}: {logic_lines} logic lines",
+                file.strip_prefix(manifest_dir).unwrap_or(&file).display()
+            ));
+        }
+    }
+
+    assert!(
+        invariant_violations.is_empty(),
+        "cfg(test)-at-bottom invariant violated (simplified counting is wrong):\n  {}",
+        invariant_violations.join("\n  ")
+    );
+
+    assert!(
+        violations.is_empty(),
+        "Files exceeding {max_logic_lines}-logic-line budget (target: 300):\n  {}",
+        violations.join("\n  ")
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Task 1.6 — mod.rs reexports only
+// ---------------------------------------------------------------------------
+
+/// Every `mod.rs` should ideally contain only reexports, module declarations,
+/// attributes, and comments. Logic belongs in named files.
+///
+/// Budget: 360 per file (current max: 354 in lint/mod.rs).
+/// Target: 0 (mod.rs should be reexports only).
+#[test]
+fn mod_rs_reexports_only() {
+    let max_mod_logic: usize = 360;
+    // Target: 0 (mod.rs should be reexports only).
+    // Current max: 354 (lint/mod.rs). Headroom for minor multi-line use edge cases.
+
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let src_dir = manifest_dir.join("src");
+
+    let mut report: Vec<(String, usize)> = Vec::new();
+
+    for file in collect_rs_files(&src_dir) {
+        if file.file_name().and_then(|n| n.to_str()) != Some("mod.rs") {
+            continue;
+        }
+
+        let Ok(content) = fs::read_to_string(&file) else {
+            continue;
+        };
+
+        let non_test_lines = count_non_test_lines(&content);
+        let lines: Vec<&str> = content.lines().collect();
+        let mut scanner = ModRsScanner::new();
+        let mut logic_count: usize = 0;
+
+        for line in lines.iter().take(non_test_lines) {
+            if !scanner.is_structural_line(line) {
+                logic_count += 1;
+            }
+        }
+
+        if logic_count > 0 {
+            let display = file
+                .strip_prefix(manifest_dir)
+                .unwrap_or(&file)
+                .display()
+                .to_string();
+            report.push((display, logic_count));
+        }
+    }
+
+    // Sort by logic count descending for visibility
+    report.sort_by(|a, b| b.1.cmp(&a.1));
+
+    let over_budget: Vec<String> = report
+        .iter()
+        .filter(|(_, count)| *count > max_mod_logic)
+        .map(|(path, count)| format!("{path}: {count} logic lines"))
+        .collect();
+
+    let report_str: String = report
+        .iter()
+        .map(|(path, count)| format!("  {path}: {count} logic lines"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        over_budget.is_empty(),
+        "mod.rs files with logic (budget: {max_mod_logic}, target: 0):\n{report_str}\n\n\
+         Over budget:\n  {}",
+        over_budget.join("\n  ")
+    );
+
+    if !report.is_empty() {
+        eprintln!("mod.rs files with logic (budget: {max_mod_logic}, target: 0):\n{report_str}");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Task 1.7 — No generic file names
+// ---------------------------------------------------------------------------
+
+/// File names should describe what the code does, not what kind of code it is.
+///
+/// Budget: 1 (current: upgrade/types.rs).
+/// Target: 0.
+#[test]
+fn no_generic_file_names() {
+    let max_generic_names: usize = 1;
+    // Target: 0.
+    // Current violation: upgrade/types.rs
+
+    let denied = [
+        "types.rs",
+        "utils.rs",
+        "helpers.rs",
+        "common.rs",
+        "misc.rs",
+        "consts.rs",
+        "constants.rs",
+    ];
+
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let src_dir = manifest_dir.join("src");
+
+    let mut violations: Vec<String> = Vec::new();
+
+    for file in collect_rs_files(&src_dir) {
+        if let Some(name) = file.file_name().and_then(|n| n.to_str())
+            && denied.contains(&name)
+        {
+            violations.push(
+                file.strip_prefix(manifest_dir)
+                    .unwrap_or(&file)
+                    .display()
+                    .to_string(),
+            );
+        }
+    }
+
+    assert!(
+        violations.len() <= max_generic_names,
+        "Generic file names (budget: {max_generic_names}, target: 0):\n  {}",
+        violations.join("\n  ")
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Inline tests for helpers
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod helper_tests {
+    use super::*;
+
+    // -- count_non_test_lines tests --
+
+    #[test]
+    fn no_test_block() {
+        let content = "fn main() {\n    println!(\"hello\");\n}\n";
+        assert_eq!(count_non_test_lines(content), 3);
+    }
+
+    #[test]
+    fn inline_test_block_at_eof() {
+        let content = "fn foo() {}\nfn bar() {}\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn it_works() {}\n}\n";
+        assert_eq!(count_non_test_lines(content), 2);
+    }
+
+    #[test]
+    fn cfg_test_mod_tests_declaration() {
+        // #[cfg(test)] followed by mod tests; (single line, no brace block)
+        let content = "fn foo() {}\n#[cfg(test)]\nmod tests;\n";
+        assert_eq!(count_non_test_lines(content), 1);
+    }
+
+    #[test]
+    fn empty_file() {
+        assert_eq!(count_non_test_lines(""), 0);
+    }
+
+    #[test]
+    fn cfg_test_in_string_literal_documents_limitation() {
+        // Known limitation: #[cfg(test)] in a string literal triggers cutoff
+        let content = "let s = \"\n#[cfg(test)]\n\";\nfn real_code() {}\n";
+        // The simplified algorithm cuts at line 1 (the #[cfg(test)] line)
+        assert_eq!(count_non_test_lines(content), 1);
+    }
+
+    #[test]
+    fn cfg_test_in_doc_comment_documents_limitation() {
+        // Known limitation: line starting with #[cfg(test)] in a doc-comment context
+        // But doc comments start with /// so this wouldn't match
+        let content = "/// Example:\n/// #[cfg(test)]\nfn foo() {}\n";
+        // /// #[cfg(test)] doesn't start with #[cfg(test)] after trim, so no cutoff
+        assert_eq!(count_non_test_lines(content), 3);
+    }
+
+    #[test]
+    fn cfg_test_in_macro_body_documents_limitation() {
+        // Known limitation: if a macro body has #[cfg(test)] at line start
+        let content = "macro_rules! m {\n    () => {\n#[cfg(test)]\n    };\n}\n";
+        // The simplified algorithm cuts at line 2 (the #[cfg(test)] line)
+        assert_eq!(count_non_test_lines(content), 2);
+    }
+
+    // -- ModRsScanner prefix classification tests --
+
+    #[test]
+    fn structural_mod_declarations() {
+        let mut s = ModRsScanner::new();
+        assert!(s.is_structural_line("mod foo;"));
+        assert!(s.is_structural_line("pub mod bar;"));
+        assert!(s.is_structural_line("pub(crate) mod baz;"));
+        assert!(s.is_structural_line("pub(super) mod qux;"));
+    }
+
+    #[test]
+    fn structural_use_statements() {
+        let mut s = ModRsScanner::new();
+        assert!(s.is_structural_line("use crate::foo;"));
+        assert!(s.is_structural_line("pub use crate::bar;"));
+        assert!(s.is_structural_line("pub(crate) use super::baz;"));
+        assert!(s.is_structural_line("pub(super) use super::qux;"));
+    }
+
+    #[test]
+    fn structural_comments() {
+        let mut s = ModRsScanner::new();
+        assert!(s.is_structural_line("// a comment"));
+        assert!(s.is_structural_line("/// doc comment"));
+        assert!(s.is_structural_line("//! module doc"));
+        assert!(s.is_structural_line("/* block comment start"));
+        assert!(s.is_structural_line("*/"));
+    }
+
+    #[test]
+    fn structural_attributes() {
+        let mut s = ModRsScanner::new();
+        assert!(s.is_structural_line("#[derive(Debug)]"));
+        assert!(s.is_structural_line("#![allow(unused)]"));
+    }
+
+    #[test]
+    fn structural_blank_lines() {
+        let mut s = ModRsScanner::new();
+        assert!(s.is_structural_line(""));
+        assert!(s.is_structural_line("   "));
+    }
+
+    #[test]
+    fn logic_lines_detected() {
+        let mut s = ModRsScanner::new();
+        assert!(!s.is_structural_line("fn foo() {}"));
+        assert!(!s.is_structural_line("struct Bar;"));
+        assert!(!s.is_structural_line("let x = 1;"));
+        assert!(!s.is_structural_line("impl Foo {"));
+    }
+
+    // -- ModRsScanner multi-line use block tests --
+
+    #[test]
+    fn single_line_use_no_state_change() {
+        let mut s = ModRsScanner::new();
+        assert!(s.is_structural_line("use crate::{Foo, Bar};"));
+        assert!(!s.in_use_block);
+    }
+
+    #[test]
+    fn multi_line_use_block() {
+        let mut s = ModRsScanner::new();
+        assert!(s.is_structural_line("use crate::{"));
+        assert!(s.in_use_block);
+        assert!(s.is_structural_line("    Foo,"));
+        assert!(s.in_use_block);
+        assert!(s.is_structural_line("    Bar,"));
+        assert!(s.in_use_block);
+        assert!(s.is_structural_line("};"));
+        assert!(!s.in_use_block);
+    }
+
+    #[test]
+    fn nested_braces_in_use_block() {
+        let mut s = ModRsScanner::new();
+        assert!(s.is_structural_line("use crate::{"));
+        assert!(s.is_structural_line("    foo::{Bar, Baz},"));
+        assert!(s.in_use_block);
+        assert!(s.is_structural_line("    Qux,"));
+        assert!(s.is_structural_line("};"));
+        assert!(!s.in_use_block);
+    }
+
+    #[test]
+    fn interleaved_logic_after_use_block() {
+        let mut s = ModRsScanner::new();
+        assert!(s.is_structural_line("use crate::Foo;"));
+        assert!(!s.is_structural_line("fn bar() {}"));
+        assert!(s.is_structural_line("use crate::Baz;"));
+    }
 }

@@ -1,6 +1,6 @@
 use crate::domain::action::identity::ActionId;
 use crate::domain::action::resolved::ResolvedAction;
-use crate::domain::plan::WorkflowPatch;
+use crate::domain::diff::WorkflowPatch;
 use crate::domain::workflow::{Error as WorkflowError, UpdateResult};
 use glob::glob;
 use regex::Regex;
@@ -173,7 +173,7 @@ mod tests {
     use super::WorkflowWriter;
     use crate::domain::action::identity::{ActionId, CommitSha, Version};
     use crate::domain::action::resolved::ResolvedAction;
-    use crate::domain::plan::WorkflowPatch;
+    use crate::domain::diff::WorkflowPatch;
     use std::fs;
     use std::io::Write as _;
     use std::path::{Path, PathBuf};

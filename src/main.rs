@@ -13,7 +13,7 @@ use gx::output::lines::Line as OutputLine;
 use gx::output::log_file::LogFile;
 use gx::output::printer::Printer;
 use gx::tidy::RunError as TidyRunError;
-use gx::upgrade::RunError as UpgradeRunError;
+use gx::upgrade::command::RunError as UpgradeRunError;
 use gx::{init, lint, tidy, upgrade};
 use indicatif::ProgressBar;
 use thiserror::Error;
@@ -213,7 +213,7 @@ fn main() -> Result<(), GxError> {
             let mut lf = log_file.take();
             let report = {
                 let mut cb = make_cb(spinner.as_ref(), &mut lf, is_ci);
-                upgrade::Upgrade { request }.run(&repo_root, config, &mut cb)?
+                upgrade::command::Upgrade { request }.run(&repo_root, config, &mut cb)?
             };
             finish_spinner(spinner);
             let mut lines = report.render();

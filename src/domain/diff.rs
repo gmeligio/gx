@@ -8,6 +8,10 @@ use std::path::PathBuf;
 
 /// Describes the changes to apply to a manifest file.
 #[derive(Debug, Default)]
+#[expect(
+    clippy::module_name_repetitions,
+    reason = "ManifestDiff is clearer than Manifest when imported"
+)]
 pub struct ManifestDiff {
     pub added: Vec<(ActionId, Specifier)>,
     pub removed: Vec<ActionId>,
@@ -36,6 +40,10 @@ pub struct LockEntryPatch {
 
 /// Describes the changes to apply to a lock file.
 #[derive(Debug, Default)]
+#[expect(
+    clippy::module_name_repetitions,
+    reason = "LockDiff is clearer than Lock when imported"
+)]
 pub struct LockDiff {
     pub added: Vec<(Spec, LockEntry)>,
     pub removed: Vec<Spec>,

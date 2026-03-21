@@ -214,7 +214,7 @@ mod tests {
     }
 
     fn make_located(workflow: &str, action: &str, version: &str) -> LocatedAction {
-        use crate::domain::workflow_action::WorkflowAction;
+        use crate::domain::workflow_actions::WorkflowAction;
         LocatedAction {
             action: WorkflowAction {
                 id: ActionId::from(action),

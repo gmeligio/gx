@@ -1,6 +1,42 @@
-use super::types::{Mode, Request, Scope};
 use crate::domain::action::identity::{ActionId, Version};
 use thiserror::Error;
+
+/// Which actions to upgrade: all, a single action, or a pinned action+version.
+#[non_exhaustive]
+#[derive(Debug, Clone)]
+pub enum Scope {
+    /// Upgrade all actions in the manifest.
+    All,
+    /// Upgrade a single action by ID.
+    Single(ActionId),
+    /// Pin a specific action to an exact version.
+    Pinned(ActionId, Version),
+}
+
+/// How the upgrade command should find new versions.
+#[non_exhaustive]
+#[derive(Debug)]
+pub enum Mode {
+    /// Default: upgrade within the current major version.
+    Safe,
+    /// Upgrade to the absolute latest version, including major versions.
+    Latest,
+}
+
+/// A request to upgrade actions with a specific mode and scope.
+#[derive(Debug)]
+pub struct Request {
+    pub mode: Mode,
+    pub scope: Scope,
+}
+
+impl Request {
+    /// Create a new upgrade request.
+    #[must_use]
+    pub fn new(mode: Mode, scope: Scope) -> Self {
+        Self { mode, scope }
+    }
+}
 
 /// Errors from resolving CLI arguments into an [`Request`].
 #[derive(Debug, Error)]
@@ -59,7 +95,8 @@ pub fn resolve_upgrade_mode(action: Option<&str>, latest: bool) -> Result<Reques
     reason = "tests use unwrap, indexing, and other patterns freely"
 )]
 mod tests {
-    use super::{Error, Mode, Scope, resolve_upgrade_mode};
+    use super::{Error, Mode, Request, Scope, resolve_upgrade_mode};
+    use crate::domain::action::identity::{ActionId, Version};
 
     #[test]
     fn resolve_none_false_returns_safe_all() {
@@ -100,5 +137,21 @@ mod tests {
     fn resolve_latest_with_version_pin_returns_error() {
         let err = resolve_upgrade_mode(Some("actions/checkout@v5"), true).unwrap_err();
         assert!(matches!(err, Error::LatestWithVersionPin));
+    }
+
+    #[test]
+    fn new_should_accept_pinned_scope() {
+        let req = Request::new(
+            Mode::Safe,
+            Scope::Pinned(ActionId::from("actions/checkout"), Version::from("v5")),
+        );
+        assert!(matches!(req.scope, Scope::Pinned(_, _)));
+    }
+
+    #[test]
+    fn new_should_accept_safe_all() {
+        let req = Request::new(Mode::Safe, Scope::All);
+        assert!(matches!(req.mode, Mode::Safe));
+        assert!(matches!(req.scope, Scope::All));
     }
 }

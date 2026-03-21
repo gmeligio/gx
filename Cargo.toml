@@ -40,7 +40,7 @@ warnings = "deny"
 # Group: pedantic (default: allow). Stricter, opinionated lints not in
 # clippy::all. Must be explicitly enabled.
 pedantic = "deny"
-# All lints below are from the restriction group (default: allow). Restriction
+# From the restriction group (default: allow). Restriction
 # lints are not enabled by any group — each must be opted into individually.
 # They ban specific language patterns rather than catching bugs.
 allow_attributes = "deny"
