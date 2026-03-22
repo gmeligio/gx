@@ -11,7 +11,7 @@ use gx::infra::manifest::patch::apply_manifest_diff;
 use gx::infra::manifest::{self};
 use gx::infra::workflow_scan::FileScanner as FileWorkflowScanner;
 use gx::infra::workflow_update::WorkflowWriter;
-use gx::upgrade::types::Request as UpgradeRequest;
+use gx::upgrade::cli::Request as UpgradeRequest;
 use gx::{lint, tidy, upgrade};
 use std::fs;
 use std::io::Write as _;

@@ -1,7 +1,7 @@
 use super::Error as ManifestError;
 use crate::domain::action::identity::ActionId;
+use crate::domain::diff::ManifestDiff;
 use crate::domain::manifest::overrides::ActionOverride;
-use crate::domain::plan::ManifestDiff;
 use crate::domain::workflow_actions::StepIndex;
 use std::fs;
 use std::path::Path;
@@ -231,8 +231,8 @@ mod tests {
     use super::apply_manifest_diff;
     use crate::domain::action::identity::ActionId;
     use crate::domain::action::specifier::Specifier;
+    use crate::domain::diff::ManifestDiff;
     use crate::domain::manifest::overrides::ActionOverride;
-    use crate::domain::plan::ManifestDiff;
     use crate::domain::workflow_actions::{JobId, WorkflowPath};
     use std::fs;
     use std::io::Write as _;

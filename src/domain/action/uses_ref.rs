@@ -1,5 +1,5 @@
 use super::identity::{ActionId, CommitSha, Version};
-use crate::domain::workflow_action::WorkflowAction;
+use crate::domain::workflow_actions::WorkflowAction;
 use std::fmt;
 
 /// The type of reference that was resolved.

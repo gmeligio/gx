@@ -1,17 +1,61 @@
-use super::types::{
-    Error as UpgradeError, Mode as UpgradeMode, Plan as UpgradePlan, Request as UpgradeRequest,
-    Scope as UpgradeScope,
-};
+use crate::domain::action::identity::{ActionId, Version};
 use crate::domain::action::resolved::ResolvedAction;
 use crate::domain::action::spec::Spec as ActionSpec;
 use crate::domain::action::upgrade::{
     Action as UpgradeAction, Candidate as UpgradeCandidate, find_upgrade_candidate,
 };
+use crate::domain::diff::{LockDiff, ManifestDiff, WorkflowPatch};
 use crate::domain::lock::Lock;
 use crate::domain::manifest::Manifest;
-use crate::domain::plan::{LockDiff, ManifestDiff};
-use crate::domain::resolution::{ActionResolver, VersionRegistry};
+use crate::domain::resolution::{ActionResolver, Error as ResolutionError, VersionRegistry};
+use crate::domain::workflow::Error as WorkflowError;
 use crate::infra::workflow_update::WorkflowWriter;
+use thiserror::Error;
+
+use super::cli::{Mode as UpgradeMode, Request as UpgradeRequest, Scope as UpgradeScope};
+
+/// The complete plan produced by an upgrade operation.
+#[derive(Debug)]
+pub struct Plan {
+    pub manifest: ManifestDiff,
+    /// The final lock state — written by `Store::save()`.
+    pub lock: Lock,
+    /// The diff between the original and planned lock — for reporting only.
+    pub lock_changes: LockDiff,
+    pub workflows: Vec<WorkflowPatch>,
+    pub upgrades: Vec<UpgradeCandidate>,
+}
+
+impl Plan {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.manifest.is_empty() && self.lock_changes.is_empty() && self.workflows.is_empty()
+    }
+}
+
+/// Errors that can occur during the upgrade command.
+#[derive(Debug, Error)]
+pub enum UpgradeError {
+    /// The specified action was not found in the manifest.
+    #[error("{0} not found in manifest")]
+    ActionNotInManifest(ActionId),
+
+    /// The specified version tag does not exist in the registry for the action.
+    #[error("{version} not found in registry for {id}")]
+    TagNotFound { id: ActionId, version: Version },
+
+    /// Could not fetch tags from the registry for the action.
+    #[error("could not fetch tags for {id}")]
+    TagFetchFailed {
+        id: ActionId,
+        #[source]
+        source: Box<ResolutionError>,
+    },
+
+    /// Workflow files could not be updated.
+    #[error(transparent)]
+    Workflow(#[from] WorkflowError),
+}
 
 /// Compute an `UpgradePlan` describing all changes without modifying the original manifest or lock.
 ///
@@ -26,7 +70,7 @@ pub fn plan<R, F: FnMut(&str)>(
     registry: &R,
     request: &UpgradeRequest,
     mut on_progress: F,
-) -> Result<UpgradePlan, UpgradeError>
+) -> Result<Plan, UpgradeError>
 where
     R: VersionRegistry,
 {
@@ -35,7 +79,7 @@ where
     let Some((upgrades, repins)) =
         determine_upgrades(manifest, lock, &service, request, &mut on_progress)?
     else {
-        return Ok(UpgradePlan {
+        return Ok(Plan {
             manifest: ManifestDiff::default(),
             lock: lock.clone(),
             lock_changes: LockDiff::default(),
@@ -86,7 +130,7 @@ where
     let manifest_diff = manifest.diff(&planned_manifest);
     let lock_diff = lock.diff(&planned_lock);
 
-    Ok(UpgradePlan {
+    Ok(Plan {
         manifest: manifest_diff,
         lock: planned_lock,
         lock_changes: lock_diff,

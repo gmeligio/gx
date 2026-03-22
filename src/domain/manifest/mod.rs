@@ -3,7 +3,7 @@ pub mod overrides;
 use super::action::identity::ActionId;
 use super::action::spec::Spec;
 use super::action::specifier::Specifier;
-use super::plan::ManifestDiff;
+use super::diff::ManifestDiff;
 use super::workflow_actions::{ActionSet, Located, Location};
 use overrides::ActionOverride;
 use std::collections::{HashMap, HashSet};
