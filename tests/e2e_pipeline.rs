@@ -24,7 +24,7 @@ use gx::domain::resolution::VersionRegistry;
 use gx::infra::github::Registry as GithubRegistry;
 use gx::infra::lock::Store as LockStore;
 use gx::infra::manifest;
-use gx::upgrade::types::{Mode as UpgradeMode, Request as UpgradeRequest, Scope as UpgradeScope};
+use gx::upgrade::cli::{Mode as UpgradeMode, Request as UpgradeRequest, Scope as UpgradeScope};
 use std::fs;
 use tempfile::TempDir;
 

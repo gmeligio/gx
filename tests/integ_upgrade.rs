@@ -24,7 +24,7 @@ use gx::infra::manifest::patch::apply_manifest_diff;
 use gx::infra::manifest::{self};
 use gx::infra::workflow_update::WorkflowWriter;
 use gx::upgrade;
-use gx::upgrade::types::{Mode as UpgradeMode, Request as UpgradeRequest, Scope as UpgradeScope};
+use gx::upgrade::cli::{Mode as UpgradeMode, Request as UpgradeRequest, Scope as UpgradeScope};
 use std::fs;
 use std::path::Path;
 use tempfile::TempDir;

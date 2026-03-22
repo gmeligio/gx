@@ -2,9 +2,9 @@ use super::Error as TidyError;
 use crate::domain::action::identity::ActionId;
 use crate::domain::action::resolved::ResolvedAction;
 use crate::domain::action::spec::Spec;
+use crate::domain::diff::WorkflowPatch;
 use crate::domain::lock::Lock;
 use crate::domain::manifest::Manifest;
-use crate::domain::plan::WorkflowPatch;
 use crate::domain::workflow::Scanner as WorkflowScanner;
 use crate::domain::workflow_actions::Located as LocatedAction;
 use std::collections::HashMap;
@@ -119,7 +119,7 @@ mod tests {
 
         // A located action referencing this action
         let located = crate::domain::workflow_actions::Located {
-            action: crate::domain::workflow_action::WorkflowAction {
+            action: crate::domain::workflow_actions::WorkflowAction {
                 id: ActionId::from("actions/checkout"),
                 version: Version::from(sha),
                 sha: Some(CommitSha::from(sha)),
