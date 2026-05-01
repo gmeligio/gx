@@ -1,4 +1,5 @@
 [tools]
+rust = { version = "1.95.0", profile = "minimal", components = "clippy,rustfmt" }
 "github:axodotdev/cargo-dist" = "0.31.0"
 "github:obi1kenobi/cargo-semver-checks" = "0.46.0"
 "github:EmbarkStudios/cargo-deny" = "0.19.0"
