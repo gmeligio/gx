@@ -9,5 +9,4 @@ ttyd = "1.7.3"
 github.github_attestations = true
 github.slsa = true
 lockfile = true
-locked = true
 idiomatic_version_file_enable_tools = ["rust"]
