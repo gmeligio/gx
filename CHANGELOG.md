@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1](https://github.com/gmeligio/gx/compare/v0.7.0...v0.7.1) - 2026-05-01
+
+### Fixed
+
+- *(lint)* accept SHA pin with version comment as pinned ([#83](https://github.com/gmeligio/gx/pull/83))
+
+### Other
+
+- *(deps)* bump rustls-webpki from 0.103.10 to 0.103.13 in the cargo group across 1 directory ([#84](https://github.com/gmeligio/gx/pull/84))
+- *(deps)* bump rand from 0.9.2 to 0.9.4 in the cargo group across 1 directory ([#82](https://github.com/gmeligio/gx/pull/82))
+- code and tests in smaller files ([#81](https://github.com/gmeligio/gx/pull/81))
+- clean up domain model types and composition ([#79](https://github.com/gmeligio/gx/pull/79))
+- deny clone_on_ref_ptr ([#78](https://github.com/gmeligio/gx/pull/78))
+- conciser readme ([#77](https://github.com/gmeligio/gx/pull/77))
+
 ## [0.7.0](https://github.com/gmeligio/gx/compare/v0.6.1...v0.7.0) - 2026-03-16
 
 ### Added
