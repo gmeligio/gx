@@ -1,4 +1,4 @@
-use super::{Context, Diagnostic, Rule, RuleName};
+use crate::lint::{Context, Diagnostic, Rule, RuleName};
 use crate::config::Level;
 use crate::domain::workflow_parsed::{Parsed, Permissions};
 

@@ -2,16 +2,6 @@
 
 /// Core lint command logic, types, and rule orchestration.
 mod command;
-/// Workflow-security: flags `pull_request_target` and `workflow_run` triggers.
-mod dangerous_trigger;
-/// Workflow-security: warns when top-level `permissions:` is broader than `contents: read`.
-mod excessive_permissions;
-/// Workflow-security: warns when a push/schedule workflow has no `concurrency:` block.
-mod missing_concurrency;
-/// Workflow-security: detects workflows that lack a top-level `permissions:` block.
-mod missing_permissions;
-/// Workflow-security: errors when a privileged workflow checks out the PR HEAD ref.
-mod pr_head_checkout;
 pub mod report;
 /// Detects workflows where the pinned SHA does not match the lock file.
 mod sha_mismatch;
@@ -21,8 +11,8 @@ mod stale_comment;
 mod unpinned;
 /// Detects actions present in workflows but missing from the manifest.
 mod unsynced_manifest;
-/// Workflow-security: errors when a PR workflow uses a user secret without a fork-PR gate.
-mod unprotected_secrets;
+/// Workflow-security rule family (permissions, triggers, secrets, concurrency).
+mod workflow_security;
 
 pub use command::{
     Context, Diagnostic, Error, Lint, Rule, RuleName, collect_diagnostics, format_and_report,

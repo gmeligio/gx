@@ -1,14 +1,12 @@
-use super::dangerous_trigger::DangerousTriggerRule;
-use super::excessive_permissions::ExcessivePermissionsRule;
-use super::missing_concurrency::MissingConcurrencyRule;
-use super::missing_permissions::MissingPermissionsRule;
-use super::pr_head_checkout::PrHeadCheckoutRule;
 use super::report::Report;
 use super::sha_mismatch::ShaMismatchRule;
 use super::stale_comment::StaleCommentRule;
 use super::unpinned::UnpinnedRule;
-use super::unprotected_secrets::UnprotectedSecretsRule;
 use super::unsynced_manifest::UnsyncedManifestRule;
+use super::workflow_security::{
+    DangerousTriggerRule, ExcessivePermissionsRule, MissingConcurrencyRule,
+    MissingPermissionsRule, PrHeadCheckoutRule, UnprotectedSecretsRule,
+};
 use crate::command::Command;
 use crate::config::{Config, IgnoreTarget, Level, Lint as LintConfig};
 use crate::domain::lock::Lock;
