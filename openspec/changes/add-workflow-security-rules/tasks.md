@@ -30,9 +30,9 @@
 
 ## 4. Configuration integration
 
-- [ ] 4.1 Confirm the existing `[lint.rules]` TOML parser accepts the six new rule names (it parses `RuleName` via serde — adding enum variants is enough).
-- [ ] 4.2 Confirm the existing `ignore = [{ action = ..., workflow = ..., job = ... }]` mechanism works for workflow-scoped rules. The `action` key is meaningless for `missing-permissions` and similar — document that omitting it is fine.
-- [ ] 4.3 Add integration tests that exercise `level = "off"` on each new rule.
+- [x] 4.1 Confirm the existing `[lint.rules]` TOML parser accepts the six new rule names (it parses `RuleName` via serde — adding enum variants is enough). Verified via `lint_config_parses_all_six_new_rule_names`.
+- [x] 4.2 Confirm the existing `ignore = [{ action = ..., workflow = ..., job = ... }]` mechanism works for workflow-scoped rules. The `action` key is meaningless for `missing-permissions` and similar — `matches_ignore_workflow` short-circuits if `action` is set so users should omit it; documented in `docs/lint-rules.md` (§6.3).
+- [x] 4.3 Add integration tests that exercise `level = "off"` on each new rule. Done in `tests/integ_lint.rs` via the `*_can_be_disabled` set.
 
 ## 5. Output and CLI
 
