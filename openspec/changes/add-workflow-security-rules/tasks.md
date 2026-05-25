@@ -9,7 +9,7 @@
 
 - [x] 2.1 Add `workflows_full: &'ctx [Parsed]` field to `Context`. Existing rules continue to use `workflows`.
 - [x] 2.2 Add six variants to `RuleName` enum: `MissingPermissions`, `ExcessivePermissions`, `DangerousTrigger`, `PrHeadCheckout`, `MissingConcurrency`, `UnprotectedSecrets`. Update `FromStr`, `Display`, and the kebab-case serde rename.
-- [ ] 2.3 Update `command.rs` lint-command runner to instantiate the six new rules and pass `workflows_full` in the context.
+- [x] 2.3 Update `command.rs` lint-command runner to instantiate the six new rules and pass `workflows_full` in the context.
 - [x] 2.4 Update `Diagnostic` to optionally carry job/step location (some rules emit step-scoped diagnostics).
 - [x] 2.5 Verify: `mise run build` passes.
 
@@ -21,7 +21,12 @@
 - [x] 3.4 `src/lint/pr_head_checkout.rs` — error if (any job has a write permission OR any step references `secrets.*`) AND (any step has `with.ref` matching `github.event.pull_request.head.sha` / `github.head_ref` / `github.event.pull_request.head.ref`). Unit tests: privileged + PR-head ref (errors), non-privileged + PR-head ref (clean), privileged without ref (clean).
 - [x] 3.5 `src/lint/missing_concurrency.rs` — warn if `Parsed.on` contains `push` or `schedule` and `Parsed.concurrency` is `None`. Unit tests: push without concurrency (warns), push with concurrency (clean), pull_request without concurrency (clean).
 - [x] 3.6 `src/lint/unprotected_secrets.rs` — error per the design.md algorithm. `secrets.GITHUB_TOKEN` is excluded from the matched set (auto-scoped down on fork PRs by GitHub). Unit tests: PR workflow + user secret + no gate (errors), PR workflow + user secret + correct gate (clean), PR workflow + `secrets.GITHUB_TOKEN` + no gate (clean — excluded), pull_request_target + secret (clean — `dangerous-trigger` covers this), workflow_run + secret (clean — `dangerous-trigger` covers this), non-PR workflow + secret (clean), PR workflow + user secret + custom non-canonical gate (errors — opt out via `ignore`).
-- [ ] 3.7 Verify: `mise run test` passes; each rule has the four standard test shapes (clean, fails, ignore-scopes, disabled).
+- [x] 3.7 Verify: `mise run test` passes; each rule has the four standard test shapes (clean, fails, ignore-scopes, disabled).
+
+  - Clean and fails shapes live in each rule's unit tests.
+  - Ignore-scopes and disabled shapes live at the runner level (see §4 integration tests):
+    those concerns are implemented by `matches_ignore_workflow` and the `Level::Off`
+    short-circuit in `command.rs`, not by the rule's `check()` function.
 
 ## 4. Configuration integration
 

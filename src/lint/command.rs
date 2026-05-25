@@ -1,7 +1,13 @@
+use super::dangerous_trigger::DangerousTriggerRule;
+use super::excessive_permissions::ExcessivePermissionsRule;
+use super::missing_concurrency::MissingConcurrencyRule;
+use super::missing_permissions::MissingPermissionsRule;
+use super::pr_head_checkout::PrHeadCheckoutRule;
 use super::report::Report;
 use super::sha_mismatch::ShaMismatchRule;
 use super::stale_comment::StaleCommentRule;
 use super::unpinned::UnpinnedRule;
+use super::unprotected_secrets::UnprotectedSecretsRule;
 use super::unsynced_manifest::UnsyncedManifestRule;
 use crate::command::Command;
 use crate::config::{Config, IgnoreTarget, Level, Lint as LintConfig};
@@ -289,18 +295,18 @@ pub fn collect_diagnostics(
         action_set.add(&action.action);
     }
 
-    // Phase 2: Run global rules that need the full picture
+    // Phase 2: action-aggregate rules
     let unsynced_level = lint_config
         .get_rule(RuleName::UnsyncedManifest, Level::Error)
         .level;
+    let ctx = Context {
+        manifest,
+        lock,
+        workflows: &located,
+        workflows_full: &parsed_workflows,
+        action_set: &action_set,
+    };
     if unsynced_level != Level::Off {
-        let ctx = Context {
-            manifest,
-            lock,
-            workflows: &located,
-            workflows_full: &parsed_workflows,
-            action_set: &action_set,
-        };
         let rule = UnsyncedManifestRule;
         for mut diag in rule.check(&ctx) {
             diag.level = unsynced_level;
@@ -315,7 +321,115 @@ pub fn collect_diagnostics(
         }
     }
 
+    // Phase 3: workflow-security rules. Each runs against ctx.workflows_full and emits
+    // diagnostics carrying workflow + (optionally) job/step location.
+    run_workflow_rule(
+        &MissingPermissionsRule,
+        Level::Error,
+        &ctx,
+        lint_config,
+        &mut all_diagnostics,
+    );
+    run_workflow_rule(
+        &ExcessivePermissionsRule,
+        Level::Warn,
+        &ctx,
+        lint_config,
+        &mut all_diagnostics,
+    );
+    run_workflow_rule(
+        &DangerousTriggerRule,
+        Level::Error,
+        &ctx,
+        lint_config,
+        &mut all_diagnostics,
+    );
+    run_workflow_rule(
+        &PrHeadCheckoutRule,
+        Level::Error,
+        &ctx,
+        lint_config,
+        &mut all_diagnostics,
+    );
+    run_workflow_rule(
+        &MissingConcurrencyRule,
+        Level::Warn,
+        &ctx,
+        lint_config,
+        &mut all_diagnostics,
+    );
+    run_workflow_rule(
+        &UnprotectedSecretsRule,
+        Level::Error,
+        &ctx,
+        lint_config,
+        &mut all_diagnostics,
+    );
+
+    // Stable diagnostic ordering: (workflow_path, job_id, step_index, rule_name).
+    all_diagnostics.sort_by(|a, b| {
+        let aw = a.workflow.as_ref().map(WorkflowPath::as_str).unwrap_or("");
+        let bw = b.workflow.as_ref().map(WorkflowPath::as_str).unwrap_or("");
+        let aj = a.job.as_ref().map(JobId::as_str).unwrap_or("");
+        let bj = b.job.as_ref().map(JobId::as_str).unwrap_or("");
+        let as_ = a.step.map(StepIndex::as_u16).unwrap_or(u16::MAX);
+        let bs = b.step.map(StepIndex::as_u16).unwrap_or(u16::MAX);
+        (aw, aj, as_, a.rule).cmp(&(bw, bj, bs, b.rule))
+    });
+
     Ok(all_diagnostics)
+}
+
+/// Run a workflow-scoped rule. Filters its diagnostics through the per-rule `ignore`
+/// list using the new workflow/job-aware matcher, applies the configured severity, and
+/// pushes the survivors onto `out`.
+fn run_workflow_rule<R: Rule>(
+    rule: &R,
+    default_level: Level,
+    ctx: &Context<'_>,
+    lint_config: &LintConfig,
+    out: &mut Vec<Diagnostic>,
+) {
+    let configured = lint_config.get_rule(rule.name(), default_level);
+    if configured.level == Level::Off {
+        return;
+    }
+    for mut diag in rule.check(ctx) {
+        diag.level = configured.level;
+        let ignored = configured
+            .ignore
+            .iter()
+            .any(|target| matches_ignore_workflow(&diag, target));
+        if !ignored {
+            out.push(diag);
+        }
+    }
+}
+
+/// Ignore matcher for workflow-security diagnostics. Uses Diagnostic's structural
+/// fields (workflow, job) directly. The `action` key is meaningless for these rules,
+/// so an ignore target that specifies `action` will NOT match — users should omit it.
+fn matches_ignore_workflow(diag: &Diagnostic, target: &IgnoreTarget) -> bool {
+    if target.action.is_some() {
+        return false;
+    }
+    if let Some(target_workflow) = &target.workflow {
+        let Some(diag_workflow) = &diag.workflow else {
+            return false;
+        };
+        if !diag_workflow.as_str().ends_with(target_workflow.as_str()) {
+            return false;
+        }
+    }
+    if let Some(target_job) = &target.job {
+        let Some(diag_job) = &diag.job else {
+            return false;
+        };
+        if diag_job.as_str() != target_job.as_str() {
+            return false;
+        }
+    }
+    true
 }
 
 /// Check if a per-action diagnostic is ignored via lint config.
