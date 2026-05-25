@@ -11,6 +11,7 @@ use crate::domain::workflow::{Error as WorkflowError, Scanner as WorkflowScanner
 use crate::domain::workflow_actions::{
     ActionSet as WorkflowActionSet, Located as LocatedAction, WorkflowPath,
 };
+use crate::domain::workflow_parsed::Parsed as ParsedWorkflow;
 use crate::infra::workflow_scan::FileScanner as FileWorkflowScanner;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -100,6 +101,10 @@ pub struct Context<'ctx> {
     pub lock: &'ctx Lock,
     /// All located actions from scanned workflows.
     pub workflows: &'ctx [LocatedAction],
+    /// Structural per-workflow parses, consumed by the workflow-security rules.
+    /// Action-hygiene rules (sha-mismatch, unpinned, stale-comment, unsynced-manifest)
+    /// continue to use `workflows`; this field is empty when no workflows were scanned.
+    pub workflows_full: &'ctx [ParsedWorkflow],
     /// Aggregated action set from all workflows.
     pub action_set: &'ctx WorkflowActionSet,
 }
@@ -192,16 +197,16 @@ pub fn collect_diagnostics(
         .level;
 
     let mut all_diagnostics = Vec::new();
-    let mut located = Vec::new();
     let mut action_set = WorkflowActionSet::new();
 
-    // Phase 1: Scan workflows, running per-action rules on each action
-    for result in scanner.scan() {
-        let action = result?;
+    // Single parse pass yields both per-step action references and the
+    // structural Parsed view the workflow-security rules consume.
+    let (located, parsed_workflows) = scanner.scan_all_with_parsed()?;
 
-        // Per-action rules
+    // Phase 1: per-action rules
+    for action in &located {
         if sha_mismatch_level != Level::Off
-            && let Some(mut diag) = ShaMismatchRule::check_action(&action, lock)
+            && let Some(mut diag) = ShaMismatchRule::check_action(action, lock)
         {
             diag.level = sha_mismatch_level;
             if !is_ignored(
@@ -209,13 +214,13 @@ pub fn collect_diagnostics(
                 RuleName::ShaMismatch,
                 Level::Error,
                 lint_config,
-                &action,
+                action,
             ) {
                 all_diagnostics.push(diag);
             }
         }
         if unpinned_level != Level::Off
-            && let Some(mut diag) = UnpinnedRule::check_action(&action)
+            && let Some(mut diag) = UnpinnedRule::check_action(action)
         {
             diag.level = unpinned_level;
             if !is_ignored(
@@ -223,13 +228,13 @@ pub fn collect_diagnostics(
                 RuleName::Unpinned,
                 Level::Error,
                 lint_config,
-                &action,
+                action,
             ) {
                 all_diagnostics.push(diag);
             }
         }
         if stale_comment_level != Level::Off
-            && let Some(mut diag) = StaleCommentRule::check_action(&action, lock)
+            && let Some(mut diag) = StaleCommentRule::check_action(action, lock)
         {
             diag.level = stale_comment_level;
             if !is_ignored(
@@ -237,14 +242,13 @@ pub fn collect_diagnostics(
                 RuleName::StaleComment,
                 Level::Warn,
                 lint_config,
-                &action,
+                action,
             ) {
                 all_diagnostics.push(diag);
             }
         }
 
         action_set.add(&action.action);
-        located.push(action);
     }
 
     // Phase 2: Run global rules that need the full picture
@@ -256,6 +260,7 @@ pub fn collect_diagnostics(
             manifest,
             lock,
             workflows: &located,
+            workflows_full: &parsed_workflows,
             action_set: &action_set,
         };
         let rule = UnsyncedManifestRule;
