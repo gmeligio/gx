@@ -775,6 +775,63 @@ jobs:
 }
 
 #[test]
+fn diagnostics_are_stably_sorted_across_workflows_jobs_and_rules() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let repo_root = temp_dir.path();
+    let workflows_dir = repo_root.join(".github").join("workflows");
+    fs::create_dir_all(&workflows_dir).unwrap();
+
+    // Two workflows, each missing both `permissions:` and `concurrency:` (on
+    // push) — yields multiple diagnostics across rules per workflow.
+    let bare = "
+name: X
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+";
+    // Intentionally write `zebra.yml` first so insertion order != path order.
+    fs::write(workflows_dir.join("zebra.yml"), bare).unwrap();
+    fs::write(workflows_dir.join("alpha.yml"), bare).unwrap();
+
+    let manifest = Manifest::default();
+    let lock = Lock::default();
+    let scanner = FileWorkflowScanner::new(repo_root);
+    let lint_config = Lint::default();
+
+    let diagnostics =
+        lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {}).unwrap();
+    assert!(diagnostics.len() >= 4, "expected ≥4 diagnostics, got {}", diagnostics.len());
+
+    // Verify the sort key tuple (workflow_path, job, step, rule) is monotonic.
+    let keys: Vec<_> = diagnostics
+        .iter()
+        .map(|d| {
+            (
+                d.workflow.as_ref().map(|w| w.as_str().to_owned()).unwrap_or_default(),
+                d.job.as_ref().map(|j| j.as_str().to_owned()).unwrap_or_default(),
+                d.step.map(|s| s.as_u16()).unwrap_or(u16::MAX),
+                d.rule,
+            )
+        })
+        .collect();
+    for pair in keys.windows(2) {
+        assert!(pair[0] <= pair[1], "diagnostics not stably sorted: {pair:?}");
+    }
+
+    // alpha.yml must precede zebra.yml in the output.
+    let first_alpha = diagnostics
+        .iter()
+        .position(|d| d.workflow.as_ref().is_some_and(|w| w.as_str().contains("alpha.yml")));
+    let first_zebra = diagnostics
+        .iter()
+        .position(|d| d.workflow.as_ref().is_some_and(|w| w.as_str().contains("zebra.yml")));
+    assert!(matches!((first_alpha, first_zebra), (Some(a), Some(z)) if a < z));
+}
+
+#[test]
 fn lint_config_parses_all_six_new_rule_names() {
     let toml_str = r#"
         [rules]

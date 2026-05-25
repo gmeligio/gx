@@ -82,6 +82,13 @@ enum Commands {
         latest: bool,
     },
     /// Run lint checks on workflows.
+    ///
+    /// Reports action-hygiene issues (sha-mismatch, unpinned, stale-comment,
+    /// unsynced-manifest) and workflow-security issues (missing-permissions,
+    /// excessive-permissions, dangerous-trigger, pr-head-checkout,
+    /// missing-concurrency, unprotected-secrets). Configure per-rule severity
+    /// and ignores under `[lint.rules]` in `.github/gx.toml`. See
+    /// `docs/lint-rules.md`.
     Lint,
 }
 

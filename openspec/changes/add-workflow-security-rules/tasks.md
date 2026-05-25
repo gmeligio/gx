@@ -36,9 +36,9 @@
 
 ## 5. Output and CLI
 
-- [ ] 5.1 Confirm `gx lint --help` lists the new rules (or links to the docs if `--help` is short).
-- [ ] 5.2 Update the summary line to count all rule categories uniformly.
-- [ ] 5.3 Verify diagnostic ordering is stable: sorted by `(workflow_path, job_id, step_index, rule_name)`.
+- [x] 5.1 `gx lint --help` now enumerates the two rule families and points to `docs/lint-rules.md`.
+- [x] 5.2 Summary line already counts uniformly by `Level` (see `Report::render` and existing `render_lint_with_violations` test). No change required — the format is rule-category-agnostic.
+- [x] 5.3 Stable diagnostic ordering by `(workflow_path, job_id, step_index, rule_name)` enforced by `collect_diagnostics` and asserted via `diagnostics_are_stably_sorted_across_workflows_jobs_and_rules`.
 
 ## 6. Documentation
 
