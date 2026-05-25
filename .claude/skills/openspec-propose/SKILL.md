@@ -1,4 +1,4 @@
-﻿---
+---
 model: opus
 name: openspec-propose
 description: Propose a new change with all artifacts generated in one step. Use when the user wants to quickly describe what they want to build and get a complete proposal with design, specs, and tasks ready for implementation.
@@ -7,7 +7,7 @@ compatibility: Requires openspec CLI.
 metadata:
   author: openspec
   version: "1.0"
-  generatedBy: "1.2.0"
+  generatedBy: "1.3.1"
 ---
 
 Propose a new change - create the change and generate all artifacts in one step.
@@ -93,22 +93,6 @@ After completing all artifacts, summarize:
 - What's ready: "All artifacts created! Ready for implementation."
 - Prompt: "Run `/opsx:apply` or ask me to implement to start working on the tasks."
 
-<!-- opsx-autoreview-patch -->
-**AUTO-REVIEW (mandatory — do not skip)**
-
-After all artifacts are created, immediately invoke the Skill tool:
-- skill: `openspec-review-proposal`
-- change: `<n>`
-
-Wait for the result. Do not suggest apply until review is complete.
-
-- **BLOCKED**: List CRITICAL issues. Ask what to fix. Re-invoke after fixes
-  (max 3 iterations).
-- **APPROVED** / **APPROVED_WITH_WARNINGS**:
-  Write marker: `echo "reviewed" > "openspec/changes/<n>/.review-passed"`
-  Show: "All artifacts created and proposal reviewed."
-  List any warnings. Prompt: "Run /opsx:apply to start implementing."
-
 **Artifact Creation Guidelines**
 
 - Follow the `instruction` field from `openspec instructions` for each artifact type
@@ -118,6 +102,28 @@ Wait for the result. Do not suggest apply until review is complete.
 - **IMPORTANT**: `context` and `rules` are constraints for YOU, not content for the file
   - Do NOT copy `<context>`, `<rules>`, `<project_context>` blocks into the artifact
   - These guide what you write, but should never appear in the output
+
+<!-- opsx-design-guidance-patch -->
+
+**Design Artifact Guidance**
+
+When creating design.md, include an "Automated Test Strategy" section (how will
+this be verified — what level of testing, what's the critical path, any new test
+infrastructure?) and an "Observability" section (how will failures be surfaced —
+what error paths exist, what should be logged, can a failure be silent?). These
+can be brief for simple changes but should be present for any change that passed
+the relevance gate. The verify step will check for them.
+
+<!-- opsx-git-commit-patch -->
+
+**Git: Commit the proposal**
+
+After all artifacts are created, stage and commit:
+
+```bash
+git add openspec/changes/<n>/
+git diff --cached --quiet || git commit -m "docs(openspec): propose <n>"
+```
 
 **Guardrails**
 - Create ALL artifacts needed for implementation (as defined by schema's `apply.requires`)

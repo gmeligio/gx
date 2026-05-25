@@ -1,5 +1,5 @@
-﻿---
-model: sonnet
+---
+model: inherit
 name: openspec-apply-change
 description: Implement tasks from an OpenSpec change. Use when the user wants to start implementing, continue implementation, or work through tasks.
 license: MIT
@@ -7,7 +7,7 @@ compatibility: Requires openspec CLI.
 metadata:
   author: openspec
   version: "1.0"
-  generatedBy: "1.2.0"
+  generatedBy: "1.3.1"
 ---
 
 Implement tasks from an OpenSpec change.
@@ -33,28 +33,6 @@ Implement tasks from an OpenSpec change.
    - `schemaName`: The workflow being used (e.g., "spec-driven")
    - Which artifact contains the tasks (typically "tasks" for spec-driven, check status for others)
 
-<!-- opsx-autoreview-patch -->
-3. **REVIEW GATE: verify the proposal has been reviewed**
-
-   Check for the review marker:
-   `ash
-   cat "openspec/changes/<n>/.review-passed" 2>/dev/null
-   `
-
-   **If the marker does NOT exist**:
-   - Announce: "Proposal review required before implementation."
-   - Invoke Skill: `openspec-review-proposal` for `<n>`
-   - Wait for the result
-   - **BLOCKED** → stop, list CRITICAL issues, do not write code
-   - **APPROVED** / **APPROVED_WITH_WARNINGS** →
-     Write marker: `echo "reviewed" > "openspec/changes/<n>/.review-passed"`
-     Continue to the next step
-
-   **If marker EXISTS**: show "✓ Proposal reviewed" and continue.
-
-   > Mid-implementation design issue: fix artifact, delete marker
-   > (`Remove-Item "openspec/changes/<n>/.review-passed"`), re-invoke
-   > `openspec-review-proposal`, resume only after it passes.
 3. **Get apply instructions**
 
    ```bash
@@ -62,7 +40,7 @@ Implement tasks from an OpenSpec change.
    ```
 
    This returns:
-   - Context file paths (varies by schema - could be proposal/specs/design/tasks or spec/tests/implementation/docs)
+   - `contextFiles`: artifact ID -> array of concrete file paths (varies by schema - could be proposal/specs/design/tasks or spec/tests/implementation/docs)
    - Progress (total, complete, remaining)
    - Task list with status
    - Dynamic instruction based on current state
@@ -74,7 +52,7 @@ Implement tasks from an OpenSpec change.
 
 4. **Read context files**
 
-   Read the files listed in `contextFiles` from the apply instructions output.
+   Read every file path listed under `contextFiles` from the apply instructions output.
    The files depend on the schema being used:
    - **spec-driven**: proposal, specs, design, tasks
    - Other schemas: follow the contextFiles from CLI output
@@ -95,6 +73,13 @@ Implement tasks from an OpenSpec change.
    - Keep changes minimal and focused
    - Mark task complete in the tasks file: `- [ ]` → `- [x]`
    - Continue to next task
+
+   <!-- opsx-git-commit-patch -->
+   - **Git: Commit the task**
+     ```bash
+     git add -A
+     git diff --cached --quiet || git commit -m "feat(<n>): task N/M — <task description>"
+     ```
 
    **Pause if:**
    - Task is unclear → ask for clarification
