@@ -2,6 +2,8 @@
 
 /// Core lint command logic, types, and rule orchestration.
 mod command;
+/// Workflow-security: detects workflows that lack a top-level `permissions:` block.
+mod missing_permissions;
 pub mod report;
 /// Detects workflows where the pinned SHA does not match the lock file.
 mod sha_mismatch;

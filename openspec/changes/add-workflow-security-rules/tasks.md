@@ -15,7 +15,7 @@
 
 ## 3. Implement the six rules
 
-- [ ] 3.1 `src/lint/missing_permissions.rs` — error if `Parsed.permissions` is `None`. Unit tests: clean workflow, missing block, top-level present.
+- [x] 3.1 `src/lint/missing_permissions.rs` — error if `Parsed.permissions` is `None`. Unit tests: clean workflow, missing block, top-level present.
 - [ ] 3.2 `src/lint/excessive_permissions.rs` — warn if top-level `permissions:` declares anything other than `contents: read`. Unit tests: `contents: read` only (clean), `contents: write` at top level (warns), `permissions: write-all` (warns), `permissions: read-all` (warns — broader than `contents: read`).
 - [ ] 3.3 `src/lint/dangerous_trigger.rs` — error if `Parsed.on` contains `pull_request_target` OR `workflow_run`. Diagnostic message names the specific trigger so the user can act on the right line. Unit tests: pull_request only (clean), pull_request_target (errors), workflow_run (errors), both pull_request_target + workflow_run in same file (two diagnostics), workflow_run with ignore opt-out (clean).
 - [ ] 3.4 `src/lint/pr_head_checkout.rs` — error if (any job has a write permission OR any step references `secrets.*`) AND (any step has `with.ref` matching `github.event.pull_request.head.sha` / `github.head_ref` / `github.event.pull_request.head.ref`). Unit tests: privileged + PR-head ref (errors), non-privileged + PR-head ref (clean), privileged without ref (clean).
