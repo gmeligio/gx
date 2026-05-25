@@ -812,7 +812,7 @@ jobs:
             (
                 d.workflow.as_ref().map(|w| w.as_str().to_owned()).unwrap_or_default(),
                 d.job.as_ref().map(|j| j.as_str().to_owned()).unwrap_or_default(),
-                d.step.map(|s| s.as_u16()).unwrap_or(u16::MAX),
+                d.step.map_or(u16::MAX, gx::domain::workflow_actions::StepIndex::as_u16),
                 d.rule,
             )
         })
