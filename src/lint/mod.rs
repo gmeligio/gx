@@ -21,6 +21,8 @@ mod stale_comment;
 mod unpinned;
 /// Detects actions present in workflows but missing from the manifest.
 mod unsynced_manifest;
+/// Workflow-security: errors when a PR workflow uses a user secret without a fork-PR gate.
+mod unprotected_secrets;
 
 pub use command::{
     Context, Diagnostic, Error, Lint, Rule, RuleName, collect_diagnostics, format_and_report,
