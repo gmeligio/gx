@@ -163,13 +163,12 @@ impl FileScanner {
             }
         }
 
-        let parsed =
-            Parsed::from_yaml(workflow_rel_path.clone(), &content).map_err(|source| {
-                IoWorkflowError::Parse {
-                    path: workflow_path.to_path_buf(),
-                    source,
-                }
-            })?;
+        let parsed = Parsed::from_yaml(workflow_rel_path.clone(), &content).map_err(|source| {
+            IoWorkflowError::Parse {
+                path: workflow_path.to_path_buf(),
+                source,
+            }
+        })?;
 
         let uses_re = Regex::new(r"^([^@\s]+)@([^\s#]+)")?;
         let mut actions = Vec::new();
@@ -276,13 +275,7 @@ impl crate::domain::workflow::Scanner for FileScanner {
 
     fn scan_all_with_parsed(
         &self,
-    ) -> Result<
-        (
-            Vec<crate::domain::workflow_actions::Located>,
-            Vec<Parsed>,
-        ),
-        WorkflowError,
-    > {
+    ) -> Result<(Vec<crate::domain::workflow_actions::Located>, Vec<Parsed>), WorkflowError> {
         let workflows = self.find_workflows()?;
         let mut located = Vec::new();
         let mut parsed = Vec::new();

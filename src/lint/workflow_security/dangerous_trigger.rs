@@ -1,6 +1,6 @@
-use crate::lint::{Context, Diagnostic, Rule, RuleName};
 use crate::config::Level;
 use crate::domain::workflow_parsed::{Parsed, Trigger};
+use crate::lint::{Context, Diagnostic, Rule, RuleName};
 
 /// `dangerous-trigger` rule: emits an error per `pull_request_target` or `workflow_run`
 /// trigger. Both run in the target-repo context with full secrets and a write-scoped

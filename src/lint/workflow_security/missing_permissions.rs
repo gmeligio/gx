@@ -1,6 +1,6 @@
-use crate::lint::{Context, Diagnostic, Rule, RuleName};
 use crate::config::Level;
 use crate::domain::workflow_parsed::Parsed;
+use crate::lint::{Context, Diagnostic, Rule, RuleName};
 
 /// `missing-permissions` rule: flags workflows that omit a top-level `permissions:` block.
 ///

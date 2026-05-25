@@ -370,10 +370,7 @@ impl Parsed {
     /// # Errors
     ///
     /// Returns the underlying `serde_saphyr` error if the YAML cannot be deserialized.
-    pub fn from_yaml(
-        path: WorkflowPath,
-        content: &str,
-    ) -> Result<Self, Box<serde_saphyr::Error>> {
+    pub fn from_yaml(path: WorkflowPath, content: &str) -> Result<Self, Box<serde_saphyr::Error>> {
         let wire: WireWorkflow = serde_saphyr::from_str(content).map_err(Box::new)?;
         let jobs = wire
             .jobs

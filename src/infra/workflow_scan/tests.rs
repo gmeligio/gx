@@ -367,23 +367,11 @@ jobs:
 
     let mut legacy_keys: Vec<String> = via_legacy
         .iter()
-        .map(|a| {
-            format!(
-                "{}@{}",
-                a.action.id.as_str(),
-                a.action.version.as_str()
-            )
-        })
+        .map(|a| format!("{}@{}", a.action.id.as_str(), a.action.version.as_str()))
         .collect();
     let mut combined_keys: Vec<String> = via_combined
         .iter()
-        .map(|a| {
-            format!(
-                "{}@{}",
-                a.action.id.as_str(),
-                a.action.version.as_str()
-            )
-        })
+        .map(|a| format!("{}@{}", a.action.id.as_str(), a.action.version.as_str()))
         .collect();
     legacy_keys.sort();
     combined_keys.sort();

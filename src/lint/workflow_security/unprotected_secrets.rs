@@ -1,7 +1,7 @@
-use crate::lint::{Context, Diagnostic, Rule, RuleName};
 use crate::config::Level;
 use crate::domain::workflow_actions::{JobId, StepIndex};
 use crate::domain::workflow_parsed::{Job, Parsed, Step, Trigger};
+use crate::lint::{Context, Diagnostic, Rule, RuleName};
 use regex::Regex;
 use std::sync::OnceLock;
 

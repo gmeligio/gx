@@ -1,6 +1,6 @@
-use crate::lint::{Context, Diagnostic, Rule, RuleName};
 use crate::config::Level;
 use crate::domain::workflow_parsed::{Parsed, Permissions};
+use crate::lint::{Context, Diagnostic, Rule, RuleName};
 
 /// `excessive-permissions` rule: warns when top-level `permissions:` declares anything
 /// broader than `contents: read`. Broader scopes belong at job level so they narrow to

@@ -505,16 +505,15 @@ fn file_size_budget() {
 
 // Count only direct .rs files per directory (non-recursive)
 fn count_rs_in_dir(dir: &Path) -> usize {
-    fs::read_dir(dir)
-        .map_or(0, |entries| {
-            entries
-                .flatten()
-                .filter(|e| {
-                    let p = e.path();
-                    p.is_file() && p.extension().and_then(|x| x.to_str()) == Some("rs")
-                })
-                .count()
-        })
+    fs::read_dir(dir).map_or(0, |entries| {
+        entries
+            .flatten()
+            .filter(|e| {
+                let p = e.path();
+                p.is_file() && p.extension().and_then(|x| x.to_str()) == Some("rs")
+            })
+            .count()
+    })
 }
 
 fn check_dir(dir: &Path, max_files: usize, violations: &mut Vec<String>) {

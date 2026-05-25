@@ -1,6 +1,6 @@
-use crate::lint::{Context, Diagnostic, Rule, RuleName};
 use crate::config::Level;
 use crate::domain::workflow_parsed::{Parsed, Trigger};
+use crate::lint::{Context, Diagnostic, Rule, RuleName};
 
 /// `missing-concurrency` rule: warns when a workflow triggered by `push:` or `schedule:`
 /// has no top-level `concurrency:` block. Without one, two runs racing on the same ref

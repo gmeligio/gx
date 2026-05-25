@@ -1,7 +1,7 @@
-use crate::lint::{Context, Diagnostic, Rule, RuleName};
 use crate::config::Level;
 use crate::domain::workflow_actions::{JobId, StepIndex};
 use crate::domain::workflow_parsed::{Job, Parsed, Step};
+use crate::lint::{Context, Diagnostic, Rule, RuleName};
 
 /// Expression fragments that pull HEAD code from an untrusted PR. We match textually
 /// because GitHub Actions `with:` values are interpolated as strings and any of these

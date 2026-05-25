@@ -669,7 +669,11 @@ jobs:
     steps:
       - run: echo hi
 ";
-    let (on, off) = run_off_toggle(workflow, gx::lint::RuleName::MissingPermissions, Lint::default());
+    let (on, off) = run_off_toggle(
+        workflow,
+        gx::lint::RuleName::MissingPermissions,
+        Lint::default(),
+    );
     assert!(on > 0, "missing-permissions should fire by default");
     assert_eq!(off, 0, "level = off must suppress missing-permissions");
 }
@@ -686,8 +690,11 @@ jobs:
     steps:
       - run: echo hi
 ";
-    let (on, off) =
-        run_off_toggle(workflow, gx::lint::RuleName::ExcessivePermissions, Lint::default());
+    let (on, off) = run_off_toggle(
+        workflow,
+        gx::lint::RuleName::ExcessivePermissions,
+        Lint::default(),
+    );
     assert!(on > 0, "excessive-permissions should fire by default");
     assert_eq!(off, 0, "level = off must suppress excessive-permissions");
 }
@@ -705,8 +712,11 @@ jobs:
     steps:
       - run: echo hi
 ";
-    let (on, off) =
-        run_off_toggle(workflow, gx::lint::RuleName::DangerousTrigger, Lint::default());
+    let (on, off) = run_off_toggle(
+        workflow,
+        gx::lint::RuleName::DangerousTrigger,
+        Lint::default(),
+    );
     assert!(on > 0, "dangerous-trigger should fire by default");
     assert_eq!(off, 0, "level = off must suppress dangerous-trigger");
 }
@@ -728,8 +738,11 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 ";
-    let (on, off) =
-        run_off_toggle(workflow, gx::lint::RuleName::PrHeadCheckout, Lint::default());
+    let (on, off) = run_off_toggle(
+        workflow,
+        gx::lint::RuleName::PrHeadCheckout,
+        Lint::default(),
+    );
     assert!(on > 0, "pr-head-checkout should fire by default");
     assert_eq!(off, 0, "level = off must suppress pr-head-checkout");
 }
@@ -747,8 +760,11 @@ jobs:
     steps:
       - run: echo hi
 ";
-    let (on, off) =
-        run_off_toggle(workflow, gx::lint::RuleName::MissingConcurrency, Lint::default());
+    let (on, off) = run_off_toggle(
+        workflow,
+        gx::lint::RuleName::MissingConcurrency,
+        Lint::default(),
+    );
     assert!(on > 0, "missing-concurrency should fire by default");
     assert_eq!(off, 0, "level = off must suppress missing-concurrency");
 }
@@ -768,8 +784,11 @@ jobs:
         with:
           password: ${{ secrets.DOCKER_HUB_TOKEN }}
 ";
-    let (on, off) =
-        run_off_toggle(workflow, gx::lint::RuleName::UnprotectedSecrets, Lint::default());
+    let (on, off) = run_off_toggle(
+        workflow,
+        gx::lint::RuleName::UnprotectedSecrets,
+        Lint::default(),
+    );
     assert!(on > 0, "unprotected-secrets should fire by default");
     assert_eq!(off, 0, "level = off must suppress unprotected-secrets");
 }
@@ -803,31 +822,49 @@ jobs:
 
     let diagnostics =
         lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {}).unwrap();
-    assert!(diagnostics.len() >= 4, "expected ≥4 diagnostics, got {}", diagnostics.len());
+    assert!(
+        diagnostics.len() >= 4,
+        "expected ≥4 diagnostics, got {}",
+        diagnostics.len()
+    );
 
     // Verify the sort key tuple (workflow_path, job, step, rule) is monotonic.
     let keys: Vec<_> = diagnostics
         .iter()
         .map(|d| {
             (
-                d.workflow.as_ref().map(|w| w.as_str().to_owned()).unwrap_or_default(),
-                d.job.as_ref().map(|j| j.as_str().to_owned()).unwrap_or_default(),
-                d.step.map_or(u16::MAX, gx::domain::workflow_actions::StepIndex::as_u16),
+                d.workflow
+                    .as_ref()
+                    .map(|w| w.as_str().to_owned())
+                    .unwrap_or_default(),
+                d.job
+                    .as_ref()
+                    .map(|j| j.as_str().to_owned())
+                    .unwrap_or_default(),
+                d.step
+                    .map_or(u16::MAX, gx::domain::workflow_actions::StepIndex::as_u16),
                 d.rule,
             )
         })
         .collect();
     for pair in keys.windows(2) {
-        assert!(pair[0] <= pair[1], "diagnostics not stably sorted: {pair:?}");
+        assert!(
+            pair[0] <= pair[1],
+            "diagnostics not stably sorted: {pair:?}"
+        );
     }
 
     // alpha.yml must precede zebra.yml in the output.
-    let first_alpha = diagnostics
-        .iter()
-        .position(|d| d.workflow.as_ref().is_some_and(|w| w.as_str().contains("alpha.yml")));
-    let first_zebra = diagnostics
-        .iter()
-        .position(|d| d.workflow.as_ref().is_some_and(|w| w.as_str().contains("zebra.yml")));
+    let first_alpha = diagnostics.iter().position(|d| {
+        d.workflow
+            .as_ref()
+            .is_some_and(|w| w.as_str().contains("alpha.yml"))
+    });
+    let first_zebra = diagnostics.iter().position(|d| {
+        d.workflow
+            .as_ref()
+            .is_some_and(|w| w.as_str().contains("zebra.yml"))
+    });
     assert!(matches!((first_alpha, first_zebra), (Some(a), Some(z)) if a < z));
 }
 
