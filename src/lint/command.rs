@@ -26,6 +26,12 @@ pub enum RuleName {
     Unpinned,
     StaleComment,
     UnsyncedManifest,
+    MissingPermissions,
+    ExcessivePermissions,
+    DangerousTrigger,
+    PrHeadCheckout,
+    MissingConcurrency,
+    UnprotectedSecrets,
 }
 
 impl std::fmt::Display for RuleName {
@@ -35,6 +41,12 @@ impl std::fmt::Display for RuleName {
             Self::Unpinned => write!(f, "unpinned"),
             Self::StaleComment => write!(f, "stale-comment"),
             Self::UnsyncedManifest => write!(f, "unsynced-manifest"),
+            Self::MissingPermissions => write!(f, "missing-permissions"),
+            Self::ExcessivePermissions => write!(f, "excessive-permissions"),
+            Self::DangerousTrigger => write!(f, "dangerous-trigger"),
+            Self::PrHeadCheckout => write!(f, "pr-head-checkout"),
+            Self::MissingConcurrency => write!(f, "missing-concurrency"),
+            Self::UnprotectedSecrets => write!(f, "unprotected-secrets"),
         }
     }
 }
@@ -48,6 +60,12 @@ impl FromStr for RuleName {
             "unpinned" => Ok(Self::Unpinned),
             "stale-comment" => Ok(Self::StaleComment),
             "unsynced-manifest" => Ok(Self::UnsyncedManifest),
+            "missing-permissions" => Ok(Self::MissingPermissions),
+            "excessive-permissions" => Ok(Self::ExcessivePermissions),
+            "dangerous-trigger" => Ok(Self::DangerousTrigger),
+            "pr-head-checkout" => Ok(Self::PrHeadCheckout),
+            "missing-concurrency" => Ok(Self::MissingConcurrency),
+            "unprotected-secrets" => Ok(Self::UnprotectedSecrets),
             other => Err(format!("unrecognized rule name: {other}")),
         }
     }
@@ -382,6 +400,12 @@ mod tests {
             RuleName::Unpinned,
             RuleName::StaleComment,
             RuleName::UnsyncedManifest,
+            RuleName::MissingPermissions,
+            RuleName::ExcessivePermissions,
+            RuleName::DangerousTrigger,
+            RuleName::PrHeadCheckout,
+            RuleName::MissingConcurrency,
+            RuleName::UnprotectedSecrets,
         ] {
             let s = name.to_string();
             assert_eq!(RuleName::from_str(&s), Ok(name));
@@ -402,6 +426,30 @@ mod tests {
         assert_eq!(
             RuleName::from_str("unsynced-manifest"),
             Ok(RuleName::UnsyncedManifest)
+        );
+        assert_eq!(
+            RuleName::from_str("missing-permissions"),
+            Ok(RuleName::MissingPermissions)
+        );
+        assert_eq!(
+            RuleName::from_str("excessive-permissions"),
+            Ok(RuleName::ExcessivePermissions)
+        );
+        assert_eq!(
+            RuleName::from_str("dangerous-trigger"),
+            Ok(RuleName::DangerousTrigger)
+        );
+        assert_eq!(
+            RuleName::from_str("pr-head-checkout"),
+            Ok(RuleName::PrHeadCheckout)
+        );
+        assert_eq!(
+            RuleName::from_str("missing-concurrency"),
+            Ok(RuleName::MissingConcurrency)
+        );
+        assert_eq!(
+            RuleName::from_str("unprotected-secrets"),
+            Ok(RuleName::UnprotectedSecrets)
         );
     }
 

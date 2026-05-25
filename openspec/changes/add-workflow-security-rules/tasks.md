@@ -8,7 +8,7 @@
 ## 2. Extend the lint engine
 
 - [x] 2.1 Add `workflows_full: &'ctx [Parsed]` field to `Context`. Existing rules continue to use `workflows`.
-- [ ] 2.2 Add six variants to `RuleName` enum: `MissingPermissions`, `ExcessivePermissions`, `DangerousTrigger`, `PrHeadCheckout`, `MissingConcurrency`, `UnprotectedSecrets`. Update `FromStr`, `Display`, and the kebab-case serde rename.
+- [x] 2.2 Add six variants to `RuleName` enum: `MissingPermissions`, `ExcessivePermissions`, `DangerousTrigger`, `PrHeadCheckout`, `MissingConcurrency`, `UnprotectedSecrets`. Update `FromStr`, `Display`, and the kebab-case serde rename.
 - [ ] 2.3 Update `command.rs` lint-command runner to instantiate the six new rules and pass `workflows_full` in the context.
 - [ ] 2.4 Update `Diagnostic` to optionally carry job/step location (some rules emit step-scoped diagnostics).
 - [ ] 2.5 Verify: `mise run build` passes.
