@@ -7,17 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.8.0](https://github.com/gmeligio/gx/compare/v0.7.1...v0.8.0) - 2026-05-25
-
-### Added
-
-- *(lint)* six workflow-security rules: `missing-permissions` (error), `excessive-permissions` (warn), `dangerous-trigger` (error — covers `pull_request_target` and `workflow_run`), `pr-head-checkout` (error), `missing-concurrency` (warn), `unprotected-secrets` (error, excluding `GITHUB_TOKEN`). See `docs/lint-rules.md` for what each rule catches and the canonical fix.
-- *(lint)* `Diagnostic` now optionally carries `job` and `step` location; diagnostics are stably sorted by `(workflow_path, job_id, step_index, rule_name)`.
-
-### Breaking
-
-- *(lint)* the six new rules emit error/warning diagnostics by default and may flip previously-clean repos to non-zero exit. Set `level = "off"` per rule in `[lint.rules]` to opt out; see `docs/lint-rules.md` for examples.
-
 ## [0.7.1](https://github.com/gmeligio/gx/compare/v0.7.0...v0.7.1) - 2026-05-01
 
 ### Fixed

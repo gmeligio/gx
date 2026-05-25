@@ -48,8 +48,8 @@
 
 ## 7. Release
 
-- [x] 7.1 CHANGELOG `0.8.0` section added: `### Added` enumerates the six new rules + the `Diagnostic` location/sort changes; `### Breaking` documents the opt-out via `level = "off"`.
-- [x] 7.2 `Cargo.toml` bumped 0.7.1 → 0.8.0 (minor: new functionality with an opt-out, per gx's SemVer convention for tool packages).
+- [x] 7.1 CHANGELOG entry — handled by release-plz post-merge. release-plz (`.github/workflows/release-plz.yml`) reads the `feat(lint): ...` conventional commits on main and generates the `### Added` / `### Breaking` sections automatically when it opens the "chore: release vX.Y.Z" PR. The manual entry initially added in this PR was reverted.
+- [x] 7.2 `Cargo.toml` version bump — also handled by release-plz post-merge (it computes the minor bump from the `feat` commits). The manual 0.7.1 → 0.8.0 bump initially added in this PR was reverted.
 - [x] 7.3 Verified: `mise run test` (339 passing) and `mise run clippy` (exit 0; the project's lint task is `clippy`, not `lint`) succeed, `cargo build --release` succeeds.
 
 ## 8. Downstream coordination
