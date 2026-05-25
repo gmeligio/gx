@@ -2,6 +2,8 @@
 
 /// Core lint command logic, types, and rule orchestration.
 mod command;
+/// Workflow-security: flags `pull_request_target` and `workflow_run` triggers.
+mod dangerous_trigger;
 /// Workflow-security: warns when top-level `permissions:` is broader than `contents: read`.
 mod excessive_permissions;
 /// Workflow-security: detects workflows that lack a top-level `permissions:` block.
