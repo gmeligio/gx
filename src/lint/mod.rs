@@ -8,6 +8,8 @@ mod dangerous_trigger;
 mod excessive_permissions;
 /// Workflow-security: detects workflows that lack a top-level `permissions:` block.
 mod missing_permissions;
+/// Workflow-security: errors when a privileged workflow checks out the PR HEAD ref.
+mod pr_head_checkout;
 pub mod report;
 /// Detects workflows where the pinned SHA does not match the lock file.
 mod sha_mismatch;
