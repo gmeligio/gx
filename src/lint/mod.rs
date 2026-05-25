@@ -6,6 +6,8 @@ mod command;
 mod dangerous_trigger;
 /// Workflow-security: warns when top-level `permissions:` is broader than `contents: read`.
 mod excessive_permissions;
+/// Workflow-security: warns when a push/schedule workflow has no `concurrency:` block.
+mod missing_concurrency;
 /// Workflow-security: detects workflows that lack a top-level `permissions:` block.
 mod missing_permissions;
 /// Workflow-security: errors when a privileged workflow checks out the PR HEAD ref.
