@@ -1,4 +1,4 @@
-use crate::domain::workflow_actions::WorkflowPath;
+use super::workflow_actions::WorkflowPath;
 use serde::de::{Deserializer, MapAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
