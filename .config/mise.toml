@@ -1,5 +1,4 @@
 [tools]
-rust = { version = "1.95.0", profile = "minimal", components = "clippy,rustfmt" }
 "github:axodotdev/cargo-dist" = "0.31.0"
 "github:obi1kenobi/cargo-semver-checks" = "0.46.0"
 "github:EmbarkStudios/cargo-deny" = "0.19.0"
@@ -11,3 +10,7 @@ github.github_attestations = true
 github.slsa = true
 lockfile = true
 locked = true
+# Defer the rust toolchain (version + components + profile) to
+# rust-toolchain.toml — rustup is the canonical manager and reads
+# that file natively. mise stays out of rust's way.
+idiomatic_version_file_enable_tools = ["rust"]
