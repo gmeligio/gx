@@ -2,6 +2,8 @@
 
 /// Core lint command logic, types, and rule orchestration.
 mod command;
+/// Workflow-security: warns when top-level `permissions:` is broader than `contents: read`.
+mod excessive_permissions;
 /// Workflow-security: detects workflows that lack a top-level `permissions:` block.
 mod missing_permissions;
 pub mod report;
