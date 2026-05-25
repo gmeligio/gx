@@ -9,7 +9,7 @@ use crate::domain::lock::Lock;
 use crate::domain::manifest::Manifest;
 use crate::domain::workflow::{Error as WorkflowError, Scanner as WorkflowScanner};
 use crate::domain::workflow_actions::{
-    ActionSet as WorkflowActionSet, Located as LocatedAction, WorkflowPath,
+    ActionSet as WorkflowActionSet, JobId, Located as LocatedAction, StepIndex, WorkflowPath,
 };
 use crate::domain::workflow_parsed::Parsed as ParsedWorkflow;
 use crate::infra::workflow_scan::FileScanner as FileWorkflowScanner;
@@ -90,6 +90,10 @@ pub struct Diagnostic {
     pub message: String,
     /// Optional workflow file path where the issue was found.
     pub workflow: Option<WorkflowPath>,
+    /// Optional job id (set by rules whose diagnostics target a specific job).
+    pub job: Option<JobId>,
+    /// Optional 0-based step index (set by step-scoped diagnostics).
+    pub step: Option<StepIndex>,
 }
 
 impl Diagnostic {
@@ -100,6 +104,8 @@ impl Diagnostic {
             level,
             message: message.into(),
             workflow: None,
+            job: None,
+            step: None,
         }
     }
 
@@ -107,6 +113,20 @@ impl Diagnostic {
     #[must_use]
     pub fn with_workflow(mut self, workflow: WorkflowPath) -> Self {
         self.workflow = Some(workflow);
+        self
+    }
+
+    /// Set the job field.
+    #[must_use]
+    pub fn with_job(mut self, job: JobId) -> Self {
+        self.job = Some(job);
+        self
+    }
+
+    /// Set the step field.
+    #[must_use]
+    pub fn with_step(mut self, step: StepIndex) -> Self {
+        self.step = Some(step);
         self
     }
 }
