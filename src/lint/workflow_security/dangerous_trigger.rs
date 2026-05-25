@@ -4,7 +4,7 @@ use crate::domain::workflow_parsed::{Parsed, Trigger};
 
 /// `dangerous-trigger` rule: emits an error per `pull_request_target` or `workflow_run`
 /// trigger. Both run in the target-repo context with full secrets and a write-scoped
-/// GITHUB_TOKEN, and both are reachable from fork PRs.
+/// `GITHUB_TOKEN`, and both are reachable from fork PRs.
 pub struct DangerousTriggerRule;
 
 impl DangerousTriggerRule {

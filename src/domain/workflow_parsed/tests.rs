@@ -148,13 +148,11 @@ jobs:
     );
     assert_eq!(s0.with.get("ref"), None);
     assert!(
-        s0.with
-            .get("password")
-            .unwrap()
+        s0.with["password"]
             .as_str()
             .contains("secrets.DOCKER_HUB_TOKEN")
     );
-    assert_eq!(s0.env.get("NODE_ENV").unwrap().as_str(), "production");
+    assert_eq!(s0.env["NODE_ENV"].as_str(), "production");
     let s1 = &job.steps[1];
     assert_eq!(s1.run.as_deref(), Some("echo hello"));
 }
@@ -205,6 +203,6 @@ jobs:
 ",
     );
     let s = &p.jobs[0].steps[0];
-    assert_eq!(s.with.get("retries").unwrap().as_str(), "3");
-    assert_eq!(s.with.get("verbose").unwrap().as_str(), "true");
+    assert_eq!(s.with["retries"].as_str(), "3");
+    assert_eq!(s.with["verbose"].as_str(), "true");
 }

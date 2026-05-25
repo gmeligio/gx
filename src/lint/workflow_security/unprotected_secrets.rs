@@ -68,7 +68,7 @@ impl UnprotectedSecretsRule {
 }
 
 /// User-managed secret names referenced by this step that are NOT covered by a fork gate.
-/// Returns an empty vec when the step is safe (gated, or only references GITHUB_TOKEN).
+/// Returns an empty vec when the step is safe (gated, or only references `GITHUB_TOKEN`).
 fn unguarded_secrets(job: &Job, step: &Step) -> Vec<String> {
     let names = step_secret_names(step);
     if names.is_empty() {
