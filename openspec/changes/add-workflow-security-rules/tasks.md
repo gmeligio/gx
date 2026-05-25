@@ -42,9 +42,9 @@
 
 ## 6. Documentation
 
-- [ ] 6.1 Update README's "Commands" section to mention security rules in the `gx lint` row.
-- [ ] 6.2 Update `docs/demo.tape` if the demo flow showcases lint (otherwise skip — `demo.tape` mostly demos `tidy`).
-- [ ] 6.3 Add a `docs/lint-rules.md` (or extend the existing lint doc) with one paragraph per rule: what it catches, the canonical fix, how to opt out via ignore.
+- [x] 6.1 README's "Commands" table now mentions workflow-security and links to `docs/lint-rules.md`.
+- [x] 6.2 Skipped — `docs/demo.tape` contains no `lint` invocations (verified via grep).
+- [x] 6.3 `docs/lint-rules.md` written: per-rule paragraph (what it catches, the canonical fix, default level), the two-family overview, and ignore semantics including the workflow-security caveat about omitting `action`.
 
 ## 7. Release
 
