@@ -1,9 +1,9 @@
 use crate::domain::action::uses_ref::UsesRef;
 use crate::domain::workflow::Error as WorkflowError;
 use crate::domain::workflow_actions::{JobId, StepIndex, WorkflowPath};
+use crate::domain::workflow_parsed::Parsed;
 use glob::glob;
 use regex::Regex;
-use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -70,29 +70,6 @@ struct ExtractedAction {
     location: crate::domain::workflow_actions::Location,
 }
 
-/// Minimal workflow structure for YAML parsing.
-#[derive(Debug, Deserialize)]
-struct Workflow {
-    /// Map of job IDs to their definitions.
-    #[serde(default)]
-    jobs: HashMap<String, Job>,
-}
-
-/// A single job within a workflow.
-#[derive(Debug, Deserialize)]
-struct Job {
-    /// Ordered list of steps in this job.
-    #[serde(default)]
-    steps: Vec<Step>,
-}
-
-/// A single step within a job.
-#[derive(Debug, Deserialize)]
-struct Step {
-    /// The `uses:` field referencing an action (e.g. "actions/checkout@v4").
-    uses: Option<String>,
-}
-
 /// Find all workflow files in a workflows directory.
 ///
 /// # Errors
@@ -155,30 +132,29 @@ impl FileScanner {
         find_workflow_files(&self.workflows_dir).map_err(Into::into)
     }
 
-    /// Extract all actions from a single workflow file as data.
+    /// Parse a workflow file once and return both the structural `Parsed` model and
+    /// the list of `uses:` action references with their location metadata.
     ///
-    /// Returns extraction without any interpretation.
+    /// The action list is derived from `parsed.jobs[].steps[].uses` and enriched
+    /// with the per-step version comment scraped via regex from the raw source
+    /// (saphyr drops comments during parsing, so we capture them separately).
     ///
     /// # Errors
     ///
     /// Returns an error if the file cannot be read, parsed as YAML, or the regex pattern is invalid.
-    fn extract_actions(
+    fn extract_workflow(
         workflow_path: &Path,
         workflow_rel_path: &WorkflowPath,
-    ) -> Result<Vec<ExtractedAction>, IoWorkflowError> {
+    ) -> Result<(Parsed, Vec<ExtractedAction>), IoWorkflowError> {
         let content =
             fs::read_to_string(workflow_path).map_err(|source| IoWorkflowError::Read {
                 path: workflow_path.to_path_buf(),
                 source,
             })?;
 
-        let mut actions = Vec::new();
-
-        // Build a map of uses line -> comment text from content
-        // Note: We capture the comment as-is without normalization
+        // Comment map: uses-text -> version comment (e.g. "v6.0.1")
         let mut comments = HashMap::new();
         let uses_with_comment_re = Regex::new(r"uses:\s*([^#\n]+)#\s*(\S+)")?;
-
         for line in content.lines() {
             if let Some(cap) = uses_with_comment_re.captures(line) {
                 let uses_part = cap[1].trim().to_owned();
@@ -187,45 +163,46 @@ impl FileScanner {
             }
         }
 
-        // Parse YAML to get structured job/step info
-        let workflow: Workflow =
-            serde_saphyr::from_str(&content).map_err(|source| IoWorkflowError::Parse {
-                path: workflow_path.to_path_buf(),
-                source: Box::new(source),
+        let parsed =
+            Parsed::from_yaml(workflow_rel_path.clone(), &content).map_err(|source| {
+                IoWorkflowError::Parse {
+                    path: workflow_path.to_path_buf(),
+                    source,
+                }
             })?;
 
-        // Pattern to parse uses: owner/repo@ref
         let uses_re = Regex::new(r"^([^@\s]+)@([^\s#]+)")?;
+        let mut actions = Vec::new();
 
-        for (job_id, job) in &workflow.jobs {
+        for job in &parsed.jobs {
             for (step_idx, step) in job.steps.iter().enumerate() {
-                if let Some(uses) = &step.uses
-                    && let Some(cap) = uses_re.captures(uses)
-                {
-                    let action_name = cap[1].to_string();
-                    let uses_ref = cap[2].to_string();
+                let Some(uses) = step.uses.as_deref() else {
+                    continue;
+                };
+                let Some(cap) = uses_re.captures(uses) else {
+                    continue;
+                };
+                let action_name = cap[1].to_string();
+                let uses_ref = cap[2].to_string();
 
-                    // Skip local actions (./path) and docker actions (docker://)
-                    if action_name.starts_with('.') || action_name.starts_with("docker://") {
-                        continue;
-                    }
-
-                    // Get comment if present (raw, no normalization)
-                    let comment = comments.get(uses).cloned();
-
-                    actions.push(ExtractedAction {
-                        uses_ref: UsesRef::new(action_name, uses_ref, comment),
-                        location: crate::domain::workflow_actions::Location {
-                            workflow: workflow_rel_path.clone(),
-                            job: Some(JobId::from(job_id.clone())),
-                            step: StepIndex::try_from(step_idx).ok(),
-                        },
-                    });
+                if action_name.starts_with('.') || action_name.starts_with("docker://") {
+                    continue;
                 }
+
+                let comment = comments.get(uses).cloned();
+
+                actions.push(ExtractedAction {
+                    uses_ref: UsesRef::new(action_name, uses_ref, comment),
+                    location: crate::domain::workflow_actions::Location {
+                        workflow: workflow_rel_path.clone(),
+                        job: Some(JobId::from(job.id.clone())),
+                        step: StepIndex::try_from(step_idx).ok(),
+                    },
+                });
             }
         }
 
-        Ok(actions)
+        Ok((parsed, actions))
     }
 
     /// Scan a single workflow and aggregate actions into a `WorkflowActionSet`.
@@ -238,7 +215,7 @@ impl FileScanner {
         workflow_path: &Path,
     ) -> Result<crate::domain::workflow_actions::ActionSet, WorkflowError> {
         let rel = self.rel_path(workflow_path);
-        let actions = Self::extract_actions(workflow_path, &rel)?;
+        let (_, actions) = Self::extract_workflow(workflow_path, &rel)?;
         let mut action_set = crate::domain::workflow_actions::ActionSet::new();
         for action in &actions {
             action_set.add(&action.uses_ref.interpret());
@@ -251,8 +228,8 @@ impl FileScanner {
         workflow_path: &Path,
         workflow_rel_path: &WorkflowPath,
     ) -> Result<Vec<crate::domain::workflow_actions::Located>, WorkflowError> {
-        let actions =
-            Self::extract_actions(workflow_path, workflow_rel_path).map_err(WorkflowError::from)?;
+        let (_, actions) = Self::extract_workflow(workflow_path, workflow_rel_path)
+            .map_err(WorkflowError::from)?;
         Ok(actions
             .into_iter()
             .map(|action| crate::domain::workflow_actions::Located {
@@ -295,6 +272,35 @@ impl crate::domain::workflow::Scanner for FileScanner {
             Ok(paths) => Box::new(paths.into_iter().map(Ok)),
             Err(e) => Box::new(std::iter::once(Err(e))),
         }
+    }
+
+    fn scan_all_with_parsed(
+        &self,
+    ) -> Result<
+        (
+            Vec<crate::domain::workflow_actions::Located>,
+            Vec<Parsed>,
+        ),
+        WorkflowError,
+    > {
+        let workflows = self.find_workflows()?;
+        let mut located = Vec::new();
+        let mut parsed = Vec::new();
+        for workflow_path in workflows {
+            let rel = self.rel_path(&workflow_path);
+            let (p, actions) =
+                Self::extract_workflow(&workflow_path, &rel).map_err(WorkflowError::from)?;
+            located.extend(
+                actions
+                    .into_iter()
+                    .map(|a| crate::domain::workflow_actions::Located {
+                        action: a.uses_ref.interpret(),
+                        location: a.location,
+                    }),
+            );
+            parsed.push(p);
+        }
+        Ok((located, parsed))
     }
 }
 

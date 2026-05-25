@@ -2,8 +2,8 @@
 
 - [x] 1.1 Add `domain::workflow::Parsed` with `on`, `permissions`, `concurrency`, `jobs` (each job with `permissions`, `if`, steps).
 - [x] 1.2 Add `domain::workflow::Trigger` enum covering `pull_request`, `pull_request_target`, `push`, `schedule`, `workflow_dispatch`, `workflow_call`, `workflow_run`, `release`, `tags`, `other(String)`. Multi-trigger workflows hold a `Vec<Trigger>`.
-- [ ] 1.3 Update `infra::workflow_scan::FileScanner` to parse the full YAML once via `serde_saphyr` (already in use at `scanner.rs:192`) and emit both `Parsed` and the existing `Located` action list. Verify existing tests still pass and add a regression test confirming the single parse yields the same `WorkflowAction` list the prior two-pass scan produced.
-- [ ] 1.4 Verify: `mise run build` and `mise run test` pass.
+- [x] 1.3 Update `infra::workflow_scan::FileScanner` to parse the full YAML once via `serde_saphyr` (already in use at `scanner.rs:192`) and emit both `Parsed` and the existing `Located` action list. Verify existing tests still pass and add a regression test confirming the single parse yields the same `WorkflowAction` list the prior two-pass scan produced.
+- [x] 1.4 Verify: `mise run build` and `mise run test` pass.
 
 ## 2. Extend the lint engine
 
