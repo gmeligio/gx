@@ -88,7 +88,7 @@ The system SHALL detect when a workflow's top-level `permissions:` block declare
 
 ### Requirement: dangerous-trigger rule
 
-The system SHALL detect when a workflow uses `on: pull_request_target:`. The user who benefits is the maintainer protecting against the "pwn request" attack class — `pull_request_target` runs PR code with the base repo's secrets and write token, which is the precondition for the May 2026 TanStack-class supply-chain attack.
+The system SHALL detect when a workflow uses `on: pull_request_target:` or `on: workflow_run:`. Both triggers run in the target-repository context with full secrets and a write-scoped `GITHUB_TOKEN`, and both are reachable from fork PRs. The user who benefits is the maintainer protecting against the "pwn request" attack class — the precondition for the May 2026 TanStack-class supply-chain attack — and against the parallel `workflow_run` artifact-poisoning class.
 
 #### Scenario: Workflow uses pull_request
 
@@ -100,15 +100,28 @@ The system SHALL detect when a workflow uses `on: pull_request_target:`. The use
 
 - **GIVEN** a workflow with `on: pull_request_target:`
 - **WHEN** `dangerous-trigger` rule runs
-- **THEN** an error diagnostic is produced identifying the file
+- **THEN** an error diagnostic is produced identifying the file and the `pull_request_target` trigger
 - **AND** the diagnostic message includes a pointer to the pull_request alternative
 
-#### Scenario: Reviewed pull_request_target workflow opts out
+#### Scenario: Workflow uses workflow_run
+
+- **GIVEN** a workflow with `on: workflow_run:` consuming artifacts from another workflow
+- **WHEN** `dangerous-trigger` rule runs
+- **THEN** an error diagnostic is produced identifying the file and the `workflow_run` trigger
+- **AND** the diagnostic message explains that `github.repository == ...` guards do not mitigate the risk
+
+#### Scenario: Workflow uses both pull_request_target and workflow_run
+
+- **GIVEN** a workflow whose `on:` map includes both triggers
+- **WHEN** `dangerous-trigger` rule runs
+- **THEN** two distinct error diagnostics are produced, one per trigger, so the user can address each line independently
+
+#### Scenario: Reviewed dangerous-trigger workflow opts out
 
 - **GIVEN** `gx.toml` contains `dangerous-trigger = { level = "error", ignore = [{ workflow = ".github/workflows/pr-comment-handler.yml" }] }`
-- **WHEN** the named workflow uses `pull_request_target`
+- **WHEN** the named workflow uses `pull_request_target` or `workflow_run`
 - **THEN** no diagnostic is produced for that file
-- **AND** other workflows using `pull_request_target` still produce diagnostics
+- **AND** other workflows using either trigger still produce diagnostics
 
 ---
 
@@ -164,21 +177,29 @@ The system SHALL detect when a workflow triggered by `push:` or `schedule:` does
 
 ### Requirement: unprotected-secrets rule
 
-The system SHALL detect when a `pull_request`-triggered workflow references `secrets.*` from a step that is not guarded by a fork-PR `if:` gate. The gate is satisfied when the effective `if:` (job-level AND step-level, concatenated) textually contains `github.event.pull_request.head.repo.full_name == github.repository` or the structurally-equivalent `github.repository_owner ==` shape.
+The system SHALL detect when a `pull_request`-triggered workflow references a user-managed secret (any `secrets.<NAME>` where `<NAME>` is not `GITHUB_TOKEN`) from a step that is not guarded by a fork-PR `if:` gate. The gate is satisfied when the effective `if:` (job-level AND step-level, concatenated) textually contains `github.event.pull_request.head.repo.full_name == github.repository` or the structurally-equivalent `github.repository_owner ==` shape.
 
-The user who benefits is the maintainer enforcing "secrets never reach fork PR code" — the rule makes the gate explicit so PR review does not have to recompute it for every secret reference.
+`secrets.GITHUB_TOKEN` is excluded because GitHub automatically downgrades it to read-only on fork PRs regardless of the workflow's declared permissions. Workflows that have widened the token via top-level `permissions:` are caught by `excessive-permissions`.
 
-#### Scenario: PR-triggered workflow uses a secret with the fork gate
+The user who benefits is the maintainer enforcing "user-managed secrets never reach fork PR code" — the rule makes the gate explicit so PR review does not have to recompute it for every secret reference.
+
+#### Scenario: PR-triggered workflow uses a user secret with the fork gate
 
 - **GIVEN** a workflow with `on: pull_request:` and a step `if: github.event.pull_request.head.repo.full_name == github.repository ... password: ${{ secrets.DOCKER_HUB_TOKEN }}`
 - **WHEN** `unprotected-secrets` rule runs
 - **THEN** no diagnostic is produced
 
-#### Scenario: PR-triggered workflow uses a secret without the fork gate
+#### Scenario: PR-triggered workflow uses a user secret without the fork gate
 
 - **GIVEN** a workflow with `on: pull_request:` and a step that references `secrets.DOCKER_HUB_TOKEN` with no `if:` guard
 - **WHEN** `unprotected-secrets` rule runs
 - **THEN** an error diagnostic is produced identifying the file, job, step, and the unguarded secret name
+
+#### Scenario: PR-triggered workflow uses only `secrets.GITHUB_TOKEN`
+
+- **GIVEN** a workflow with `on: pull_request:` and a step referencing `secrets.GITHUB_TOKEN` with no `if:` guard
+- **WHEN** `unprotected-secrets` rule runs
+- **THEN** no diagnostic is produced (GitHub auto-scopes `GITHUB_TOKEN` to read-only on fork PRs)
 
 #### Scenario: Non-PR workflow uses a secret without the gate
 
@@ -189,5 +210,11 @@ The user who benefits is the maintainer enforcing "secrets never reach fork PR c
 #### Scenario: pull_request_target workflow uses a secret
 
 - **GIVEN** a workflow with `on: pull_request_target:` that references a secret
+- **WHEN** `unprotected-secrets` rule runs
+- **THEN** no diagnostic is produced (`dangerous-trigger` covers this; double-reporting would be noise)
+
+#### Scenario: workflow_run workflow uses a secret
+
+- **GIVEN** a workflow with `on: workflow_run:` that references a secret
 - **WHEN** `unprotected-secrets` rule runs
 - **THEN** no diagnostic is produced (`dangerous-trigger` covers this; double-reporting would be noise)

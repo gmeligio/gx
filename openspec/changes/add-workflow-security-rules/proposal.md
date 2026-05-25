@@ -26,10 +26,10 @@ This change extends `gx lint` with workflow-level security rules so a single `gx
 |-----------|---------|-----------------|
 | `missing-permissions` | error | Workflow file has no top-level `permissions:` block |
 | `excessive-permissions` | warn | Top-level `permissions:` declares anything broader than `contents: read` (broader scopes belong at job level) |
-| `dangerous-trigger` | error | Workflow uses `on: pull_request_target:` |
+| `dangerous-trigger` | error | Workflow uses `on: pull_request_target:` or `on: workflow_run:` (both run in target-repo context with secrets and are triggerable by fork PRs) |
 | `pr-head-checkout` | error | Workflow with secrets/write token checks out `${{ github.event.pull_request.head.sha }}` or `github.head_ref` |
 | `missing-concurrency` | warn | Workflow triggered by `push:` or `schedule:` without a `concurrency:` block |
-| `unprotected-secrets` | error | `pull_request`-triggered workflow references `secrets.*` in a step without an `if:` guard on `github.event.pull_request.head.repo.full_name == github.repository` |
+| `unprotected-secrets` | error | `pull_request`-triggered workflow references a non-`GITHUB_TOKEN` secret in a step without an `if:` guard on `github.event.pull_request.head.repo.full_name == github.repository`. `secrets.GITHUB_TOKEN` is excluded because GitHub auto-scopes it down on fork PRs. |
 
 - `Context` (the structure passed to each `Rule::check`) gains a `workflows_full: &[ParsedWorkflow]` field exposing parsed workflow metadata: triggers, top-level permissions, concurrency, jobs (with their permissions/if/steps).
 - A new `domain::workflow::Parsed` type encapsulates the YAML parse result. The existing action-scanner reuses this parse instead of re-parsing the file.
@@ -56,6 +56,7 @@ Required. This change adds user-facing behavior (six new rules; new default erro
 - **Affected source**: new files under `src/lint/` (one per rule), expansion of `domain::workflow` to expose parsed workflow metadata, extension of `Context` and `RuleName`.
 - **Performance**: full YAML parse of every workflow (today gx scans only for `uses:` lines). For typical repos (<20 workflows × <500 lines) this is sub-50ms.
 - **Risk**: false positives on `unprotected-secrets` and `pr-head-checkout` — the rule has to model "is this workflow triggered by `pull_request`?" and "is the secret access guarded?" The design.md walks through the false-positive analysis.
+- **Risk**: `dangerous-trigger` firing on `workflow_run` will flag the canonical "two-workflow `pull_request` + `workflow_run`" mitigation pattern recommended by GitHub Security Lab. This is intentional — even non-checkout `workflow_run` jobs run with secrets and are exploitable via attacker-controlled artifacts. Users who have audited the consumer can opt out per-workflow via `ignore`.
 - **Risk**: `excessive-permissions` is opinionated — some users keep top-level `contents: write` intentionally. Default-warn (not error) and configurable; this matches its informational nature.
 - **Documentation**: each new rule gets a one-paragraph entry in the lint-command docs (DeepWiki regenerates from source).
-- **No new dependencies**: `serde_yaml` is already a dependency for `gx.toml` and lock parsing; the workflow parser uses the same crate.
+- **No new dependencies**: `serde_saphyr` is already the YAML parser used by the action scanner (`src/infra/workflow_scan/scanner.rs`); the full-workflow parser reuses that same parse pass rather than parsing each file twice.
