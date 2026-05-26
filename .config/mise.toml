@@ -1,5 +1,4 @@
 [tools]
-rust = { version = "1.95.0", profile = "minimal", components = "clippy,rustfmt" }
 "github:axodotdev/cargo-dist" = "0.31.0"
 "github:obi1kenobi/cargo-semver-checks" = "0.46.0"
 "github:EmbarkStudios/cargo-deny" = "0.19.0"
@@ -11,3 +10,8 @@ github.github_attestations = true
 github.slsa = true
 lockfile = true
 locked = true
+# Read the rust version + components from rust-toolchain.toml (the
+# canonical Rust declarative config). mise.lock still needs a rust
+# entry because `locked = true` requires every resolved tool to be
+# in the lockfile.
+idiomatic_version_file_enable_tools = ["rust"]
