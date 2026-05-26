@@ -163,6 +163,10 @@ checksum = "sha256:b6177ff73aa355704ea8c4690f291126e4798bc951f0fa520de9ef5387f00
 url = "https://github.com/obi1kenobi/cargo-semver-checks/releases/download/v0.46.0/cargo-semver-checks-x86_64-pc-windows-msvc.zip"
 url_api = "https://api.github.com/repos/obi1kenobi/cargo-semver-checks/releases/assets/344661661"
 
+[[tools.rust]]
+version = "1.95.0"
+backend = "core:rust"
+
 [[tools.ttyd]]
 version = "1.7.3"
 backend = "aqua:tsl0922/ttyd"
