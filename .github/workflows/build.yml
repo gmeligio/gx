@@ -28,7 +28,7 @@ jobs:
             # Reads toolchain + components from rust-toolchain.toml.
             # Runs before mise-action so rustup has the components installed
             # before mise sets RUSTUP_TOOLCHAIN.
-            - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master @ 2026-05-26
+            - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.16.1
             - run: cargo fmt --check
 
     clippy:
@@ -37,7 +37,9 @@ jobs:
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
             # Reads toolchain + components from rust-toolchain.toml.
-            - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master @ 2026-05-26
+            # Runs before mise-action so rustup has the components installed
+            # before mise sets RUSTUP_TOOLCHAIN.
+            - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.16.1
             - uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
             - run: mise run clippy
 
