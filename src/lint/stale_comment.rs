@@ -127,6 +127,7 @@ mod tests {
             manifest: &manifest,
             lock: &lock,
             workflows: &workflows,
+            workflows_full: &[],
             action_set: &action_set,
         };
 
@@ -155,6 +156,7 @@ mod tests {
             manifest: &manifest,
             lock: &lock,
             workflows: &workflows,
+            workflows_full: &[],
             action_set: &action_set,
         };
 
@@ -186,6 +188,7 @@ mod tests {
             manifest: &manifest,
             lock: &lock,
             workflows: &workflows,
+            workflows_full: &[],
             action_set: &action_set,
         };
 

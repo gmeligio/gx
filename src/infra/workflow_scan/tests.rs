@@ -331,6 +331,79 @@ fn scan_iterator_matches_scan_all_located() {
 }
 
 #[test]
+fn scan_all_with_parsed_matches_scan_all_located() {
+    // Task 1.3 regression test: the combined single-pass parse must produce
+    // exactly the same WorkflowAction list as the legacy per-iterator path.
+    let temp_dir = TempDir::new().unwrap();
+    create_test_workflow(
+        temp_dir.path(),
+        "ci.yml",
+        "on: pull_request
+permissions:
+  contents: read
+jobs:
+  build:
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v4
+      - uses: actions/setup-node@v3
+",
+    );
+    create_test_workflow(
+        temp_dir.path(),
+        "deploy.yml",
+        "on: push
+jobs:
+  deploy:
+    steps:
+      - uses: docker/build-push-action@v5",
+    );
+
+    let scanner = FileWorkflowScanner::new(temp_dir.path());
+
+    let via_legacy = scanner.scan_all_located().unwrap();
+    let (via_combined, parsed) = scanner.scan_all_with_parsed().unwrap();
+
+    assert_eq!(via_legacy.len(), via_combined.len());
+
+    let mut legacy_keys: Vec<String> = via_legacy
+        .iter()
+        .map(|a| format!("{}@{}", a.action.id.as_str(), a.action.version.as_str()))
+        .collect();
+    let mut combined_keys: Vec<String> = via_combined
+        .iter()
+        .map(|a| format!("{}@{}", a.action.id.as_str(), a.action.version.as_str()))
+        .collect();
+    legacy_keys.sort();
+    combined_keys.sort();
+    assert_eq!(legacy_keys, combined_keys);
+
+    // The Parsed output must carry the same workflow set and the structural
+    // fields rules will consume.
+    assert_eq!(parsed.len(), 2);
+    let ci = parsed
+        .iter()
+        .find(|p| p.path.as_str().ends_with("ci.yml"))
+        .unwrap();
+    assert!(ci.permissions.is_some());
+    assert!(
+        ci.on
+            .iter()
+            .any(|t| matches!(t, crate::domain::workflow_parsed::Trigger::PullRequest))
+    );
+    let deploy = parsed
+        .iter()
+        .find(|p| p.path.as_str().ends_with("deploy.yml"))
+        .unwrap();
+    assert!(deploy.permissions.is_none());
+    assert!(
+        deploy
+            .on
+            .iter()
+            .any(|t| matches!(t, crate::domain::workflow_parsed::Trigger::Push))
+    );
+}
+
+#[test]
 fn scan_iterator_yields_error_for_malformed_file_without_aborting() {
     let temp_dir = TempDir::new().unwrap();
     // One valid workflow

@@ -105,7 +105,7 @@ fn module_path_segments(file_path: &Path, src_dir: &Path) -> Vec<String> {
     let parts: Vec<String> = rel
         .unwrap()
         .components()
-        .filter_map(|c| c.as_os_str().to_str().map(str::to_string))
+        .filter_map(|c| c.as_os_str().to_str().map(str::to_owned))
         .collect();
 
     let mut segments: Vec<String> = Vec::new();
@@ -505,17 +505,15 @@ fn file_size_budget() {
 
 // Count only direct .rs files per directory (non-recursive)
 fn count_rs_in_dir(dir: &Path) -> usize {
-    fs::read_dir(dir)
-        .map(|entries| {
-            entries
-                .flatten()
-                .filter(|e| {
-                    let p = e.path();
-                    p.is_file() && p.extension().and_then(|x| x.to_str()) == Some("rs")
-                })
-                .count()
-        })
-        .unwrap_or(0)
+    fs::read_dir(dir).map_or(0, |entries| {
+        entries
+            .flatten()
+            .filter(|e| {
+                let p = e.path();
+                p.is_file() && p.extension().and_then(|x| x.to_str()) == Some("rs")
+            })
+            .count()
+    })
 }
 
 fn check_dir(dir: &Path, max_files: usize, violations: &mut Vec<String>) {

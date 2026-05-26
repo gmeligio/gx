@@ -54,7 +54,7 @@ cargo install gx
 ```bash
 gx tidy      # Pin actions to commit SHAs and sync manifest if present
 gx upgrade   # Upgrade pinned actions to newer versions
-gx lint      # Check for unpinned or mismatched actions
+gx lint      # Check action pinning and workflow-security issues (see docs/lint-rules.md)
 gx init      # Create a manifest and lock file from your current workflows
 ```
 

@@ -1,5 +1,5 @@
 ---
-model: sonnet
+model: inherit
 name: openspec-archive-change
 description: Archive a completed change in the experimental workflow. Use when the user wants to finalize and archive a change after implementation is complete.
 license: MIT
@@ -7,7 +7,7 @@ compatibility: Requires openspec CLI.
 metadata:
   author: openspec
   version: "1.0"
-  generatedBy: "1.2.0"
+  generatedBy: "1.3.1"
 ---
 
 Archive a completed change in the experimental workflow.
@@ -60,13 +60,27 @@ Archive a completed change in the experimental workflow.
    - Determine what changes would be applied (adds, modifications, removals, renames)
    - Show a combined summary before prompting
 
-   **Prompt options:**
-   - If changes needed: "Sync now (recommended)", "Archive without syncing"
-   - If already synced: "Archive now", "Sync anyway", "Cancel"
+   **Always sync specs automatically** — do NOT prompt the user. If there are changes to sync, proceed directly.
 
-   If user chooses sync, use Task tool (subagent_type: "general-purpose", prompt: "Use Skill tool to invoke openspec-sync-specs for change '<name>'. Delta spec analysis: <include the analyzed delta spec summary>"). Proceed to archive regardless of choice.
+   Use Task tool (subagent_type: "general-purpose", prompt: "Use Skill tool to invoke openspec-sync-specs for change '<name>'. Delta spec analysis: <include the analyzed delta spec summary>"). Proceed to archive after sync completes.
 
-5. **Perform the archive**
+<!-- opsx-verify-scoring-patch -->
+
+5. **Verify implementation**
+
+   Check for `.verify-passed` marker at `openspec/changes/<n>/.verify-passed`.
+
+   **If marker does NOT exist:**
+   - Invoke Skill tool: `openspec-verify-change` for change `<n>`
+   - Wait for the verdict:
+     - **FAIL** → block archive, show score table, list CRITICAL issues
+     - **CONDITIONAL** → show score table + warnings, ask user to confirm
+     - **PASS** → write marker: `echo "passed" > "openspec/changes/<n>/.verify-passed"`, continue
+   - Max 3 retry cycles: fix → re-verify → check verdict
+
+   **If marker EXISTS:** show "✓ Verified" and continue.
+
+6. **Perform the archive**
 
    Create the archive directory if it doesn't exist:
    ```bash
@@ -83,7 +97,44 @@ Archive a completed change in the experimental workflow.
    mv openspec/changes/<name> openspec/changes/archive/YYYY-MM-DD-<name>
    ```
 
-6. **Display summary**
+
+<!-- opsx-git-commit-patch -->
+
+7. **Git: Commit, push, and create PR**
+
+   Stage and commit the archived change:
+
+   ```bash
+   git add -A openspec/
+   git diff --cached --quiet || git commit -m "docs: archive <change-name>"
+   ```
+
+   Push the branch and create a pull request:
+
+   ```bash
+   git push -u origin HEAD
+   gh pr create --title "<change-name>" --body "<summary from the proposal>"
+   ```
+
+8. **Watch pipeline and fix issues**
+
+   After creating the PR, monitor CI checks:
+
+   ```bash
+   gh pr checks <PR-number> --watch
+   ```
+
+   **If any check fails:**
+   - Read the failure logs: `gh run view <run-id> --log-failed`
+   - Identify the root cause and fix the issue
+   - Commit the fix: `git add -A && git commit -m "fix(<change-name>): <brief description>"`
+   - Push: `git push`
+   - Re-check: `gh pr checks <PR-number> --watch`
+   - Repeat until all checks pass (max 3 attempts, then report to user with failure details)
+
+   **If all checks pass:** notify the user and continue to summary.
+
+9. **Display summary**
 
    Show archive completion summary including:
    - Change name

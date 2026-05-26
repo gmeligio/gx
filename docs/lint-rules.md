@@ -1,0 +1,95 @@
+# Lint rules
+
+`gx lint` reports two families of issues:
+
+- **Action hygiene** — verify every workflow `uses:` reference is pinned, manifested, and consistently commented.
+- **Workflow security** — flag patterns that expose secrets, the repo write token, or untrusted code execution to fork PRs and other adversarial inputs.
+
+Every rule is identified by a kebab-case name and configured under `[lint.rules]` in `.github/gx.toml`:
+
+```toml
+[lint.rules]
+unpinned = { level = "error" }
+dangerous-trigger = { level = "off" }
+unprotected-secrets = { level = "error", ignore = [{ workflow = ".github/workflows/release.yml" }] }
+```
+
+Levels are `error` (fail the run), `warn` (report but don't fail), or `off` (skip). Each rule has a built-in default level that applies when the rule is unconfigured.
+
+The `ignore` list takes intersection semantics: every key you specify must match for the ignore to apply. For workflow-security rules the `action` key is meaningless — diagnostics are scoped to a workflow (and sometimes a job/step), not to an action reference. Omit `action` when ignoring a workflow-security finding; specifying it will cause the ignore not to match.
+
+## Action-hygiene rules
+
+### sha-mismatch *(default: error)*
+
+The SHA pinned in a workflow does not match the SHA recorded in `gx.lock` for that action + specifier. Run `gx tidy` to repin, or update `gx.lock` if the workflow is correct.
+
+### unpinned *(default: error)*
+
+A `uses:` reference points at a tag, branch, or `@main`/`@master` instead of a 40-character commit SHA. Run `gx tidy` to pin.
+
+### stale-comment *(default: warn)*
+
+The `# v1.2.3` comment alongside a pinned SHA does not match the lock-resolved version. Run `gx tidy` to regenerate the comment.
+
+### unsynced-manifest *(default: error)*
+
+A `uses:` reference exists in a workflow but is missing from the manifest (`gx.toml`). Run `gx tidy` (or `gx init`) to add the action.
+
+## Workflow-security rules
+
+### missing-permissions *(default: error)*
+
+The workflow has no top-level `permissions:` block, so it inherits the repo-default token scopes — usually broad. Add an explicit block, ideally starting from `permissions: {}` or `permissions: { contents: read }` and granting only what the workflow needs.
+
+### excessive-permissions *(default: warn)*
+
+The top-level `permissions:` grants more than `contents: read`. `write-all` and `read-all` always trigger this rule; per-scope maps trigger when they grant any write scope or non-`contents` scope. Scope down to the minimum the workflow actually requires, or use job-level overrides.
+
+### dangerous-trigger *(default: error)*
+
+The workflow uses `pull_request_target` or `workflow_run`. Both run in the *target* repository context with full secret access and a write-scoped `GITHUB_TOKEN`, and both are reachable from fork PRs. Prefer `pull_request` unless you genuinely need a privileged trigger; if you do, gate every step that uses secrets or writes to the repo with a fork-PR check (`github.event.pull_request.head.repo.full_name == github.repository`). One diagnostic is emitted per dangerous trigger so the user can act on the right line.
+
+### pr-head-checkout *(default: error)*
+
+A privileged workflow (any job with write permissions OR any step referencing `secrets.*`) checks out the PR HEAD ref — `github.event.pull_request.head.sha`, `github.event.pull_request.head.ref`, or `github.head_ref`. This executes untrusted code with privileged context. Either drop the privileged context, drop the HEAD checkout, or gate the privileged step with the fork-PR check above.
+
+### missing-concurrency *(default: warn)*
+
+The workflow triggers on `push` or `schedule` but has no top-level `concurrency:` block, so overlapping runs are not cancelled. Add `concurrency: { group: "${{ github.workflow }}-${{ github.ref }}", cancel-in-progress: true }` or similar to reclaim runner time.
+
+### unprotected-secrets *(default: error)*
+
+A `pull_request` workflow references a user-managed secret (anything except `GITHUB_TOKEN`) in a step that lacks the canonical fork-PR gate. `secrets.GITHUB_TOKEN` is exempt because GitHub auto-scopes it down on fork PRs. The accepted gates are:
+
+- `github.event.pull_request.head.repo.full_name == github.repository`
+- `github.repository_owner == ...`
+
+A job-level `if:` propagates to its steps. Workflows that already use `pull_request_target` or `workflow_run` are skipped by this rule (the broader `dangerous-trigger` covers them).
+
+## Disabling rules
+
+To turn off a rule entirely:
+
+```toml
+[lint.rules]
+missing-concurrency = { level = "off" }
+```
+
+To keep a rule active but skip a specific workflow:
+
+```toml
+[lint.rules]
+dangerous-trigger = { level = "error", ignore = [
+    { workflow = ".github/workflows/release.yml" },
+] }
+```
+
+To skip a single job within a workflow:
+
+```toml
+[lint.rules]
+unprotected-secrets = { level = "error", ignore = [
+    { workflow = ".github/workflows/ci.yml", job = "publish" },
+] }
+```

@@ -55,4 +55,22 @@ pub trait Scanner {
     fn find_workflow_paths(&self) -> Result<Vec<std::path::PathBuf>, Error> {
         self.scan_paths().collect()
     }
+
+    /// Parse every workflow once and return both the structural `Parsed` model
+    /// and the existing `Located` action list. The lint command uses this to
+    /// feed both action-hygiene rules and workflow-security rules from a single
+    /// parse pass.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any workflow file cannot be read or parsed.
+    fn scan_all_with_parsed(
+        &self,
+    ) -> Result<
+        (
+            Vec<crate::domain::workflow_actions::Located>,
+            Vec<crate::domain::workflow_parsed::Parsed>,
+        ),
+        Error,
+    >;
 }
