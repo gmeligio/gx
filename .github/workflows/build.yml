@@ -25,8 +25,11 @@ jobs:
         runs-on: ubuntu-24.04
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-            - uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
-            - run: rustup component add rustfmt
+            # Toolchain version kept in sync with `.config/mise.toml`.
+            - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master @ 2026-05-26
+              with:
+                  toolchain: "1.95.0"
+                  components: rustfmt
             - run: cargo fmt --check
 
     clippy:
@@ -34,8 +37,12 @@ jobs:
         runs-on: ubuntu-24.04
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+            # Toolchain version kept in sync with `.config/mise.toml`.
+            - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master @ 2026-05-26
+              with:
+                  toolchain: "1.95.0"
+                  components: clippy
             - uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
-            - run: rustup component add clippy
             - run: mise run clippy
 
     unit-tests:
