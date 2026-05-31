@@ -3,7 +3,7 @@ use crate::domain::workflow_actions::{JobId, StepIndex};
 use crate::domain::workflow_parsed::{Job, Parsed, Step, Trigger};
 use crate::lint::{Context, Diagnostic, Rule, RuleName};
 use regex::Regex;
-use std::sync::OnceLock;
+use std::sync::LazyLock;
 
 /// `unprotected-secrets` rule: errors when a `pull_request`-triggered workflow references
 /// a user-managed secret from a step that isn't guarded by a fork-PR `if:` gate.
@@ -22,18 +22,16 @@ const FORK_GATE_FRAGMENTS: &[&str] = &[
     "github.repository_owner ==",
 ];
 
-/// Lazily-compiled regex matching `secrets.NAME` references and capturing the secret name.
-fn secret_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        #[expect(
-            clippy::expect_used,
-            reason = "static regex pattern is known valid at compile time"
-        )]
-        Regex::new(r"secrets\.([A-Za-z_][A-Za-z0-9_]*)")
-            .expect("secret reference regex is a valid static pattern")
-    })
-}
+/// Regex matching `secrets.NAME` references and capturing the secret name. Compiled
+/// once on first use. The pattern is a constant, so construction is infallible.
+#[expect(
+    clippy::expect_used,
+    reason = "static regex pattern is known valid at compile time"
+)]
+static SECRET_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"secrets\.([A-Za-z_][A-Za-z0-9_]*)")
+        .expect("secret reference regex is a valid static pattern")
+});
 
 impl UnprotectedSecretsRule {
     /// Diagnoses each step in a PR-triggered workflow that references an ungated user secret.
@@ -93,7 +91,7 @@ fn unguarded_secrets(job: &Job, step: &Step) -> Vec<String> {
 fn step_secret_names(step: &Step) -> Vec<String> {
     let mut found: Vec<String> = Vec::new();
     let mut visit = |text: &str| {
-        for cap in secret_re().captures_iter(text) {
+        for cap in SECRET_RE.captures_iter(text) {
             let name = cap[1].to_string();
             if name == "GITHUB_TOKEN" {
                 continue;
