@@ -80,6 +80,7 @@ pub enum Trigger {
 }
 
 impl Trigger {
+    /// Maps a raw event name to a `Trigger`, falling back to `Other` for unknown names.
     fn from_name(name: &str) -> Self {
         match name {
             "pull_request" => Self::PullRequest,
@@ -149,7 +150,7 @@ fn parse_triggers<'de, D: Deserializer<'de>>(de: D) -> Result<Vec<Trigger>, D::E
             let mut out = Vec::new();
             while let Some(name) = map.next_key::<String>()? {
                 // Discard the filter body; rules only need the event-name set.
-                let _ = map.next_value::<serde::de::IgnoredAny>()?;
+                let _: serde::de::IgnoredAny = map.next_value()?;
                 out.push(Trigger::from_name(&name));
             }
             Ok(out)
@@ -183,8 +184,7 @@ impl Permissions {
     #[must_use]
     pub fn is_excessive(&self) -> bool {
         match self {
-            Self::WriteAll => true,
-            Self::ReadAll => true,
+            Self::WriteAll | Self::ReadAll => true,
             Self::Empty => false,
             Self::Specific(map) => map.iter().any(|(scope, access)| {
                 !(scope == "contents" && matches!(access, Access::Read | Access::None))
@@ -349,16 +349,21 @@ pub struct Parsed {
 /// Wire-format struct used only as a serde target. Public surface is `Parsed`.
 #[derive(Debug, Deserialize)]
 struct WireWorkflow {
+    /// The `on:` block, parsed into a list of triggers; absent when no `on:` key is present.
     #[serde(default, deserialize_with = "parse_triggers_opt")]
     on: Option<Vec<Trigger>>,
+    /// The workflow-level `permissions:` block, if declared.
     #[serde(default)]
     permissions: Option<Permissions>,
+    /// The workflow-level `concurrency:` block, if declared.
     #[serde(default)]
     concurrency: Option<Concurrency>,
+    /// The workflow's jobs, keyed by job id.
     #[serde(default)]
     jobs: BTreeMap<String, Job>,
 }
 
+/// Deserializes the `on:` block, wrapping the parsed triggers in `Some`.
 fn parse_triggers_opt<'de, D: Deserializer<'de>>(de: D) -> Result<Option<Vec<Trigger>>, D::Error> {
     parse_triggers(de).map(Some)
 }

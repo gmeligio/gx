@@ -42,7 +42,7 @@ A `uses:` reference exists in a workflow but is missing from the manifest (`gx.t
 
 The workflow has no top-level `permissions:` block, so it inherits the repo-default token scopes — usually broad. Add an explicit block, ideally starting from `permissions: {}` or `permissions: { contents: read }` and granting only what the workflow needs.
 
-### excessive-permissions *(default: warn)*
+### excessive-permissions *(default: error)*
 
 The top-level `permissions:` grants more than `contents: read`. `write-all` and `read-all` always trigger this rule; per-scope maps trigger when they grant any write scope or non-`contents` scope. Scope down to the minimum the workflow actually requires, or use job-level overrides.
 

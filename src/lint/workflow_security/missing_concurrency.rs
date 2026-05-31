@@ -8,11 +8,19 @@ use crate::lint::{Context, Diagnostic, Rule, RuleName};
 pub struct MissingConcurrencyRule;
 
 impl MissingConcurrencyRule {
+    /// Returns a diagnostic when a push/schedule workflow lacks a `concurrency:` block.
     pub fn check_workflow(workflow: &Parsed) -> Option<Diagnostic> {
         let race_trigger = workflow.on.iter().find_map(|t| match t {
             Trigger::Push => Some("push"),
             Trigger::Schedule => Some("schedule"),
-            _ => None,
+            Trigger::PullRequest
+            | Trigger::PullRequestTarget
+            | Trigger::WorkflowDispatch
+            | Trigger::WorkflowCall
+            | Trigger::WorkflowRun
+            | Trigger::Release
+            | Trigger::Tags
+            | Trigger::Other(_) => None,
         })?;
         if workflow.concurrency.is_some() {
             return None;
@@ -46,11 +54,7 @@ impl Rule for MissingConcurrencyRule {
 }
 
 #[cfg(test)]
-#[expect(
-    clippy::unwrap_used,
-    clippy::indexing_slicing,
-    reason = "tests use unwrap and indexing freely"
-)]
+#[expect(clippy::unwrap_used, reason = "tests use unwrap freely")]
 mod tests {
     use super::*;
     use crate::domain::workflow_actions::WorkflowPath;

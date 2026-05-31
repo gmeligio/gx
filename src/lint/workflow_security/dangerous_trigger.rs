@@ -24,11 +24,19 @@ impl DangerousTriggerRule {
                     "workflow_run",
                     "runs in the target-repo context with secrets and is triggerable by fork PRs; `github.repository == ...` guards do not mitigate the risk",
                 )),
-                _ => None,
+                Trigger::PullRequest
+                | Trigger::Push
+                | Trigger::Schedule
+                | Trigger::WorkflowDispatch
+                | Trigger::WorkflowCall
+                | Trigger::Release
+                | Trigger::Tags
+                | Trigger::Other(_) => None,
             })
             .collect()
     }
 
+    /// Builds an error diagnostic naming the dangerous trigger and its mitigation hint.
     fn diagnostic(workflow: &Parsed, trigger: &str, hint: &str) -> Diagnostic {
         let msg = format!(
             "{}: dangerous trigger `{}` — {}",

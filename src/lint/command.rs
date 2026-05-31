@@ -132,48 +132,7 @@ pub fn collect_diagnostics(
 
     // Phase 3: workflow-security rules. Each runs against ctx.workflows_full and emits
     // diagnostics carrying workflow + (optionally) job/step location.
-    run_workflow_rule(
-        &MissingPermissionsRule,
-        Level::Error,
-        &ctx,
-        lint_config,
-        &mut all_diagnostics,
-    );
-    run_workflow_rule(
-        &ExcessivePermissionsRule,
-        Level::Warn,
-        &ctx,
-        lint_config,
-        &mut all_diagnostics,
-    );
-    run_workflow_rule(
-        &DangerousTriggerRule,
-        Level::Error,
-        &ctx,
-        lint_config,
-        &mut all_diagnostics,
-    );
-    run_workflow_rule(
-        &PrHeadCheckoutRule,
-        Level::Error,
-        &ctx,
-        lint_config,
-        &mut all_diagnostics,
-    );
-    run_workflow_rule(
-        &MissingConcurrencyRule,
-        Level::Warn,
-        &ctx,
-        lint_config,
-        &mut all_diagnostics,
-    );
-    run_workflow_rule(
-        &UnprotectedSecretsRule,
-        Level::Error,
-        &ctx,
-        lint_config,
-        &mut all_diagnostics,
-    );
+    run_workflow_security_rules(&ctx, lint_config, &mut all_diagnostics);
 
     // Stable diagnostic ordering: (workflow_path, job_id, step_index, rule_name).
     all_diagnostics.sort_by(|a, b| {
@@ -187,6 +146,56 @@ pub fn collect_diagnostics(
     });
 
     Ok(all_diagnostics)
+}
+
+/// Run all workflow-security rules and append their diagnostics.
+fn run_workflow_security_rules(
+    ctx: &Context,
+    lint_config: &LintConfig,
+    all_diagnostics: &mut Vec<Diagnostic>,
+) {
+    run_workflow_rule(
+        &MissingPermissionsRule,
+        Level::Error,
+        ctx,
+        lint_config,
+        all_diagnostics,
+    );
+    run_workflow_rule(
+        &ExcessivePermissionsRule,
+        Level::Error,
+        ctx,
+        lint_config,
+        all_diagnostics,
+    );
+    run_workflow_rule(
+        &DangerousTriggerRule,
+        Level::Error,
+        ctx,
+        lint_config,
+        all_diagnostics,
+    );
+    run_workflow_rule(
+        &PrHeadCheckoutRule,
+        Level::Error,
+        ctx,
+        lint_config,
+        all_diagnostics,
+    );
+    run_workflow_rule(
+        &MissingConcurrencyRule,
+        Level::Warn,
+        ctx,
+        lint_config,
+        all_diagnostics,
+    );
+    run_workflow_rule(
+        &UnprotectedSecretsRule,
+        Level::Error,
+        ctx,
+        lint_config,
+        all_diagnostics,
+    );
 }
 
 /// The lint command struct.

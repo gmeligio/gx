@@ -22,12 +22,21 @@ const FORK_GATE_FRAGMENTS: &[&str] = &[
     "github.repository_owner ==",
 ];
 
+/// Lazily-compiled regex matching `secrets.NAME` references and capturing the secret name.
 fn secret_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"secrets\.([A-Za-z_][A-Za-z0-9_]*)").unwrap())
+    RE.get_or_init(|| {
+        #[expect(
+            clippy::expect_used,
+            reason = "static regex pattern is known valid at compile time"
+        )]
+        Regex::new(r"secrets\.([A-Za-z_][A-Za-z0-9_]*)")
+            .expect("secret reference regex is a valid static pattern")
+    })
 }
 
 impl UnprotectedSecretsRule {
+    /// Diagnoses each step in a PR-triggered workflow that references an ungated user secret.
     pub fn check_workflow(workflow: &Parsed) -> Vec<Diagnostic> {
         // Only PR-triggered workflows are in scope. pull_request_target and workflow_run
         // get a single dangerous-trigger diagnostic instead.
@@ -80,6 +89,7 @@ fn unguarded_secrets(job: &Job, step: &Step) -> Vec<String> {
     names
 }
 
+/// Collects distinct user-managed secret names referenced in a step's `with`, `env`, and `run`.
 fn step_secret_names(step: &Step) -> Vec<String> {
     let mut found: Vec<String> = Vec::new();
     let mut visit = |text: &str| {
@@ -105,6 +115,7 @@ fn step_secret_names(step: &Step) -> Vec<String> {
     found
 }
 
+/// Returns whether the step's effective `if:` (job + step) contains a fork-PR gate fragment.
 fn has_fork_gate(job: &Job, step: &Step) -> bool {
     let mut combined = String::new();
     if let Some(job_if) = &job.if_cond {
@@ -119,6 +130,7 @@ fn has_fork_gate(job: &Job, step: &Step) -> bool {
         .any(|frag| combined.contains(frag))
 }
 
+/// Formats secret names as a comma-separated list of backtick-quoted `secrets.NAME` entries.
 fn format_secret_list(secrets: &[String]) -> String {
     match secrets {
         [single] => format!("`secrets.{single}`"),

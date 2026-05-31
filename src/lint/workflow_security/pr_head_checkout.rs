@@ -20,6 +20,7 @@ const PR_HEAD_REFS: &[&str] = &[
 pub struct PrHeadCheckoutRule;
 
 impl PrHeadCheckoutRule {
+    /// Returns a diagnostic for each PR-HEAD checkout step in a privileged workflow.
     pub fn check_workflow(workflow: &Parsed) -> Vec<Diagnostic> {
         if !is_privileged(workflow) {
             return Vec::new();
@@ -46,6 +47,7 @@ impl PrHeadCheckoutRule {
     }
 }
 
+/// Reports whether any job has write permissions or any step references secrets.
 fn is_privileged(workflow: &Parsed) -> bool {
     workflow.jobs.iter().any(job_has_write_perms)
         || workflow
@@ -54,12 +56,14 @@ fn is_privileged(workflow: &Parsed) -> bool {
             .any(|j| j.steps.iter().any(step_references_secrets))
 }
 
+/// Reports whether the job declares a write scope in its `permissions:`.
 fn job_has_write_perms(job: &Job) -> bool {
     job.permissions
         .as_ref()
         .is_some_and(crate::domain::workflow_parsed::Permissions::has_write)
 }
 
+/// Reports whether the step references `secrets.*` in its `run`, `with`, or `env`.
 fn step_references_secrets(step: &Step) -> bool {
     if let Some(run) = &step.run
         && run.contains("secrets.")
@@ -70,6 +74,7 @@ fn step_references_secrets(step: &Step) -> bool {
         || step.env.values().any(|v| v.as_str().contains("secrets."))
 }
 
+/// Reports whether the step is an `actions/checkout` of a PR HEAD ref.
 fn checks_out_pr_head(step: &Step) -> bool {
     let Some(uses) = step.uses.as_deref() else {
         return false;
