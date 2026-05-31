@@ -2,12 +2,18 @@ use crate::domain::action::uses_ref::UsesRef;
 use crate::domain::workflow::Error as WorkflowError;
 use crate::domain::workflow_actions::{JobId, StepIndex, WorkflowPath};
 use crate::domain::workflow_parsed::Parsed;
+use crate::regex::static_regex;
 use glob::glob;
-use regex::Regex;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
+
+// Matches a `uses:` line carrying a trailing version comment: captures the uses text
+// and the comment (e.g. `v6.0.1`).
+static_regex!(USES_WITH_COMMENT_RE, r"uses:\s*([^#\n]+)#\s*(\S+)");
+// Splits an action reference into `owner/repo` (or path) and its `@ref`.
+static_regex!(USES_RE, r"^([^@\s]+)@([^\s#]+)");
 
 /// Internal I/O errors for workflow operations.
 #[derive(Debug, Error)]
@@ -154,9 +160,8 @@ impl FileScanner {
 
         // Comment map: uses-text -> version comment (e.g. "v6.0.1")
         let mut comments = HashMap::new();
-        let uses_with_comment_re = Regex::new(r"uses:\s*([^#\n]+)#\s*(\S+)")?;
         for line in content.lines() {
-            if let Some(cap) = uses_with_comment_re.captures(line) {
+            if let Some(cap) = USES_WITH_COMMENT_RE.captures(line) {
                 let uses_part = cap[1].trim().to_owned();
                 let comment = cap[2].to_string();
                 comments.insert(uses_part, comment);
@@ -170,7 +175,6 @@ impl FileScanner {
             }
         })?;
 
-        let uses_re = Regex::new(r"^([^@\s]+)@([^\s#]+)")?;
         let mut actions = Vec::new();
 
         for job in &parsed.jobs {
@@ -178,7 +182,7 @@ impl FileScanner {
                 let Some(uses) = step.uses.as_deref() else {
                     continue;
                 };
-                let Some(cap) = uses_re.captures(uses) else {
+                let Some(cap) = USES_RE.captures(uses) else {
                     continue;
                 };
                 let action_name = cap[1].to_string();

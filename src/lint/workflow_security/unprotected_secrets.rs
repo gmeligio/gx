@@ -2,8 +2,7 @@ use crate::config::Level;
 use crate::domain::workflow_actions::{JobId, StepIndex};
 use crate::domain::workflow_parsed::{Job, Parsed, Step, Trigger};
 use crate::lint::{Context, Diagnostic, Rule, RuleName};
-use regex::Regex;
-use std::sync::LazyLock;
+use crate::regex::static_regex;
 
 /// `unprotected-secrets` rule: errors when a `pull_request`-triggered workflow references
 /// a user-managed secret from a step that isn't guarded by a fork-PR `if:` gate.
@@ -22,16 +21,8 @@ const FORK_GATE_FRAGMENTS: &[&str] = &[
     "github.repository_owner ==",
 ];
 
-/// Regex matching `secrets.NAME` references and capturing the secret name. Compiled
-/// once on first use. The pattern is a constant, so construction is infallible.
-#[expect(
-    clippy::expect_used,
-    reason = "static regex pattern is known valid at compile time"
-)]
-static SECRET_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"secrets\.([A-Za-z_][A-Za-z0-9_]*)")
-        .expect("secret reference regex is a valid static pattern")
-});
+// Regex matching `secrets.NAME` references and capturing the secret name.
+static_regex!(SECRET_RE, r"secrets\.([A-Za-z_][A-Za-z0-9_]*)");
 
 impl UnprotectedSecretsRule {
     /// Diagnoses each step in a PR-triggered workflow that references an ungated user secret.
