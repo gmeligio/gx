@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- [**breaking**] drop `x86_64-apple-darwin` (Intel Mac) release target; macOS distribution is now Apple Silicon only — Intel-Mac users build from source via `cargo install`
+
 ## [0.8.0](https://github.com/gmeligio/gx/compare/v0.7.2...v0.8.0) - 2026-05-31
 
 ### Added
