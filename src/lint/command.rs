@@ -134,18 +134,23 @@ pub fn collect_diagnostics(
     // diagnostics carrying workflow + (optionally) job/step location.
     run_workflow_security_rules(&ctx, lint_config, &mut all_diagnostics);
 
-    // Stable diagnostic ordering: (workflow_path, job_id, step_index, rule_name).
-    all_diagnostics.sort_by(|a, b| {
-        let aw = a.workflow.as_ref().map_or("", WorkflowPath::as_str);
-        let bw = b.workflow.as_ref().map_or("", WorkflowPath::as_str);
-        let aj = a.job.as_ref().map_or("", JobId::as_str);
-        let bj = b.job.as_ref().map_or("", JobId::as_str);
-        let as_ = a.step.map_or(u16::MAX, StepIndex::as_u16);
-        let bs = b.step.map_or(u16::MAX, StepIndex::as_u16);
-        (aw, aj, as_, a.rule).cmp(&(bw, bj, bs, b.rule))
-    });
+    // Stable, location-first ordering so findings for one file read together.
+    all_diagnostics.sort_by(|a, b| diagnostic_sort_key(a).cmp(&diagnostic_sort_key(b)));
 
     Ok(all_diagnostics)
+}
+
+/// Output ordering key: group by file, then position within the file, then rule.
+/// A missing workflow or job sorts first, so broader findings lead; a missing step
+/// sorts last, so a whole-job finding follows the specific steps it covers. Ending
+/// on `rule` gives same-location findings a stable, total order.
+fn diagnostic_sort_key(diag: &Diagnostic) -> (&str, &str, u16, RuleName) {
+    (
+        diag.workflow.as_ref().map_or("", WorkflowPath::as_str),
+        diag.job.as_ref().map_or("", JobId::as_str),
+        diag.step.map_or(u16::MAX, StepIndex::as_u16),
+        diag.rule,
+    )
 }
 
 /// Run all workflow-security rules and append their diagnostics.
