@@ -45,11 +45,7 @@ impl Rule for MissingPermissionsRule {
 }
 
 #[cfg(test)]
-#[expect(
-    clippy::unwrap_used,
-    clippy::indexing_slicing,
-    reason = "tests use unwrap and indexing freely"
-)]
+#[expect(clippy::unwrap_used, reason = "tests use unwrap freely")]
 mod tests {
     use super::*;
     use crate::domain::workflow_actions::WorkflowPath;

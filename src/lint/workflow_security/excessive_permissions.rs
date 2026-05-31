@@ -2,12 +2,13 @@ use crate::config::Level;
 use crate::domain::workflow_parsed::{Parsed, Permissions};
 use crate::lint::{Context, Diagnostic, Rule, RuleName};
 
-/// `excessive-permissions` rule: warns when top-level `permissions:` declares anything
+/// `excessive-permissions` rule: flags when top-level `permissions:` declares anything
 /// broader than `contents: read`. Broader scopes belong at job level so they narrow to
 /// the specific job that needs them.
 pub struct ExcessivePermissionsRule;
 
 impl ExcessivePermissionsRule {
+    /// Returns a diagnostic when the workflow's top-level `permissions:` are excessive.
     pub fn check_workflow(workflow: &Parsed) -> Option<Diagnostic> {
         let perms = workflow.permissions.as_ref()?;
         if !perms.is_excessive() {
@@ -24,7 +25,7 @@ impl ExcessivePermissionsRule {
             workflow.path, scope
         );
         Some(
-            Diagnostic::new(RuleName::ExcessivePermissions, Level::Warn, msg)
+            Diagnostic::new(RuleName::ExcessivePermissions, Level::Error, msg)
                 .with_workflow(workflow.path.clone()),
         )
     }
@@ -36,7 +37,7 @@ impl Rule for ExcessivePermissionsRule {
     }
 
     fn default_level(&self) -> Level {
-        Level::Warn
+        Level::Error
     }
 
     fn check(&self, ctx: &Context) -> Vec<Diagnostic> {
@@ -48,11 +49,7 @@ impl Rule for ExcessivePermissionsRule {
 }
 
 #[cfg(test)]
-#[expect(
-    clippy::unwrap_used,
-    clippy::indexing_slicing,
-    reason = "tests use unwrap and indexing freely"
-)]
+#[expect(clippy::unwrap_used, reason = "tests use unwrap freely")]
 mod tests {
     use super::*;
     use crate::domain::workflow_actions::WorkflowPath;
@@ -65,7 +62,7 @@ mod tests {
     fn rule_metadata() {
         let r = ExcessivePermissionsRule;
         assert_eq!(r.name(), RuleName::ExcessivePermissions);
-        assert_eq!(r.default_level(), Level::Warn);
+        assert_eq!(r.default_level(), Level::Error);
     }
 
     #[test]
@@ -75,25 +72,25 @@ mod tests {
     }
 
     #[test]
-    fn write_all_warns() {
+    fn write_all_errors() {
         let p = parse("on: push\npermissions: write-all\njobs: {}\n");
         let d = ExcessivePermissionsRule::check_workflow(&p).unwrap();
-        assert_eq!(d.level, Level::Warn);
+        assert_eq!(d.level, Level::Error);
         assert!(d.message.contains("write-all"));
     }
 
     #[test]
-    fn read_all_warns_because_broader_than_contents_read() {
+    fn read_all_errors_because_broader_than_contents_read() {
         let p = parse("on: push\npermissions: read-all\njobs: {}\n");
         let d = ExcessivePermissionsRule::check_workflow(&p).unwrap();
-        assert_eq!(d.level, Level::Warn);
+        assert_eq!(d.level, Level::Error);
     }
 
     #[test]
-    fn contents_write_at_top_warns() {
+    fn contents_write_at_top_errors() {
         let p = parse("on: push\npermissions:\n  contents: write\njobs: {}\n");
         let d = ExcessivePermissionsRule::check_workflow(&p).unwrap();
-        assert_eq!(d.level, Level::Warn);
+        assert_eq!(d.level, Level::Error);
         assert!(d.message.contains("write-capable scope"));
     }
 

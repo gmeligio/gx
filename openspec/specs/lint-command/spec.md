@@ -40,7 +40,7 @@ The system SHALL run all built-in rules at their hardcoded default levels when n
   - `unsynced-manifest` = error
   - `stale-comment` = warn
   - `missing-permissions` = error
-  - `excessive-permissions` = warn
+  - `excessive-permissions` = error
   - `dangerous-trigger` = error
   - `pr-head-checkout` = error
   - `missing-concurrency` = warn
@@ -212,13 +212,13 @@ The system SHALL detect when a workflow's top-level `permissions:` block declare
 
 - **GIVEN** a workflow with top-level `permissions: write-all`
 - **WHEN** `excessive-permissions` rule runs
-- **THEN** a warn diagnostic is produced identifying the file and the offending scope
+- **THEN** an error diagnostic is produced identifying the file and the offending scope
 
 #### Scenario: Top-level scope includes a write permission
 
 - **GIVEN** a workflow with top-level `permissions: { contents: write, packages: read }`
 - **WHEN** `excessive-permissions` rule runs
-- **THEN** a warn diagnostic is produced
+- **THEN** an error diagnostic is produced
 
 #### Scenario: Job-level write scope is acceptable
 

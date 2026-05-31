@@ -10,5 +10,6 @@ pub mod infra;
 pub mod init;
 pub mod lint;
 pub mod output;
+pub(crate) mod regex;
 pub mod tidy;
 pub mod upgrade;

@@ -778,7 +778,7 @@ fn mod_rs_reexports_only() {
     }
 
     // Sort by logic count descending for visibility
-    report.sort_by(|a, b| b.1.cmp(&a.1));
+    report.sort_by_key(|entry| std::cmp::Reverse(entry.1));
 
     let over_budget: Vec<String> = report
         .iter()
