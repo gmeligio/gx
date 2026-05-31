@@ -70,3 +70,24 @@ All formula file changes for a release SHALL be collected into a single commit a
 The workflow SHALL use the GitHub GraphQL `createCommitOnBranch` mutation to deliver commits. Direct `git push` with token-injected remotes is prohibited.
 
 **Rationale:** GraphQL-based commit delivery ensures atomic, auditable formula updates. Commits are automatically signed by GitHub, providing the verified status users see in the tap history. A failed mutation leaves no partial state, unlike a failed push.
+
+---
+
+## macOS Distribution Targets
+
+### Requirement: macOS distribution targets Apple Silicon only
+
+The Homebrew formula SHALL provide a macOS binary for Apple Silicon (`aarch64-apple-darwin`) only. Intel (`x86_64-apple-darwin`) macOS binaries SHALL NOT be distributed; Intel-Mac users obtain `gx` by building from source.
+
+#### Scenario: Apple Silicon user installs gx via Homebrew
+
+- **GIVEN** a released formula
+- **WHEN** an Apple Silicon (arm64) macOS user runs `brew install <tap>/gx`
+- **THEN** the formula resolves to the `aarch64-apple-darwin` binary with a matching checksum
+
+#### Scenario: Intel macOS user has no prebuilt binary
+
+- **GIVEN** a released formula
+- **WHEN** an Intel (x86_64) macOS user attempts to install gx via Homebrew
+- **THEN** no Intel macOS binary is offered by the formula
+- **AND** the user builds from source via `cargo install` instead
