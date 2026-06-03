@@ -67,6 +67,24 @@ A `pull_request` workflow references a user-managed secret (anything except `GIT
 
 A job-level `if:` propagates to its steps. Workflows that already use `pull_request_target` or `workflow_run` are skipped by this rule (the broader `dangerous-trigger` covers them).
 
+## Workflow-validity rules
+
+These rules catch references that GitHub Actions accepts at parse time but that fail or silently resolve to nothing at run time — the kind of break you would otherwise discover only when a scheduled or dispatched run misfires (a blank output, or an "unknown job" error far from the edit that caused it). They are scoped per workflow/job; the `action` key in an `ignore` entry is meaningless for them.
+
+### dangling-reference *(default: error)*
+
+A job's `needs:` lists a job id that does not exist in the workflow — usually a typo (`needs: [buld]`) or a job that was renamed without updating its dependents. Both the scalar form (`needs: build`) and the sequence form (`needs: [build, test]`) are accepted. GitHub fails the run with "job depends on unknown job" only when the workflow is dispatched; this catches it at lint time.
+
+### invalid-expression *(default: error)*
+
+A `${{ }}` reference to `needs.<job>` or `steps.<id>` that cannot resolve:
+
+- `needs.<job>.…` where `<job>` is not in the referencing job's `needs:` list (including when the job declares no `needs:` at all).
+- `needs.<job>.outputs.<key>` where `<job>` is a declared dependency that exposes a non-empty inline `outputs:` map and `<key>` is not one of its keys. When the producing job has no inline `outputs:` map — for example a job that `uses:` a reusable workflow, whose outputs are defined in the called file — the output key is not checked.
+- `steps.<id>.…` where no *earlier* step in the same job declares `id: <id>` (you can't read an output before the step runs).
+
+The rule only flags references it can fully resolve to a bare identifier. Dynamic references whose job/step segment is indexed (`needs[matrix.target]`) or built by a function (`steps[format(...)]`) are skipped, as are out-of-scope contexts (`env`, `vars`, `matrix`, `inputs`, `github`, `secrets`, `runner`, `job`). Step *output keys* (`steps.<id>.outputs.<key>`) are intentionally not validated — what a step produces is not knowable from the workflow file.
+
 ## Disabling rules
 
 To turn off a rule entirely:

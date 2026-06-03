@@ -24,9 +24,9 @@
 
 ## 4. Docs and changelog
 
-- [ ] 4.1 Add a "Workflow validity" subsection to `docs/lint-rules.md` documenting both rules, their defaults, and `ignore` scoping (workflow/job; `action` key meaningless).
-- [ ] 4.2 Note both new default-error rules in the changelog / release notes path (`release-plz` picks up the conventional-commit body — call out the breaking-for-CI nature).
-- [ ] 4.3 Update README's lint-rule listing if it enumerates rules.
+- [x] 4.1 Add a "Workflow validity" subsection to `docs/lint-rules.md` documenting both rules, their defaults, and `ignore` scoping (workflow/job; `action` key meaningless).
+- [x] 4.2 Note both new default-error rules in the changelog / release notes path (`release-plz` picks up the conventional-commit body — call out the breaking-for-CI nature).
+- [x] 4.3 Update README's lint-rule listing if it enumerates rules.
 
 ## 5. Validate
 

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- *(lint)* add two workflow-validity rules: `dangling-reference` and `invalid-expression` (both default: error). They flag `needs:` entries and `${{ needs.* }}`/`${{ steps.* }}` references that resolve to nothing at run time. **Breaking for CI**: workflows with a pre-existing dangling reference or unresolved expression now produce error-level diagnostics and fail `gx lint`; opt out per-rule with `level = "off"` in `gx.toml`.
+
 ### Removed
 
 - [**breaking**] drop `x86_64-apple-darwin` (Intel Mac) release target; macOS distribution is now Apple Silicon only — Intel-Mac users build from source via `cargo install`
