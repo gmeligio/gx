@@ -30,7 +30,7 @@
 
 ## 5. Validate
 
-- [ ] 5.1 `openspec validate add-workflow-validity-rules --strict`.
-- [ ] 5.2 `mise run test` (per AGENTS.md — never invoke cargo directly) green, including the new unit tests.
-- [ ] 5.3 `mise run lint` (gx's own clippy/fmt task) clean.
-- [ ] 5.4 Dogfood: run the built `gx lint` against a fixture workflow with a deliberately dangling `needs:` and a typo'd `steps.<id>.outputs` reference; confirm both rules fire and that flutter-docker-image's real `update-version.yml` (post-p12) lints clean.
+- [x] 5.1 `openspec validate add-workflow-validity-rules --strict`.
+- [x] 5.2 `mise run test` (per AGENTS.md — never invoke cargo directly) green, including the new unit tests.
+- [x] 5.3 `mise run lint` (gx's own clippy/fmt task) clean.
+- [x] 5.4 Dogfood: run the built `gx lint` against a fixture workflow with a deliberately dangling `needs:` and a typo'd `steps.<id>.outputs` reference; confirm both rules fire and that flutter-docker-image's real `update-version.yml` (post-p12) lints clean.

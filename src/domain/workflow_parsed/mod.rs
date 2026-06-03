@@ -1,3 +1,5 @@
+#![expect(clippy::pub_use, reason = "reexport Trigger from extracted submodule")]
+
 use super::workflow_actions::WorkflowPath;
 use serde::de::{Deserializer, MapAccess, Visitor};
 use serde::{Deserialize, Serialize};

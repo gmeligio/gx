@@ -6,9 +6,7 @@ use std::fmt;
 /// Deserializes `needs:` in either the scalar (`needs: build`) or sequence
 /// (`needs: [build, test]`) form into a `Vec<String>`. Mirrors the custom-deserialize
 /// pattern `JobSecrets` uses for its scalar-or-map union.
-pub(super) fn deserialize_needs<'de, D: Deserializer<'de>>(
-    de: D,
-) -> Result<Vec<String>, D::Error> {
+pub(super) fn deserialize_needs<'de, D: Deserializer<'de>>(de: D) -> Result<Vec<String>, D::Error> {
     struct V;
     impl<'de> Visitor<'de> for V {
         type Value = Vec<String>;

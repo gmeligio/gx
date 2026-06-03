@@ -25,15 +25,9 @@ static_regex!(
 // Matches a `${{ ... }}` expression span; capture group 1 is the inner text.
 static_regex!(EXPR_SPAN_RE, r"\$\{\{(.*?)\}\}");
 
-/// One resolved-and-broken reference found in a step.
-struct Finding {
-    message: String,
-}
-
 impl InvalidExpressionRule {
     /// Flags every unresolvable `needs.*` / `steps.*` reference across all jobs.
     pub fn check_workflow(workflow: &Parsed) -> Vec<Diagnostic> {
-        // Job id -> its non-empty inline outputs key set, for `needs.<job>.outputs.<key>`.
         let mut out = Vec::new();
         for job in &workflow.jobs {
             let needs: BTreeSet<&str> = job.needs.iter().map(String::as_str).collect();
@@ -41,9 +35,9 @@ impl InvalidExpressionRule {
             // step's id is unresolved (the step hasn't run yet).
             let mut declared_ids: BTreeSet<&str> = BTreeSet::new();
             for (idx, step) in job.steps.iter().enumerate() {
-                for finding in step_findings(workflow, job, &needs, &declared_ids, step) {
+                for message in step_findings(workflow, job, &needs, &declared_ids, step) {
                     let mut diag =
-                        Diagnostic::new(RuleName::InvalidExpression, Level::Error, finding.message)
+                        Diagnostic::new(RuleName::InvalidExpression, Level::Error, message)
                             .with_workflow(workflow.path.clone())
                             .with_job(JobId::from(job.id.clone()));
                     if let Ok(si) = StepIndex::try_from(idx) {
@@ -60,21 +54,22 @@ impl InvalidExpressionRule {
     }
 }
 
-/// Resolves every `needs.*` / `steps.*` reference in a single step's scannable fields.
+/// Resolves every `needs.*` / `steps.*` reference in a single step's scannable fields,
+/// returning a diagnostic message for each broken one.
 fn step_findings(
     workflow: &Parsed,
     job: &Job,
     needs: &BTreeSet<&str>,
     declared_ids: &BTreeSet<&str>,
     step: &Step,
-) -> Vec<Finding> {
+) -> Vec<String> {
     let mut out = Vec::new();
     let mut scan = |text: &str| {
         for span in EXPR_SPAN_RE.captures_iter(text) {
             let inner = &span[1];
             for cap in REF_RE.captures_iter(inner) {
-                if let Some(finding) = resolve_ref(workflow, job, needs, declared_ids, &cap) {
-                    out.push(finding);
+                if let Some(message) = resolve_ref(workflow, job, needs, declared_ids, &cap) {
+                    out.push(message);
                 }
             }
         }
@@ -94,14 +89,14 @@ fn step_findings(
     out
 }
 
-/// Resolves a single captured reference. Returns a `Finding` when it is broken.
+/// Resolves a single captured reference. Returns a diagnostic message when it is broken.
 fn resolve_ref(
     workflow: &Parsed,
     job: &Job,
     needs: &BTreeSet<&str>,
     declared_ids: &BTreeSet<&str>,
     cap: &regex::Captures,
-) -> Option<Finding> {
+) -> Option<String> {
     let context = &cap[1];
     let id = &cap[2];
     let output_key = cap.get(3).map(|m| m.as_str());
@@ -119,14 +114,12 @@ fn resolve_needs(
     needs: &BTreeSet<&str>,
     id: &str,
     output_key: Option<&str>,
-) -> Option<Finding> {
+) -> Option<String> {
     if !needs.contains(id) {
-        return Some(Finding {
-            message: format!(
-                "{}: job `{}` references `needs.{id}` but `{id}` is not in its `needs:` list — the reference resolves to nothing at run time",
-                workflow.path, job.id
-            ),
-        });
+        return Some(format!(
+            "{}: job `{}` references `needs.{id}` but `{id}` is not in its `needs:` list — the reference resolves to nothing at run time",
+            workflow.path, job.id
+        ));
     }
     // The job IS a declared dependency. Validate the output key only when the producing
     // job declares a non-empty inline `outputs:` map. An empty map (a `uses:` reusable-
@@ -137,12 +130,10 @@ fn resolve_needs(
     if producer.outputs.is_empty() || producer.outputs.contains_key(key) {
         return None;
     }
-    Some(Finding {
-        message: format!(
-            "{}: job `{}` references `needs.{id}.outputs.{key}` but job `{id}` declares no `{key}` output — the reference resolves to nothing at run time",
-            workflow.path, job.id
-        ),
-    })
+    Some(format!(
+        "{}: job `{}` references `needs.{id}.outputs.{key}` but job `{id}` declares no `{key}` output — the reference resolves to nothing at run time",
+        workflow.path, job.id
+    ))
 }
 
 /// Resolves `steps.<id>` against the ids declared by earlier steps in the same job.
@@ -152,16 +143,14 @@ fn resolve_steps(
     job: &Job,
     declared_ids: &BTreeSet<&str>,
     id: &str,
-) -> Option<Finding> {
+) -> Option<String> {
     if declared_ids.contains(id) {
         return None;
     }
-    Some(Finding {
-        message: format!(
-            "{}: job `{}` references `steps.{id}` but no earlier step declares `id: {id}` — the reference resolves to nothing at run time",
-            workflow.path, job.id
-        ),
-    })
+    Some(format!(
+        "{}: job `{}` references `steps.{id}` but no earlier step declares `id: {id}` — the reference resolves to nothing at run time",
+        workflow.path, job.id
+    ))
 }
 
 impl Rule for InvalidExpressionRule {
