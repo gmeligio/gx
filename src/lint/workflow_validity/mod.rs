@@ -6,5 +6,8 @@
 
 /// Workflow-validity: flags `needs:` entries that name a job absent from the workflow.
 mod dangling_reference;
+/// Workflow-validity: flags `needs.*`/`steps.*` expression refs that resolve to nothing.
+mod invalid_expression;
 
 pub use dangling_reference::DanglingReferenceRule;
+pub use invalid_expression::InvalidExpressionRule;

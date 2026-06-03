@@ -14,13 +14,13 @@
 
 ## 3. Add the `invalid-expression` rule
 
-- [ ] 3.1 Add `InvalidExpression` to `RuleName` with the same wiring + roundtrip tests as 2.1.
-- [ ] 3.2 Create `src/lint/invalid_expression.rs`: a `Rule` impl, `default_level()` = `Error`. For each job, build the declared-step-id set incrementally as steps are walked in order. Scan each `${{ ... }}` span in `if_cond`/`with`/`env`/`run` (reuse `Step::scalar_text` where it fits, but note it concatenates — for accurate per-reference reporting, scan the individual fields) for anchored `needs.<id>.` and `steps.<id>.` bare-identifier patterns.
-- [ ] 3.3 Resolution logic: `needs.<id>` is invalid if `<id>` is not in the enclosing job's `needs:` set (including the case where the job declares no `needs:` at all). `steps.<id>` is invalid if `<id>` is not in the set of ids declared by *earlier* steps in the same job.
-- [ ] 3.4 Output-key resolution (in scope, `needs.*` only): for a `needs.<id>.outputs.<key>` reference where `<id>` IS a declared dependency, additionally flag when the producing job `<id>` has a **non-empty** inline `outputs:` map and `<key>` is not one of its keys. If the producing job's inline `outputs:` map is empty/absent (reusable-workflow `uses:` job), do NOT flag the key — fall back to job-existence only. Never resolve `steps.<id>.outputs.<key>` keys (out of scope by design).
-- [ ] 3.5 Conservative matching: a `${{ }}` span whose `needs`/`steps` access is not a bare-identifier dotted form (e.g. `needs[matrix.x]`, `steps[format(...)]`) is skipped. Contexts other than `needs.`/`steps.` are skipped.
-- [ ] 3.6 Register in `src/lint/command.rs`.
-- [ ] 3.7 Unit tests covering each spec scenario: undeclared-needs job, nonexistent step id, valid step id (no flag), later-step id (flagged), nonexistent job output key (flagged), valid job output key (no flag), reusable-workflow job output key (no flag), dynamic reference (no flag), out-of-scope context (no flag), `off` suppresses.
+- [x] 3.1 Add `InvalidExpression` to `RuleName` with the same wiring + roundtrip tests as 2.1.
+- [x] 3.2 Create `src/lint/invalid_expression.rs`: a `Rule` impl, `default_level()` = `Error`. For each job, build the declared-step-id set incrementally as steps are walked in order. Scan each `${{ ... }}` span in `if_cond`/`with`/`env`/`run` (reuse `Step::scalar_text` where it fits, but note it concatenates — for accurate per-reference reporting, scan the individual fields) for anchored `needs.<id>.` and `steps.<id>.` bare-identifier patterns.
+- [x] 3.3 Resolution logic: `needs.<id>` is invalid if `<id>` is not in the enclosing job's `needs:` set (including the case where the job declares no `needs:` at all). `steps.<id>` is invalid if `<id>` is not in the set of ids declared by *earlier* steps in the same job.
+- [x] 3.4 Output-key resolution (in scope, `needs.*` only): for a `needs.<id>.outputs.<key>` reference where `<id>` IS a declared dependency, additionally flag when the producing job `<id>` has a **non-empty** inline `outputs:` map and `<key>` is not one of its keys. If the producing job's inline `outputs:` map is empty/absent (reusable-workflow `uses:` job), do NOT flag the key — fall back to job-existence only. Never resolve `steps.<id>.outputs.<key>` keys (out of scope by design).
+- [x] 3.5 Conservative matching: a `${{ }}` span whose `needs`/`steps` access is not a bare-identifier dotted form (e.g. `needs[matrix.x]`, `steps[format(...)]`) is skipped. Contexts other than `needs.`/`steps.` are skipped.
+- [x] 3.6 Register in `src/lint/command.rs`.
+- [x] 3.7 Unit tests covering each spec scenario: undeclared-needs job, nonexistent step id, valid step id (no flag), later-step id (flagged), nonexistent job output key (flagged), valid job output key (no flag), reusable-workflow job output key (no flag), dynamic reference (no flag), out-of-scope context (no flag), `off` suppresses.
 
 ## 4. Docs and changelog
 

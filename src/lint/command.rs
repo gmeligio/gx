@@ -11,7 +11,7 @@ use super::workflow_security::{
     DangerousTriggerRule, ExcessivePermissionsRule, MissingConcurrencyRule, MissingPermissionsRule,
     PrHeadCheckoutRule, UnprotectedSecretsRule,
 };
-use super::workflow_validity::DanglingReferenceRule;
+use super::workflow_validity::{DanglingReferenceRule, InvalidExpressionRule};
 use crate::command::Command;
 use crate::config::{Config, Level, Lint as LintConfig};
 use crate::domain::lock::Lock;
@@ -216,6 +216,13 @@ fn run_workflow_validity_rules(
 ) {
     run_workflow_rule(
         &DanglingReferenceRule,
+        Level::Error,
+        ctx,
+        lint_config,
+        all_diagnostics,
+    );
+    run_workflow_rule(
+        &InvalidExpressionRule,
         Level::Error,
         ctx,
         lint_config,
