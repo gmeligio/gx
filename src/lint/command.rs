@@ -11,6 +11,7 @@ use super::workflow_security::{
     DangerousTriggerRule, ExcessivePermissionsRule, MissingConcurrencyRule, MissingPermissionsRule,
     PrHeadCheckoutRule, UnprotectedSecretsRule,
 };
+use super::workflow_validity::DanglingReferenceRule;
 use crate::command::Command;
 use crate::config::{Config, Level, Lint as LintConfig};
 use crate::domain::lock::Lock;
@@ -134,6 +135,10 @@ pub fn collect_diagnostics(
     // diagnostics carrying workflow + (optionally) job/step location.
     run_workflow_security_rules(&ctx, lint_config, &mut all_diagnostics);
 
+    // Phase 4: workflow-validity rules. Same parse, same run_workflow_rule path; these
+    // catch structurally broken references (dangling needs:, unresolved expressions).
+    run_workflow_validity_rules(&ctx, lint_config, &mut all_diagnostics);
+
     // Stable, location-first ordering so findings for one file read together.
     all_diagnostics.sort_by(|a, b| diagnostic_sort_key(a).cmp(&diagnostic_sort_key(b)));
 
@@ -196,6 +201,21 @@ fn run_workflow_security_rules(
     );
     run_workflow_rule(
         &UnprotectedSecretsRule,
+        Level::Error,
+        ctx,
+        lint_config,
+        all_diagnostics,
+    );
+}
+
+/// Run all workflow-validity rules and append their diagnostics.
+fn run_workflow_validity_rules(
+    ctx: &Context,
+    lint_config: &LintConfig,
+    all_diagnostics: &mut Vec<Diagnostic>,
+) {
+    run_workflow_rule(
+        &DanglingReferenceRule,
         Level::Error,
         ctx,
         lint_config,

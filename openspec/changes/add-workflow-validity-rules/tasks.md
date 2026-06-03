@@ -7,10 +7,10 @@
 
 ## 2. Add the `dangling-reference` rule
 
-- [ ] 2.1 Add `DanglingReference` to `RuleName` (`src/lint/rule.rs`): enum variant, `Display` → `dangling-reference`, `FromStr`, and the `rule_name_*` roundtrip tests.
-- [ ] 2.2 Create `src/lint/dangling_reference.rs`: a `Rule` impl, `default_level()` = `Error`. In `check`, for each workflow build the set of job ids; for each job, flag any `needs:` entry not in that set. Emit a `Diagnostic` scoped with `.with_workflow(...).with_job(...)` naming the missing id.
-- [ ] 2.3 Register the rule in `src/lint/command.rs` alongside the workflow-security family (same `run_workflow_rule` path).
-- [ ] 2.4 Unit tests: missing job flagged; scalar `needs` to a real job not flagged; sequence with one bad entry flags only the bad one; `off` level suppresses.
+- [x] 2.1 Add `DanglingReference` to `RuleName` (`src/lint/rule.rs`): enum variant, `Display` → `dangling-reference`, `FromStr`, and the `rule_name_*` roundtrip tests.
+- [x] 2.2 Create `src/lint/dangling_reference.rs`: a `Rule` impl, `default_level()` = `Error`. In `check`, for each workflow build the set of job ids; for each job, flag any `needs:` entry not in that set. Emit a `Diagnostic` scoped with `.with_workflow(...).with_job(...)` naming the missing id.
+- [x] 2.3 Register the rule in `src/lint/command.rs` alongside the workflow-security family (same `run_workflow_rule` path).
+- [x] 2.4 Unit tests: missing job flagged; scalar `needs` to a real job not flagged; sequence with one bad entry flags only the bad one; `off` level suppresses.
 
 ## 3. Add the `invalid-expression` rule
 

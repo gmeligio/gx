@@ -27,6 +27,8 @@ pub enum RuleName {
     PrHeadCheckout,
     MissingConcurrency,
     UnprotectedSecrets,
+    DanglingReference,
+    InvalidExpression,
 }
 
 impl std::fmt::Display for RuleName {
@@ -42,6 +44,8 @@ impl std::fmt::Display for RuleName {
             Self::PrHeadCheckout => write!(f, "pr-head-checkout"),
             Self::MissingConcurrency => write!(f, "missing-concurrency"),
             Self::UnprotectedSecrets => write!(f, "unprotected-secrets"),
+            Self::DanglingReference => write!(f, "dangling-reference"),
+            Self::InvalidExpression => write!(f, "invalid-expression"),
         }
     }
 }
@@ -61,6 +65,8 @@ impl FromStr for RuleName {
             "pr-head-checkout" => Ok(Self::PrHeadCheckout),
             "missing-concurrency" => Ok(Self::MissingConcurrency),
             "unprotected-secrets" => Ok(Self::UnprotectedSecrets),
+            "dangling-reference" => Ok(Self::DanglingReference),
+            "invalid-expression" => Ok(Self::InvalidExpression),
             other => Err(format!("unrecognized rule name: {other}")),
         }
     }
@@ -326,6 +332,8 @@ mod tests {
             RuleName::PrHeadCheckout,
             RuleName::MissingConcurrency,
             RuleName::UnprotectedSecrets,
+            RuleName::DanglingReference,
+            RuleName::InvalidExpression,
         ] {
             let s = name.to_string();
             assert_eq!(RuleName::from_str(&s), Ok(name));
@@ -370,6 +378,14 @@ mod tests {
         assert_eq!(
             RuleName::from_str("unprotected-secrets"),
             Ok(RuleName::UnprotectedSecrets)
+        );
+        assert_eq!(
+            RuleName::from_str("dangling-reference"),
+            Ok(RuleName::DanglingReference)
+        );
+        assert_eq!(
+            RuleName::from_str("invalid-expression"),
+            Ok(RuleName::InvalidExpression)
         );
     }
 
