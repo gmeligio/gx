@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-#MISE description="Check for semver violations against the published crate"
-cargo semver-checks
