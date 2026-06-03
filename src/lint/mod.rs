@@ -15,6 +15,8 @@ mod unpinned;
 mod unsynced_manifest;
 /// Workflow-security rule family (permissions, triggers, secrets, concurrency).
 mod workflow_security;
+/// Workflow-validity rule family (dangling references, unresolved expressions).
+mod workflow_validity;
 
 pub use command::{Error, Lint, collect_diagnostics};
 pub use rule::{Context, Diagnostic, Rule, RuleName, format_and_report};

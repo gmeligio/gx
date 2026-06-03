@@ -2,7 +2,6 @@ use crate::domain::action::identity::{ActionId, Version};
 use thiserror::Error;
 
 /// Which actions to upgrade: all, a single action, or a pinned action+version.
-#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub enum Scope {
     /// Upgrade all actions in the manifest.
@@ -14,7 +13,6 @@ pub enum Scope {
 }
 
 /// How the upgrade command should find new versions.
-#[non_exhaustive]
 #[derive(Debug)]
 pub enum Mode {
     /// Default: upgrade within the current major version.

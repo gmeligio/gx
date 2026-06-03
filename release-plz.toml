@@ -16,5 +16,6 @@ publish = false
 # release the package only when the release PR is merged
 release_always = false
 
-# semver is checked in PR CI (build.yml) before reaching main, so no need to run it again here
+# gx is a CLI binary, not a library — its public API is not a stability contract,
+# so semver API-diff checking is disabled (the cargo-semver-checks CI gate was removed).
 semver_check = false

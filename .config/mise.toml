@@ -1,6 +1,5 @@
 [tools]
 "github:axodotdev/cargo-dist" = "0.31.0"
-"github:obi1kenobi/cargo-semver-checks" = "0.46.0"
 "github:EmbarkStudios/cargo-deny" = "0.19.0"
 "github:charmbracelet/vhs" = "0.10.0"
 ttyd = "1.7.3"
@@ -9,9 +8,12 @@ ttyd = "1.7.3"
 github.github_attestations = true
 github.slsa = true
 lockfile = true
-locked = true
-# Read the rust version + components from rust-toolchain.toml (the
-# canonical Rust declarative config). mise.lock still needs a rust
-# entry because `locked = true` requires every resolved tool to be
-# in the lockfile.
+# `locked = false` (not true): mise >= 2026.6.0 cannot write a lock entry
+# for the `core:rust` backend resolved from rust-toolchain.toml, yet under
+# `locked = true` it *requires* rust to be in the lockfile — a catch-22 that
+# breaks `mise install --locked` in CI. With `locked = false` the lockfile
+# still pins every other tool's checksum (lockfile = true), and rust is
+# pinned by rust-toolchain.toml, its canonical source.
+locked = false
+# Read the rust version + components from rust-toolchain.toml.
 idiomatic_version_file_enable_tools = ["rust"]

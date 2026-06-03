@@ -795,6 +795,59 @@ jobs:
 }
 
 #[test]
+fn dangling_reference_can_be_disabled() {
+    let workflow = "
+name: CI
+on: push
+permissions:
+  contents: read
+concurrency:
+  group: ci
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+  deploy:
+    needs: [buld]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+";
+    let (on, off) = run_off_toggle(
+        workflow,
+        gx::lint::RuleName::DanglingReference,
+        Lint::default(),
+    );
+    assert!(on > 0, "dangling-reference should fire by default");
+    assert_eq!(off, 0, "level = off must suppress dangling-reference");
+}
+
+#[test]
+fn invalid_expression_can_be_disabled() {
+    let workflow = "
+name: CI
+on: push
+permissions:
+  contents: read
+concurrency:
+  group: ci
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ${{ steps.missing.outputs.x }}
+";
+    let (on, off) = run_off_toggle(
+        workflow,
+        gx::lint::RuleName::InvalidExpression,
+        Lint::default(),
+    );
+    assert!(on > 0, "invalid-expression should fire by default");
+    assert_eq!(off, 0, "level = off must suppress invalid-expression");
+}
+
+#[test]
 fn diagnostics_are_stably_sorted_across_workflows_jobs_and_rules() {
     let temp_dir = tempfile::tempdir().unwrap();
     let repo_root = temp_dir.path();
