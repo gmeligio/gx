@@ -191,6 +191,87 @@ jobs:
 }
 
 #[test]
+fn needs_scalar_form_parses_to_single_element_vec() {
+    let p = parse(
+        "on: push
+jobs:
+  build:
+    steps: []
+  test:
+    needs: build
+    steps: []
+",
+    );
+    let test = p.jobs.iter().find(|j| j.id == "test").unwrap();
+    assert_eq!(test.needs, vec!["build".to_owned()]);
+}
+
+#[test]
+fn needs_sequence_form_parses_to_vec() {
+    let p = parse(
+        "on: push
+jobs:
+  build:
+    steps: []
+  lint:
+    steps: []
+  deploy:
+    needs: [build, lint]
+    steps: []
+",
+    );
+    let deploy = p.jobs.iter().find(|j| j.id == "deploy").unwrap();
+    assert_eq!(deploy.needs, vec!["build".to_owned(), "lint".to_owned()]);
+}
+
+#[test]
+fn absent_needs_is_empty_vec() {
+    let p = parse("on: push\njobs:\n  build:\n    steps: []\n");
+    assert!(p.jobs[0].needs.is_empty());
+}
+
+#[test]
+fn job_outputs_map_is_captured() {
+    let p = parse(
+        "on: push
+jobs:
+  build:
+    outputs:
+      sha: ${{ steps.x.outputs.sha }}
+      tag: ${{ steps.x.outputs.tag }}
+    steps: []
+",
+    );
+    let outs = &p.jobs[0].outputs;
+    assert_eq!(outs.len(), 2);
+    assert!(outs.contains_key("sha"));
+    assert!(outs.contains_key("tag"));
+}
+
+#[test]
+fn absent_outputs_is_empty_map() {
+    let p = parse("on: push\njobs:\n  build:\n    steps: []\n");
+    assert!(p.jobs[0].outputs.is_empty());
+}
+
+#[test]
+fn step_id_is_captured_when_present_and_none_when_absent() {
+    let p = parse(
+        "on: push
+jobs:
+  build:
+    steps:
+      - id: checkout
+        uses: actions/checkout@v4
+      - run: echo hi
+",
+    );
+    let steps = &p.jobs[0].steps;
+    assert_eq!(steps[0].id.as_deref(), Some("checkout"));
+    assert_eq!(steps[1].id, None);
+}
+
+#[test]
 fn any_scalar_accepts_numbers_and_bools() {
     let p = parse(
         "on: push

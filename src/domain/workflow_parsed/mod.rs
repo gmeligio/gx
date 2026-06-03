@@ -251,6 +251,8 @@ pub struct Concurrency {
 #[derive(Debug, Clone, Deserialize)]
 pub struct Step {
     #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
     pub uses: Option<String>,
     #[serde(default, rename = "if")]
     pub if_cond: Option<String>,
@@ -292,10 +294,51 @@ pub struct Job {
     pub permissions: Option<Permissions>,
     #[serde(default, rename = "if")]
     pub if_cond: Option<String>,
+    /// Jobs this one depends on. Accepts the scalar (`needs: build`) and sequence
+    /// (`needs: [build, test]`) forms; absent → empty. The validity rules read this.
+    #[serde(default, deserialize_with = "deserialize_needs")]
+    pub needs: Vec<String>,
+    /// The job's inline `outputs:` map. The `invalid-expression` rule reads the key
+    /// set to validate `needs.<job>.outputs.<key>` references. A `uses:` reusable-workflow
+    /// job has no inline outputs here (they live in the called file) → empty.
+    #[serde(default)]
+    pub outputs: BTreeMap<String, String>,
     #[serde(default)]
     pub steps: Vec<Step>,
     #[serde(default)]
     pub secrets: Option<JobSecrets>,
+}
+
+/// Deserializes `needs:` in either the scalar (`needs: build`) or sequence
+/// (`needs: [build, test]`) form into a `Vec<String>`. Mirrors the custom-deserialize
+/// pattern `JobSecrets` uses for its scalar-or-map union.
+fn deserialize_needs<'de, D: Deserializer<'de>>(de: D) -> Result<Vec<String>, D::Error> {
+    struct V;
+    impl<'de> Visitor<'de> for V {
+        type Value = Vec<String>;
+
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("a job id or a list of job ids")
+        }
+
+        fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Vec<String>, E> {
+            Ok(vec![v.to_owned()])
+        }
+        fn visit_string<E: serde::de::Error>(self, v: String) -> Result<Vec<String>, E> {
+            Ok(vec![v])
+        }
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(
+            self,
+            mut seq: A,
+        ) -> Result<Vec<String>, A::Error> {
+            let mut out = Vec::new();
+            while let Some(id) = seq.next_element::<String>()? {
+                out.push(id);
+            }
+            Ok(out)
+        }
+    }
+    de.deserialize_any(V)
 }
 
 /// The `secrets:` field on a reusable-workflow call. Captures only the `inherit` shape;

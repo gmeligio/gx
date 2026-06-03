@@ -9,9 +9,11 @@ The user who benefits is the workflow maintainer refactoring a multi-job workflo
 The rules:
 
 - `dangling-reference` (default: error) — a job's `needs:` lists a job id that does not exist in the workflow.
-- `invalid-expression` (default: error) — a `${{ }}` reference to `needs.<job>.…` where `<job>` is not in the referencing job's `needs:` list, or `steps.<id>.…` where no earlier step in the same job declares that `id`.
+- `invalid-expression` (default: error) — a `${{ }}` reference to `needs.<job>.…` where `<job>` is not in the referencing job's `needs:` list; a `needs.<job>.outputs.<key>` reference where `<job>` is a declared dependency that exposes a non-empty inline `outputs:` map and `<key>` is not in it; or `steps.<id>.…` where no earlier step in the same job declares that `id`.
 
 Both rules SHALL only flag references they can fully resolve to a bare identifier. A reference whose job/step segment is dynamic (indexed by `matrix`, built by `format(...)`, or otherwise not a literal identifier) SHALL NOT be flagged. Contexts other than `needs.*` and `steps.*` (such as `env`, `vars`, `matrix`, `inputs`, `github`, `secrets`, `runner`, `job`) SHALL NOT be flagged.
+
+The `invalid-expression` rule SHALL validate the output *key* of a `needs.<job>.outputs.<key>` reference only when the producing job `<job>` declares a non-empty inline `outputs:` map. When `<job>`'s inline `outputs:` map is empty or absent (as for a job that `uses:` a reusable workflow, whose outputs are defined in the called file), the rule SHALL fall back to job-existence checking only and SHALL NOT flag the output key. The rule SHALL NOT validate `steps.<id>.outputs.<key>` output keys at all — what a step produces is not knowable from the workflow file.
 
 #### Scenario: needs references a nonexistent job
 
@@ -47,6 +49,28 @@ Both rules SHALL only flag references they can fully resolve to a bare identifie
 - **GIVEN** a job with an earlier step `id: upload` and a later step referencing `${{ steps.upload.outputs.artifact-id }}`
 - **WHEN** the user runs `gx lint`
 - **THEN** no `invalid-expression` diagnostic is reported for that reference
+
+#### Scenario: expression reads a nonexistent job output key
+
+- **GIVEN** a job `build` that declares `outputs:` with a single key `sha`
+- **AND** a job `deploy` that declares `needs: [build]` and references `${{ needs.build.outputs.shaa }}` in a step (typo for `sha`)
+- **WHEN** the user runs `gx lint`
+- **THEN** an `invalid-expression` diagnostic is reported for job `deploy` naming the missing output key `shaa` on job `build`
+- **AND** the command exits with code 1
+
+#### Scenario: expression reads a valid job output key
+
+- **GIVEN** a job `build` that declares `outputs:` with a key `sha`
+- **AND** a job `deploy` declaring `needs: [build]` and referencing `${{ needs.build.outputs.sha }}`
+- **WHEN** the user runs `gx lint`
+- **THEN** no `invalid-expression` diagnostic is reported for that reference
+
+#### Scenario: output key of a reusable-workflow job is not flagged
+
+- **GIVEN** a job `release` that is `uses: ./.github/workflows/release.yml` (a reusable workflow) and therefore declares no inline `outputs:` map
+- **AND** a job `notify` declaring `needs: [release]` and referencing `${{ needs.release.outputs.url }}`
+- **WHEN** the user runs `gx lint`
+- **THEN** no `invalid-expression` diagnostic is reported for the `outputs.url` key (the producing job's outputs are defined in the called workflow, not this file)
 
 #### Scenario: dynamic reference is not flagged
 

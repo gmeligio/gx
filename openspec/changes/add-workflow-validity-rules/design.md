@@ -15,8 +15,8 @@ The parse model in `domain::workflow_parsed` is deliberately partial — `Parsed
 **Non-Goals:**
 
 - A general `${{ }}` expression parser. These rules do targeted reference resolution, not grammar validation.
-- Cross-workflow analysis (reusable-workflow `outputs`, `workflow_call`). Single-workflow scope only.
-- Validating that a referenced output *value* exists in the producing job's `outputs:` map — modeled data is captured (`Job.outputs`) but the first cut only checks job/step *existence*, not output-key existence. A follow-up can tighten to key-level.
+- Cross-workflow analysis (reusable-workflow `outputs`, `workflow_call`). Single-workflow scope only. In particular, a job that is `uses:` a reusable workflow exposes outputs defined in *that* file, not in this one — so `needs.<that-job>.outputs.*` key-checking is intentionally skipped (see the key-existence decision below).
+- **`steps.<id>.outputs.<key>` key-existence — out of scope by design, not deferred.** What a step outputs is not in this file: for `uses:` steps it is in the external action's `action.yml`; for `run:` steps it is a shell side-effect (`echo … >> $GITHUB_OUTPUT`). Resolving it requires bundling and continually refreshing a fetched-from-GitHub action-metadata database (how `actionlint` does it) and still degrades to accept-any-key on unknown actions — a permanent maintenance cost for a check that silently does nothing on the long tail. We resolve step *id* existence and stop. A future change should not treat this as low-hanging fruit; the cost/value is structurally unfavorable.
 
 ## Decisions
 
@@ -29,7 +29,8 @@ The parse model in `domain::workflow_parsed` is deliberately partial — `Parsed
 `invalid-expression` scans each step/job string field (`if_cond`, `with`, `env`, `run`) for `${{ ... }}` spans and within them looks only for two anchored patterns:
 
 - `needs.<id>.…` — `<id>` must be a bare identifier (`[A-Za-z_][A-Za-z0-9_-]*`). If `<id>` is not in the enclosing job's `needs:` set → diagnostic.
-- `steps.<id>.…` — `<id>` bare identifier. If no earlier step in the same job declares `id: <id>` → diagnostic.
+- `needs.<id>.outputs.<key>` — when `<id>` *is* a declared, in-`needs:` job AND that job declares a non-empty inline `outputs:` map AND `<key>` is a bare identifier not present in that map → diagnostic (see the key-existence decision). The bare `<id>`-resolves check above still runs first; this is the second, tighter layer.
+- `steps.<id>.…` — `<id>` bare identifier. If no earlier step in the same job declares `id: <id>` → diagnostic. The step *output key* (`steps.<id>.outputs.<key>`) is never resolved — out of scope by design.
 
 The rule MUST NOT flag:
 
@@ -47,11 +48,21 @@ This keeps false positives near zero: every flagged reference is one the rule fu
 
 Most steps have no `id`. Steps without one simply can't be the target of a `steps.<id>` reference. The `invalid-expression` resolver builds a per-job set of declared ids as it walks steps in order, so a reference to a *later* step's id is also flagged (you can't read an output before the step runs).
 
+### Decision: validate `needs.*.outputs.<key>`, never `steps.*.outputs.<key>`
+
+The two output-key checks look symmetric but are not, and the difference is exactly the long-term-maintainability line:
+
+- **`needs.<job>.outputs.<key>` — in scope.** The producing job's `outputs:` map is *in the same workflow file* and already modeled as `Job.outputs`. Checking `<key>` against it costs no new I/O, no external data, and cannot go stale. It catches the real failure the motivating maintainer hits: a cross-job `outputs.<typo>` that silently resolves to empty at run time.
+- **`steps.<id>.outputs.<key>` — out of scope by design.** A step's outputs are *not* in this file (external `action.yml`, or a `run:` shell side-effect). The only way to check them is to bundle and perpetually refresh a fetched-from-GitHub action-metadata database, and even then degrade to accept-any on unknown actions. That is a standing maintenance burden with a silent-no-op tail. We decline it. See Non-Goals.
+
+**The zero-false-positive guard for the in-scope half:** key-existence is checked only when the producing job declares a **non-empty inline `outputs:` map**. A reusable-workflow job (`uses: ./…`) has an empty inline map but real outputs from the called file — so an empty `outputs:` means "fall back to job-existence-only, do not flag the key." This preserves the rule invariant: every flag is a reference the rule *fully* resolved and found broken.
+
 ## Risks / Trade-offs
 
 - **[Risk] Regex/text scan misses a reference shape** → Mitigation: conservative matching means a missed shape is a false *negative* (rule stays silent), never a false positive. Acceptable: the rule's value is catching the common case, not exhaustiveness.
 - **[Risk] Domain extension touches the shared parse used by security rules** → Mitigation: additive fields with `#[serde(default)]`; existing rules ignore them. Covered by the existing security-rule test suite plus new deserialization tests for `needs:` scalar/seq.
-- **[Trade-off] Not validating output-key existence in the first cut** → Acceptable: job/step *existence* is the high-value, zero-false-positive check; key-level resolution is a documented follow-up.
+- **[Risk] `needs.*.outputs.<key>` false positive on reusable-workflow jobs** → Mitigation: key-checking runs only when the producing job has a non-empty inline `outputs:` map; an empty map (the reusable-workflow case) falls back to job-existence-only. Covered by a scenario.
+- **[Trade-off] Step output keys unchecked** → Accepted permanently, not deferred: the data lives outside the file and the only implementations require a continually-refreshed external metadata DB that still no-ops on unknown actions. Job-output keys (in-file) give most of the value at none of that cost.
 
 ## Migration Plan
 
@@ -60,4 +71,4 @@ Most steps have no `id`. Steps without one simply can't be the target of a `step
 
 ## Open Questions
 
-- None blocking. Output-key-level resolution (vs. job/step existence) is a deliberate follow-up, noted in Non-Goals.
+- None blocking. The scope split on output keys (`needs.*` in, `steps.*` out) is a deliberate, documented decision above — not an open question.
