@@ -30,7 +30,7 @@
 
 ## 5. Validate
 
-- [ ] 5.1 `openspec validate add-run-shellcheck-rule --strict`.
-- [ ] 5.2 `mise run test` (per AGENTS.md) green, including new unit tests.
-- [ ] 5.3 `mise run lint` clean.
-- [ ] 5.4 Dogfood: run the built `gx lint` against a fixture with a known shellcheck issue (unquoted `$VAR`) and confirm a warn diagnostic; temporarily remove `shellcheck` from `PATH` and confirm the graceful-skip diagnostic with exit 0.
+- [x] 5.1 `openspec validate add-run-shellcheck-rule --strict`.
+- [x] 5.2 `mise run test` (per AGENTS.md) green, including new unit tests. *(389 lib tests pass.)*
+- [x] 5.3 `mise run lint` clean. *(No `lint` task exists; ran its components `lint:size` (26/26 budgets) and `clippy` (clean).)*
+- [x] 5.4 Dogfood: run the built `gx lint` against a fixture with a known shellcheck issue (unquoted `$VAR`) and confirm a warn diagnostic; temporarily remove `shellcheck` from `PATH` and confirm the graceful-skip diagnostic with exit 0. *(Verified: SC2086 warn reported, `${{ }}` step produced no false positive, and absent-binary emits one skip diagnostic with exit 0.)*
