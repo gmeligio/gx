@@ -172,9 +172,7 @@ fn expression_spans(script: &str) -> Vec<(usize, usize)> {
 /// Given an iterator positioned just past `${{`, return the byte offset just after the
 /// first `}}`, advancing the iterator to that point. Returns `None` (leaving the iterator
 /// consumed) if no close is found.
-fn find_close(
-    iter: &mut std::iter::Peekable<std::str::CharIndices<'_>>,
-) -> Option<usize> {
+fn find_close(iter: &mut std::iter::Peekable<std::str::CharIndices<'_>>) -> Option<usize> {
     while let Some((_, ch)) = iter.next() {
         if ch == '}' && iter.peek().map(|&(_, c)| c) == Some('}') {
             let (close_offset, _) = iter.next()?;

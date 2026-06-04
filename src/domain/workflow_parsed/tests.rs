@@ -324,14 +324,8 @@ jobs:
       - run: echo hi
 ",
     );
-    assert_eq!(
-        p.defaults.as_ref().unwrap().run_shell(),
-        Some("bash")
-    );
-    assert_eq!(
-        p.jobs[0].defaults.as_ref().unwrap().run_shell(),
-        Some("sh")
-    );
+    assert_eq!(p.defaults.as_ref().unwrap().run_shell(), Some("bash"));
+    assert_eq!(p.jobs[0].defaults.as_ref().unwrap().run_shell(), Some("sh"));
 }
 
 #[test]
@@ -354,10 +348,7 @@ fn effective_shell_prefers_step_over_job_over_workflow() {
         }),
     };
     // step wins
-    assert_eq!(
-        effective_shell(Some("bash"), Some(&job), Some(&wf)),
-        "bash"
-    );
+    assert_eq!(effective_shell(Some("bash"), Some(&job), Some(&wf)), "bash");
     // job wins over workflow when step absent
     assert_eq!(effective_shell(None, Some(&job), Some(&wf)), "pwsh");
     // workflow used when step + job absent

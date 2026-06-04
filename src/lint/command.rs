@@ -3,10 +3,10 @@ use super::rule::{
     Context, Diagnostic, Rule as _, RuleName, format_and_report, is_ignored, matches_ignore,
     run_workflow_rule,
 };
+use super::run_shellcheck::RunShellcheckRule;
 use super::sha_mismatch::ShaMismatchRule;
 use super::stale_comment::StaleCommentRule;
 use super::unpinned::UnpinnedRule;
-use super::run_shellcheck::RunShellcheckRule;
 use super::unsynced_manifest::UnsyncedManifestRule;
 use super::workflow_security::{
     DangerousTriggerRule, ExcessivePermissionsRule, MissingConcurrencyRule, MissingPermissionsRule,

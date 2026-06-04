@@ -4,10 +4,10 @@
 //! integration. The subprocess lives behind the [`ShellChecker`] seam so this rule's logic
 //! is pure and unit-testable without the binary on `PATH`.
 
+use super::{Context, Diagnostic, Rule, RuleName};
 use crate::config::Level;
 use crate::domain::workflow_actions::{JobId, StepIndex};
 use crate::domain::workflow_parsed::{Defaults, Parsed, effective_shell};
-use super::{Context, Diagnostic, Rule, RuleName};
 use crate::infra::shellcheck::{
     Availability, Finding, Severity, Sh, ShellChecker, sanitize_expressions,
 };
@@ -73,8 +73,11 @@ fn check_workflows(checker: &dyn ShellChecker, workflows: &[Parsed]) -> Vec<Diag
         for job in &wf.jobs {
             for (index, step) in job.steps.iter().enumerate() {
                 let Some(body) = &step.run else { continue };
-                let Some(shell) = resolve_shell(step.shell.as_deref(), job.defaults.as_ref(), wf.defaults.as_ref())
-                else {
+                let Some(shell) = resolve_shell(
+                    step.shell.as_deref(),
+                    job.defaults.as_ref(),
+                    wf.defaults.as_ref(),
+                ) else {
                     continue; // non-shell (pwsh/python/...) → skipped
                 };
                 let sanitized = sanitize_expressions(body);
