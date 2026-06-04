@@ -287,3 +287,92 @@ jobs:
     assert_eq!(s.with["retries"].as_str(), "3");
     assert_eq!(s.with["verbose"].as_str(), "true");
 }
+
+#[test]
+fn parses_step_shell() {
+    let p = parse(
+        "on: push
+jobs:
+  build:
+    steps:
+      - run: echo hi
+        shell: bash
+      - run: Write-Host hi
+        shell: pwsh
+      - run: echo hi
+",
+    );
+    let steps = &p.jobs[0].steps;
+    assert_eq!(steps[0].shell.as_deref(), Some("bash"));
+    assert_eq!(steps[1].shell.as_deref(), Some("pwsh"));
+    assert_eq!(steps[2].shell, None);
+}
+
+#[test]
+fn parses_defaults_run_shell_at_job_and_workflow_level() {
+    let p = parse(
+        "on: push
+defaults:
+  run:
+    shell: bash
+jobs:
+  build:
+    defaults:
+      run:
+        shell: sh
+    steps:
+      - run: echo hi
+",
+    );
+    assert_eq!(
+        p.defaults.as_ref().unwrap().run_shell(),
+        Some("bash")
+    );
+    assert_eq!(
+        p.jobs[0].defaults.as_ref().unwrap().run_shell(),
+        Some("sh")
+    );
+}
+
+#[test]
+fn defaults_absent_deserializes_to_none() {
+    let p = parse("on: push\njobs:\n  build:\n    steps:\n      - run: echo hi\n");
+    assert!(p.defaults.is_none());
+    assert!(p.jobs[0].defaults.is_none());
+}
+
+#[test]
+fn effective_shell_prefers_step_over_job_over_workflow() {
+    let wf = Defaults {
+        run: Some(RunDefaults {
+            shell: Some("sh".to_owned()),
+        }),
+    };
+    let job = Defaults {
+        run: Some(RunDefaults {
+            shell: Some("pwsh".to_owned()),
+        }),
+    };
+    // step wins
+    assert_eq!(
+        effective_shell(Some("bash"), Some(&job), Some(&wf)),
+        "bash"
+    );
+    // job wins over workflow when step absent
+    assert_eq!(effective_shell(None, Some(&job), Some(&wf)), "pwsh");
+    // workflow used when step + job absent
+    assert_eq!(effective_shell(None, None, Some(&wf)), "sh");
+}
+
+#[test]
+fn effective_shell_defaults_to_bash_when_absent_everywhere() {
+    assert_eq!(effective_shell(None, None, None), "bash");
+}
+
+#[test]
+fn effective_shell_normalizes_template_forms() {
+    assert_eq!(effective_shell(Some("bash -e {0}"), None, None), "bash");
+    assert_eq!(effective_shell(Some("sh -e {0}"), None, None), "sh");
+    // empty value falls back to bash
+    assert_eq!(effective_shell(Some("   "), None, None), "bash");
+}

@@ -157,6 +157,58 @@ pub struct Concurrency {
     pub cancel_in_progress: Option<bool>,
 }
 
+/// A `defaults:` block. Only `run.shell` is captured — it is the one field the
+/// `run-shellcheck` rule needs to resolve a step's effective shell. Both levels are
+/// optional, so an absent `defaults:` or absent `defaults.run:` deserializes to `None`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct Defaults {
+    #[serde(default)]
+    pub run: Option<RunDefaults>,
+}
+
+/// The `defaults.run:` block. Captures only `shell`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct RunDefaults {
+    #[serde(default)]
+    pub shell: Option<String>,
+}
+
+impl Defaults {
+    /// The `run.shell` value, if both `defaults:` and `defaults.run:` are present.
+    fn run_shell(&self) -> Option<&str> {
+        self.run.as_ref().and_then(|r| r.shell.as_deref())
+    }
+}
+
+/// Resolve a step's effective shell from the three GitHub Actions sources, in precedence
+/// order: the step's own `shell:`, then the job's `defaults.run.shell`, then the
+/// workflow's `defaults.run.shell`. When none is set, GitHub's default on Linux/macOS
+/// runners is `bash`, which this returns as the floor.
+///
+/// The returned token is normalized: a `shell:` value carrying a flag/template form
+/// (`bash -e {0}`, `sh -e {0}`) is reduced to its leading word, so callers can match on
+/// `"bash"`/`"sh"` directly. The fourth GitHub source — the runner-OS default — is a
+/// documented non-goal for this cut; an absent shell is treated as `bash`.
+#[must_use]
+pub fn effective_shell(
+    step_shell: Option<&str>,
+    job_defaults: Option<&Defaults>,
+    workflow_defaults: Option<&Defaults>,
+) -> String {
+    let raw = step_shell
+        .or_else(|| job_defaults.and_then(Defaults::run_shell))
+        .or_else(|| workflow_defaults.and_then(Defaults::run_shell))
+        .unwrap_or("bash");
+    normalize_shell(raw)
+}
+
+/// Reduce a `shell:` value to its leading word. GitHub allows custom command templates
+/// like `bash -e {0}` or `perl {0}`; the first whitespace-delimited token is the shell
+/// name. An empty or whitespace-only value falls back to `bash`.
+fn normalize_shell(raw: &str) -> String {
+    raw.split_whitespace().next().unwrap_or("bash").to_owned()
+}
+
 /// A single step within a job, with the structural fields rule logic needs.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Step {
@@ -172,6 +224,10 @@ pub struct Step {
     pub env: BTreeMap<String, AnyScalar>,
     #[serde(default)]
     pub run: Option<String>,
+    /// The step's `shell:`, if declared. The `run-shellcheck` rule uses this (with
+    /// `defaults.run.shell` as fallback) to decide whether the body is bash/sh.
+    #[serde(default)]
+    pub shell: Option<String>,
 }
 
 impl Step {
@@ -217,6 +273,10 @@ pub struct Job {
     pub steps: Vec<Step>,
     #[serde(default)]
     pub secrets: Option<JobSecrets>,
+    /// The job's `defaults:` block. Supplies the `run.shell` fallback for steps in this
+    /// job that omit a step-level `shell:`.
+    #[serde(default)]
+    pub defaults: Option<Defaults>,
 }
 
 /// The `secrets:` field on a reusable-workflow call. Captures only the `inherit` shape;
@@ -264,6 +324,9 @@ pub struct Parsed {
     pub on: Vec<Trigger>,
     pub permissions: Option<Permissions>,
     pub concurrency: Option<Concurrency>,
+    /// The workflow-level `defaults:` block. Lowest-precedence source for a step's
+    /// effective shell (below the step's own `shell:` and the job's `defaults`).
+    pub defaults: Option<Defaults>,
     pub jobs: Vec<Job>,
 }
 
@@ -279,6 +342,9 @@ struct WireWorkflow {
     /// The workflow-level `concurrency:` block, if declared.
     #[serde(default)]
     concurrency: Option<Concurrency>,
+    /// The workflow-level `defaults:` block, if declared.
+    #[serde(default)]
+    defaults: Option<Defaults>,
     /// The workflow's jobs, keyed by job id.
     #[serde(default)]
     jobs: BTreeMap<String, Job>,
@@ -306,6 +372,7 @@ impl Parsed {
             on: wire.on.unwrap_or_default(),
             permissions: wire.permissions,
             concurrency: wire.concurrency,
+            defaults: wire.defaults,
             jobs,
         })
     }
