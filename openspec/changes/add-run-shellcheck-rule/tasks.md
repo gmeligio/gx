@@ -15,11 +15,11 @@
 
 ## 3. Add the `run-shellcheck` rule
 
-- [ ] 3.1 Add `RunShellcheck` to `RuleName` (`src/lint/rule.rs`): variant, `Display` → `run-shellcheck`, `FromStr`, roundtrip tests.
-- [ ] 3.2 Create `src/lint/run_shellcheck.rs`: `Rule` impl, `default_level()` = `Warn`. The rule holds a `&dyn ShellChecker` (or `Availability`). In `check`: if `Absent`, emit one informational skip diagnostic and return. Otherwise, for each workflow/job/step where `run:` is present and the effective shell (task 1.3) is bash/sh: `sanitize_expressions` the body, run it through the checker, and map each `Finding` to a `Diagnostic` scoped `.with_workflow().with_job().with_step()`, message including the `SCxxxx` code and the in-script line.
-- [ ] 3.3 Skip steps whose effective shell is a non-shell (`pwsh`, `python`, `cmd`, ...).
-- [ ] 3.4 Register the rule in `src/lint/command.rs` (same `run_workflow_rule` path as the workflow-validity family).
-- [ ] 3.5 Unit tests for each spec scenario, driving the rule with `FakeChecker` (no live binary): finding reported at warn (exit 0); escalated to error (exit 1); clean body (no diagnostic); `${{ }}` expression does not produce a false positive; binary-missing (`Availability::Absent`) skip diagnostic + no failure; non-shell step skipped; `defaults.run.shell: pwsh` skips an absent-`shell:` step; `ignore` by workflow/job suppresses.
+- [x] 3.1 Add `RunShellcheck` to `RuleName` (`src/lint/rule.rs`): variant, `Display` → `run-shellcheck`, `FromStr`, roundtrip tests.
+- [x] 3.2 Create `src/lint/run_shellcheck.rs`: `Rule` impl, `default_level()` = `Warn`. The rule holds a `&dyn ShellChecker` (or `Availability`). In `check`: if `Absent`, emit one informational skip diagnostic and return. Otherwise, for each workflow/job/step where `run:` is present and the effective shell (task 1.3) is bash/sh: `sanitize_expressions` the body, run it through the checker, and map each `Finding` to a `Diagnostic` scoped `.with_workflow().with_job().with_step()`, message including the `SCxxxx` code and the in-script line. *(Moved to `src/lint/run_shellcheck/mod.rs` to keep `src/lint/` within the 8-file folder budget.)*
+- [x] 3.3 Skip steps whose effective shell is a non-shell (`pwsh`, `python`, `cmd`, ...).
+- [x] 3.4 Register the rule in `src/lint/command.rs` (same `run_workflow_rule` path as the workflow-validity family).
+- [x] 3.5 Unit tests for each spec scenario, driving the rule with `FakeChecker` (no live binary): finding reported at warn (exit 0); escalated to error (exit 1); clean body (no diagnostic); `${{ }}` expression does not produce a false positive; binary-missing (`Availability::Absent`) skip diagnostic + no failure; non-shell step skipped; `defaults.run.shell: pwsh` skips an absent-`shell:` step; `ignore` by workflow/job suppresses.
 
 ## 4. Toolchain, docs, changelog
 

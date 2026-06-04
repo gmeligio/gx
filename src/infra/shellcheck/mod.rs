@@ -15,12 +15,8 @@
 )]
 
 mod cli;
-#[cfg(test)]
-mod fake;
 
 pub use cli::ShellcheckCli;
-#[cfg(test)]
-pub use fake::FakeChecker;
 
 /// The shell dialect a `run:` body is analyzed as. Only the two POSIX-family shells
 /// shellcheck understands are modeled; other shells (`pwsh`, `python`, ...) are skipped
@@ -200,6 +196,11 @@ fn blank_char(out: &mut String, ch: char) {
         }
     }
 }
+
+#[cfg(test)]
+mod fake;
+#[cfg(test)]
+pub use fake::FakeChecker;
 
 #[cfg(test)]
 mod tests {

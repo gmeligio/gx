@@ -29,6 +29,7 @@ pub enum RuleName {
     UnprotectedSecrets,
     DanglingReference,
     InvalidExpression,
+    RunShellcheck,
 }
 
 impl std::fmt::Display for RuleName {
@@ -46,6 +47,7 @@ impl std::fmt::Display for RuleName {
             Self::UnprotectedSecrets => write!(f, "unprotected-secrets"),
             Self::DanglingReference => write!(f, "dangling-reference"),
             Self::InvalidExpression => write!(f, "invalid-expression"),
+            Self::RunShellcheck => write!(f, "run-shellcheck"),
         }
     }
 }
@@ -67,6 +69,7 @@ impl FromStr for RuleName {
             "unprotected-secrets" => Ok(Self::UnprotectedSecrets),
             "dangling-reference" => Ok(Self::DanglingReference),
             "invalid-expression" => Ok(Self::InvalidExpression),
+            "run-shellcheck" => Ok(Self::RunShellcheck),
             other => Err(format!("unrecognized rule name: {other}")),
         }
     }
@@ -334,6 +337,7 @@ mod tests {
             RuleName::UnprotectedSecrets,
             RuleName::DanglingReference,
             RuleName::InvalidExpression,
+            RuleName::RunShellcheck,
         ] {
             let s = name.to_string();
             assert_eq!(RuleName::from_str(&s), Ok(name));
@@ -386,6 +390,10 @@ mod tests {
         assert_eq!(
             RuleName::from_str("invalid-expression"),
             Ok(RuleName::InvalidExpression)
+        );
+        assert_eq!(
+            RuleName::from_str("run-shellcheck"),
+            Ok(RuleName::RunShellcheck)
         );
     }
 
