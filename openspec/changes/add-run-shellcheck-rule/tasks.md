@@ -7,11 +7,11 @@
 
 ## 2. shellcheck invocation behind a `ShellChecker` seam
 
-- [ ] 2.1 Define `trait ShellChecker { fn check(&self, script: &str, shell: Sh) -> Vec<Finding> }` and a typed `Finding { code: u16, level, line, column, message }` under `src/infra/`. Newtype the shellcheck JSON at the edge (serde), not in rule logic.
-- [ ] 2.2 Implement `ShellcheckCli`: invoke `shellcheck --norc -f json -x --shell <sh> -e SC1091,SC2194,SC2050,SC2153,SC2154,SC2157,SC2043 -` with the script on **stdin**. Prepend the runtime setup line (`set -eo pipefail` for bash, `set -e` for sh) and offset reported lines by `-1`.
-- [ ] 2.3 Model binary availability as `enum Availability { Present(ShellcheckCli), Absent }`, probed once per lint run (not per step) — distinct from "ran, here are findings" so the rule degrades gracefully.
-- [ ] 2.4 Add `sanitize_expressions(&str) -> String`: replace each `${{ ... }}` span with an equal-length run of underscores (preserve columns). Port from actionlint `rule_shellcheck.go`.
-- [ ] 2.5 Add a `FakeChecker` test double returning canned `Finding`s, and unit-test the JSON parser against a captured shellcheck `-f json` sample (no live binary in unit tests).
+- [x] 2.1 Define `trait ShellChecker { fn check(&self, script: &str, shell: Sh) -> Vec<Finding> }` and a typed `Finding { code: u16, level, line, column, message }` under `src/infra/`. Newtype the shellcheck JSON at the edge (serde), not in rule logic.
+- [x] 2.2 Implement `ShellcheckCli`: invoke `shellcheck --norc -f json -x --shell <sh> -e SC1091,SC2194,SC2050,SC2153,SC2154,SC2157,SC2043 -` with the script on **stdin**. Prepend the runtime setup line (`set -eo pipefail` for bash, `set -e` for sh) and offset reported lines by `-1`.
+- [x] 2.3 Model binary availability as `enum Availability { Present(ShellcheckCli), Absent }`, probed once per lint run (not per step) — distinct from "ran, here are findings" so the rule degrades gracefully.
+- [x] 2.4 Add `sanitize_expressions(&str) -> String`: replace each `${{ ... }}` span with an equal-length run of underscores (preserve columns). Port from actionlint `rule_shellcheck.go`.
+- [x] 2.5 Add a `FakeChecker` test double returning canned `Finding`s, and unit-test the JSON parser against a captured shellcheck `-f json` sample (no live binary in unit tests).
 
 ## 3. Add the `run-shellcheck` rule
 
