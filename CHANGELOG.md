@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - *(lint)* add two workflow-validity rules: `dangling-reference` and `invalid-expression` (both default: error). They flag `needs:` entries and `${{ needs.* }}`/`${{ steps.* }}` references that resolve to nothing at run time. **Breaking for CI**: workflows with a pre-existing dangling reference or unresolved expression now produce error-level diagnostics and fail `gx lint`; opt out per-rule with `level = "off"` in `gx.toml`.
+- *(lint)* add the `run-shellcheck` rule (default: warn). It runs the [`shellcheck`](https://www.shellcheck.net/) static analyzer over each bash/sh `run:` body — neutralizing `${{ }}` expressions first (actionlint parity) — and reports findings scoped to the workflow/job/step. `shellcheck` is an **optional dependency**: when it is not on `PATH`, the rule emits a single skip diagnostic and does not fail the run. Set `run-shellcheck = { level = "error" }` to make findings block CI.
 
 ### Removed
 

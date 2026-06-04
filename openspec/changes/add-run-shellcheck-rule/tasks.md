@@ -23,10 +23,10 @@
 
 ## 4. Toolchain, docs, changelog
 
-- [ ] 4.1 Add `shellcheck` to gx's own toolchain (`mise.toml` / `.config`) so gx's CI runs the rule against gx's workflows.
-- [ ] 4.2 Document `run-shellcheck` in `docs/lint-rules.md`: default warn, the `shellcheck` binary requirement, the graceful-skip behavior, and `ignore` scoping (workflow/job/step).
-- [ ] 4.3 Note the new rule + optional `shellcheck` dependency in the changelog / release-notes path.
-- [ ] 4.4 Update README's lint-rule listing if it enumerates rules.
+- [x] 4.1 Add `shellcheck` to gx's own toolchain (`mise.toml` / `.config`) so gx's CI runs the rule against gx's workflows.
+- [x] 4.2 Document `run-shellcheck` in `docs/lint-rules.md`: default warn, the `shellcheck` binary requirement, the graceful-skip behavior, and `ignore` scoping (workflow/job). *(Corrected from workflow/job/step: `IgnoreTarget` has no `step` key.)*
+- [x] 4.3 Note the new rule + optional `shellcheck` dependency in the changelog / release-notes path.
+- [x] 4.4 Update README's lint-rule listing if it enumerates rules. *(README points to docs/lint-rules.md rather than enumerating; updated the `gx lint` one-liner.)*
 
 ## 5. Validate
 

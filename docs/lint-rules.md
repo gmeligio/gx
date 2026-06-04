@@ -1,9 +1,11 @@
 # Lint rules
 
-`gx lint` reports two families of issues:
+`gx lint` reports several families of issues:
 
 - **Action hygiene** — verify every workflow `uses:` reference is pinned, manifested, and consistently commented.
 - **Workflow security** — flag patterns that expose secrets, the repo write token, or untrusted code execution to fork PRs and other adversarial inputs.
+- **Workflow validity** — catch references that parse but fail or silently resolve to nothing at run time.
+- **Shell analysis** — run `shellcheck` over `run:` shell bodies to surface shell bugs at lint time.
 
 Every rule is identified by a kebab-case name and configured under `[lint.rules]` in `.github/gx.toml`:
 
@@ -84,6 +86,20 @@ A `${{ }}` reference to `needs.<job>` or `steps.<id>` that cannot resolve:
 - `steps.<id>.…` where no *earlier* step in the same job declares `id: <id>` (you can't read an output before the step runs).
 
 The rule only flags references it can fully resolve to a bare identifier. Dynamic references whose job/step segment is indexed (`needs[matrix.target]`) or built by a function (`steps[format(...)]`) are skipped, as are out-of-scope contexts (`env`, `vars`, `matrix`, `inputs`, `github`, `secrets`, `runner`, `job`). Step *output keys* (`steps.<id>.outputs.<key>`) are intentionally not validated — what a step produces is not knowable from the workflow file.
+
+## Shell-analysis rules
+
+### run-shellcheck *(default: warn)*
+
+Runs the [`shellcheck`](https://www.shellcheck.net/) static analyzer over the shell body of each `run:` step and reports each finding as a diagnostic scoped to the workflow, job, and step (the message carries the `SCxxxx` code, severity, and the in-script line). This brings the same coverage [actionlint](https://github.com/rhysd/actionlint) gives — unquoted expansions that word-split, masked pipeline failures, and ~250 other checks — into `gx lint`, without configuring a separate tool.
+
+**Which steps are analyzed.** Only steps whose *effective shell* is `bash` or `sh`. The effective shell is resolved in precedence order: the step's `shell:`, then the job's `defaults.run.shell`, then the workflow's `defaults.run.shell`, then a default of `bash`. Steps that resolve to a non-POSIX shell (`pwsh`, `python`, `cmd`, ...) are skipped.
+
+**`${{ }}` expressions.** Before analysis, GitHub Actions `${{ }}` expressions are neutralized (replaced with equal-length underscores so columns are preserved), and the `shellcheck` codes that this substitution would otherwise trip are excluded (`SC1091`, `SC2050`, `SC2153`, `SC2154`, `SC2157`, `SC2194`, `SC2043`). This mirrors actionlint and prevents false positives on workflows that interpolate expressions into `run:` blocks.
+
+**Optional dependency.** `shellcheck` must be on `PATH`. When it is not found, the rule does **not** fail the lint run: it emits a single informational diagnostic noting that it was skipped, and the exit code is unaffected. Install `shellcheck` (e.g. via your package manager, or `mise`) to activate the rule. Because it defaults to `warn`, set `run-shellcheck = { level = "error" }` to make findings fail CI.
+
+This rule is scoped per workflow/job — like the other workflow rules, the `action` key in an `ignore` entry is meaningless for it.
 
 ## Disabling rules
 
