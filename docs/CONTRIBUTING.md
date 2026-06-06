@@ -26,6 +26,24 @@
     prek install
     ```
 
+## Generating the demo
+
+The demo recording tools (`vhs` and `ttyd`) are **not** in the committed
+`.config/mise.toml`, because CI never needs them — installing them there would
+rewrite checksums into the committed `.config/mise.lock` and break the
+release-plz job. They live in a gitignored `.config/mise.local.toml` that you
+create locally:
+
+```toml
+# .config/mise.local.toml (gitignored)
+[tools]
+"github:charmbracelet/vhs" = "0.10.0"
+ttyd = "1.7.3"
+```
+
+Then `mise install` picks them up (their checksums go to `.config/mise.local.lock`,
+also gitignored), and `mise run demo` regenerates `docs/demo.gif`.
+
 ## Building
 
 ```bash
