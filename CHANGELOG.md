@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1](https://github.com/gmeligio/gx/compare/v0.8.0...v0.8.1) - 2026-06-06
+
+### Added
+
+- *(hooks)* add prek local lockfile hooks bootstrapped per worktree ([#94](https://github.com/gmeligio/gx/pull/94))
+- *(lint)* add workflow-validity rules (dangling-reference, invalid-expression) ([#92](https://github.com/gmeligio/gx/pull/92))
+
+### Fixed
+
+- *(release)* anchor package include to exclude non-cargo lockfiles ([#96](https://github.com/gmeligio/gx/pull/96))
+
 ### Added
 
 - *(lint)* add two workflow-validity rules: `dangling-reference` and `invalid-expression` (both default: error). They flag `needs:` entries and `${{ needs.* }}`/`${{ steps.* }}` references that resolve to nothing at run time. **Breaking for CI**: workflows with a pre-existing dangling reference or unresolved expression now produce error-level diagnostics and fail `gx lint`; opt out per-rule with `level = "off"` in `gx.toml`.
