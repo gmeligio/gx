@@ -1,7 +1,7 @@
 ## 1. Unblock the release (immediate, standalone)
 
-- [ ] 1.1 Run `mise install` and confirm the only change to `.config/mise.lock` is the `@generated` header (`mise.jdx.dev` → `mise.en.dev`)
-- [ ] 1.2 Commit the regenerated `.config/mise.lock` so the next `release-plz` run sees a clean tree
+- [x] 1.1 Run `mise install` and confirm the only change to `.config/mise.lock` is the `@generated` header (`mise.jdx.dev` → `mise.en.dev`)
+- [x] 1.2 Commit the regenerated `.config/mise.lock` so the next `release-plz` run sees a clean tree
 
 ## 2. Cargo.lock — native `--locked` verification
 
