@@ -1,3 +1,5 @@
 #!/usr/bin/env bash
 #MISE description="Check supply chain"
-cargo deny --locked check
+# -D warnings fails on stale config (unmatched allows, unnecessary skips) so
+# the exception lists stay honest as the dependency tree shifts.
+cargo deny --locked check -D warnings
