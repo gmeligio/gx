@@ -11,8 +11,8 @@
 
 ## 3. Regenerate committed lockfile
 
-- [ ] 3.1 Regenerate `.config/mise.lock` so the `ttyd` and `github:charmbracelet/vhs` entries are removed (run the documented lock flow), and verify the rust/other entries are otherwise unchanged
-- [ ] 3.2 Confirm `git status --porcelain .config/mise.lock` is empty after a fresh `mise install` in a checkout where `.config/mise.local.toml` is absent
+- [x] 3.1 Regenerate `.config/mise.lock` so the `ttyd` and `github:charmbracelet/vhs` entries are removed (run the documented lock flow), and verify the rust/other entries are otherwise unchanged. Done by moving `.config/mise.local.toml` aside (CI's view) and deleting the now-orphaned `vhs`/`ttyd` tables — pure 58-line deletion, zero additions, rust + 4 other tools intact (mise does not auto-prune stale lock tables).
+- [x] 3.2 Confirm `git status --porcelain .config/mise.lock` is empty after a fresh `mise install` in a checkout where `.config/mise.local.toml` is absent. Verified: CI-style `mise install` against the slimmed lock produced zero unstaged churn.
 
 ## 4. Remove per-workflow guards
 
