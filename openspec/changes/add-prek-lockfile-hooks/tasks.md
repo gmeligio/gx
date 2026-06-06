@@ -20,10 +20,10 @@
 
 ## 4. Lockfile-maintenance hooks in `.pre-commit-config.yaml`
 
-- [ ] 4.1 Add a cargo lock-sync hook gated on `files: ^Cargo\.toml$` (regenerate `Cargo.lock`)
-- [ ] 4.2 Add a `gx tidy` hook gated on `files: ^\.github/(workflows/.*|gx\.toml)$`
-- [ ] 4.3 Add a mise hook with `always_run: true`, `pass_filenames: false`, running unlocked `mise install` (NOT `--locked`/`MISE_LOCKED`); emit a one-line note when it regenerates the lock
-- [ ] 4.4 Decide the mise hook stage (`pre-commit` vs `pre-push`) and set it
+- [x] 4.1 Add a cargo lock-sync hook gated on `files: ^Cargo\.toml$` (uses `cargo metadata` — re-resolves and rewrites `Cargo.lock` without upgrading versions)
+- [x] 4.2 Add a `gx tidy` hook gated on `files: ^\.github/(workflows/.*|gx\.toml)$`
+- [x] 4.3 Add a mise hook with `always_run: true`, `pass_filenames: false`, running unlocked `mise install` (NOT `--locked`/`MISE_LOCKED`)
+- [x] 4.4 mise hook stage = **pre-push** (per decision); set `default_stages: [pre-commit]` so commit hooks run once at commit and the mise hook runs once at push; `setup` installs both shims (`prek install -t pre-commit -t pre-push`)
 
 ## 5. Verification
 

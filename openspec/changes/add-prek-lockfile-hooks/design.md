@@ -76,4 +76,4 @@ Verification is behavioral, exercised locally:
 
 ## Open Questions
 
-- **`pre-commit` vs `pre-push` stage for the `always_run` mise hook?** Pre-push cuts per-commit latency while still stopping drift before it leaves the machine. DX preference — to finalize during implementation.
+- **Resolved:** the `always_run` mise hook runs at **pre-push** (one `mise install` per push, not per commit) — drift still can't leave the machine, without per-commit latency. `default_stages: [pre-commit]` keeps the cargo/gx hooks at commit time; `prek install` installs both the pre-commit and pre-push shims.
