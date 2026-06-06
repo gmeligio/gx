@@ -14,7 +14,6 @@ allow = [
     "ISC",
     "MIT",
     "MIT-0",
-    "OpenSSL",
     "Unicode-3.0",
     "Unlicense",
     "Zlib",
@@ -31,7 +30,6 @@ highlight = "all"
 skip = [
     # Transitive duplicates we can't resolve — all pulled by reqwest's dependency tree
     { crate = "core-foundation@0.9", reason = "system-configuration pulls old version" },
-    { crate = "getrandom@0.3", reason = "ahash/jobserver still on 0.3" },
     { crate = "thiserror@1", reason = "jni still on thiserror 1.x" },
     { crate = "thiserror-impl@1", reason = "jni still on thiserror 1.x" },
     { crate = "toml_datetime@0.6", reason = "toml_edit still on 0.6" },
