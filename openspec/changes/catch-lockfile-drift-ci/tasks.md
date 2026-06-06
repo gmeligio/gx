@@ -5,10 +5,10 @@
 
 ## 2. Cargo.lock — native `--locked` verification
 
-- [ ] 2.1 Add `--locked` to `cargo check` in `.github/workflows/build.yml` (the `check` job)
-- [ ] 2.2 Add `--locked` to the cargo invocation in `.config/mise/tasks/clippy`
-- [ ] 2.3 Add `--locked` to the cargo invocation in `.config/mise/tasks/test`
-- [ ] 2.4 Verify locally that `cargo check --locked` and `mise run clippy`/`mise run test` pass with the committed `Cargo.lock`
+- [x] 2.1 Add `--locked` to `cargo check` in `.github/workflows/build.yml` (the `check` job)
+- [x] 2.2 Add `--locked` to the cargo invocation in `.config/mise/tasks/clippy`
+- [x] 2.3 Add `--locked` to the cargo invocation in `.config/mise/tasks/test` (also `integ`, `e2e`, and `deny` — every CI cargo command that loads deps; `cargo deny` needs `--locked` *before* the subcommand)
+- [x] 2.4 Verify locally that `cargo check --locked`, `cargo deny --locked check`, `cargo test --locked`, and `cargo clippy --locked` pass with the committed `Cargo.lock` (lock stays clean)
 
 ## 3. gx.lock — `gx tidy` verification
 
