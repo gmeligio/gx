@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2](https://github.com/gmeligio/gx/compare/v0.8.1...v0.8.2) - 2026-06-06
+
+### Added
+
+- *(lint)* add run-shellcheck rule ([#93](https://github.com/gmeligio/gx/pull/93))
+
+### Fixed
+
+- *(deps)* bump gix-discover to 0.51 to patch gix-fs symlink escape (CVE-2026-44471) ([#98](https://github.com/gmeligio/gx/pull/98))
+
 ## [0.8.1](https://github.com/gmeligio/gx/compare/v0.8.0...v0.8.1) - 2026-06-06
 
 ### Added
