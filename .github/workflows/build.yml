@@ -28,7 +28,7 @@ jobs:
             # Reads toolchain + components from rust-toolchain.toml.
             # Runs before mise-action so rustup has the components installed
             # before mise sets RUSTUP_TOOLCHAIN.
-            - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.16.1
+            - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
             - run: cargo fmt --check
 
     clippy:
@@ -39,7 +39,7 @@ jobs:
             # Reads toolchain + components from rust-toolchain.toml.
             # Runs before mise-action so rustup has the components installed
             # before mise sets RUSTUP_TOOLCHAIN.
-            - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.16.1
+            - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c # v1.15.2
             - uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
             - run: mise run clippy
 
@@ -76,3 +76,30 @@ jobs:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
             - uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
             - run: mise run deny
+
+    lockfiles:
+        name: Lockfiles
+        runs-on: ubuntu-24.04
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+            # mise-action runs `mise install`, which (with locked = false) rewrites
+            # .config/mise.lock if a newer mise changes generated content. We do NOT
+            # use MISE_LOCKED here: on a cold runner it hits the core:rust catch-22
+            # (rust not writable to the lock). Instead, detect drift after install.
+            - uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
+            - name: Assert .config/mise.lock is committed
+              run: |
+                  if ! git diff --exit-code .config/mise.lock; then
+                      echo "::error::.config/mise.lock drifted. Run 'mise install' and commit the regenerated lock."
+                      exit 1
+                  fi
+            # gx tidy has no --check mode; it mutates, so assert nothing changed.
+            - name: Install gx
+              run: mise run install
+            - name: Assert gx manifest and lock match the workflows
+              run: |
+                  gx tidy
+                  if ! git diff --exit-code .github/gx.toml .github/gx.lock; then
+                      echo "::error::.github/gx.{toml,lock} out of sync with workflows. Run 'gx tidy' and commit the result."
+                      exit 1
+                  fi
