@@ -1,4 +1,3 @@
 #!/usr/bin/env bash
 #MISE description="Install git hooks for this worktree"
-# Install both shims: pre-commit (cargo/gx lock hooks) and pre-push (mise lock hook).
-prek install --hook-type pre-commit --hook-type pre-push
+prek install --hook-type pre-commit

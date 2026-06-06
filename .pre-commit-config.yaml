@@ -1,4 +1,3 @@
-# Hooks run at pre-commit by default; the mise lock hook overrides to pre-push.
 default_stages: [pre-commit]
 repos:
     - repo: local
@@ -20,7 +19,10 @@ repos:
           - id: cargo-lockfile
             name: Cargo Lockfile
             description: Sync Cargo.lock with Cargo.toml. prek blocks the commit if the lock changed; re-stage it.
-            entry: cargo metadata --format-version 1 --quiet
+            # `cargo metadata` resolves the lock with minimal churn (vs generate-lockfile,
+            # which opportunistically upgrades every dep); stdout is the dependency-graph
+            # JSON we don't need, so discard it and keep stderr for real errors.
+            entry: bash -c 'cargo metadata --format-version 1 --quiet >/dev/null'
             pass_filenames: false
             files: ^Cargo\.toml$
             language: system
@@ -33,9 +35,8 @@ repos:
             language: system
           - id: mise-lockfile
             name: mise Lockfile
-            description: Regenerate .config/mise.lock (e.g. after a mise binary upgrade). Runs on push; never uses --locked (core:rust catch-22).
+            description: Regenerate .config/mise.lock (e.g. after a mise binary upgrade). Never uses --locked (core:rust catch-22).
             entry: mise install
             pass_filenames: false
             always_run: true
-            stages: [pre-push]
             language: system
