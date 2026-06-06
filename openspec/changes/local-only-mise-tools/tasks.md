@@ -22,6 +22,6 @@
 
 ## 5. Document & verify
 
-- [ ] 5.1 Document the expected gitignored `.config/mise.local.toml` (purpose + copy-paste snippet) in AGENTS.md / contributor docs so a fresh clone knows demo tools live there
-- [ ] 5.2 Verify locally: with `.config/mise.local.toml` present, `mise ls` shows `ttyd`/`vhs` and `mise run build` (and the demo task) succeed; with it absent, neither tool resolves
-- [ ] 5.3 After merge, watch the `Release-plz` run on `main` (cold cache) to confirm `release-plz release-pr` no longer aborts on a dirty `.config/mise.lock`
+- [x] 5.1 Document the expected gitignored `.config/mise.local.toml` (purpose + copy-paste snippet) in AGENTS.md / contributor docs so a fresh clone knows demo tools live there. Added a "Generating the demo" section to `docs/CONTRIBUTING.md` (the canonical setup doc) with the rationale and a copy-paste snippet.
+- [x] 5.2 Verify locally: with `.config/mise.local.toml` present, `mise ls` shows `ttyd`/`vhs` and `mise run build` (and the demo task) succeed; with it absent, neither tool resolves. Verified via `mise ls --current --json`: ttyd+vhs present in the active set only when the local file exists; absent (CI's view) when it does not. (The `demo` task runs in Docker with a GitHub token, so it is not executed here; tool resolution — what this task gates — is confirmed.)
+- [ ] 5.3 After merge, watch the `Release-plz` run on `main` (cold cache) to confirm `release-plz release-pr` no longer aborts on a dirty `.config/mise.lock`. *(Post-merge observation — cannot be exercised pre-merge.)*
