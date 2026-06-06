@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+#MISE description="Install git hooks for this worktree"
+prek install --hook-type pre-commit

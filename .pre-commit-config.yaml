@@ -1,3 +1,4 @@
+default_stages: [pre-commit]
 repos:
     - repo: local
       hooks:
@@ -14,4 +15,28 @@ repos:
             entry: cargo clippy --fix --allow-dirty
             pass_filenames: false
             types: [file, rust]
+            language: system
+          - id: cargo-lockfile
+            name: Cargo Lockfile
+            description: Sync Cargo.lock with Cargo.toml. prek blocks the commit if the lock changed; re-stage it.
+            # `cargo metadata` resolves the lock with minimal churn (vs generate-lockfile,
+            # which opportunistically upgrades every dep); stdout is the dependency-graph
+            # JSON we don't need, so discard it and keep stderr for real errors.
+            entry: bash -c 'cargo metadata --format-version 1 --quiet >/dev/null'
+            pass_filenames: false
+            files: ^Cargo\.toml$
+            language: system
+          - id: gx-lockfile
+            name: gx Lockfile
+            description: Sync .github/gx.{toml,lock} with the workflows via gx tidy. prek blocks the commit if anything changed; re-stage it.
+            entry: gx tidy
+            pass_filenames: false
+            files: ^\.github/(workflows/.*|gx\.toml)$
+            language: system
+          - id: mise-lockfile
+            name: mise Lockfile
+            description: Regenerate .config/mise.lock (e.g. after a mise binary upgrade). Never uses --locked (core:rust catch-22).
+            entry: mise install
+            pass_filenames: false
+            always_run: true
             language: system
