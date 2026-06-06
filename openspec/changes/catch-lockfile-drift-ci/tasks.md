@@ -12,15 +12,15 @@
 
 ## 3. gx.lock — `gx tidy` verification
 
-- [x] 3.1 Add a CI step (PR job in `build.yml`) that installs gx via the existing `mise run install` task
-- [x] 3.2 Add a `gx tidy` step after install that fails the job if `.github/gx.lock` / manifest no longer match the workflows (gx tidy has no `--check` mode → run it then `git diff --exit-code`; pruned a pre-existing stale `rustfmt` entry from manifest+lock so the gate starts clean)
-- [x] 3.3 Verify locally that `gx tidy` is clean (idempotent "Up to date") against the current workflows
+- [ ] 3.1 Add a CI step (PR job in `build.yml`) that installs gx via the existing `mise run install` task
+- [ ] 3.2 Add a `gx tidy` step after install that fails the job if `.github/gx.lock` / manifest no longer match the workflows
+- [ ] 3.3 Verify locally that `gx tidy` is clean against the current workflows
 
 ## 4. mise.lock — drift detection (no `--locked`)
 
-- [x] 4.1 In `build.yml`, after mise-action's (unlocked) install, add `git diff --exit-code .config/mise.lock`
-- [x] 4.2 Make the failure actionable: `::error::` message instructing the maintainer to run `mise install` and commit the regenerated lock
-- [x] 4.3 Confirmed the step does NOT use `MISE_LOCKED` / `mise install --locked` (documented inline why; would trigger the `core:rust` catch-22 on a cold runner)
+- [ ] 4.1 In `build.yml`, after mise-action's (unlocked) install, add `git diff --exit-code .config/mise.lock`
+- [ ] 4.2 Make the failure actionable: print a message instructing the maintainer to run `mise install` and commit the regenerated lock
+- [ ] 4.3 Confirm the step does NOT use `MISE_LOCKED` / `mise install --locked` (would trigger the `core:rust` catch-22 on a cold runner)
 
 ## 5. Verification
 
