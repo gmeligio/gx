@@ -16,9 +16,9 @@
 
 ## 4. Remove per-workflow guards
 
-- [ ] 4.1 Remove the `env: MISE_DISABLE_TOOLS: ttyd,github:charmbracelet/vhs` block from `.github/workflows/build.yml`
-- [ ] 4.2 Remove the `env: MISE_DISABLE_TOOLS: ttyd,github:charmbracelet/vhs` block from `.github/workflows/release.yml`
-- [ ] 4.3 Confirm `.github/workflows/release-plz.yml` has no `MISE_DISABLE_TOOLS` env (it must not need one)
+- [x] 4.1 Remove the `env: MISE_DISABLE_TOOLS: ttyd,github:charmbracelet/vhs` block from `.github/workflows/build.yml`
+- [x] 4.2 Remove the `env: MISE_DISABLE_TOOLS: ttyd,github:charmbracelet/vhs` block from `.github/workflows/release.yml`
+- [x] 4.3 Confirm `.github/workflows/release-plz.yml` has no `MISE_DISABLE_TOOLS` env (it must not need one). Confirmed: `grep MISE_DISABLE` across `.github/workflows/` now returns nothing.
 
 ## 5. Document & verify
 
