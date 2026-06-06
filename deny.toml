@@ -36,10 +36,13 @@ skip = [
     { crate = "thiserror-impl@1", reason = "jni still on thiserror 1.x" },
     { crate = "toml_datetime@0.6", reason = "toml_edit still on 0.6" },
     { crate = "windows-sys@0.60", reason = "socket2/tokio still on 0.60" },
+    { crate = "hashbrown@0.17", reason = "gix-hashtable on 0.17, rest of tree on 0.16" },
 ]
 skip-tree = [
     # jni pulls windows-sys 0.45 → old windows-targets tree
     { crate = "windows-sys@0.45", reason = "jni → rustls-platform-verifier transitive" },
+    # gix-tempfile/walkdir (via gix-discover) pull windows-sys 0.52 → old windows-targets tree
+    { crate = "windows-sys@0.52", reason = "gix-discover → tempfile/winapi-util transitive" },
 ]
 
 [sources]

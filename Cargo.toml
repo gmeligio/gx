@@ -15,7 +15,9 @@ include = ["/src/", "/LICENSE.md", "/README.md"]
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 console = "0.16"
-gix-discover = "0.46.0"
+# The `sha1` feature forwards down to gix-hash, which since 0.25 no longer
+# enables a hash backend by default (empty hash enums break the build otherwise).
+gix-discover = { version = "0.51.0", features = ["sha1"] }
 glob = "0.3"
 indicatif = "0.18"
 regex = "1"
