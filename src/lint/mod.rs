@@ -5,6 +5,8 @@ mod command;
 pub mod report;
 /// Rule identity (`RuleName`), `Diagnostic`/`Context`/`Rule` types, and ignore matchers.
 mod rule;
+/// Runs shellcheck over bash/sh `run:` bodies and surfaces its findings.
+mod run_shellcheck;
 /// Detects workflows where the pinned SHA does not match the lock file.
 mod sha_mismatch;
 /// Detects stale version comments that no longer match the locked version.

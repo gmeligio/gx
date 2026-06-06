@@ -8,7 +8,7 @@ The motivating user is the flutter-docker-image maintainer, who runs `gx lint` i
 
 **Out of scope (deferred):**
 
-- Re-implementing shellcheck's analysis in Rust. This change shells out to the `shellcheck` binary — reimplementing a mature static analyzer is not justified.
+- Re-implementing shellcheck's analysis in Rust. This change shells out to the [`shellcheck`](https://github.com/koalaman/shellcheck) binary — reimplementing a mature static analyzer is not justified. The Rust ecosystem confirms this: there are mature shell *parsers* ([`tree-sitter-bash`](https://crates.io/crates/tree-sitter-bash), [`brush-parser`](https://crates.io/crates/brush-parser)) but **no Rust shell *linter***. Parsing bash is the easy part; shellcheck's value is its ~250 hand-tuned checks (dataflow, quoting, word-splitting, sh-vs-bash dialect) accumulated over 13+ years. Building those on a parser is the work we are explicitly not doing.
 - `run:` blocks with a non-shell `shell:` (e.g. `shell: pwsh`, `shell: python`). Only POSIX/bash `run:` steps are analyzed; others are skipped.
 - Workflow-command deprecations inside `run:` (`echo "::set-output::"`). Could layer on later; not part of the shellcheck pass.
 

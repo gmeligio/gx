@@ -794,6 +794,7 @@ dependencies = [
  "semver",
  "serde",
  "serde-saphyr",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.18",
  "time",

@@ -3,6 +3,7 @@ use super::rule::{
     Context, Diagnostic, Rule as _, RuleName, format_and_report, is_ignored, matches_ignore,
     run_workflow_rule,
 };
+use super::run_shellcheck::RunShellcheckRule;
 use super::sha_mismatch::ShaMismatchRule;
 use super::stale_comment::StaleCommentRule;
 use super::unpinned::UnpinnedRule;
@@ -138,6 +139,16 @@ pub fn collect_diagnostics(
     // Phase 4: workflow-validity rules. Same parse, same run_workflow_rule path; these
     // catch structurally broken references (dangling needs:, unresolved expressions).
     run_workflow_validity_rules(&ctx, lint_config, &mut all_diagnostics);
+
+    // Phase 5: shellcheck over bash/sh run: bodies. The rule probes for the binary once
+    // on construction and degrades gracefully (single skip diagnostic) when it is absent.
+    run_workflow_rule(
+        &RunShellcheckRule::new(),
+        Level::Warn,
+        &ctx,
+        lint_config,
+        &mut all_diagnostics,
+    );
 
     // Stable, location-first ordering so findings for one file read together.
     all_diagnostics.sort_by(|a, b| diagnostic_sort_key(a).cmp(&diagnostic_sort_key(b)));
