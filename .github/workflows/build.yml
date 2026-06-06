@@ -8,9 +8,6 @@ on:
 permissions:
     contents: read
 
-env:
-    MISE_DISABLE_TOOLS: ttyd,github:charmbracelet/vhs
-
 jobs:
     check:
         name: Check

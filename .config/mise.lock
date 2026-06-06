@@ -124,45 +124,6 @@ url = "https://github.com/axodotdev/cargo-dist/releases/download/v0.31.0/cargo-d
 url_api = "https://api.github.com/repos/axodotdev/cargo-dist/releases/assets/360963394"
 provenance = "github-attestations"
 
-[[tools."github:charmbracelet/vhs"]]
-version = "0.10.0"
-backend = "github:charmbracelet/vhs"
-
-[tools."github:charmbracelet/vhs"."platforms.linux-arm64"]
-checksum = "sha256:6d7300028d4641b9dc004a05cf411d40f1e12e560cc6fca985dd90504b6652a7"
-url = "https://github.com/charmbracelet/vhs/releases/download/v0.10.0/vhs_0.10.0_Linux_arm64.tar.gz"
-url_api = "https://api.github.com/repos/charmbracelet/vhs/releases/assets/264847395"
-
-[tools."github:charmbracelet/vhs"."platforms.linux-arm64-musl"]
-checksum = "sha256:6d7300028d4641b9dc004a05cf411d40f1e12e560cc6fca985dd90504b6652a7"
-url = "https://github.com/charmbracelet/vhs/releases/download/v0.10.0/vhs_0.10.0_Linux_arm64.tar.gz"
-url_api = "https://api.github.com/repos/charmbracelet/vhs/releases/assets/264847395"
-
-[tools."github:charmbracelet/vhs"."platforms.linux-x64"]
-checksum = "sha256:b552c3870aca101dcafe533cfef32dceb7b783400ad32642e728775c9f125407"
-url = "https://github.com/charmbracelet/vhs/releases/download/v0.10.0/vhs_0.10.0_Linux_x86_64.tar.gz"
-url_api = "https://api.github.com/repos/charmbracelet/vhs/releases/assets/264847388"
-
-[tools."github:charmbracelet/vhs"."platforms.linux-x64-musl"]
-checksum = "sha256:b552c3870aca101dcafe533cfef32dceb7b783400ad32642e728775c9f125407"
-url = "https://github.com/charmbracelet/vhs/releases/download/v0.10.0/vhs_0.10.0_Linux_x86_64.tar.gz"
-url_api = "https://api.github.com/repos/charmbracelet/vhs/releases/assets/264847388"
-
-[tools."github:charmbracelet/vhs"."platforms.macos-arm64"]
-checksum = "sha256:dc256c403305ac8ba623563d0ef3241a38024f35b27c705f79d523e9da618012"
-url = "https://github.com/charmbracelet/vhs/releases/download/v0.10.0/vhs_0.10.0_Darwin_arm64.tar.gz"
-url_api = "https://api.github.com/repos/charmbracelet/vhs/releases/assets/264847398"
-
-[tools."github:charmbracelet/vhs"."platforms.macos-x64"]
-checksum = "sha256:0ef1ae1f399dc837204aa737d375a44cddb0a605be3c32eaa659d4e6a5ad0b70"
-url = "https://github.com/charmbracelet/vhs/releases/download/v0.10.0/vhs_0.10.0_Darwin_x86_64.tar.gz"
-url_api = "https://api.github.com/repos/charmbracelet/vhs/releases/assets/264847396"
-
-[tools."github:charmbracelet/vhs"."platforms.windows-x64"]
-checksum = "sha256:7f5cffbbd01fe4229af0540856ddc0da933af0c16c05b1fbe62e0ef2097038a8"
-url = "https://github.com/charmbracelet/vhs/releases/download/v0.10.0/vhs_0.10.0_Windows_x86_64.zip"
-url_api = "https://api.github.com/repos/charmbracelet/vhs/releases/assets/264847397"
-
 [[tools.rust]]
 version = "1.95.0"
 backend = "core:rust"
@@ -198,22 +159,3 @@ url = "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellche
 [tools.shellcheck."platforms.windows-x64"]
 checksum = "sha256:8a4e35ab0b331c85d73567b12f2a444df187f483e5079ceffa6bda1faa2e740e"
 url = "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.zip"
-
-[[tools.ttyd]]
-version = "1.7.3"
-backend = "aqua:tsl0922/ttyd"
-
-[tools.ttyd."platforms.linux-arm64"]
-url = "https://github.com/tsl0922/ttyd/releases/download/1.7.3/ttyd.aarch64"
-
-[tools.ttyd."platforms.linux-arm64-musl"]
-url = "https://github.com/tsl0922/ttyd/releases/download/1.7.3/ttyd.aarch64"
-
-[tools.ttyd."platforms.linux-x64"]
-url = "https://github.com/tsl0922/ttyd/releases/download/1.7.3/ttyd.x86_64"
-
-[tools.ttyd."platforms.linux-x64-musl"]
-url = "https://github.com/tsl0922/ttyd/releases/download/1.7.3/ttyd.x86_64"
-
-[tools.ttyd."platforms.windows-x64"]
-url = "https://github.com/tsl0922/ttyd/releases/download/1.7.3/ttyd.win32.exe"

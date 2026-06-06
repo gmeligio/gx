@@ -10,3 +10,7 @@
 
 # Git worktrees
 .worktrees
+
+# Local-only mise tools (demo recordings: ttyd, vhs)
+.config/mise.local.toml
+.config/mise.local.lock
