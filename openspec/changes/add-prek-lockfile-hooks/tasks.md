@@ -7,9 +7,9 @@
 
 ## 2. Install prek via mise
 
-- [ ] 2.1 Add `aqua:j178/prek` (pinned) to `[tools]` in `.config/mise.toml`
-- [ ] 2.2 Run `mise install` and confirm `prek --version` resolves via the mise shim
-- [ ] 2.3 Confirm `mise.lock` gains a pinned, checksummed `prek` entry (then commit it)
+- [x] 2.1 Add `aqua:j178/prek` (pinned) to `[tools]` in `.config/mise.toml`
+- [x] 2.2 Run `mise install` and confirm `prek --version` resolves via the mise shim (prek 0.4.4)
+- [x] 2.3 Confirm `mise.lock` gains a pinned, checksummed `prek` entry (then commit it)
 
 ## 3. Per-worktree bootstrap
 
