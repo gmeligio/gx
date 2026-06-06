@@ -49,6 +49,7 @@ Local hooks are opt-in (bypassable with `-n`, absent on un-bootstrapped clones).
 - **Hooks only help if installed** → the `SessionStart` bootstrap + `mise run setup` close this for Claude sessions and manual setup; CI backstops the rest.
 - **prek language parity is not 100%** → mitigated by using `language: system` hooks (plain shell-out), which prek fully supports.
 - **`.claude/settings.json` could be ignored by `.gitignore`** → explicit allow-list entry required, verified by `git check-ignore`.
+- **A fresh worktree/clone is untrusted by mise** → `mise run setup` fails with "Config files are not trusted" until `mise trust` runs. The `SessionStart` bootstrap therefore runs `mise trust` before `mise run setup` (verified end-to-end in a throwaway worktree).
 
 ## Automated Test Strategy
 

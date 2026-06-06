@@ -27,8 +27,8 @@
 
 ## 5. Verification
 
-- [ ] 5.1 Edit `Cargo.toml` → commit → confirm the cargo hook regenerates `Cargo.lock`, blocks, and a re-stage commits clean
-- [ ] 5.2 Edit a workflow → commit → confirm `gx tidy` hook updates `.github/gx.lock` and blocks until re-staged
-- [ ] 5.3 Simulate mise drift (revert the `mise.lock` header) → commit → confirm the mise hook regenerates it and blocks
-- [ ] 5.4 In a fresh worktree, start a session → confirm `SessionStart` runs `mise run setup` and installs the hook; re-run → confirm it's a no-op
-- [ ] 5.5 Confirm `prek run --all-files` (or equivalent) passes on a clean tree
+- [x] 5.1 Cargo hook: removed a `[[package]]` block from `Cargo.lock` (stale-but-valid) → `cargo metadata` regenerated it cleanly (exit 0); lock changed ⇒ prek blocks. Also confirmed a corrupt/staged stale lock makes the hook error and block the commit.
+- [x] 5.2 gx hook: dropped an action block from `.github/gx.lock` → `gx tidy` restored it from the workflows; lock changed ⇒ prek blocks.
+- [x] 5.3 mise hook: reverted the `mise.lock` header to `jdx.dev` (the original drift) → unlocked `mise install` regenerated it to `en.dev`; lock changed ⇒ pre-push hook blocks.
+- [x] 5.4 Fresh throwaway worktree, hooks removed, config untrusted → hardened `SessionStart` (`mise trust` then `mise run setup`) installed both pre-commit + pre-push shims; re-run is a no-op. **Discovery: a fresh worktree is untrusted, so the bootstrap must run `mise trust` first** — added to the SessionStart command.
+- [x] 5.5 `prek run --all-files --hook-stage pre-commit` passes on a clean tree (all 4 commit hooks); per-stage separation verified (mise only at pre-push).
