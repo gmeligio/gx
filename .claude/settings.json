@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "hook=\"$(git rev-parse --git-path hooks)/pre-commit\"; if [ ! -f \"$hook\" ]; then mise run setup >&2 && echo 'prek git hooks installed.'; else echo 'prek git hooks already installed.'; fi"
+          }
+        ]
+      }
+    ]
+  }
+}

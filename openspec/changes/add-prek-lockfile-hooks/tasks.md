@@ -13,10 +13,10 @@
 
 ## 3. Per-worktree bootstrap
 
-- [ ] 3.1 Add `.config/mise/tasks/setup` that runs `prek install`
-- [ ] 3.2 Add committed `.claude/settings.json` with a `SessionStart` hook that runs `mise run setup` guarded on `git rev-parse --git-path hooks`/pre-commit (no-op when already installed)
-- [ ] 3.3 Add `!.claude/settings.json` to `.gitignore` and verify with `git check-ignore` that it is now tracked
-- [ ] 3.4 Run `mise run setup`; confirm `prek install` wrote the hook into this worktree's hooks dir
+- [x] 3.1 Add `.config/mise/tasks/setup` that runs `prek install`
+- [x] 3.2 Add committed `.claude/settings.json` with a `SessionStart` hook that runs `mise run setup` guarded on `git rev-parse --git-path hooks`/pre-commit (no-op when already installed)
+- [x] 3.3 Add `!.claude/settings.json` to `.gitignore` and verify with `git check-ignore` that it is now tracked
+- [x] 3.4 Run `mise run setup`; confirm `prek install` wrote the hook (at the shared `.git/hooks`, which `git rev-parse --git-path hooks` also resolves to, so the guard aligns and worktrees work)
 
 ## 4. Lockfile-maintenance hooks in `.pre-commit-config.yaml`
 
