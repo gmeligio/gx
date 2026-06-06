@@ -5,6 +5,7 @@
 .claude/*
 !.claude/CLAUDE.md
 !.claude/commands
+!.claude/settings.json
 !.claude/skills
 
 # Git worktrees

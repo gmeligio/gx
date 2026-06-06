@@ -188,6 +188,17 @@ pub(super) fn run_workflow_rule<R: Rule>(
     }
 }
 
+/// True when the target's `workflow` key (if any) matches the diagnostic's workflow by
+/// suffix. A `None` target workflow always matches; a `Some` requires both a diagnostic
+/// workflow and a suffix match. Shared by all three ignore matchers below, which differ
+/// only in how they handle the `action` and `job` axes.
+fn workflow_matches(diag_workflow: Option<&WorkflowPath>, target: &IgnoreTarget) -> bool {
+    let Some(target_workflow) = &target.workflow else {
+        return true;
+    };
+    diag_workflow.is_some_and(|w| w.as_str().ends_with(target_workflow.as_str()))
+}
+
 /// Ignore matcher for workflow-security diagnostics. Uses Diagnostic's structural
 /// fields (workflow, job) directly. The `action` key is meaningless for these rules,
 /// so an ignore target that specifies `action` will NOT match — users should omit it.
@@ -195,13 +206,8 @@ fn matches_ignore_workflow(diag: &Diagnostic, target: &IgnoreTarget) -> bool {
     if target.action.is_some() {
         return false;
     }
-    if let Some(target_workflow) = &target.workflow {
-        let Some(diag_workflow) = &diag.workflow else {
-            return false;
-        };
-        if !diag_workflow.as_str().ends_with(target_workflow.as_str()) {
-            return false;
-        }
+    if !workflow_matches(diag.workflow.as_ref(), target) {
+        return false;
     }
     if let Some(target_job) = &target.job {
         let Some(diag_job) = &diag.job else {
@@ -231,9 +237,9 @@ pub(super) fn is_ignored(
 
 /// Check if a diagnostic matches an ignore target using the current action context.
 fn matches_ignore_action(diag: &Diagnostic, target: &IgnoreTarget, action: &LocatedAction) -> bool {
-    let Some(diag_workflow) = &diag.workflow else {
+    if diag.workflow.is_none() {
         return false;
-    };
+    }
 
     if let Some(target_action) = &target.action
         && action.action.id.as_str() != target_action.as_str()
@@ -241,9 +247,7 @@ fn matches_ignore_action(diag: &Diagnostic, target: &IgnoreTarget, action: &Loca
         return false;
     }
 
-    if let Some(target_workflow) = &target.workflow
-        && !diag_workflow.as_str().ends_with(target_workflow.as_str())
-    {
+    if !workflow_matches(diag.workflow.as_ref(), target) {
         return false;
     }
 
@@ -281,9 +285,7 @@ pub(super) fn matches_ignore(
         }
     }
 
-    if let Some(target_workflow) = &target.workflow
-        && !diag_workflow.as_str().ends_with(target_workflow.as_str())
-    {
+    if !workflow_matches(Some(diag_workflow), target) {
         return false;
     }
 

@@ -1,8 +1,5 @@
-[resolutions."actions-rust-lang/rustfmt"."^1"]
-version = "v1.1.2"
-
-[resolutions."actions-rust-lang/setup-rust-toolchain"."~1.15.2"]
-version = "v1.15.2"
+[resolutions."actions-rust-lang/setup-rust-toolchain"."~1.16.1"]
+version = "v1.16.1"
 
 [resolutions."actions/checkout"."^6"]
 version = "v6.0.2"
@@ -25,17 +22,11 @@ version = "v0.5.128"
 [resolutions."rust-lang/crates-io-auth-action"."~1.0.3"]
 version = "v1.0.3"
 
-[actions."actions-rust-lang/rustfmt"."v1.1.2"]
-sha = "4066006ec54a31931b9b1fddfd38f2fdf2d27143"
-repository = "actions-rust-lang/rustfmt"
-ref_type = "tag"
-date = "2025-12-14T19:52:54Z"
-
-[actions."actions-rust-lang/setup-rust-toolchain"."v1.15.2"]
-sha = "1780873c7b576612439a134613cc4cc74ce5538c"
+[actions."actions-rust-lang/setup-rust-toolchain"."v1.16.1"]
+sha = "46268bd060767258de96ed93c1251119784f2ab6"
 repository = "actions-rust-lang/setup-rust-toolchain"
-ref_type = "tag"
-date = "2025-10-04T13:50:05Z"
+ref_type = "release"
+date = "2026-05-08T21:04:57Z"
 
 [actions."actions/checkout"."v6.0.2"]
 sha = "de0fac2e4500dabe0009e67214ff5f5447ce83dd"

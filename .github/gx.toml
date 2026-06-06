@@ -1,6 +1,5 @@
 [actions]
-"actions-rust-lang/rustfmt" = "^1"
-"actions-rust-lang/setup-rust-toolchain" = "~1.15.2"
+"actions-rust-lang/setup-rust-toolchain" = "~1.16.1"
 "actions/checkout" = "^6"
 "actions/create-github-app-token" = "^2"
 "actions/download-artifact" = "^7"
