@@ -5,9 +5,9 @@
 
 ## 2. Split tool config
 
-- [ ] 2.1 Create `.config/mise.local.toml` with `[tools]` `github:charmbracelet/vhs = "0.10.0"` and `ttyd = "1.7.3"`
-- [ ] 2.2 Remove `github:charmbracelet/vhs` and `ttyd` from `[tools]` in `.config/mise.toml`
-- [ ] 2.3 Add `.config/mise.local.toml` and `.config/mise.local.lock` to `.gitignore`
+- [x] 2.1 Create `.config/mise.local.toml` with `[tools]` `github:charmbracelet/vhs = "0.10.0"` and `ttyd = "1.7.3"`
+- [x] 2.2 Remove `github:charmbracelet/vhs` and `ttyd` from `[tools]` in `.config/mise.toml`
+- [x] 2.3 Add `.config/mise.local.toml` and `.config/mise.local.lock` to `.gitignore`
 
 ## 3. Regenerate committed lockfile
 
