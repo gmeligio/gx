@@ -1,7 +1,7 @@
-## 1. Verify resolution (decision gate)
+## 1. Verify resolution (decision gate) — VERIFIED, no fallback needed
 
-- [ ] 1.1 Create a throwaway `.config/mise.local.toml` with `jq` and run `mise config` / `mise ls` to confirm mise discovers a `.local.toml` nested under `.config/`; if it does not resolve, fall back to a root-level `mise.local.toml` and adjust the paths in the tasks below
-- [ ] 1.2 Confirm mise writes the local lock to `.config/mise.local.lock` (not `.config/mise.lock`) when the local config is present, then delete the throwaway file
+- [x] 1.1 Confirmed mise 2026.6.0 discovers `.config/mise.local.toml` (`mise config` lists it; `mise ls --current --json` includes its tools only when the file is present, excludes them when absent). The `.config/`-nested form works — root-level fallback not required. Note: use `mise ls --current --json` for the active set; plain `mise ls` also lists installed-but-inactive global versions.
+- [x] 1.2 Confirmed lockfile separation: local tools write to `.config/mise.local.lock`, never `.config/mise.lock`; a CI-style `mise install` with the local file absent leaves `.config/mise.lock` byte-for-byte unchanged. (mise only updates an existing lockfile — `.config/mise.local.lock` must be `touch`ed to materialize, but it is gitignored so this is harmless.)
 
 ## 2. Split tool config
 
