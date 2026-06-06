@@ -10,7 +10,7 @@ homepage = "https://github.com/gmeligio/gx"
 repository = "https://github.com/gmeligio/gx"
 resolver = "2"
 rust-version = "1.93"
-include = ["src/", "LICENSE.md", "README.md", "!openspec/"]
+include = ["/src/", "/LICENSE.md", "/README.md"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
