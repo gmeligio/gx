@@ -210,6 +210,7 @@ mod tests {
             workflow: WorkflowPath::new(workflow),
             job: job.map(JobId::from),
             step: step.map(StepIndex::from),
+            line: None,
         }
     }
 

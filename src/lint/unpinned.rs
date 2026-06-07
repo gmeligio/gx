@@ -25,10 +25,12 @@ impl UnpinnedRule {
             &action.action.id,
             action.action.version.as_str()
         );
-        Some(
-            Diagnostic::new(RuleName::Unpinned, Level::Error, msg)
-                .with_workflow(action.location.workflow.clone()),
-        )
+        let diag = Diagnostic::new(RuleName::Unpinned, Level::Error, msg)
+            .with_workflow(action.location.workflow.clone());
+        Some(match action.location.line {
+            Some(line) => diag.with_line(line),
+            None => diag,
+        })
     }
 }
 
@@ -50,6 +52,7 @@ impl Rule for UnpinnedRule {
 }
 
 #[cfg(test)]
+#[expect(clippy::unwrap_used, reason = "tests use unwrap freely")]
 mod tests {
     use super::{Level, Rule as _, RuleName, UnpinnedRule};
     use crate::domain::action::identity::{ActionId, CommitSha, Version};
@@ -58,6 +61,10 @@ mod tests {
     const VALID_SHA: &str = "8e8c483db84b4bee98b60c0593521ed34d9990e8";
 
     fn located(version: &str, sha: Option<&str>) -> Located {
+        located_at(version, sha, None)
+    }
+
+    fn located_at(version: &str, sha: Option<&str>, line: Option<u32>) -> Located {
         Located {
             action: WorkflowAction {
                 id: ActionId::from("actions/checkout"),
@@ -68,6 +75,7 @@ mod tests {
                 workflow: WorkflowPath::new(".github/workflows/ci.yml"),
                 job: None,
                 step: None,
+                line,
             },
         }
     }
@@ -95,5 +103,19 @@ mod tests {
     fn tag_reference_is_flagged() {
         let action = located("v4", None);
         assert!(UnpinnedRule::check_action(&action).is_some());
+    }
+
+    #[test]
+    fn diagnostic_carries_source_line_when_known() {
+        let action = located_at("v4", None, Some(12));
+        let diag = UnpinnedRule::check_action(&action).unwrap();
+        assert_eq!(diag.line, Some(12));
+    }
+
+    #[test]
+    fn diagnostic_omits_line_when_unknown() {
+        let action = located_at("v4", None, None);
+        let diag = UnpinnedRule::check_action(&action).unwrap();
+        assert_eq!(diag.line, None);
     }
 }

@@ -185,6 +185,7 @@ impl FileScanner {
                         workflow: workflow_rel_path.clone(),
                         job: Some(JobId::from(job.id.clone())),
                         step: StepIndex::try_from(step_idx).ok(),
+                        line: step.uses_line(),
                     },
                 });
             }

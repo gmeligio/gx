@@ -32,10 +32,12 @@ impl StaleCommentRule {
             sha.as_str(),
             entry.commit.sha.as_str()
         );
-        Some(
-            Diagnostic::new(RuleName::StaleComment, Level::Warn, msg)
-                .with_workflow(action.location.workflow.clone()),
-        )
+        let diag = Diagnostic::new(RuleName::StaleComment, Level::Warn, msg)
+            .with_workflow(action.location.workflow.clone());
+        Some(match action.location.line {
+            Some(line) => diag.with_line(line),
+            None => diag,
+        })
     }
 }
 
@@ -99,6 +101,7 @@ mod tests {
                 workflow: WorkflowPath::new(workflow),
                 job: None,
                 step: None,
+                line: None,
             },
         }
     }

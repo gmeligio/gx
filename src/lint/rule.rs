@@ -90,6 +90,10 @@ pub struct Diagnostic {
     pub job: Option<JobId>,
     /// Optional 0-based step index (set by step-scoped diagnostics).
     pub step: Option<StepIndex>,
+    /// Optional 1-based source line of the offending `uses:` scalar. Set by rules whose
+    /// diagnostic maps to a single workflow line; left `None` for manifest-level or
+    /// whole-file diagnostics that have no single line to point at.
+    pub line: Option<u32>,
 }
 
 impl Diagnostic {
@@ -102,6 +106,7 @@ impl Diagnostic {
             workflow: None,
             job: None,
             step: None,
+            line: None,
         }
     }
 
@@ -123,6 +128,13 @@ impl Diagnostic {
     #[must_use]
     pub fn with_step(mut self, step: StepIndex) -> Self {
         self.step = Some(step);
+        self
+    }
+
+    /// Set the source line.
+    #[must_use]
+    pub fn with_line(mut self, line: u32) -> Self {
+        self.line = Some(line);
         self
     }
 }

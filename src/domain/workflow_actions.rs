@@ -208,6 +208,9 @@ pub struct Location {
     pub job: Option<JobId>,
     /// 0-based step index within the job.
     pub step: Option<StepIndex>,
+    /// 1-based source line of the `uses:` scalar, when known. `None` for locations
+    /// synthesized outside a parse (e.g. manifest-derived entries).
+    pub line: Option<u32>,
 }
 
 /// A single action reference with its full location context.
@@ -265,11 +268,13 @@ mod tests {
             workflow: WorkflowPath::new(".github/workflows/ci.yml"),
             job: Some(JobId::from("build")),
             step: Some(StepIndex::from(0_u16)),
+            line: None,
         };
         let loc2 = Location {
             workflow: WorkflowPath::new(".github/workflows/ci.yml"),
             job: Some(JobId::from("build")),
             step: Some(StepIndex::from(0_u16)),
+            line: None,
         };
         assert_eq!(loc1, loc2);
     }
@@ -280,6 +285,7 @@ mod tests {
             workflow: WorkflowPath::new(".github/workflows/ci.yml"),
             job: Some(JobId::from("build")),
             step: Some(StepIndex::from(0_u16)),
+            line: None,
         };
         let action = Located {
             action: WorkflowAction {

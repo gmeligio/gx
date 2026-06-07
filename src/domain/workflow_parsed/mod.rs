@@ -3,7 +3,7 @@
 use super::workflow_actions::WorkflowPath;
 use serde::de::{Deserializer, MapAccess, Visitor};
 use serde::{Deserialize, Serialize};
-use serde_saphyr::Commented;
+use serde_saphyr::{Commented, Spanned};
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -215,10 +215,11 @@ fn normalize_shell(raw: &str) -> String {
 pub struct Step {
     #[serde(default)]
     pub id: Option<String>,
-    /// The step's `uses:` reference with its inline version comment. Read via
-    /// [`Step::uses_ref`] (bare reference) and [`Step::uses_comment`] (comment).
+    /// The step's `uses:` reference with its inline version comment and source location.
+    /// Read via [`Step::uses_ref`] (bare reference), [`Step::uses_comment`] (comment),
+    /// and [`Step::uses_line`] (source line).
     #[serde(default)]
-    pub uses: Option<Commented<String>>,
+    pub uses: Option<Spanned<Commented<String>>>,
     #[serde(default, rename = "if")]
     pub if_cond: Option<String>,
     #[serde(default)]
@@ -237,7 +238,7 @@ impl Step {
     /// The step's `uses:` action reference without its version comment, if present.
     #[must_use]
     pub fn uses_ref(&self) -> Option<&str> {
-        self.uses.as_ref().map(|c| c.0.as_str())
+        self.uses.as_ref().map(|s| s.value.0.as_str())
     }
 
     /// The step's inline `uses:` version comment (e.g. `v4`), if any. saphyr yields an
@@ -246,8 +247,20 @@ impl Step {
     pub fn uses_comment(&self) -> Option<&str> {
         self.uses
             .as_ref()
-            .map(|c| c.1.as_str())
-            .filter(|s| !s.is_empty())
+            .map(|s| s.value.1.as_str())
+            .filter(|c| !c.is_empty())
+    }
+
+    /// The 1-based source line of the step's `uses:` scalar, if present.
+    ///
+    /// saphyr reports line 0 for an unknown location; this normalizes that to `None`.
+    #[must_use]
+    pub fn uses_line(&self) -> Option<u32> {
+        self.uses
+            .as_ref()
+            .map(|s| s.referenced.line())
+            .filter(|&line| line != 0)
+            .and_then(|line| u32::try_from(line).ok())
     }
 
     /// All scalar text owned by this step (concatenated `with` values, `env` values, and

@@ -30,10 +30,12 @@ impl ShaMismatchRule {
             &action.action.id,
             action.action.version.as_str()
         );
-        Some(
-            Diagnostic::new(RuleName::ShaMismatch, Level::Error, msg)
-                .with_workflow(action.location.workflow.clone()),
-        )
+        let diag = Diagnostic::new(RuleName::ShaMismatch, Level::Error, msg)
+            .with_workflow(action.location.workflow.clone());
+        Some(match action.location.line {
+            Some(line) => diag.with_line(line),
+            None => diag,
+        })
     }
 }
 

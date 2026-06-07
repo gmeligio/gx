@@ -128,6 +128,7 @@ mod tests {
                 workflow: WorkflowPath::new(".github/workflows/ci.yml"),
                 job: Some(JobId::from("build")),
                 step: Some(StepIndex::from(0_u16)),
+                line: None,
             },
         };
 
