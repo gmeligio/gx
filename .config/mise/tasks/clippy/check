@@ -1,5 +1,3 @@
 #!/usr/bin/env bash
 #MISE description="Verify lints without applying fixes (CI)"
-# No `lint:size` dependency: verifying lints alone lets a red CI job name the
-# real failure. The size budget is its own `lint:size` task and CI job.
 cargo clippy --locked --tests -- -D warnings

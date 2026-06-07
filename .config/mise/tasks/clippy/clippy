@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
 #MISE description="Lint the code"
+# Pull in the size budget so the commit-time flow catches oversized files too.
 #MISE depends=["lint:size"]
 cargo clippy --locked --tests --fix --allow-dirty
