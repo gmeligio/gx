@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Local gate: typecheck, format, lint, size budgets, unit tests"
+#MISE depends=["check", "format:check", "clippy:check", "lint:size", "test:unit"]
+# `_default` makes the bare `test` name resolve to this aggregator (mise maps
+# tasks/<dir>/_default to <dir>). Aggregates by reference so no command is
+# re-spelled; keep `depends` in sync with the PR-check jobs in build.yml.

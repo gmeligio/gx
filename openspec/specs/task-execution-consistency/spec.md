@@ -82,6 +82,6 @@ There SHALL be one mise task that, when run, executes the fast local verificatio
 #### Scenario: The unit suite remains independently runnable
 
 - **GIVEN** the unit-test suite has its own task (`test:unit`)
-- **WHEN** CI's Unit Tests job or the `test-all` aggregator needs only unit tests
+- **WHEN** CI's Unit Tests job or the `test:all` aggregator needs only unit tests
 - **THEN** it invokes `mise run test:unit` (the leaf), not the local gate
 - **AND** the gate and the leaf each map to exactly one job (the gate aggregates; the leaf runs `cargo test --locked --lib`)

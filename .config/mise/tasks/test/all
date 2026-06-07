@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+#MISE description="Run all test suites (unit + integration + e2e)"
+#MISE depends=["test:unit", "integ", "e2e"]
