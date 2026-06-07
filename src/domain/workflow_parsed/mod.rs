@@ -215,12 +215,8 @@ fn normalize_shell(raw: &str) -> String {
 pub struct Step {
     #[serde(default)]
     pub id: Option<String>,
-    /// The step's `uses:` reference, if any, paired with its inline version comment.
-    ///
-    /// saphyr's `Commented<String>` captures the trailing `# v4`-style comment during the
-    /// structural parse, so the comment travels with the value instead of being re-scraped
-    /// from the raw source. Use [`Step::uses_ref`] for the bare action reference and
-    /// [`Step::uses_comment`] for the comment.
+    /// The step's `uses:` reference with its inline version comment. Read via
+    /// [`Step::uses_ref`] (bare reference) and [`Step::uses_comment`] (comment).
     #[serde(default)]
     pub uses: Option<Commented<String>>,
     #[serde(default, rename = "if")]
@@ -244,10 +240,8 @@ impl Step {
         self.uses.as_ref().map(|c| c.0.as_str())
     }
 
-    /// The step's inline `uses:` version comment (e.g. `v4`), if non-empty.
-    ///
-    /// saphyr stores an empty string when no comment is present; this normalizes that to
-    /// `None` so callers can treat "no comment" uniformly.
+    /// The step's inline `uses:` version comment (e.g. `v4`), if any. saphyr yields an
+    /// empty string for no comment; this normalizes that to `None`.
     #[must_use]
     pub fn uses_comment(&self) -> Option<&str> {
         self.uses

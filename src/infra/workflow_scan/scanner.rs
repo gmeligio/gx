@@ -137,9 +137,8 @@ impl FileScanner {
     /// Parse a workflow file once and return both the structural `Parsed` model and
     /// the list of `uses:` action references with their location metadata.
     ///
-    /// The action list is derived from `parsed.jobs[].steps[].uses`. Each step's inline
-    /// version comment (e.g. `# v4`) rides on the parsed value via saphyr's
-    /// `Commented<String>`, so it is read per step rather than re-scraped from the source.
+    /// The action list is derived from `parsed.jobs[].steps[].uses`, each carrying its
+    /// inline version comment (e.g. `# v4`).
     ///
     /// # Errors
     ///
