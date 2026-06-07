@@ -139,7 +139,7 @@ jobs:
     );
     let job = &p.jobs[0];
     let s0 = &job.steps[0];
-    assert_eq!(s0.uses.as_deref(), Some("docker/login-action@v3"));
+    assert_eq!(s0.uses_ref(), Some("docker/login-action@v3"));
     assert!(
         s0.if_cond
             .as_deref()
