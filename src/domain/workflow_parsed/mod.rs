@@ -216,8 +216,7 @@ pub struct Step {
     #[serde(default)]
     pub id: Option<String>,
     /// The step's `uses:` reference with its inline version comment and source location.
-    /// Read via [`Step::uses_ref`] (bare reference), [`Step::uses_comment`] (comment),
-    /// and [`Step::uses_line`] (source line).
+    /// The nested tuple is opaque; read it through the `uses_*` accessors.
     #[serde(default)]
     pub uses: Option<Spanned<Commented<String>>>,
     #[serde(default, rename = "if")]
