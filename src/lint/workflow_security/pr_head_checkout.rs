@@ -30,8 +30,8 @@ impl PrHeadCheckoutRule {
             for (idx, step) in job.steps.iter().enumerate() {
                 if checks_out_pr_head(step) {
                     let msg = format!(
-                        "{}: job `{}` step {} checks out PR HEAD in a privileged workflow — checking out attacker-controlled code while secrets/write tokens are in scope enables the 'pwn request' attack class",
-                        workflow.path, job.id, idx
+                        "job `{}` step {} checks out PR HEAD in a privileged workflow — checking out attacker-controlled code while secrets/write tokens are in scope enables the 'pwn request' attack class",
+                        job.id, idx
                     );
                     let mut diag = Diagnostic::new(RuleName::PrHeadCheckout, Level::Error, msg)
                         .with_workflow(workflow.path.clone())

@@ -25,14 +25,14 @@ impl ShaMismatchRule {
         }
 
         let msg = format!(
-            "{}: action {} SHA {} not found in lock file",
-            &action.location.workflow,
+            "action {} SHA {} not found in lock file",
             &action.action.id,
             action.action.version.as_str()
         );
         Some(
             Diagnostic::new(RuleName::ShaMismatch, Level::Error, msg)
-                .with_workflow(action.location.workflow.clone()),
+                .with_workflow(action.location.workflow.clone())
+                .with_line(action.location.line),
         )
     }
 }

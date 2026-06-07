@@ -19,8 +19,8 @@ impl DanglingReferenceRule {
             for needed in &job.needs {
                 if !job_ids.contains(needed.as_str()) {
                     let msg = format!(
-                        "{}: job `{}` needs job `{}` which does not exist in this workflow",
-                        workflow.path, job.id, needed
+                        "job `{}` needs job `{}` which does not exist in this workflow",
+                        job.id, needed
                     );
                     out.push(
                         Diagnostic::new(RuleName::DanglingReference, Level::Error, msg)

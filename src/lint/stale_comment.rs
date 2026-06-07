@@ -25,8 +25,7 @@ impl StaleCommentRule {
         }
 
         let msg = format!(
-            "{}: action {} version {} has stale comment (SHA {} does not match lock SHA {})",
-            &action.location.workflow,
+            "action {} version {} has stale comment (SHA {} does not match lock SHA {})",
             &action.action.id,
             action.action.version.as_str(),
             sha.as_str(),
@@ -34,7 +33,8 @@ impl StaleCommentRule {
         );
         Some(
             Diagnostic::new(RuleName::StaleComment, Level::Warn, msg)
-                .with_workflow(action.location.workflow.clone()),
+                .with_workflow(action.location.workflow.clone())
+                .with_line(action.location.line),
         )
     }
 }
@@ -99,6 +99,7 @@ mod tests {
                 workflow: WorkflowPath::new(workflow),
                 job: None,
                 step: None,
+                line: None,
             },
         }
     }

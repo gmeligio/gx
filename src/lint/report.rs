@@ -48,6 +48,7 @@ impl CommandReport for Report {
             lines.push(OutputLine::LintDiag {
                 level: diag.level,
                 workflow: diag.workflow.as_ref().map(std::string::ToString::to_string),
+                line: diag.line,
                 rule: diag.rule.to_string(),
                 message: diag.message.clone(),
             });

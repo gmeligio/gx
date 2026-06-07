@@ -26,6 +26,8 @@ pub enum Line {
     LintDiag {
         level: Level,
         workflow: Option<String>,
+        /// 1-based source line, rendered as `workflow:line` when both are present.
+        line: Option<u32>,
         rule: String,
         message: String,
     },
@@ -85,6 +87,7 @@ impl Line {
             Line::LintDiag {
                 level,
                 workflow,
+                line,
                 rule,
                 message,
             } => {
@@ -107,7 +110,10 @@ impl Line {
                 };
                 let location = workflow
                     .as_ref()
-                    .map(|w| format!("{w}: "))
+                    .map(|w| match line {
+                        Some(n) => format!("{w}:{n}: "),
+                        None => format!("{w}: "),
+                    })
                     .unwrap_or_default();
                 format!(" {colored_symbol} {location}{rule}: {message}")
             }
@@ -164,6 +170,7 @@ mod tests {
         let line = Line::LintDiag {
             level: Level::Error,
             workflow: Some("ci.yml".to_owned()),
+            line: None,
             rule: "pinned-version".to_owned(),
             message: "action must be pinned".to_owned(),
         };
@@ -172,6 +179,43 @@ mod tests {
         assert!(result.contains("ci.yml"));
         assert!(result.contains("pinned-version"));
         assert!(result.contains("action must be pinned"));
+        // No line known: the workflow renders as `ci.yml: ` with no numeric `:line` suffix.
+        assert!(result.contains("ci.yml: "));
+        assert!(!result.contains("ci.yml:1"));
+    }
+
+    #[test]
+    fn format_line_lint_diag_renders_source_line() {
+        let line = Line::LintDiag {
+            level: Level::Error,
+            workflow: Some("ci.yml".to_owned()),
+            line: Some(12),
+            rule: "unpinned".to_owned(),
+            message: "action must be pinned".to_owned(),
+        };
+        let result = line.format_line(false);
+        // A located violation renders `file:line` so the user can jump straight to it.
+        assert!(result.contains("ci.yml:12:"), "got: {result}");
+    }
+
+    #[test]
+    fn format_line_lint_diag_renders_location_once() {
+        // The renderer is the single source of the workflow location: rule messages must
+        // NOT embed the path themselves, or it prints twice. This guards against a rule
+        // re-introducing a leading `{workflow}: ` in its message.
+        let line = Line::LintDiag {
+            level: Level::Error,
+            workflow: Some(".github/workflows/ci.yml".to_owned()),
+            line: Some(7),
+            rule: "unpinned".to_owned(),
+            message: "action actions/checkout uses tag reference v4 instead of SHA pin".to_owned(),
+        };
+        let result = line.format_line(false);
+        assert_eq!(
+            result.matches(".github/workflows/ci.yml").count(),
+            1,
+            "workflow path must appear exactly once, got: {result}"
+        );
     }
 
     #[test]

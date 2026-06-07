@@ -9,10 +9,10 @@
 
 ## PR 2 — `Spanned<T>` + line in diagnostics (delivers the spec delta)
 
-- [ ] 2.1 Wrap `Step.uses` as `Option<Spanned<Commented<String>>>`; thread the value/comment through unchanged
-- [ ] 2.2 Capture the parsed line in `src/infra/workflow_scan/scanner.rs` and carry it on `Location`/`Located` in `src/domain/workflow_actions.rs`
-- [ ] 2.3 Add `line: Option<u32>` and a `with_line` builder to `Diagnostic` in `src/lint/rule.rs`
-- [ ] 2.4 Populate `line` in rules that map to a single `uses:` line (sha-mismatch, unpinned, stale-comment); leave manifest/whole-file rules with `line = None`
-- [ ] 2.5 Render `path:line:` in `Line::LintDiag` in `src/output/lines.rs` when `line` is `Some`; keep `path:` rendering when `None`
-- [ ] 2.6 Add tests: a located violation prints `file:line:`; a manifest-level violation prints `file:` with no line (no regression)
-- [ ] 2.7 Verify `cargo build`, `cargo clippy`, and the full test suite pass (e2e with `GITHUB_TOKEN`)
+- [x] 2.1 Wrap `Step.uses` as `Option<Spanned<Commented<String>>>`; thread the value/comment through unchanged
+- [x] 2.2 Capture the parsed line in `src/infra/workflow_scan/scanner.rs` and carry it on `Location`/`Located` in `src/domain/workflow_actions.rs`
+- [x] 2.3 Add `line: Option<u32>` and a `with_line` builder to `Diagnostic` in `src/lint/rule.rs`
+- [x] 2.4 Populate `line` in rules that map to a single `uses:` line (sha-mismatch, unpinned, stale-comment); leave manifest/whole-file rules with `line = None`
+- [x] 2.5 Render `path:line:` in `Line::LintDiag` in `src/output/lines.rs` when `line` is `Some`; keep `path:` rendering when `None`
+- [x] 2.6 Add tests: a located violation prints `file:line:`; a manifest-level violation prints `file:` with no line (no regression)
+- [x] 2.7 Verify `cargo build`, `cargo clippy`, and the full test suite pass (e2e with `GITHUB_TOKEN`)

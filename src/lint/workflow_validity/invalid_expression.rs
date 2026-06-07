@@ -102,7 +102,7 @@ fn resolve_ref(
     let output_key = cap.get(3).map(|m| m.as_str());
     match context {
         "needs" => resolve_needs(workflow, job, needs, id, output_key),
-        "steps" => resolve_steps(workflow, job, declared_ids, id),
+        "steps" => resolve_steps(job, declared_ids, id),
         _ => None,
     }
 }
@@ -117,8 +117,8 @@ fn resolve_needs(
 ) -> Option<String> {
     if !needs.contains(id) {
         return Some(format!(
-            "{}: job `{}` references `needs.{id}` but `{id}` is not in its `needs:` list — the reference resolves to nothing at run time",
-            workflow.path, job.id
+            "job `{}` references `needs.{id}` but `{id}` is not in its `needs:` list — the reference resolves to nothing at run time",
+            job.id
         ));
     }
     // The job IS a declared dependency. Validate the output key only when the producing
@@ -131,25 +131,20 @@ fn resolve_needs(
         return None;
     }
     Some(format!(
-        "{}: job `{}` references `needs.{id}.outputs.{key}` but job `{id}` declares no `{key}` output — the reference resolves to nothing at run time",
-        workflow.path, job.id
+        "job `{}` references `needs.{id}.outputs.{key}` but job `{id}` declares no `{key}` output — the reference resolves to nothing at run time",
+        job.id
     ))
 }
 
 /// Resolves `steps.<id>` against the ids declared by earlier steps in the same job.
 /// The output key (`steps.<id>.outputs.<key>`) is never resolved — out of scope by design.
-fn resolve_steps(
-    workflow: &Parsed,
-    job: &Job,
-    declared_ids: &BTreeSet<&str>,
-    id: &str,
-) -> Option<String> {
+fn resolve_steps(job: &Job, declared_ids: &BTreeSet<&str>, id: &str) -> Option<String> {
     if declared_ids.contains(id) {
         return None;
     }
     Some(format!(
-        "{}: job `{}` references `steps.{id}` but no earlier step declares `id: {id}` — the reference resolves to nothing at run time",
-        workflow.path, job.id
+        "job `{}` references `steps.{id}` but no earlier step declares `id: {id}` — the reference resolves to nothing at run time",
+        job.id
     ))
 }
 

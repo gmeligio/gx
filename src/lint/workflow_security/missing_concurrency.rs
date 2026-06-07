@@ -26,8 +26,7 @@ impl MissingConcurrencyRule {
             return None;
         }
         let msg = format!(
-            "{}: workflow triggered by `{}` has no `concurrency:` block — add one (e.g. `concurrency: {{ group: ${{{{ github.workflow }}}}-${{{{ github.ref }}}}, cancel-in-progress: true }}`) to serialize racing runs",
-            workflow.path, race_trigger
+            "workflow triggered by `{race_trigger}` has no `concurrency:` block — add one (e.g. `concurrency: {{ group: ${{{{ github.workflow }}}}-${{{{ github.ref }}}}, cancel-in-progress: true }}`) to serialize racing runs"
         );
         Some(
             Diagnostic::new(RuleName::MissingConcurrency, Level::Warn, msg)

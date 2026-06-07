@@ -38,10 +38,7 @@ impl DangerousTriggerRule {
 
     /// Builds an error diagnostic naming the dangerous trigger and its mitigation hint.
     fn diagnostic(workflow: &Parsed, trigger: &str, hint: &str) -> Diagnostic {
-        let msg = format!(
-            "{}: dangerous trigger `{}` — {}",
-            workflow.path, trigger, hint
-        );
+        let msg = format!("dangerous trigger `{trigger}` — {hint}");
         Diagnostic::new(RuleName::DangerousTrigger, Level::Error, msg)
             .with_workflow(workflow.path.clone())
     }
