@@ -35,7 +35,7 @@ Checks that can fix code (format, clippy) SHALL mutate in the local and pre-comm
 - **GIVEN** a contributor with the hooks installed
 - **AND** a staged change containing misformatted Rust
 - **WHEN** they commit
-- **THEN** the `cargo-fmt` hook runs the mutating format task (`mise run format:format`), the result is re-staged with `git add`, and the commit succeeds without being rejected for formatting
+- **THEN** the `cargo-fmt` hook runs the mutating format task (`mise run format`), the result is re-staged with `git add`, and the commit succeeds without being rejected for formatting
 
 #### Scenario: CI verifies without mutating
 

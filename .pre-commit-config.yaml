@@ -5,14 +5,14 @@ repos:
           - id: cargo-fmt
             name: Cargo Formatter
             description: Format via the mise task (single source of truth) and re-stage so the commit succeeds in one shot.
-            entry: bash -c 'mise run format:format && git add -u'
+            entry: bash -c 'mise run format && git add -u'
             pass_filenames: false
             types: [file, rust]
             language: system
           - id: cargo-linter
             name: Cargo Linter
             description: Lint+fix via the mise task (single source of truth) and re-stage so the commit succeeds in one shot.
-            entry: bash -c 'mise run clippy:clippy && git add -u'
+            entry: bash -c 'mise run clippy && git add -u'
             pass_filenames: false
             types: [file, rust]
             language: system

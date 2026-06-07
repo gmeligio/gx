@@ -1,3 +1,4 @@
 #!/usr/bin/env bash
 #MISE description="Format the code with rustfmt"
+# Don't rename: the `_default` filename is what gives this the bare `format` name.
 cargo fmt --all
