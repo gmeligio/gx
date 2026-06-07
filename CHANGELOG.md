@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.3](https://github.com/gmeligio/gx/compare/v0.8.2...v0.8.3) - 2026-06-07
+
+### Added
+
+- *(lint)* show file:line in diagnostics via saphyr Spanned ([#106](https://github.com/gmeligio/gx/pull/106))
+
+### Other
+
+- *(scan)* capture uses comments via saphyr Commented<String> ([#105](https://github.com/gmeligio/gx/pull/105))
+- *(deps)* bump serde-saphyr to 0.0.27 ([#102](https://github.com/gmeligio/gx/pull/102))
+
 ## [0.8.2](https://github.com/gmeligio/gx/compare/v0.8.1...v0.8.2) - 2026-06-06
 
 ### Added
