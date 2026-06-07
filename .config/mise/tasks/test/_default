@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Local gate: typecheck, format, lint, size budgets, unit tests"
+#MISE depends=["check", "format:check", "clippy:check", "lint:size", "test:unit"]
+# Don't rename: the `_default` filename is what gives this the bare `test` name.
+# Keep `depends` in sync with the PR-check jobs in build.yml.

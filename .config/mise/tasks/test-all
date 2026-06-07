@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-#MISE description="Run unit tests"
-#MISE depends=["test", "integ", "e2e"]

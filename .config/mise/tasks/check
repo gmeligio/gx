@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+#MISE description="Type-check the code without building artifacts"
+cargo check --locked

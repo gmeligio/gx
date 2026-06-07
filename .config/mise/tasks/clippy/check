@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+#MISE description="Verify lints without applying fixes (CI)"
+cargo clippy --locked --tests -- -D warnings

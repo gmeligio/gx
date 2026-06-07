@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Lint the code"
+# Don't rename: the `_default` filename is what gives this the bare `clippy` name.
+# Pull in the size budget so the commit-time flow catches oversized files too.
+#MISE depends=["lint:size"]
+cargo clippy --locked --tests --fix --allow-dirty
