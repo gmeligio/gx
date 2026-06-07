@@ -3,6 +3,7 @@
 use super::workflow_actions::WorkflowPath;
 use serde::de::{Deserializer, MapAccess, Visitor};
 use serde::{Deserialize, Serialize};
+use serde_saphyr::Commented;
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -214,8 +215,10 @@ fn normalize_shell(raw: &str) -> String {
 pub struct Step {
     #[serde(default)]
     pub id: Option<String>,
+    /// The step's `uses:` reference with its inline version comment. Read via
+    /// [`Step::uses_ref`] (bare reference) and [`Step::uses_comment`] (comment).
     #[serde(default)]
-    pub uses: Option<String>,
+    pub uses: Option<Commented<String>>,
     #[serde(default, rename = "if")]
     pub if_cond: Option<String>,
     #[serde(default)]
@@ -231,6 +234,22 @@ pub struct Step {
 }
 
 impl Step {
+    /// The step's `uses:` action reference without its version comment, if present.
+    #[must_use]
+    pub fn uses_ref(&self) -> Option<&str> {
+        self.uses.as_ref().map(|c| c.0.as_str())
+    }
+
+    /// The step's inline `uses:` version comment (e.g. `v4`), if any. saphyr yields an
+    /// empty string for no comment; this normalizes that to `None`.
+    #[must_use]
+    pub fn uses_comment(&self) -> Option<&str> {
+        self.uses
+            .as_ref()
+            .map(|c| c.1.as_str())
+            .filter(|s| !s.is_empty())
+    }
+
     /// All scalar text owned by this step (concatenated `with` values, `env` values, and
     /// `run` body). Rules text-scan this for expression references like `secrets.NAME`.
     #[must_use]

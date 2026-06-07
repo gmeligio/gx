@@ -4,14 +4,10 @@ use crate::domain::workflow_actions::{JobId, StepIndex, WorkflowPath};
 use crate::domain::workflow_parsed::Parsed;
 use crate::regex::static_regex;
 use glob::glob;
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-// Matches a `uses:` line carrying a trailing version comment: captures the uses text
-// and the comment (e.g. `v6.0.1`).
-static_regex!(USES_WITH_COMMENT_RE, r"uses:\s*([^#\n]+)#\s*(\S+)");
 // Splits an action reference into `owner/repo` (or path) and its `@ref`.
 static_regex!(USES_RE, r"^([^@\s]+)@([^\s#]+)");
 
@@ -141,13 +137,12 @@ impl FileScanner {
     /// Parse a workflow file once and return both the structural `Parsed` model and
     /// the list of `uses:` action references with their location metadata.
     ///
-    /// The action list is derived from `parsed.jobs[].steps[].uses` and enriched
-    /// with the per-step version comment scraped via regex from the raw source
-    /// (saphyr drops comments during parsing, so we capture them separately).
+    /// The action list is derived from `parsed.jobs[].steps[].uses`, each carrying its
+    /// inline version comment (e.g. `# v4`).
     ///
     /// # Errors
     ///
-    /// Returns an error if the file cannot be read, parsed as YAML, or the regex pattern is invalid.
+    /// Returns an error if the file cannot be read or parsed as YAML.
     fn extract_workflow(
         workflow_path: &Path,
         workflow_rel_path: &WorkflowPath,
@@ -157,16 +152,6 @@ impl FileScanner {
                 path: workflow_path.to_path_buf(),
                 source,
             })?;
-
-        // Comment map: uses-text -> version comment (e.g. "v6.0.1")
-        let mut comments = HashMap::new();
-        for line in content.lines() {
-            if let Some(cap) = USES_WITH_COMMENT_RE.captures(line) {
-                let uses_part = cap[1].trim().to_owned();
-                let comment = cap[2].to_string();
-                comments.insert(uses_part, comment);
-            }
-        }
 
         let parsed = Parsed::from_yaml(workflow_rel_path.clone(), &content).map_err(|source| {
             IoWorkflowError::Parse {
@@ -179,7 +164,7 @@ impl FileScanner {
 
         for job in &parsed.jobs {
             for (step_idx, step) in job.steps.iter().enumerate() {
-                let Some(uses) = step.uses.as_deref() else {
+                let Some(uses) = step.uses_ref() else {
                     continue;
                 };
                 let Some(cap) = USES_RE.captures(uses) else {
@@ -192,7 +177,7 @@ impl FileScanner {
                     continue;
                 }
 
-                let comment = comments.get(uses).cloned();
+                let comment = step.uses_comment().map(ToOwned::to_owned);
 
                 actions.push(ExtractedAction {
                     uses_ref: UsesRef::new(action_name, uses_ref, comment),

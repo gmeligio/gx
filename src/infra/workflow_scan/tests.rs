@@ -404,6 +404,51 @@ jobs:
 }
 
 #[test]
+fn scan_same_uses_keeps_per_step_comment() {
+    // Regression test for the dup-key bug in the old regex comment-scraper: it keyed a
+    // `HashMap<uses-text, comment>` on the `uses:` string, so two steps pinning the *same*
+    // `action@sha` with *different* version comments collapsed to one entry (last write
+    // wins) and both steps were mislabeled. Reading the comment from each step's own parsed
+    // `Commented<String>` value gives each step its own comment.
+    let temp_dir = TempDir::new().unwrap();
+    let content = "name: CI
+jobs:
+  build:
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v4
+  test:
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v5
+";
+    create_test_workflow(temp_dir.path(), "ci.yml", content);
+
+    let scanner = FileWorkflowScanner::new(temp_dir.path());
+    let located = scanner.scan_all_located().unwrap();
+
+    let version_for = |job: &str| {
+        located
+            .iter()
+            .find(|a| {
+                a.action.id == ActionId::from("actions/checkout")
+                    && a.location
+                        .job
+                        .as_ref()
+                        .map(crate::domain::workflow_actions::JobId::as_str)
+                        == Some(job)
+            })
+            .unwrap()
+            .action
+            .version
+            .as_str()
+            .to_owned()
+    };
+
+    // Each step keeps the comment written on its own line, not a single shared one.
+    assert_eq!(version_for("build"), "v4");
+    assert_eq!(version_for("test"), "v5");
+}
+
+#[test]
 fn scan_iterator_yields_error_for_malformed_file_without_aborting() {
     let temp_dir = TempDir::new().unwrap();
     // One valid workflow

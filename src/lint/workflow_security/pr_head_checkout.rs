@@ -76,7 +76,7 @@ fn step_references_secrets(step: &Step) -> bool {
 
 /// Reports whether the step is an `actions/checkout` of a PR HEAD ref.
 fn checks_out_pr_head(step: &Step) -> bool {
-    let Some(uses) = step.uses.as_deref() else {
+    let Some(uses) = step.uses_ref() else {
         return false;
     };
     if !uses.starts_with("actions/checkout") {

@@ -1,11 +1,11 @@
 ## PR 1 — `Commented<T>` refactor (internal, no spec-visible change)
 
-- [ ] 1.1 Change `Step.uses` in `src/domain/workflow_parsed/mod.rs` from `Option<String>` to `Option<Commented<String>>`; update any other readers the compiler flags
-- [ ] 1.2 In `src/infra/workflow_scan/scanner.rs`, read the inline comment from `step.uses`'s `Commented` value instead of the regex map
-- [ ] 1.3 Delete `USES_WITH_COMMENT_RE`, the `for line in content.lines()` comment-scrape loop, the `HashMap<uses-text, comment>`, and the `comments.get(uses)` lookup
-- [ ] 1.4 Remove the now-outdated "saphyr drops comments during parsing" doc comment on `extract_workflow`
-- [ ] 1.5 Add a test: two steps with the **same** `uses:` but **different** pinned comments each keep their own comment (regression test for the dup-key bug)
-- [ ] 1.6 Verify `cargo build`, `cargo clippy`, and the existing test suite pass with output byte-identical to before (run with `GITHUB_TOKEN=$(gh auth token)` for e2e)
+- [x] 1.1 Change `Step.uses` in `src/domain/workflow_parsed/mod.rs` from `Option<String>` to `Option<Commented<String>>`; update any other readers the compiler flags
+- [x] 1.2 In `src/infra/workflow_scan/scanner.rs`, read the inline comment from `step.uses`'s `Commented` value instead of the regex map
+- [x] 1.3 Delete `USES_WITH_COMMENT_RE`, the `for line in content.lines()` comment-scrape loop, the `HashMap<uses-text, comment>`, and the `comments.get(uses)` lookup
+- [x] 1.4 Remove the now-outdated "saphyr drops comments during parsing" doc comment on `extract_workflow`
+- [x] 1.5 Add a test: two steps with the **same** `uses:` but **different** pinned comments each keep their own comment (regression test for the dup-key bug)
+- [x] 1.6 Verify `cargo build`, `cargo clippy`, and the existing test suite pass with output byte-identical to before (run with `GITHUB_TOKEN=$(gh auth token)` for e2e)
 
 ## PR 2 — `Spanned<T>` + line in diagnostics (delivers the spec delta)
 
