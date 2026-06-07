@@ -40,3 +40,11 @@ repos:
             pass_filenames: false
             always_run: true
             language: system
+          - id: cargo-deny
+            name: Cargo Deny
+            description: Supply-chain + stale-exception check. Delegates to `mise run deny` so flags match CI's Deny job exactly. Pre-push only — fires solely on dependency/policy changes, where CI's Deny job would otherwise fail late.
+            entry: mise run deny
+            pass_filenames: false
+            files: ^(Cargo\.lock|deny\.toml)$
+            stages: [pre-push]
+            language: system
