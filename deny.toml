@@ -39,8 +39,6 @@ skip = [
 skip-tree = [
     # jni pulls windows-sys 0.45 → old windows-targets tree
     { crate = "windows-sys@0.45", reason = "jni → rustls-platform-verifier transitive" },
-    # gix-tempfile/walkdir (via gix-discover) pull windows-sys 0.52 → old windows-targets tree
-    { crate = "windows-sys@0.52", reason = "gix-discover → tempfile/winapi-util transitive" },
 ]
 
 [sources]
