@@ -54,12 +54,24 @@ Collapsing CI into one serial `prek run --all-files` step would nearly triple wa
 ### D6. Resolve the clippy `depends` double-format
 The `clippy` task declares `depends=["lint:size", "format"]`. If both the `cargo-fmt` hook (`mise run format`) and the `cargo-linter` hook (`mise run clippy`, which re-runs `format` via its dependency) fire on the same commit, `format` runs twice. Resolution: drop `format` from the `clippy` task's `depends` so each task does one job, and let the dedicated `cargo-fmt` hook own formatting. CI's `clippy:check` is `--fix`-free and independent, so it is unaffected. (`lint:size` stays as a clippy dependency — it is cheap, ~0.2s, and wanting file-size budgets enforced alongside lint is intentional.)
 
+### D7. The `:check` variants force an all-file directory layout; bare task names become namespaced
+This repo defines tasks as **executable files** in `.config/mise/tasks/`; namespaced names come from a subdirectory (the existing `lint:size` is the file `lint/size`). To attach a `:check` variant to `format`/`clippy`, the task must live in a directory — and **mise 2026.6.0 has no "primary file in a task dir" convention**: a directory yields *no* implicit bare task. Empirically verified against mise 2026.6.0:
+- `.config/mise/tasks/format` (file) **and** `.config/mise/tasks/format/` (dir) cannot coexist — the filesystem rejects it (`mkdir: File exists`).
+- A file literally named `format:check` is **sanitized to `format_check`** (colon → underscore) — wrong name.
+- `.config/mise/tasks/format/check` → task `format:check` ✅, but `.config/mise/tasks/format/{format,default}` → `format:format` / `format:default`, **never bare `format`**.
+
+So the bare `format`/`clippy` task names cannot survive a directory layout. **Decision: convert each to a directory holding both variants** — `format/format` (task `format:format`, mutating) + `format/check` (task `format:check`, verify); likewise `clippy/clippy` + `clippy/check`. The bare names are retired and every reference migrates to the namespaced name (CI clippy job, pre-commit hook entries, any `depends`). The migration is mechanical and the blast radius is small — verified by grep, the only references are the clippy job in `build.yml`, the two fmt/clippy hook entries, and the clippy task's own `depends` (which D6 already touches); `AGENTS.md` uses the generic `mise run <task>` and needs no edit; no README/docs/demo.tape use the bare names.
+- *Alternative — define the `:check` variants as TOML tasks in `.config/mise.toml`, keeping `format`/`clippy` as bare files:* viable and verified working (bare file task + `[tasks."format:check"]` TOML task coexist, both resolve). **Rejected** to keep a single task-definition style — the repo is currently 100% file-based tasks; mixing in TOML tasks would split the convention and make "where is this task defined?" ambiguous. The all-file directory layout matches the existing `lint/size` precedent. The cost (retiring bare names) is a one-time mechanical rename, paid once.
+
+`check` needs no `:check` sibling — `cargo check` never mutates — so it stays a plain file task with the bare name `check`.
+
 ## Risks / Trade-offs
 
 - **Clippy `--fix` auto-applies machine edits on commit** → Mitigation: `clippy --fix` only applies machine-applicable suggestions (conservative by design), and the edits still appear in the staged diff for review before push. Accepted deliberately for consistency with format-on-commit.
 - **`git add` re-staging can sweep in an already-dirty-but-unstaged file the formatter touched** → Mitigation: low real-world impact (formatting only rewrites already-near-correct files, and commits are usually coherent sets); this is standard pre-commit behavior. Use `git add -u` (tracked files only) to avoid staging brand-new untracked files.
-- **Dropping `format` from clippy's `depends` (D6) means `mise run clippy` no longer auto-formats first** → Mitigation: intended; formatting is owned by the `format` task / `cargo-fmt` hook. A developer running `mise run clippy` directly who wants formatting runs `mise run format` (or relies on the hook). Document if surprising.
-- **Two task entrypoints per check (`format` / `format:check`) could themselves drift** → Mitigation: they share `rustfmt.toml` and `--all`; the only delta is the `--check` verb, which cannot drift independently because there is no separate config to keep in sync.
+- **Dropping `format` from clippy's `depends` (D6) means `mise run clippy:clippy` no longer auto-formats first** → Mitigation: intended; formatting is owned by the `format:format` task / `cargo-fmt` hook. A developer running `mise run clippy:clippy` directly who wants formatting runs `mise run format:format` (or relies on the hook). Document if surprising.
+- **Two task entrypoints per check (`format:format` / `format:check`) could themselves drift** → Mitigation: they share `rustfmt.toml` and `--all`; the only delta is the `--check` verb, which cannot drift independently because there is no separate config to keep in sync.
+- **Retiring the bare `format`/`clippy` names (D7) breaks muscle-memory and any out-of-tree script that calls `mise run format`** → Mitigation: blast radius inside the repo is grep-verified small (CI clippy job, two hook entries, clippy's `depends`); `mise run format` will fail loudly with "task not found" rather than silently mis-run, so any missed reference surfaces immediately. The namespaced names are discoverable via `mise tasks ls`.
 
 ## Automated Test Strategy
 
@@ -78,9 +90,9 @@ This change is verified by the CI pipeline it modifies plus local hook exercise;
 
 ## Migration Plan
 
-1. Add `format:check`, `clippy:check`, and `check` mise tasks; adjust `clippy` task `depends` (D6).
-2. Update `build.yml` Format/Clippy/Check jobs to `mise run <task>`.
-3. Update `.pre-commit-config.yaml` fmt/clippy/tidy hooks to delegate + `git add -u`.
+1. Convert the `format` and `clippy` task files into directories (`format/format`, `clippy/clippy`) and add the `format/check`, `clippy/check`, and `check` tasks; adjust the clippy task `depends` (D6). Migrate all bare-name references to the namespaced names (D7).
+2. Update `build.yml` Format/Clippy/Check jobs to `mise run <task>` (`format:check`, `clippy:check`, `check`).
+3. Update `.pre-commit-config.yaml` fmt/clippy/tidy hooks to delegate (`mise run format:format`, `mise run clippy:clippy`, `mise run tidy`) + `git add -u`.
 4. Verify locally (Automated Test Strategy), then push and confirm all CI jobs green.
 
-Rollback: revert the three files; no state or data is migrated, so rollback is a pure git revert with no side effects.
+Rollback: revert the touched files (the `.config/mise/tasks/` directory moves, `build.yml`, `.pre-commit-config.yaml`); no state or data is migrated, so rollback is a pure git revert with no side effects.
