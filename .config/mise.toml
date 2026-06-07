@@ -19,3 +19,13 @@ lockfile = true
 locked = false
 # Read the rust version + components from rust-toolchain.toml.
 idiomatic_version_file_enable_tools = ["rust"]
+
+# Local happy-path gate: one command that runs the fast verification set by
+# aggregating the per-check tasks (no command is re-spelled). Defined here in
+# TOML rather than as a file task because mise has no primary-file-in-directory
+# convention, so a file in tasks/test/ can only produce a `test:<name>` task —
+# the bare `test` name is reachable only from outside the directory.
+# keep `depends` in sync with the PR-check jobs in .github/workflows/build.yml
+[tasks.test]
+description = "Local gate: typecheck, format, lint, size budgets, unit tests"
+depends = ["check", "format:check", "clippy:check", "lint:size", "test:unit"]

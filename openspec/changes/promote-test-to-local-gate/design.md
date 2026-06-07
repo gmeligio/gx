@@ -24,8 +24,15 @@ Three facts established during research (all verified against mise 2026.6.0 in t
 ## Decisions
 
 ### D1. `test` becomes the aggregator; the unit suite moves to `test:unit`
-The name `test` is overloaded the moment it must mean both "the unit suite" (what CI's Unit Tests job and `test-all` need) and "my local gate" (what the contributor wants to type). Resolution: give each meaning its own name. `test` = the gate (empty body + `depends`), `test:unit` = the leaf (`cargo test --locked --lib`). Each name maps to exactly one job, which is the property that keeps the task set legible as it grows.
+The name `test` is overloaded the moment it must mean both "the unit suite" (what CI's Unit Tests job and `test-all` need) and "my local gate" (what the contributor wants to type). Resolution: give each meaning its own name. `test` = the gate (`depends` only), `test:unit` = the leaf (`cargo test --locked --lib`). Each name maps to exactly one job, which is the property that keeps the task set legible as it grows.
 - *Alternative — keep `test` as the unit suite and name the gate something else (`verify`/`gate`):* viable and zero-breakage, but the user explicitly wants to type `test` for the gate. Rejected on that preference.
+
+### D4. The `test` gate is a TOML task; the `test:unit` leaf is a file
+mise 2026.6.x has **no primary-file-in-directory convention** (verified, same finding as the archived `consolidate-task-execution` D7): a file inside `test/` only ever produces a namespaced task name — `test/test` → `test:test`, `test/default` → `test:default` — and with the directory present but no bare-`test` definition, `mise run test` errors with "no task". So the directory layout that worked for `format`/`clippy` (which did *not* need a bare name — both bare names were retired there) cannot deliver the bare `test` name this change requires.
+The only layout that keeps **both** bare `test` (the gate) **and** `test:unit` (the leaf) is to define `test` *outside* the directory: a `[tasks.test]` block in `.config/mise.toml`. Verified: a TOML `test` task coexists with the `test/unit` file task; `mise run test` resolves to the gate, `mise run test:unit` to the leaf.
+- *Trade-off:* this introduces one TOML-defined task into an otherwise all-file task set (`.config/mise/tasks/`). Accepted because it is the only way to honor the explicit "type `mise run test`" requirement; the divergence is a single, well-commented block, and the leaf + every other task stay file-based.
+- *Alternative — gate named `verify` (all-file):* keeps one definition style but abandons the `test` name the user asked for. Rejected on that preference.
+- *Alternative — gate as bare file `test`, leaf as bare file `unit` (not `test:unit`):* all-file and bare `test` both work, but drops the `test:unit` namespacing the spec specifies. Rejected to keep the leaf consistent with `format:format`/`clippy:check`.
 - *Alternative — make `test` the gate but keep unit tests inline in its body + depend on the rest:* leaves `test-all` dragging the linters along (wrong scope), forcing a leaf rename anyway. Half-measure.
 
 ### D2. The gate includes `lint:size` explicitly
@@ -60,7 +67,7 @@ No new application tests; this is task-graph plumbing verified by exercising the
 
 ## Migration Plan
 
-1. Convert `.config/mise/tasks/test` (file) into a directory: `test/unit` gets the old body (`cargo test --locked --lib`); `test/test` becomes the empty-body aggregator with `depends=[check, format:check, clippy:check, lint:size, test:unit]` + the sync comment.
+1. Convert `.config/mise/tasks/test` (file) into a directory: `test/unit` gets the old body (`cargo test --locked --lib`). Add the gate as a `[tasks.test]` block in `.config/mise.toml` with `depends=[check, format:check, clippy:check, lint:size, test:unit]` + the sync comment (D4).
 2. Repoint `test-all` `depends` → `["test:unit", "integ", "e2e"]`.
 3. Repoint `build.yml` Unit Tests job → `mise run test:unit`.
 4. Verify locally (Automated Test Strategy), then push and confirm CI green.
