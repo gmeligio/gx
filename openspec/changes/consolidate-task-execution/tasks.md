@@ -13,11 +13,11 @@
 
 ## 2. CI workflow (delegate every job to mise)
 
-- [ ] 2.1 In `.github/workflows/build.yml`, change the Format job's `cargo fmt --check` to `mise run format:check`
-- [ ] 2.2 Change the Clippy job's `mise run clippy` to `mise run clippy:check` (CI must not auto-`--fix`; note the old `mise run clippy` would now be `mise run clippy:clippy` anyway, so this swap also fixes the stale bare name)
-- [ ] 2.3 Change the Check job's `cargo check --locked` to `mise run check`
-- [ ] 2.4 Confirm no `run:` step in `build.yml` invokes `cargo`/`clippy`/`rustfmt` directly — every check is `mise run <task>` (drift guarantee)
-- [ ] 2.5 Confirm the Format/Clippy jobs still have the toolchain setup they need (`setup-rust-toolchain` before `mise-action`) after the command swap
+- [x] 2.1 In `.github/workflows/build.yml`, change the Format job's `cargo fmt --check` to `mise run format:check` (also added the missing `mise-action` step the Format job needed to resolve mise tasks)
+- [x] 2.2 Change the Clippy job's `mise run clippy` to `mise run clippy:check` (CI must not auto-`--fix`; note the old `mise run clippy` would now be `mise run clippy:clippy` anyway, so this swap also fixes the stale bare name)
+- [x] 2.3 Change the Check job's `cargo check --locked` to `mise run check`
+- [x] 2.4 Confirm no `run:` step in `build.yml` invokes `cargo`/`clippy`/`rustfmt` directly — every check is `mise run <task>` (drift guarantee). Verified: all 7 `run:` steps are `mise run <task>`.
+- [x] 2.5 Confirm the Format/Clippy jobs still have the toolchain setup they need (`setup-rust-toolchain` before `mise-action`) after the command swap. Verified: both jobs keep `setup-rust-toolchain` → `mise-action` → `mise run`.
 
 ## 3. Pre-commit hooks (mutate + re-stage via mise)
 
