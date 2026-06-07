@@ -20,8 +20,7 @@ impl UnpinnedRule {
             return None;
         }
         let msg = format!(
-            "{}: action {} uses tag reference {} instead of SHA pin",
-            &action.location.workflow,
+            "action {} uses tag reference {} instead of SHA pin",
             &action.action.id,
             action.action.version.as_str()
         );
@@ -117,5 +116,18 @@ mod tests {
         let action = located_at("v4", None, None);
         let diag = UnpinnedRule::check_action(&action).unwrap();
         assert_eq!(diag.line, None);
+    }
+
+    #[test]
+    fn message_does_not_embed_workflow_path() {
+        // The renderer owns the workflow location; the message must not repeat it, or the
+        // path prints twice (`ci.yml:7: unpinned: ci.yml: ...`).
+        let action = located("v4", None);
+        let diag = UnpinnedRule::check_action(&action).unwrap();
+        assert!(
+            !diag.message.contains(".github/workflows/ci.yml"),
+            "message should not embed the workflow path: {}",
+            diag.message
+        );
     }
 }

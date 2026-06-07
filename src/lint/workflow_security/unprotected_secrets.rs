@@ -46,8 +46,7 @@ impl UnprotectedSecretsRule {
                     continue;
                 }
                 let msg = format!(
-                    "{}: job `{}` step {} references {} without a fork-PR `if:` gate — guard the step with `if: github.event.pull_request.head.repo.full_name == github.repository` so the secret never reaches fork PR code",
-                    workflow.path,
+                    "job `{}` step {} references {} without a fork-PR `if:` gate — guard the step with `if: github.event.pull_request.head.repo.full_name == github.repository` so the secret never reaches fork PR code",
                     job.id,
                     idx,
                     format_secret_list(&secrets),

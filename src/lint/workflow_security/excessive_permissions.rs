@@ -21,8 +21,7 @@ impl ExcessivePermissionsRule {
             Permissions::Empty => return None,
         };
         let msg = format!(
-            "{}: top-level `permissions:` declares {} — move broader scopes to the specific job that needs them",
-            workflow.path, scope
+            "top-level `permissions:` declares {scope} — move broader scopes to the specific job that needs them"
         );
         Some(
             Diagnostic::new(RuleName::ExcessivePermissions, Level::Error, msg)

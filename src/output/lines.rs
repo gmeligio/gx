@@ -199,6 +199,26 @@ mod tests {
     }
 
     #[test]
+    fn format_line_lint_diag_renders_location_once() {
+        // The renderer is the single source of the workflow location: rule messages must
+        // NOT embed the path themselves, or it prints twice. This guards against a rule
+        // re-introducing a leading `{workflow}: ` in its message.
+        let line = Line::LintDiag {
+            level: Level::Error,
+            workflow: Some(".github/workflows/ci.yml".to_owned()),
+            line: Some(7),
+            rule: "unpinned".to_owned(),
+            message: "action actions/checkout uses tag reference v4 instead of SHA pin".to_owned(),
+        };
+        let result = line.format_line(false);
+        assert_eq!(
+            result.matches(".github/workflows/ci.yml").count(),
+            1,
+            "workflow path must appear exactly once, got: {result}"
+        );
+    }
+
+    #[test]
     fn format_line_summary_no_color() {
         let line = Line::Summary {
             text: "All done".to_owned(),

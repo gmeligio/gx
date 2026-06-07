@@ -16,10 +16,7 @@ impl MissingPermissionsRule {
         if workflow.permissions.is_some() {
             return None;
         }
-        let msg = format!(
-            "{}: workflow has no top-level `permissions:` block — declare one (typically `permissions: {{ contents: read }}`) to make the token scope explicit",
-            workflow.path
-        );
+        let msg = "workflow has no top-level `permissions:` block — declare one (typically `permissions: { contents: read }`) to make the token scope explicit".to_owned();
         Some(
             Diagnostic::new(RuleName::MissingPermissions, Level::Error, msg)
                 .with_workflow(workflow.path.clone()),
