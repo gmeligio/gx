@@ -133,8 +133,8 @@ impl Diagnostic {
 
     /// Set the source line.
     #[must_use]
-    pub fn with_line(mut self, line: u32) -> Self {
-        self.line = Some(line);
+    pub fn with_line(mut self, line: Option<u32>) -> Self {
+        self.line = line;
         self
     }
 }

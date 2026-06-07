@@ -405,11 +405,8 @@ jobs:
 
 #[test]
 fn scan_same_uses_keeps_per_step_comment() {
-    // Regression test for the dup-key bug in the old regex comment-scraper: it keyed a
-    // `HashMap<uses-text, comment>` on the `uses:` string, so two steps pinning the *same*
-    // `action@sha` with *different* version comments collapsed to one entry (last write
-    // wins) and both steps were mislabeled. Reading the comment from each step's own parsed
-    // `Commented<String>` value gives each step its own comment.
+    // Two steps pinning the same `action@sha` with different version comments must each
+    // keep their own comment — a comment map keyed on the `uses:` string would collapse them.
     let temp_dir = TempDir::new().unwrap();
     let content = "name: CI
 jobs:
@@ -443,7 +440,6 @@ jobs:
             .to_owned()
     };
 
-    // Each step keeps the comment written on its own line, not a single shared one.
     assert_eq!(version_for("build"), "v4");
     assert_eq!(version_for("test"), "v5");
 }

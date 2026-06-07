@@ -31,12 +31,11 @@ impl StaleCommentRule {
             sha.as_str(),
             entry.commit.sha.as_str()
         );
-        let diag = Diagnostic::new(RuleName::StaleComment, Level::Warn, msg)
-            .with_workflow(action.location.workflow.clone());
-        Some(match action.location.line {
-            Some(line) => diag.with_line(line),
-            None => diag,
-        })
+        Some(
+            Diagnostic::new(RuleName::StaleComment, Level::Warn, msg)
+                .with_workflow(action.location.workflow.clone())
+                .with_line(action.location.line),
+        )
     }
 }
 

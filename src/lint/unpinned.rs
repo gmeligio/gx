@@ -24,12 +24,11 @@ impl UnpinnedRule {
             &action.action.id,
             action.action.version.as_str()
         );
-        let diag = Diagnostic::new(RuleName::Unpinned, Level::Error, msg)
-            .with_workflow(action.location.workflow.clone());
-        Some(match action.location.line {
-            Some(line) => diag.with_line(line),
-            None => diag,
-        })
+        Some(
+            Diagnostic::new(RuleName::Unpinned, Level::Error, msg)
+                .with_workflow(action.location.workflow.clone())
+                .with_line(action.location.line),
+        )
     }
 }
 
@@ -120,8 +119,7 @@ mod tests {
 
     #[test]
     fn message_does_not_embed_workflow_path() {
-        // The renderer owns the workflow location; the message must not repeat it, or the
-        // path prints twice (`ci.yml:7: unpinned: ci.yml: ...`).
+        // The renderer prepends the location; the message must not repeat it.
         let action = located("v4", None);
         let diag = UnpinnedRule::check_action(&action).unwrap();
         assert!(
