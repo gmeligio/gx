@@ -21,10 +21,10 @@
 
 ## 3. Pre-commit hooks (mutate + re-stage via mise)
 
-- [ ] 3.1 In `.pre-commit-config.yaml`, change `cargo-fmt` hook entry to run the mutating `mise run format:format` then `git add -u` (e.g. `entry: bash -c 'mise run format:format && git add -u'`)
-- [ ] 3.2 Change `cargo-linter` hook entry to run the mutating `mise run clippy:clippy` then `git add -u`
-- [ ] 3.3 Change `gx-lockfile` hook entry from `gx tidy` to `mise run tidy` (fixes stale installed-binary bug); add `git add -u` if `tidy` can modify tracked files
-- [ ] 3.4 Leave `cargo-lockfile` and `mise-lockfile` hooks inline (no task/CI counterpart) and the `cargo-deny` pre-push hook unchanged (already delegates)
+- [x] 3.1 In `.pre-commit-config.yaml`, change `cargo-fmt` hook entry to run the mutating `mise run format:format` then `git add -u` (`entry: bash -c 'mise run format:format && git add -u'`)
+- [x] 3.2 Change `cargo-linter` hook entry to run the mutating `mise run clippy:clippy` then `git add -u`
+- [x] 3.3 Change `gx-lockfile` hook entry from `gx tidy` to `mise run tidy` (fixes stale installed-binary bug); added `git add -u` (tidy can modify `.github/gx.{toml,lock}`)
+- [x] 3.4 Leave `cargo-lockfile` and `mise-lockfile` hooks inline (no task/CI counterpart). NOTE: there is no `cargo-deny` pre-push hook in `.pre-commit-config.yaml` (the artifact assumed one); deny exists only as the CI job + `deny` mise task, both already correct — nothing to change.
 
 ## 4. Verification
 

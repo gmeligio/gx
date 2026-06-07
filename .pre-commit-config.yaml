@@ -4,15 +4,15 @@ repos:
       hooks:
           - id: cargo-fmt
             name: Cargo Formatter
-            description: Run cargo fmt on files included in the commit. rustfmt should be installed before-hand.
-            entry: cargo fmt --all
+            description: Format via the mise task (single source of truth) and re-stage so the commit succeeds in one shot.
+            entry: bash -c 'mise run format:format && git add -u'
             pass_filenames: false
             types: [file, rust]
             language: system
           - id: cargo-linter
             name: Cargo Linter
-            description: Run cargo linter on files included in the commit. clippy should be installed before-hand.
-            entry: cargo clippy --fix --allow-dirty
+            description: Lint+fix via the mise task (single source of truth) and re-stage so the commit succeeds in one shot.
+            entry: bash -c 'mise run clippy:clippy && git add -u'
             pass_filenames: false
             types: [file, rust]
             language: system
@@ -28,8 +28,8 @@ repos:
             language: system
           - id: gx-lockfile
             name: gx Lockfile
-            description: Sync .github/gx.{toml,lock} with the workflows via gx tidy. prek blocks the commit if anything changed; re-stage it.
-            entry: gx tidy
+            description: Sync .github/gx.{toml,lock} with the workflows via the mise tidy task (runs gx from source, not a stale installed binary) and re-stage.
+            entry: bash -c 'mise run tidy && git add -u'
             pass_filenames: false
             files: ^\.github/(workflows/.*|gx\.toml)$
             language: system
