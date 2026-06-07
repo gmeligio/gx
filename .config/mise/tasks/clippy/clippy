@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 #MISE description="Lint the code"
-#MISE depends=["lint:size", "format"]
+#MISE depends=["lint:size"]
 cargo clippy --locked --tests --fix --allow-dirty

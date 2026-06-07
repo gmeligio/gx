@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Verify lints without applying fixes (CI)"
+# No `lint:size` dependency: CI's Integration Tests job already runs the
+# `code_health` size test, and a per-check CI job should verify one thing
+# (lints) so a red ✗ names the real failure. The mutating local `clippy`
+# task keeps `lint:size` for the commit-time flow (design D6).
+cargo clippy --locked --tests -- -D warnings
