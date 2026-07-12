@@ -128,6 +128,10 @@ provenance = "github-attestations"
 version = "1.95.0"
 backend = "core:rust"
 
+[tools.rust.options]
+components = "clippy,rustfmt"
+profile = "minimal"
+
 [[tools.shellcheck]]
 version = "0.11.0"
 backend = "aqua:koalaman/shellcheck"
