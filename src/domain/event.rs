@@ -21,6 +21,13 @@ pub enum Event {
     },
     /// A SHA version in the manifest was upgraded to the best matching tag.
     ShaUpgraded { id: ActionId, tag: Version },
+    /// A workflow-pinned SHA's tag fell outside the manifest specifier's range,
+    /// so the version was re-resolved within range (the pin was a stale preference).
+    PinOutOfRange {
+        spec: Spec,
+        rejected: Version,
+        resolved: Version,
+    },
     /// A lock resolution was skipped due to a recoverable error.
     ResolutionSkipped { spec: Spec, reason: String },
     /// Multiple actions were skipped due to recoverable errors.
@@ -41,6 +48,14 @@ impl fmt::Display for Event {
                 "Corrected {id} version to {corrected} (SHA {sha_points_to} points to {corrected})"
             ),
             Event::ShaUpgraded { id, tag } => write!(f, "~ {id} SHA upgraded to {tag}"),
+            Event::PinOutOfRange {
+                spec,
+                rejected,
+                resolved,
+            } => write!(
+                f,
+                "{spec}: pinned {rejected} is outside the range; re-resolved to {resolved}"
+            ),
             Event::ResolutionSkipped { spec, reason } => {
                 write!(f, "Skipping {spec}: {reason}")
             }
@@ -99,6 +114,19 @@ mod tests {
     fn display_recoverable_warning() {
         let event = Event::RecoverableWarning { count: 3 };
         assert!(event.to_string().contains("3 action(s) skipped"));
+    }
+
+    #[test]
+    fn display_pin_out_of_range() {
+        let event = Event::PinOutOfRange {
+            spec: Spec::new(ActionId::from("actions/checkout"), Specifier::parse("^5")),
+            rejected: Version::from("v6.0.2"),
+            resolved: Version::from("v5"),
+        };
+        let s = event.to_string();
+        assert!(s.contains("actions/checkout@^5"));
+        assert!(s.contains("v6.0.2"));
+        assert!(s.contains("v5"));
     }
 
     #[test]

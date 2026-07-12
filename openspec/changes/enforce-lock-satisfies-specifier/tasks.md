@@ -16,8 +16,8 @@
 
 ## 4. Observability
 
-- [ ] 4.1 Emit a progress event when an out-of-range pin is re-resolved, naming the action, the rejected tag, and the in-range version chosen (mirror `SyncEvent::VersionCorrected`/`ShaUpgraded`, flow through `on_progress`).
-- [ ] 4.2 Test that the event fires on the #95 scenario and does not fire on the in-range and non-semver scenarios.
+- [x] 4.1 Emit a progress event when an out-of-range pin is re-resolved, naming the action, the rejected tag, and the in-range version chosen (mirror `SyncEvent::VersionCorrected`/`ShaUpgraded`, flow through `on_progress`).
+- [x] 4.2 Test that the event fires on the #95 scenario and does not fire on the in-range and non-semver scenarios.
 
 ## 5. Guard the unaffected paths
 

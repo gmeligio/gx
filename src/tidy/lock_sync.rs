@@ -46,15 +46,19 @@ pub(super) fn update_lock<R: VersionRegistry>(
     }
 
     for spec in &all_specs {
-        if let Err(e) = populate_lock_entry(lock, resolver, spec, workflow_shas, sha_index) {
-            if e.is_recoverable() {
-                events.push(SyncEvent::ResolutionSkipped {
-                    spec: spec.clone(),
-                    reason: e.to_string(),
-                });
-                recoverable_count = recoverable_count.saturating_add(1);
-            } else {
-                unresolved.push(format!("{spec}: {e}"));
+        match populate_lock_entry(lock, resolver, spec, workflow_shas, sha_index) {
+            Ok(Some(event)) => events.push(event),
+            Ok(None) => {}
+            Err(e) => {
+                if e.is_recoverable() {
+                    events.push(SyncEvent::ResolutionSkipped {
+                        spec: spec.clone(),
+                        reason: e.to_string(),
+                    });
+                    recoverable_count = recoverable_count.saturating_add(1);
+                } else {
+                    unresolved.push(format!("{spec}: {e}"));
+                }
             }
         }
     }
@@ -77,57 +81,64 @@ pub(super) fn update_lock<R: VersionRegistry>(
 
 /// Resolve a single spec into the lock if missing, then populate version/specifier fields.
 ///
-/// Returns `Ok(())` on success or when no population was needed.
-/// Returns `Err(ResolutionError)` if resolution fails.
+/// Returns `Ok(Some(event))` when an out-of-range pinned SHA was re-resolved within
+/// range, `Ok(None)` on ordinary success or when no population was needed, and
+/// `Err(ResolutionError)` if resolution fails.
 fn populate_lock_entry<R: VersionRegistry>(
     lock: &mut Lock,
     resolver: &ActionResolver<'_, R>,
     spec: &ActionSpec,
     workflow_shas: &HashMap<ActionSpec, CommitSha>,
     sha_index: &mut ShaIndex,
-) -> Result<(), ResolutionError> {
+) -> Result<Option<SyncEvent>, ResolutionError> {
     let needs_population = !lock.is_complete(spec);
 
     if !needs_population {
-        return Ok(());
+        return Ok(None);
     }
 
-    if !lock.has(spec) {
-        let result = if let Some(sha) = workflow_shas.get(spec) {
-            resolver
-                .resolve_from_sha(&spec.id, sha, sha_index)
-                // The manifest range is authoritative over the version label. A
-                // pinned SHA whose *tag* falls outside the declared range is a
-                // stale preference: discard the SHA-first version and re-resolve
-                // within the range (the pnpm/uv/Cargo model). Only tag-backed
-                // resolutions are checked — a SHA with no tags resolves to the
-                // bare commit (`RefType::Commit`, version == SHA), which carries
-                // no version label for the range to constrain. Non-semver
-                // specifiers are exempt via `matches_version`.
-                .and_then(|action| {
-                    let is_tag = action.commit.ref_type != Some(RefType::Commit);
-                    if is_tag && !spec.specifier.matches_version(&action.version) {
-                        resolver.resolve(spec)
-                    } else {
-                        Ok(action)
-                    }
-                })
-                .or_else(|_| resolver.resolve(spec))
-        } else {
-            resolver.resolve(spec)
-        };
+    if lock.has(spec) {
+        return Ok(None);
+    }
 
-        match result {
-            Ok(action) => {
-                lock.set(spec, action.version, action.commit);
-            }
-            Err(e) => {
-                return Err(e);
-            }
+    let mut event = None;
+    let result = if let Some(sha) = workflow_shas.get(spec) {
+        resolver
+            .resolve_from_sha(&spec.id, sha, sha_index)
+            // The manifest range is authoritative over the version label. A
+            // pinned SHA whose *tag* falls outside the declared range is a stale
+            // preference: discard the SHA-first version and re-resolve within the
+            // range (the pnpm/uv/Cargo model). Only tag-backed resolutions are
+            // checked — a SHA with no tags resolves to the bare commit
+            // (`RefType::Commit`, version == SHA), which carries no version label
+            // for the range to constrain. Non-semver specifiers are exempt via
+            // `matches_version`.
+            .and_then(|action| {
+                let is_tag = action.commit.ref_type != Some(RefType::Commit);
+                if is_tag && !spec.specifier.matches_version(&action.version) {
+                    let reresolved = resolver.resolve(spec)?;
+                    event = Some(SyncEvent::PinOutOfRange {
+                        spec: spec.clone(),
+                        rejected: action.version,
+                        resolved: reresolved.version.clone(),
+                    });
+                    Ok(reresolved)
+                } else {
+                    Ok(action)
+                }
+            })
+            .or_else(|_| resolver.resolve(spec))
+    } else {
+        resolver.resolve(spec)
+    };
+
+    match result {
+        Ok(action) => {
+            lock.set(spec, action.version, action.commit);
+            Ok(event)
         }
+        Err(e) => Err(e),
     }
-
-    Ok(())
 }
 
 #[cfg(test)]
@@ -428,6 +439,84 @@ mod tests {
         assert_eq!(
             version, "v1.15.2",
             "resolved version must be re-resolved within the ~1.15.2 range"
+        );
+    }
+
+    /// An out-of-range pin emits a `PinOutOfRange` event naming the rejected tag.
+    #[test]
+    fn out_of_range_pin_emits_event() {
+        let workflow_sha = "6d1e696000000000000000000000000000000000";
+        let mut manifest = make_manifest_with("actions/checkout", "v5");
+        let mut lock = Lock::default();
+        let key = ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v5"));
+        let mut workflow_shas = HashMap::new();
+        workflow_shas.insert(key, CommitSha::from(workflow_sha));
+
+        let registry = FakeRegistry::new().with_sha_tags(
+            "actions/checkout",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            vec!["v6", "v6.0", "v6.0.2"],
+        );
+        let resolver = ActionResolver::new(&registry);
+        let mut sha_index = ShaIndex::new();
+        let events = update_lock(
+            &mut lock,
+            &mut manifest,
+            &resolver,
+            &workflow_shas,
+            &mut sha_index,
+        )
+        .unwrap();
+
+        let has_event = events.iter().any(|e| {
+            matches!(
+                e,
+                SyncEvent::PinOutOfRange { rejected, .. } if rejected.as_str() == "v6.0.2"
+            )
+        });
+        assert!(
+            has_event,
+            "expected a PinOutOfRange event for v6.0.2, got: {events:?}"
+        );
+    }
+
+    /// An in-range pin resolves via SHA-first and emits no `PinOutOfRange` event.
+    #[test]
+    fn in_range_pin_emits_no_event() {
+        let workflow_sha = "6d1e696000000000000000000000000000000000";
+        let mut manifest = make_manifest_with("actions/checkout", "v5");
+        let mut lock = Lock::default();
+        let key = ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v5"));
+        let mut workflow_shas = HashMap::new();
+        workflow_shas.insert(key.clone(), CommitSha::from(workflow_sha));
+
+        // In-range tags: SHA-first keeps v5.4.0, no re-resolution.
+        let registry = FakeRegistry::new().with_sha_tags(
+            "actions/checkout",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            vec!["v5", "v5.4", "v5.4.0"],
+        );
+        let resolver = ActionResolver::new(&registry);
+        let mut sha_index = ShaIndex::new();
+        let events = update_lock(
+            &mut lock,
+            &mut manifest,
+            &resolver,
+            &workflow_shas,
+            &mut sha_index,
+        )
+        .unwrap();
+
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, SyncEvent::PinOutOfRange { .. })),
+            "in-range pin must not emit PinOutOfRange, got: {events:?}"
+        );
+        assert_eq!(
+            lock.get(&key).expect("entry").version.as_str(),
+            "v5.4.0",
+            "in-range SHA-first version must be kept"
         );
     }
 }
