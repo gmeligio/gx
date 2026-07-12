@@ -76,17 +76,17 @@ impl Specifier {
         }
     }
 
-    /// Check whether a resolved [`Version`] satisfies this specifier.
+    /// Whether a resolved [`Version`] is allowed under this specifier.
     ///
-    /// This is the satisfiability primitive that binds a lock entry's version to
-    /// its specifier key. Non-semver specifiers (`Ref`, `Sha`) impose no range and
-    /// are **exempt** — they accept any version. A `Range` specifier accepts a
-    /// version only when it parses as semver and falls within the range; a version
-    /// that cannot be parsed as semver never satisfies a range.
+    /// A range constrains only real semver tags. A branch/SHA specifier, or a
+    /// version that is itself a commit SHA (no tag to check), imposes no range
+    /// and is always allowed.
     #[must_use]
     pub fn matches_version(&self, version: &Version) -> bool {
         match self {
-            Self::Range { .. } => parse_semver(version.as_str()).is_some_and(|v| self.matches(&v)),
+            Self::Range { .. } => {
+                version.is_sha() || parse_semver(version.as_str()).is_some_and(|v| self.matches(&v))
+            }
             Self::Ref(_) | Self::Sha(_) => true,
         }
     }
@@ -285,19 +285,23 @@ mod tests {
 
     #[test]
     fn matches_version_ref_is_exempt() {
-        // Non-semver branch ref imposes no range: any version is accepted.
         assert!(Specifier::Ref("main".to_owned()).matches_version(&Version::from("v6.0.2")));
     }
 
     #[test]
-    fn matches_version_sha_is_exempt() {
+    fn matches_version_sha_specifier_is_exempt() {
         let sha = "a".repeat(40);
         assert!(Specifier::parse(&sha).matches_version(&Version::from("v6.0.2")));
     }
 
     #[test]
-    fn matches_version_non_semver_version_never_satisfies_range() {
-        // A range specifier cannot be satisfied by an unparseable version.
+    fn matches_version_sha_as_version_is_exempt() {
+        let sha = "a".repeat(40);
+        assert!(Specifier::parse("^5").matches_version(&Version::from(sha.as_str())));
+    }
+
+    #[test]
+    fn matches_version_branch_as_version_never_satisfies_range() {
         assert!(!Specifier::parse("^5").matches_version(&Version::from("main")));
     }
 

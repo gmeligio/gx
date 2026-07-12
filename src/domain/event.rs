@@ -21,8 +21,7 @@ pub enum Event {
     },
     /// A SHA version in the manifest was upgraded to the best matching tag.
     ShaUpgraded { id: ActionId, tag: Version },
-    /// A workflow-pinned SHA's tag fell outside the manifest specifier's range,
-    /// so the version was re-resolved within range (the pin was a stale preference).
+    /// A pinned SHA's tag was outside the manifest range, so it was re-resolved within range.
     PinOutOfRange {
         spec: Spec,
         rejected: Version,

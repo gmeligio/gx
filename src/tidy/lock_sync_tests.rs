@@ -211,21 +211,19 @@ fn update_lock_recoverable_errors_are_skipped() {
 // Manifest range is authoritative over an out-of-range pinned SHA (#95)
 // ---------------------------------------------------------------------------
 
-/// A workflow SHA whose most-specific tag (`v6.0.2`) violates the manifest
-/// range (`^5`) must NOT be recorded as-is. The pin is a stale preference:
-/// tidy re-resolves the version within the declared range.
+/// A pinned SHA tagged `v6.0.2` under manifest range `^5` is re-resolved within
+/// range, never recorded as `v6.0.2`.
 #[test]
 fn out_of_range_pinned_sha_is_reresolved_within_range() {
     let workflow_sha = "6d1e696000000000000000000000000000000000";
-    // `from_v1("v5")` → specifier `^5`.
-    let mut manifest = make_manifest_with("actions/checkout", "v5");
+    let mut manifest = make_manifest_with("actions/checkout", "v5"); // → ^5
     let mut lock = Lock::default();
     let key = ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v5"));
     let mut workflow_shas = HashMap::new();
     workflow_shas.insert(key.clone(), CommitSha::from(workflow_sha));
 
-    // The SHA's tags are all v6 (out of range for ^5). The version-first
-    // fallback resolves the `^5` → `v5` lookup tag instead.
+    // The pinned SHA only has v6 tags (out of range), so tidy re-resolves ^5,
+    // whose lookup tag is v5.
     let registry = FakeRegistry::new().with_sha_tags(
         "actions/checkout",
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -248,7 +246,6 @@ fn out_of_range_pinned_sha_is_reresolved_within_range() {
         version, "v6.0.2",
         "out-of-range tag v6.0.2 must not be recorded under ^5"
     );
-    // The version-first fallback resolves the `^5` → `v5` lookup tag.
     assert_eq!(
         version, "v5",
         "resolved version must be re-resolved within the ^5 range"
@@ -259,8 +256,7 @@ fn out_of_range_pinned_sha_is_reresolved_within_range() {
 #[test]
 fn out_of_range_pinned_sha_sub_major_is_reresolved() {
     let workflow_sha = "6d1e696000000000000000000000000000000000";
-    // `from_v1("v1.15.2")` → specifier `~1.15.2`.
-    let mut manifest = make_manifest_with("some/action", "v1.15.2");
+    let mut manifest = make_manifest_with("some/action", "v1.15.2"); // → ~1.15.2
     let mut lock = Lock::default();
     let key = ActionSpec::new(ActionId::from("some/action"), Specifier::from_v1("v1.15.2"));
     let mut workflow_shas = HashMap::new();
@@ -288,7 +284,6 @@ fn out_of_range_pinned_sha_sub_major_is_reresolved() {
         version, "v1.16.0",
         "out-of-range tag v1.16.0 must not be recorded under ~1.15.2"
     );
-    // The version-first fallback resolves the `~1.15.2` → `v1.15.2` lookup tag.
     assert_eq!(
         version, "v1.15.2",
         "resolved version must be re-resolved within the ~1.15.2 range"
@@ -373,14 +368,12 @@ fn in_range_pin_emits_no_event() {
     );
 }
 
-/// Init guard: when the specifier is *derived* from the SHA's own tag (as init
-/// does for a fresh `@sha # v6` adoption), the resolved version satisfies it by
-/// construction — the SHA-first version is kept, no re-resolution, no event.
+/// Init derives `^6` from a `# v6` pin, so the SHA's `v6.0.2` tag already fits
+/// the range: it is kept, with no re-resolution and no event.
 #[test]
 fn init_derived_specifier_keeps_sha_version() {
     let workflow_sha = "6d1e696000000000000000000000000000000000";
-    // `from_v1("v6")` → `^6`, the specifier init derives from a `# v6` comment.
-    let mut manifest = make_manifest_with("actions/checkout", "v6");
+    let mut manifest = make_manifest_with("actions/checkout", "v6"); // → ^6
     let mut lock = Lock::default();
     let key = ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v6"));
     let mut workflow_shas = HashMap::new();
