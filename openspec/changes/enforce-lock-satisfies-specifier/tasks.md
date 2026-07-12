@@ -5,8 +5,8 @@
 
 ## 2. Satisfiability primitive
 
-- [ ] 2.1 Add `Specifier::matches_version(&self, version: &Version) -> bool` in `src/domain/action/specifier.rs`: parse the version via the canonical `parse_semver`, delegate to `matches`; non-semver specifiers (`Ref`/`Sha`) return exempt (accept any version).
-- [ ] 2.2 Unit-test `matches_version`: `^5`+`v6.0.2`→false, `^5`+`v5.4.0`→true, `~1.15.2`+`v1.16.0`→false, `~1.15.2`+`v1.15.9`→true, `main`→exempt, bare-SHA specifier→exempt.
+- [x] 2.1 Add `Specifier::matches_version(&self, version: &Version) -> bool` in `src/domain/action/specifier.rs`: parse the version via the canonical `parse_semver`, delegate to `matches`; non-semver specifiers (`Ref`/`Sha`) return exempt (accept any version).
+- [x] 2.2 Unit-test `matches_version`: `^5`+`v6.0.2`→false, `^5`+`v5.4.0`→true, `~1.15.2`+`v1.16.0`→false, `~1.15.2`+`v1.15.9`→true, `main`→exempt, bare-SHA specifier→exempt.
 
 ## 3. Tidy reconciliation (SHA-first path)
 
