@@ -4,7 +4,6 @@ use super::Error as TidyError;
 use crate::domain::action::identity::CommitSha;
 use crate::domain::action::spec::Spec as ActionSpec;
 use crate::domain::action::tag_selection::ShaIndex;
-use crate::domain::action::uses_ref::RefType;
 use crate::domain::event::Event as SyncEvent;
 use crate::domain::lock::Lock;
 use crate::domain::manifest::Manifest;
@@ -79,10 +78,10 @@ pub(super) fn update_lock<R: VersionRegistry>(
     Ok(events)
 }
 
-/// Resolve a single spec into the lock if missing, then populate version/specifier fields.
+/// Resolve a single spec into the lock if its entry is missing or incomplete.
 ///
 /// Returns `Ok(Some(event))` when an out-of-range pinned SHA was re-resolved within
-/// range, `Ok(None)` on ordinary success or when no population was needed, and
+/// range, `Ok(None)` on ordinary success or when no resolution was needed, and
 /// `Err(ResolutionError)` if resolution fails.
 fn populate_lock_entry<R: VersionRegistry>(
     lock: &mut Lock,
@@ -91,54 +90,42 @@ fn populate_lock_entry<R: VersionRegistry>(
     workflow_shas: &HashMap<ActionSpec, CommitSha>,
     sha_index: &mut ShaIndex,
 ) -> Result<Option<SyncEvent>, ResolutionError> {
-    let needs_population = !lock.is_complete(spec);
-
-    if !needs_population {
-        return Ok(None);
-    }
-
+    // An existing entry is left untouched, even if incomplete; only unseen
+    // specs are resolved here.
     if lock.has(spec) {
         return Ok(None);
     }
 
-    let mut event = None;
-    let result = if let Some(sha) = workflow_shas.get(spec) {
-        resolver
-            .resolve_from_sha(&spec.id, sha, sha_index)
-            // The manifest range is authoritative over the version label. A
-            // pinned SHA whose *tag* falls outside the declared range is a stale
-            // preference: discard the SHA-first version and re-resolve within the
-            // range (the pnpm/uv/Cargo model). Only tag-backed resolutions are
-            // checked — a SHA with no tags resolves to the bare commit
-            // (`RefType::Commit`, version == SHA), which carries no version label
-            // for the range to constrain. Non-semver specifiers are exempt via
-            // `matches_version`.
-            .and_then(|action| {
-                let is_tag = action.commit.ref_type != Some(RefType::Commit);
-                if is_tag && !spec.specifier.matches_version(&action.version) {
-                    let reresolved = resolver.resolve(spec)?;
-                    event = Some(SyncEvent::PinOutOfRange {
-                        spec: spec.clone(),
-                        rejected: action.version,
-                        resolved: reresolved.version.clone(),
-                    });
-                    Ok(reresolved)
-                } else {
-                    Ok(action)
-                }
-            })
-            .or_else(|_| resolver.resolve(spec))
-    } else {
-        resolver.resolve(spec)
+    // SHA-first: derive the version from the pinned SHA's own tag. Absent a
+    // workflow SHA or when the SHA can't be described, resolve version-first.
+    let sha_first = workflow_shas
+        .get(spec)
+        .and_then(|sha| resolver.resolve_from_sha(&spec.id, sha, sha_index).ok());
+    let Some(action) = sha_first else {
+        let action = resolver.resolve(spec)?;
+        lock.set(spec, action.version, action.commit);
+        return Ok(None);
     };
 
-    match result {
-        Ok(action) => {
-            lock.set(spec, action.version, action.commit);
-            Ok(event)
-        }
-        Err(e) => Err(e),
+    // The manifest range is authoritative over the version label. A pinned SHA
+    // whose tag falls outside the declared range is a stale preference:
+    // re-resolve within the range (the pnpm/uv/Cargo model). A tagless SHA
+    // resolves to the bare commit as its version, which no range can match and
+    // which carries no label to constrain — skip it. Non-semver specifiers are
+    // exempt via `matches_version`.
+    if action.version.is_sha() || spec.specifier.matches_version(&action.version) {
+        lock.set(spec, action.version, action.commit);
+        return Ok(None);
     }
+
+    let reresolved = resolver.resolve(spec)?;
+    let event = SyncEvent::PinOutOfRange {
+        spec: spec.clone(),
+        rejected: action.version,
+        resolved: reresolved.version.clone(),
+    };
+    lock.set(spec, reresolved.version, reresolved.commit);
+    Ok(Some(event))
 }
 
 #[cfg(test)]
