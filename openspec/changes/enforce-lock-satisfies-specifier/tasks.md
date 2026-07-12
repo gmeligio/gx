@@ -26,6 +26,6 @@
 
 ## 6. Docs and verification
 
-- [ ] 6.1 Update `README.md` and/or `docs/demo.tape` only if user-facing tidy output/behavior described there changed (per AGENTS.md).
-- [ ] 6.2 Run `mise run test-all` and `mise run clippy`; ensure clean.
-- [ ] 6.3 Manually verify against the #95 repro (manifest `^5`, workflow pinning a `v6` SHA): `gx tidy` produces an in-range lock and prints the re-resolution notice.
+- [x] 6.1 Update `README.md` and/or `docs/demo.tape` only if user-facing tidy output/behavior described there changed (per AGENTS.md). — No change needed: this is a correctness fix; README/demo describe commands, not internal range-reconciliation semantics.
+- [x] 6.2 Run `mise run test:all` and `mise run clippy:check`; ensure clean. — 408 unit + all integration + 15 e2e green; clippy:check clean.
+- [x] 6.3 Manually verify against the #95 repro (manifest `^3`, workflow pinning a real `v4` SHA): `gx tidy` produced an in-range `^3 → v3` lock and printed `pinned v4.3.1 is outside the range; re-resolved to v3`.
