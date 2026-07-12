@@ -21,8 +21,8 @@
 
 ## 5. Guard the unaffected paths
 
-- [ ] 5.1 Add an init guard test: empty manifest + workflow `@sha # v6` (tag `v6.0.2`) → derived `^6`, lock `v6.0.2`, no re-resolution/violation triggered.
-- [ ] 5.2 Confirm all existing `src/upgrade/plan.rs` tests remain green unchanged (upgrade behavior is byte-identical).
+- [x] 5.1 Add an init guard test: empty manifest + workflow `@sha # v6` (tag `v6.0.2`) → derived `^6`, lock `v6.0.2`, no re-resolution/violation triggered. (`init_derived_specifier_keeps_sha_version`)
+- [x] 5.2 Confirm all existing `src/upgrade/plan.rs` tests remain green unchanged (upgrade behavior is byte-identical; `src/upgrade/` and `upgrade.rs` untouched per git).
 
 ## 6. Docs and verification
 
