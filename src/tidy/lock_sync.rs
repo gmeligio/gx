@@ -4,6 +4,7 @@ use super::Error as TidyError;
 use crate::domain::action::identity::CommitSha;
 use crate::domain::action::spec::Spec as ActionSpec;
 use crate::domain::action::tag_selection::ShaIndex;
+use crate::domain::action::uses_ref::RefType;
 use crate::domain::event::Event as SyncEvent;
 use crate::domain::lock::Lock;
 use crate::domain::manifest::Manifest;
@@ -95,6 +96,22 @@ fn populate_lock_entry<R: VersionRegistry>(
         let result = if let Some(sha) = workflow_shas.get(spec) {
             resolver
                 .resolve_from_sha(&spec.id, sha, sha_index)
+                // The manifest range is authoritative over the version label. A
+                // pinned SHA whose *tag* falls outside the declared range is a
+                // stale preference: discard the SHA-first version and re-resolve
+                // within the range (the pnpm/uv/Cargo model). Only tag-backed
+                // resolutions are checked — a SHA with no tags resolves to the
+                // bare commit (`RefType::Commit`, version == SHA), which carries
+                // no version label for the range to constrain. Non-semver
+                // specifiers are exempt via `matches_version`.
+                .and_then(|action| {
+                    let is_tag = action.commit.ref_type != Some(RefType::Commit);
+                    if is_tag && !spec.specifier.matches_version(&action.version) {
+                        resolver.resolve(spec)
+                    } else {
+                        Ok(action)
+                    }
+                })
                 .or_else(|_| resolver.resolve(spec))
         } else {
             resolver.resolve(spec)

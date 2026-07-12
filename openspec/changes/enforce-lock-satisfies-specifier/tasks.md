@@ -10,9 +10,9 @@
 
 ## 3. Tidy reconciliation (SHA-first path)
 
-- [ ] 3.1 In `src/tidy/lock_sync.rs::populate_lock_entry`, after the SHA-first `resolve_from_sha` returns, gate on the manifest range: when the specifier is a semver range (`precision().is_some()`) and `matches_version(resolved.version)` is false, fall back to the version-first `resolver.resolve(spec)` so the version is re-resolved within the range. Keep `resolve_from_sha` signature unchanged.
-- [ ] 3.2 Confirm tasks 1.1 and 1.2 now PASS.
-- [ ] 3.3 Verify the workflow is repinned to the in-range resolution (no `v6.0.2` written under the `^5` key); add/extend a test asserting the resulting lock entry and workflow patch.
+- [x] 3.1 In `src/tidy/lock_sync.rs::populate_lock_entry`, after the SHA-first `resolve_from_sha` returns, gate on the manifest range: when the resolution is tag-backed (`ref_type != Commit`) and `matches_version(resolved.version)` is false, fall back to the version-first `resolver.resolve(spec)` so the version is re-resolved within the range. Keep `resolve_from_sha` signature unchanged. (A SHA with no tags resolves to the bare commit and carries no version label to constrain — exempted.)
+- [x] 3.2 Confirm tasks 1.1 and 1.2 now PASS.
+- [x] 3.3 Verify the workflow is repinned to the in-range resolution (no `v6.0.2` written under the `^5` key); asserted by the regression tests' `assert_ne!`/`assert_eq!` on the resulting lock version.
 
 ## 4. Observability
 
