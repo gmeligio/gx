@@ -76,6 +76,21 @@ impl Specifier {
         }
     }
 
+    /// Whether a resolved [`Version`] is allowed under this specifier.
+    ///
+    /// A range constrains only real semver tags. A branch/SHA specifier, or a
+    /// version that is itself a commit SHA (no tag to check), imposes no range
+    /// and is always allowed.
+    #[must_use]
+    pub fn matches_version(&self, version: &Version) -> bool {
+        match self {
+            Self::Range { .. } => {
+                version.is_sha() || parse_semver(version.as_str()).is_some_and(|v| self.matches(&v))
+            }
+            Self::Ref(_) | Self::Sha(_) => true,
+        }
+    }
+
     /// Get the tag name used for GitHub API lookups (e.g., `"^6"` → `"v6"`).
     #[must_use]
     pub fn to_lookup_tag(&self) -> String {
@@ -246,7 +261,49 @@ pub(super) fn higher_version<'ver>(a: &'ver Version, b: &'ver Version) -> &'ver 
     reason = "tests use unwrap, indexing, and other patterns freely"
 )]
 mod tests {
-    use super::{Version, parse_semver};
+    use super::{Specifier, Version, parse_semver};
+
+    #[test]
+    fn matches_version_caret_in_range() {
+        assert!(Specifier::parse("^5").matches_version(&Version::from("v5.4.0")));
+    }
+
+    #[test]
+    fn matches_version_caret_out_of_range() {
+        assert!(!Specifier::parse("^5").matches_version(&Version::from("v6.0.2")));
+    }
+
+    #[test]
+    fn matches_version_tilde_in_range() {
+        assert!(Specifier::parse("~1.15.2").matches_version(&Version::from("v1.15.9")));
+    }
+
+    #[test]
+    fn matches_version_tilde_out_of_range() {
+        assert!(!Specifier::parse("~1.15.2").matches_version(&Version::from("v1.16.0")));
+    }
+
+    #[test]
+    fn matches_version_ref_is_exempt() {
+        assert!(Specifier::Ref("main".to_owned()).matches_version(&Version::from("v6.0.2")));
+    }
+
+    #[test]
+    fn matches_version_sha_specifier_is_exempt() {
+        let sha = "a".repeat(40);
+        assert!(Specifier::parse(&sha).matches_version(&Version::from("v6.0.2")));
+    }
+
+    #[test]
+    fn matches_version_sha_as_version_is_exempt() {
+        let sha = "a".repeat(40);
+        assert!(Specifier::parse("^5").matches_version(&Version::from(sha.as_str())));
+    }
+
+    #[test]
+    fn matches_version_branch_as_version_never_satisfies_range() {
+        assert!(!Specifier::parse("^5").matches_version(&Version::from("main")));
+    }
 
     #[test]
     fn parse_semver_full() {
