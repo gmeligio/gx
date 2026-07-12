@@ -325,4 +325,92 @@ mod tests {
             "checkout must be skipped (AuthRequired)"
         );
     }
+
+    // ---------------------------------------------------------------------------
+    // Manifest range is authoritative over an out-of-range pinned SHA (#95)
+    // ---------------------------------------------------------------------------
+
+    /// A workflow SHA whose most-specific tag (`v6.0.2`) violates the manifest
+    /// range (`^5`) must NOT be recorded as-is. The pin is a stale preference:
+    /// tidy re-resolves the version within the declared range.
+    #[test]
+    fn out_of_range_pinned_sha_is_reresolved_within_range() {
+        let workflow_sha = "6d1e696000000000000000000000000000000000";
+        // `from_v1("v5")` → specifier `^5`.
+        let mut manifest = make_manifest_with("actions/checkout", "v5");
+        let mut lock = Lock::default();
+        let key = ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v5"));
+        let mut workflow_shas = HashMap::new();
+        workflow_shas.insert(key.clone(), CommitSha::from(workflow_sha));
+
+        // The SHA's tags are all v6 (out of range for ^5). The version-first
+        // fallback resolves the `^5` → `v5` lookup tag instead.
+        let registry = FakeRegistry::new().with_sha_tags(
+            "actions/checkout",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            vec!["v6", "v6.0", "v6.0.2"],
+        );
+        let resolver = ActionResolver::new(&registry);
+        let mut sha_index = ShaIndex::new();
+        update_lock(
+            &mut lock,
+            &mut manifest,
+            &resolver,
+            &workflow_shas,
+            &mut sha_index,
+        )
+        .unwrap();
+
+        let entry = lock.get(&key).expect("lock entry must exist");
+        let version = entry.version.as_str();
+        assert_ne!(
+            version, "v6.0.2",
+            "out-of-range tag v6.0.2 must not be recorded under ^5"
+        );
+        // The version-first fallback resolves the `^5` → `v5` lookup tag.
+        assert_eq!(
+            version, "v5",
+            "resolved version must be re-resolved within the ^5 range"
+        );
+    }
+
+    /// Sub-major violation: `~1.15.2` does not admit `v1.16.0`.
+    #[test]
+    fn out_of_range_pinned_sha_sub_major_is_reresolved() {
+        let workflow_sha = "6d1e696000000000000000000000000000000000";
+        // `from_v1("v1.15.2")` → specifier `~1.15.2`.
+        let mut manifest = make_manifest_with("some/action", "v1.15.2");
+        let mut lock = Lock::default();
+        let key = ActionSpec::new(ActionId::from("some/action"), Specifier::from_v1("v1.15.2"));
+        let mut workflow_shas = HashMap::new();
+        workflow_shas.insert(key.clone(), CommitSha::from(workflow_sha));
+
+        let registry = FakeRegistry::new().with_sha_tags(
+            "some/action",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            vec!["v1.16", "v1.16.0"],
+        );
+        let resolver = ActionResolver::new(&registry);
+        let mut sha_index = ShaIndex::new();
+        update_lock(
+            &mut lock,
+            &mut manifest,
+            &resolver,
+            &workflow_shas,
+            &mut sha_index,
+        )
+        .unwrap();
+
+        let entry = lock.get(&key).expect("lock entry must exist");
+        let version = entry.version.as_str();
+        assert_ne!(
+            version, "v1.16.0",
+            "out-of-range tag v1.16.0 must not be recorded under ~1.15.2"
+        );
+        // The version-first fallback resolves the `~1.15.2` → `v1.15.2` lookup tag.
+        assert_eq!(
+            version, "v1.15.2",
+            "resolved version must be re-resolved within the ~1.15.2 range"
+        );
+    }
 }

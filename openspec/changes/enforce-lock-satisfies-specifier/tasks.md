@@ -1,7 +1,7 @@
 ## 1. Failing regression tests (must fail on current main)
 
-- [ ] 1.1 Add a `lock_sync` test: manifest `^5`, workflow SHA tagged `v6.0.2`, registry offers `v5.4.0`; assert the lock version satisfies `^5` and is never `v6.0.2`. Confirm it FAILS against current code.
-- [ ] 1.2 Add the sub-major variant test: manifest `~1.15.2`, workflow SHA tagged `v1.16.0`, registry offers `v1.15.9`; assert resolution satisfies `~1.15.2`. Confirm it FAILS.
+- [x] 1.1 Add a `lock_sync` test: manifest `^5`, workflow SHA tagged `v6.0.2`, registry offers `v5.4.0`; assert the lock version satisfies `^5` and is never `v6.0.2`. Confirm it FAILS against current code.
+- [x] 1.2 Add the sub-major variant test: manifest `~1.15.2`, workflow SHA tagged `v1.16.0`, registry offers `v1.15.9`; assert resolution satisfies `~1.15.2`. Confirm it FAILS.
 
 ## 2. Satisfiability primitive
 
