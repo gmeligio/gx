@@ -136,34 +136,6 @@ impl<'reg, R: VersionRegistry> ActionResolver<'reg, R> {
             },
         })
     }
-
-    /// Correct a version based on the commit SHA it points to.
-    /// Returns `(best_version, was_corrected)`.
-    /// If the best tag matches the `original_version`, `was_corrected` is false.
-    /// This is a pure version-correction step; metadata resolution is done separately via `resolve()`.
-    pub fn correct_version(
-        &self,
-        id: &ActionId,
-        sha: &CommitSha,
-        original_version: &Version,
-        sha_index: &mut ShaIndex,
-    ) -> (Version, bool) {
-        match sha_index.get_or_describe(self.registry, id, sha) {
-            Ok(desc) => {
-                let tags = &desc.tags;
-                // If the original version is already a valid tag, keep it
-                if tags.contains(original_version) {
-                    return (original_version.clone(), false);
-                }
-                if let Some(tag) = select_most_specific_tag(tags) {
-                    (tag, true)
-                } else {
-                    (original_version.clone(), false)
-                }
-            }
-            Err(_e) => (original_version.clone(), false),
-        }
-    }
 }
 
 #[cfg(test)]
@@ -256,54 +228,6 @@ mod tests {
         let result = service.resolve(&spec);
 
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn correct_version_no_correction_needed() {
-        let registry = MockRegistry {
-            resolve_result: Ok(Commit {
-                sha: CommitSha::from("abc123def456789012345678901234567890abcd"),
-                repository: Repository::from("actions/checkout"),
-                ref_type: Some(RefType::Tag),
-                date: CommitDate::from("2026-01-01T00:00:00Z"),
-            }),
-            tags_result: Ok(vec![Version::from("v4"), Version::from("v4.0.0")]),
-        };
-        let service = ActionResolver::new(&registry);
-
-        let id = ActionId::from("actions/checkout");
-        let sha = CommitSha::from("abc123def456789012345678901234567890abcd");
-        let original_version = Version::from("v4");
-        let mut sha_index = ShaIndex::new();
-        let (version, was_corrected) =
-            service.correct_version(&id, &sha, &original_version, &mut sha_index);
-
-        assert_eq!(version.as_str(), "v4");
-        assert!(!was_corrected);
-    }
-
-    #[test]
-    fn correct_version_correction_needed() {
-        let registry = MockRegistry {
-            resolve_result: Ok(Commit {
-                sha: CommitSha::from("abc123def456789012345678901234567890abcd"),
-                repository: Repository::from("actions/checkout"),
-                ref_type: Some(RefType::Tag),
-                date: CommitDate::from("2026-01-01T00:00:00Z"),
-            }),
-            tags_result: Ok(vec![Version::from("v5"), Version::from("v5.0.0")]),
-        };
-        let service = ActionResolver::new(&registry);
-
-        let id = ActionId::from("actions/checkout");
-        let sha = CommitSha::from("abc123def456789012345678901234567890abcd");
-        let original_version = Version::from("v4");
-        let mut sha_index = ShaIndex::new();
-        let (version, was_corrected) =
-            service.correct_version(&id, &sha, &original_version, &mut sha_index);
-
-        assert_eq!(version.as_str(), "v5.0.0");
-        assert!(was_corrected);
     }
 
     #[test]
