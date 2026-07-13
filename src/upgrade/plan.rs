@@ -221,8 +221,11 @@ fn determine_upgrades<R: VersionRegistry>(
 
                 match service.registry().all_tags(&spec.id) {
                     Ok(tags) => {
-                        // Get lock version as floor (if entry exists)
-                        let lock_version = lock.get(spec).map(|entry| entry.version.clone());
+                        // Get lock version as floor (if entry exists). Only a
+                        // real tag acts as a floor; a branch/commit pin has none.
+                        let lock_version = lock
+                            .get(spec)
+                            .and_then(|entry| entry.reference.tag().cloned());
 
                         let allow_major = matches!(request.mode, UpgradeMode::Latest);
                         let action = find_upgrade_candidate(
@@ -267,7 +270,7 @@ pub(super) fn resolve_and_store<R: VersionRegistry>(
 ) {
     match service.resolve(spec) {
         Ok(resolved) => {
-            lock.set(spec, resolved.version, resolved.commit);
+            lock.set(spec, resolved.reference, resolved.commit);
         }
         Err(e) => {
             on_progress(&format!("{unresolved_msg} {spec}: {e}"));
@@ -291,11 +294,9 @@ pub fn apply_upgrade_workflows(
         .map(|(key, entry)| ResolvedAction {
             id: key.id.clone(),
             sha: entry.commit.sha.clone(),
-            version: if key.specifier.is_sha() {
-                None
-            } else {
-                Some(entry.version.clone())
-            },
+            // The lock entry carries its own kind: a bare commit pin has no
+            // `# comment` annotation.
+            version: entry.reference.annotation().cloned(),
         })
         .collect();
 
@@ -318,7 +319,7 @@ pub fn apply_upgrade_workflows(
 mod tests {
     use super::{Lock, Manifest, UpgradeMode, UpgradeRequest, UpgradeScope, plan};
     use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
-    use crate::domain::action::resolved::Commit;
+    use crate::domain::action::resolved::{Commit, ResolvedRef};
     use crate::domain::action::spec::Spec as ActionSpec;
     use crate::domain::action::specifier::Specifier;
     use crate::domain::action::uses_ref::RefType;
@@ -332,7 +333,7 @@ mod tests {
         let mut lock = Lock::default();
         lock.set(
             &ActionSpec::new(ActionId::from("actions/checkout"), Specifier::parse("^4")),
-            Version::from("v4"),
+            ResolvedRef::Tag(Version::from("v4")),
             Commit {
                 sha: CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
                 repository: Repository::from("actions/checkout"),
@@ -360,7 +361,7 @@ mod tests {
         let mut lock = Lock::default();
         lock.set(
             &ActionSpec::new(ActionId::from("actions/checkout"), Specifier::parse("^4")),
-            Version::from("v4"),
+            ResolvedRef::Tag(Version::from("v4")),
             Commit {
                 sha: CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
                 repository: Repository::from("actions/checkout"),
@@ -403,7 +404,7 @@ mod tests {
         let mut lock = Lock::default();
         lock.set(
             &ActionSpec::new(ActionId::from("actions/checkout"), Specifier::parse("^3")),
-            Version::from("v3"),
+            ResolvedRef::Tag(Version::from("v3")),
             Commit {
                 sha: CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
                 repository: Repository::from("actions/checkout"),

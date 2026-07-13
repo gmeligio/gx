@@ -64,11 +64,9 @@ fn build_pins(manifest: &Manifest, lock: &Lock, steps: &[&LocatedAction]) -> Vec
                     ResolvedAction {
                         id: action.action.id.clone(),
                         sha: entry.commit.sha.clone(),
-                        version: if version.is_sha() {
-                            None
-                        } else {
-                            Some(entry.version.clone())
-                        },
+                        // The lock entry knows its own kind: a bare commit pin
+                        // carries no `# comment` annotation.
+                        version: entry.reference.annotation().cloned(),
                     },
                 );
             }
@@ -85,7 +83,7 @@ fn build_pins(manifest: &Manifest, lock: &Lock, steps: &[&LocatedAction]) -> Vec
 mod tests {
     use super::{Lock, Manifest, build_pins};
     use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
-    use crate::domain::action::resolved::Commit;
+    use crate::domain::action::resolved::{Commit, ResolvedRef};
     use crate::domain::action::spec::Spec;
     use crate::domain::action::specifier::Specifier;
     use crate::domain::action::uses_ref::RefType;
@@ -103,16 +101,16 @@ mod tests {
         let mut manifest = Manifest::default();
         manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1(sha));
 
-        // Lock has an entry for this SHA version
+        // Lock has a bare commit pin for this SHA (no version label).
         let spec = Spec::new(ActionId::from("actions/checkout"), Specifier::from_v1(sha));
         let mut lock = Lock::default();
         lock.set(
             &spec,
-            Version::from(sha),
+            ResolvedRef::Commit,
             Commit {
                 sha: CommitSha::from(sha),
                 repository: Repository::from("actions/checkout"),
-                ref_type: Some(RefType::Tag),
+                ref_type: Some(RefType::Commit),
                 date: CommitDate::from("2026-01-01T00:00:00Z"),
             },
         );

@@ -1,6 +1,6 @@
 use super::Store;
 use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
-use crate::domain::action::resolved::Commit;
+use crate::domain::action::resolved::{Commit, ResolvedRef};
 use crate::domain::action::spec::Spec;
 use crate::domain::action::specifier::Specifier;
 use crate::domain::action::uses_ref::RefType;
@@ -17,7 +17,7 @@ fn set_resolved(lock: &mut crate::domain::lock::Lock, action: &str, specifier: &
     let version = Version::from(Specifier::parse(specifier).to_lookup_tag());
     lock.set(
         &spec,
-        version,
+        ResolvedRef::Tag(version),
         Commit {
             sha: CommitSha::from(sha),
             repository: ActionId::from(action).base_repo(),
@@ -83,7 +83,7 @@ fn load_two_tier_format() {
         entry.commit.sha,
         CommitSha::from("abc123def456789012345678901234567890abcd")
     );
-    assert_eq!(entry.version.as_str(), "v4.0.0");
+    assert_eq!(entry.version_label(), "v4.0.0");
 }
 
 #[test]
@@ -99,7 +99,7 @@ fn load_flat_format() {
     let store = Store::new(file.path());
     let lock = store.load().unwrap();
     let entry = lock.get(&make_key("actions/checkout", "^6")).unwrap();
-    assert_eq!(entry.version.as_str(), "v6.2.3");
+    assert_eq!(entry.version_label(), "v6.2.3");
     assert_eq!(
         entry.commit.sha,
         CommitSha::from("de0fac2e4500dabe0009e67214ff5f5447ce83dd")
@@ -223,14 +223,14 @@ fn save_roundtrip_preserves_all_fields() {
         ref_type: Some(RefType::Release),
         date: CommitDate::from("2026-01-15T10:30:00Z"),
     };
-    lock.set(&spec, version.clone(), commit.clone());
+    lock.set(&spec, ResolvedRef::Tag(version.clone()), commit.clone());
 
     store.save(&lock).unwrap();
     let loaded = store.load().unwrap();
 
     let loaded_entry = loaded.get(&spec).expect("Entry must exist");
     assert_eq!(loaded_entry.commit.sha, commit.sha);
-    assert_eq!(loaded_entry.version.as_str(), version.as_str());
+    assert_eq!(loaded_entry.version_label(), version.as_str());
     assert_eq!(
         loaded_entry.commit.repository.as_str(),
         commit.repository.as_str()

@@ -51,7 +51,7 @@ fn init_sha_first_describe_sha_no_tags() {
     );
 
     assert_eq!(
-        entry.version.as_str(),
+        entry.version_label(),
         checkout_sha.as_str(),
         "When describe_sha returns no tags, lock version should be the SHA itself"
     );

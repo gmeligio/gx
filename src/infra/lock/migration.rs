@@ -1,5 +1,5 @@
 use crate::domain::action::identity::{CommitDate, CommitSha, Repository, Version};
-use crate::domain::action::resolved::Commit;
+use crate::domain::action::resolved::{Commit, ResolvedRef};
 use crate::domain::action::spec::Spec;
 use crate::domain::action::uses_ref::RefType;
 use crate::domain::lock::{Lock, LockEntry};
@@ -74,14 +74,15 @@ fn lock_from_flat(data: FlatData) -> Lock {
             .as_deref()
             .unwrap_or(spec.specifier.as_str());
         let version = Version::from(version_str);
+        let ref_type = RefType::parse(&entry_data.ref_type);
         entries.insert(
             spec,
             LockEntry {
-                version,
+                reference: ResolvedRef::from_stored(version, ref_type.as_ref()),
                 commit: Commit {
                     sha: CommitSha::from(entry_data.sha),
                     repository: Repository::from(entry_data.repository),
-                    ref_type: RefType::parse(&entry_data.ref_type),
+                    ref_type,
                     date: CommitDate::from(entry_data.date),
                 },
             },
@@ -117,7 +118,7 @@ mod tests {
         assert!(result.is_some(), "v1.4 format must be parsed as flat");
         let lock = result.unwrap();
         let entry = lock.get(&make_key("actions/checkout", "^6")).unwrap();
-        assert_eq!(entry.version.as_str(), "v6.2.3");
+        assert_eq!(entry.version_label(), "v6.2.3");
         assert_eq!(
             entry.commit.sha,
             CommitSha::from("de0fac2e4500dabe0009e67214ff5f5447ce83dd")
@@ -138,7 +139,7 @@ date = "2026-01-01T00:00:00Z"
         assert!(result.is_some(), "flat format without version must parse");
         let lock = result.unwrap();
         let entry = lock.get(&make_key("actions/checkout", "^4")).unwrap();
-        assert_eq!(entry.version.as_str(), "v4.0.0");
+        assert_eq!(entry.version_label(), "v4.0.0");
         assert_eq!(
             entry.commit.sha,
             CommitSha::from("abc123def456789012345678901234567890abcd")
@@ -159,7 +160,7 @@ date = ""
         let lock = result.unwrap();
         let entry = lock.get(&make_key("actions/checkout", "^4")).unwrap();
         assert_eq!(
-            entry.version.as_str(),
+            entry.version_label(),
             "^4",
             "missing version must fall back to specifier"
         );
@@ -196,8 +197,8 @@ date = "2026-01-01T00:00:00Z"
         // Both have same version and SHA
         let entry1 = lock.get(&spec1).unwrap();
         let entry2 = lock.get(&spec2).unwrap();
-        assert_eq!(entry1.version.as_str(), "v4.2.1");
-        assert_eq!(entry2.version.as_str(), "v4.2.1");
+        assert_eq!(entry1.version_label(), "v4.2.1");
+        assert_eq!(entry2.version_label(), "v4.2.1");
         assert_eq!(entry1.commit.sha, entry2.commit.sha);
     }
 

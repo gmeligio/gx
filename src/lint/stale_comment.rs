@@ -64,7 +64,7 @@ impl Rule for StaleCommentRule {
 mod tests {
     use super::{Level, Rule as _, RuleName, StaleCommentRule};
     use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Version};
-    use crate::domain::action::resolved::Commit;
+    use crate::domain::action::resolved::{Commit, ResolvedRef};
     use crate::domain::action::spec::Spec;
     use crate::domain::action::specifier::Specifier;
     use crate::domain::action::uses_ref::RefType;
@@ -76,7 +76,7 @@ mod tests {
         let mut lock = Lock::default();
         lock.set(
             &Spec::new(ActionId::from(action), Specifier::from_v1(version)),
-            Version::from(version),
+            ResolvedRef::Tag(Version::from(version)),
             Commit {
                 sha: CommitSha::from(sha),
                 repository: ActionId::from(action).base_repo(),

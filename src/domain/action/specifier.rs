@@ -1,4 +1,5 @@
 use super::identity::{CommitSha, Version, VersionPrecision};
+use super::resolved::ResolvedRef;
 use std::fmt;
 
 /// A specifier for an action version in the manifest or lock key.
@@ -76,17 +77,23 @@ impl Specifier {
         }
     }
 
-    /// Whether a resolved [`Version`] is allowed under this specifier.
+    /// Whether a resolved reference is allowed under this specifier.
     ///
-    /// A range constrains only real semver tags. A branch/SHA specifier, or a
-    /// version that is itself a commit SHA (no tag to check), imposes no range
-    /// and is always allowed.
+    /// A range constrains a real semver tag (allowed only if the tag satisfies
+    /// the range) and rejects a branch (not a version, so it can never satisfy a
+    /// range). A bare commit pin is exempt: it carries no version to check, so
+    /// the pin itself is authoritative. A `Ref`/`Sha` specifier imposes no range
+    /// at all.
     #[must_use]
-    pub fn matches_version(&self, version: &Version) -> bool {
+    pub fn matches_version(&self, reference: &ResolvedRef) -> bool {
         match self {
-            Self::Range { .. } => {
-                version.is_sha() || parse_semver(version.as_str()).is_some_and(|v| self.matches(&v))
-            }
+            Self::Range { .. } => match reference {
+                ResolvedRef::Tag(tag) => {
+                    parse_semver(tag.as_str()).is_some_and(|v| self.matches(&v))
+                }
+                ResolvedRef::Branch(_) => false,
+                ResolvedRef::Commit => true,
+            },
             Self::Ref(_) | Self::Sha(_) => true,
         }
     }
@@ -261,48 +268,62 @@ pub(super) fn higher_version<'ver>(a: &'ver Version, b: &'ver Version) -> &'ver 
     reason = "tests use unwrap, indexing, and other patterns freely"
 )]
 mod tests {
-    use super::{Specifier, Version, parse_semver};
+    use super::{ResolvedRef, Specifier, Version, parse_semver};
 
     #[test]
     fn matches_version_caret_in_range() {
-        assert!(Specifier::parse("^5").matches_version(&Version::from("v5.4.0")));
+        assert!(Specifier::parse("^5").matches_version(&ResolvedRef::Tag(Version::from("v5.4.0"))));
     }
 
     #[test]
     fn matches_version_caret_out_of_range() {
-        assert!(!Specifier::parse("^5").matches_version(&Version::from("v6.0.2")));
+        assert!(
+            !Specifier::parse("^5").matches_version(&ResolvedRef::Tag(Version::from("v6.0.2")))
+        );
     }
 
     #[test]
     fn matches_version_tilde_in_range() {
-        assert!(Specifier::parse("~1.15.2").matches_version(&Version::from("v1.15.9")));
+        assert!(
+            Specifier::parse("~1.15.2")
+                .matches_version(&ResolvedRef::Tag(Version::from("v1.15.9")))
+        );
     }
 
     #[test]
     fn matches_version_tilde_out_of_range() {
-        assert!(!Specifier::parse("~1.15.2").matches_version(&Version::from("v1.16.0")));
+        assert!(
+            !Specifier::parse("~1.15.2")
+                .matches_version(&ResolvedRef::Tag(Version::from("v1.16.0")))
+        );
     }
 
     #[test]
     fn matches_version_ref_is_exempt() {
-        assert!(Specifier::Ref("main".to_owned()).matches_version(&Version::from("v6.0.2")));
+        assert!(
+            Specifier::Ref("main".to_owned())
+                .matches_version(&ResolvedRef::Tag(Version::from("v6.0.2")))
+        );
     }
 
     #[test]
     fn matches_version_sha_specifier_is_exempt() {
         let sha = "a".repeat(40);
-        assert!(Specifier::parse(&sha).matches_version(&Version::from("v6.0.2")));
+        assert!(Specifier::parse(&sha).matches_version(&ResolvedRef::Tag(Version::from("v6.0.2"))));
     }
 
     #[test]
-    fn matches_version_sha_as_version_is_exempt() {
-        let sha = "a".repeat(40);
-        assert!(Specifier::parse("^5").matches_version(&Version::from(sha.as_str())));
+    fn matches_version_commit_reference_is_exempt() {
+        // A bare commit pin exposes no tag, so a range is inapplicable — the
+        // reference is always allowed, without any is_sha() discrimination.
+        assert!(Specifier::parse("^5").matches_version(&ResolvedRef::Commit));
     }
 
     #[test]
-    fn matches_version_branch_as_version_never_satisfies_range() {
-        assert!(!Specifier::parse("^5").matches_version(&Version::from("main")));
+    fn matches_version_branch_reference_never_satisfies_range() {
+        assert!(
+            !Specifier::parse("^5").matches_version(&ResolvedRef::Branch(Version::from("main")))
+        );
     }
 
     #[test]
