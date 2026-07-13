@@ -58,11 +58,10 @@ impl Specifier {
     /// - SHA → `Sha(...)`
     #[must_use]
     pub fn from_v1(v: &str) -> Self {
-        let version = Version::from(v);
-        if version.is_sha() {
+        if CommitSha::is_valid(v) {
             return Self::Sha(v.to_owned());
         }
-        if let Some(spec_str) = version.specifier() {
+        if let Some(spec_str) = Version::from(v).specifier() {
             return Self::parse(&spec_str);
         }
         Self::Ref(v.to_owned())

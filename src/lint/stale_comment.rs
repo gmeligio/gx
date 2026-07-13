@@ -2,21 +2,27 @@ use super::{Context, Diagnostic, Rule, RuleName};
 use crate::config::Level;
 use crate::domain::action::spec::Spec;
 use crate::domain::action::specifier::Specifier;
+use crate::domain::action::uses_ref::ParsedRef;
 
 /// stale-comment rule: detects when a version comment doesn't match the lock file.
 pub struct StaleCommentRule;
 
 impl StaleCommentRule {
     /// Check a single action for the stale-comment rule.
+    ///
+    /// Only a `# comment` pin (`uses: owner/repo@<sha> # v4`) can carry a stale
+    /// comment: it pairs a pinned SHA with a human-readable version to reconcile.
     pub fn check_action(
         action: &crate::domain::workflow_actions::Located,
         lock: &crate::domain::lock::Lock,
     ) -> Option<Diagnostic> {
-        let sha = action.action.sha.as_ref()?;
+        let ParsedRef::Pinned { sha, comment } = &action.action.reference else {
+            return None;
+        };
 
         let key = Spec::new(
             action.action.id.clone(),
-            Specifier::from_v1(action.action.version.as_str()),
+            Specifier::from_v1(comment.as_str()),
         );
         let entry = lock.get(&key)?;
 
@@ -27,7 +33,7 @@ impl StaleCommentRule {
         let msg = format!(
             "action {} version {} has stale comment (SHA {} does not match lock SHA {})",
             &action.action.id,
-            action.action.version.as_str(),
+            comment.as_str(),
             sha.as_str(),
             entry.commit.sha.as_str()
         );
@@ -88,12 +94,22 @@ mod tests {
     }
 
     fn make_located(action: &str, version: &str, sha: Option<&str>, workflow: &str) -> Located {
+        use crate::domain::action::uses_ref::ParsedRef;
         use crate::domain::workflow_actions::WorkflowAction;
+        // Mirror `UsesRef::interpret`: a `# comment` pin → `Pinned`; a bare
+        // 40-hex ref → `Sha`; otherwise a plain tag/branch `Ref`.
+        let reference = match sha {
+            Some(sha_str) => ParsedRef::Pinned {
+                sha: CommitSha::from(sha_str),
+                comment: Version::from(version),
+            },
+            None if CommitSha::is_valid(version) => ParsedRef::Sha(CommitSha::from(version)),
+            None => ParsedRef::Ref(Version::from(version)),
+        };
         Located {
             action: WorkflowAction {
                 id: ActionId::from(action),
-                version: Version::from(version),
-                sha: sha.map(CommitSha::from),
+                reference,
             },
             location: Location {
                 workflow: WorkflowPath::new(workflow),

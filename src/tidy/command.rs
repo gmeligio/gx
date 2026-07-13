@@ -3,6 +3,7 @@ use crate::config::Config;
 use crate::domain::action::identity::CommitSha;
 use crate::domain::action::spec::Spec;
 use crate::domain::action::tag_selection::ShaIndex;
+use crate::domain::action::uses_ref::ParsedRef;
 use crate::domain::diff::{LockDiff, ManifestDiff, WorkflowPatch};
 use crate::domain::lock::Lock;
 use crate::domain::manifest::Manifest;
@@ -95,13 +96,7 @@ where
     let mut sha_index = ShaIndex::new();
 
     // Phase 1: Sync manifest
-    let sync_events = manifest_sync::sync_manifest_actions(
-        &mut planned_manifest,
-        &located,
-        &action_set,
-        &resolver,
-        &mut sha_index,
-    );
+    let sync_events = manifest_sync::sync_manifest_actions(&mut planned_manifest, &action_set);
     for event in &sync_events {
         on_progress(&event.to_string());
     }
@@ -119,10 +114,16 @@ where
     planned_manifest.prune_stale_overrides(&located);
 
     // Build SHA map: workflow SHA for each (action, manifest_version) pair
+    // Only a `# comment` pin contributes a workflow SHA to reconcile against the
+    // manifest tag: its `(id, tag)` key matches the manifest specifier. A bare
+    // `@<sha>` ref keys on the SHA itself and is resolved directly in lock sync,
+    // so it is intentionally not collected here.
     let workflow_shas: HashMap<Spec, CommitSha> = located
         .iter()
         .filter_map(|loc| {
-            let sha = loc.action.sha.as_ref()?;
+            let ParsedRef::Pinned { sha, .. } = &loc.action.reference else {
+                return None;
+            };
             let manifest_version = planned_manifest.get(&loc.action.id)?;
             let key = Spec::new(loc.action.id.clone(), manifest_version.clone());
             Some((key, sha.clone()))
