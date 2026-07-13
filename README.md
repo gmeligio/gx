@@ -70,6 +70,8 @@ gx works alongside your existing setup.
 | ratchet | A manifest/lock system for team reproducibility, and standard version comments (no `# ratchet:` prefix) |
 | pinact | A manifest/lock system for team reproducibility |
 
+Running Renovate too? It catches majors; in-range advancement is `gx upgrade`'s job. See [docs/renovate.md](docs/renovate.md) for how the two fit together.
+
 ## Configuration
 
 gx works with no configuration. Run `gx tidy` and your workflows are pinned.
