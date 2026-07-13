@@ -7,7 +7,7 @@
 
 use gx::config::{Level, Lint};
 use gx::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
-use gx::domain::action::resolved::Commit;
+use gx::domain::action::resolved::{Commit, ResolvedRef};
 use gx::domain::action::spec::Spec as ActionSpec;
 use gx::domain::action::specifier::Specifier;
 use gx::domain::action::uses_ref::RefType;
@@ -277,7 +277,7 @@ jobs:
     let mut lock = Lock::default();
     lock.set(
         &ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4")),
-        Version::from("v4"),
+        ResolvedRef::Tag(Version::from("v4")),
         Commit {
             sha: CommitSha::from("def456789012345678901234567890abcd123456"),
             repository: Repository::from("actions/checkout"),
@@ -332,7 +332,7 @@ jobs:
             ActionId::from("actions/setup-node"),
             Specifier::from_v1("v3"),
         ),
-        Version::from("v3"),
+        ResolvedRef::Tag(Version::from("v3")),
         Commit {
             sha: CommitSha::from("def456789012345678901234567890abcd123456"),
             repository: Repository::from("actions/setup-node"),
@@ -392,7 +392,7 @@ jobs:
             ActionId::from("actions/setup-node"),
             Specifier::from_v1("v3"),
         ),
-        Version::from("v3"),
+        ResolvedRef::Tag(Version::from("v3")),
         Commit {
             sha: CommitSha::from("def456789012345678901234567890abcd123456"),
             repository: Repository::from("actions/setup-node"),
@@ -499,7 +499,7 @@ jobs:
     let mut lock = Lock::default();
     lock.set(
         &ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4")),
-        Version::from("v4"),
+        ResolvedRef::Tag(Version::from("v4")),
         Commit {
             sha: CommitSha::from("def456789012345678901234567890abcd123456"),
             repository: Repository::from("actions/checkout"),

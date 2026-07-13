@@ -13,7 +13,7 @@ use common::setup::{
     create_test_repo, lock_path, manifest_path, write_lock, write_manifest, write_workflow,
 };
 use gx::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
-use gx::domain::action::resolved::{Commit, ResolvedAction};
+use gx::domain::action::resolved::{Commit, ResolvedAction, ResolvedRef};
 use gx::domain::action::spec::Spec as ActionSpec;
 use gx::domain::action::specifier::Specifier;
 use gx::domain::action::uses_ref::RefType;
@@ -274,7 +274,7 @@ jobs:
             ActionId::from("actions/checkout"),
             Specifier::from_v1("v6.0.2"),
         ),
-        Version::from("v6.0.2"),
+        ResolvedRef::Tag(Version::from("v6.0.2")),
         Commit {
             sha: CommitSha::from(checkout_new_sha),
             repository: Repository::from("actions/checkout"),
@@ -337,7 +337,7 @@ fn upgrade_repins_branch_ref() {
             ActionId::from("my-org/my-action"),
             Specifier::from_v1("main"),
         ),
-        Version::from("main"),
+        ResolvedRef::Branch(Version::from("main")),
         Commit {
             sha: CommitSha::from(old_sha),
             repository: Repository::from("my-org/my-action"),
@@ -387,7 +387,7 @@ fn upgrade_latest_also_repins_branch_ref() {
             ActionId::from("my-org/my-action"),
             Specifier::from_v1("main"),
         ),
-        Version::from("main"),
+        ResolvedRef::Branch(Version::from("main")),
         Commit {
             sha: CommitSha::from(old_sha),
             repository: Repository::from("my-org/my-action"),
@@ -439,7 +439,7 @@ fn upgrade_targeted_does_not_repin_branch_ref() {
             ActionId::from("my-org/my-action"),
             Specifier::from_v1("main"),
         ),
-        Version::from("main"),
+        ResolvedRef::Branch(Version::from("main")),
         Commit {
             sha: CommitSha::from(branch_sha),
             repository: Repository::from("my-org/my-action"),
@@ -449,7 +449,7 @@ fn upgrade_targeted_does_not_repin_branch_ref() {
     );
     lock.set(
         &ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4")),
-        Version::from("v4"),
+        ResolvedRef::Tag(Version::from("v4")),
         Commit {
             sha: CommitSha::from(checkout_sha),
             repository: Repository::from("actions/checkout"),
@@ -506,7 +506,7 @@ fn upgrade_mixed_semver_and_branch() {
             ActionId::from("my-org/my-action"),
             Specifier::from_v1("main"),
         ),
-        Version::from("main"),
+        ResolvedRef::Branch(Version::from("main")),
         Commit {
             sha: CommitSha::from(old_branch_sha),
             repository: Repository::from("my-org/my-action"),
@@ -516,7 +516,7 @@ fn upgrade_mixed_semver_and_branch() {
     );
     lock.set(
         &ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4")),
-        Version::from("v4"),
+        ResolvedRef::Tag(Version::from("v4")),
         Commit {
             sha: CommitSha::from(old_checkout_sha),
             repository: Repository::from("actions/checkout"),

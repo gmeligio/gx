@@ -1,6 +1,7 @@
 use super::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
-use super::action::resolved::{Commit, Resolved};
+use super::action::resolved::{Commit, Resolved, ResolvedRef};
 use super::action::spec::Spec as ActionSpec;
+use super::action::specifier::Specifier;
 
 use super::action::tag_selection::{ShaIndex, select_most_specific_tag};
 use super::action::uses_ref::RefType;
@@ -95,7 +96,14 @@ impl<'reg, R: VersionRegistry> ActionResolver<'reg, R> {
     pub fn resolve(&self, spec: &ActionSpec) -> Result<Resolved, Error> {
         let version = Version::from(spec.specifier.to_lookup_tag());
         let commit = self.registry.lookup_sha(&spec.id, &version)?;
-        Ok(Resolved { version, commit })
+        // The specifier dictates the kind: a range resolves a semver tag, a
+        // branch ref a branch, and a bare SHA a commit with no version label.
+        let reference = match &spec.specifier {
+            Specifier::Range { .. } => ResolvedRef::Tag(version),
+            Specifier::Ref(_) => ResolvedRef::Branch(version),
+            Specifier::Sha(_) => ResolvedRef::Commit,
+        };
+        Ok(Resolved { reference, commit })
     }
 
     /// Resolve an action from a known commit SHA.
@@ -111,15 +119,15 @@ impl<'reg, R: VersionRegistry> ActionResolver<'reg, R> {
         sha_index: &mut ShaIndex,
     ) -> Result<Resolved, Error> {
         let desc = sha_index.get_or_describe(self.registry, id, sha)?;
-        let version =
-            select_most_specific_tag(&desc.tags).unwrap_or_else(|| Version::from(sha.as_str()));
-        let ref_type = if desc.tags.is_empty() {
-            Some(RefType::Commit)
-        } else {
-            Some(RefType::Tag)
+        // Establish the kind once, at construction: a tag if one points at this
+        // SHA, otherwise a bare commit pin with no version label. No SHA is ever
+        // fabricated into a version slot.
+        let (reference, ref_type) = match select_most_specific_tag(&desc.tags) {
+            Some(tag) => (ResolvedRef::Tag(tag), Some(RefType::Tag)),
+            None => (ResolvedRef::Commit, Some(RefType::Commit)),
         };
         Ok(Resolved {
-            version,
+            reference,
             commit: Commit {
                 sha: sha.clone(),
                 repository: desc.repository.clone(),
@@ -173,6 +181,7 @@ mod tests {
         ActionId, ActionResolver, ActionSpec, Commit, CommitDate, CommitSha, Error, RefType,
         Repository, ShaDescription, ShaIndex, Version, VersionRegistry,
     };
+    use crate::domain::action::resolved::ResolvedRef;
     use crate::domain::action::specifier::Specifier;
 
     struct MockRegistry {
@@ -221,7 +230,11 @@ mod tests {
         let result = service.resolve(&spec);
 
         let resolved = result.expect("Expected Ok result");
-        assert_eq!(resolved.version.as_str(), "v4");
+        assert_eq!(
+            resolved.reference,
+            ResolvedRef::Tag(Version::from("v4")),
+            "a range specifier resolves to a Tag reference"
+        );
         assert_eq!(
             resolved.commit.sha.as_str(),
             "abc123def456789012345678901234567890abcd"
@@ -317,7 +330,7 @@ mod tests {
             .resolve_from_sha(&id, &sha, &mut sha_index)
             .expect("Expected Ok result");
 
-        assert_eq!(result.version.as_str(), "v3.6.1");
+        assert_eq!(result.reference, ResolvedRef::Tag(Version::from("v3.6.1")));
         assert_eq!(result.commit.sha, sha);
         assert_eq!(result.commit.ref_type, Some(RefType::Tag));
         assert_eq!(result.commit.repository.as_str(), "owner/repo");
@@ -343,7 +356,9 @@ mod tests {
             .resolve_from_sha(&id, &sha, &mut sha_index)
             .expect("Expected Ok result");
 
-        assert_eq!(result.version.as_str(), sha.as_str());
+        // No tag points at this SHA: the reference is a bare Commit, not a SHA
+        // fabricated into a version slot.
+        assert_eq!(result.reference, ResolvedRef::Commit);
         assert_eq!(result.commit.sha, sha);
         assert_eq!(result.commit.ref_type, Some(RefType::Commit));
     }

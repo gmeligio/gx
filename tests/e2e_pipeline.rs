@@ -370,14 +370,14 @@ fn e2e_init_sha_pinned_workflow_sets_version_not_sha() {
 
     // The lock version must be a semver tag, not the raw SHA
     assert_ne!(
-        entry.version.as_str(),
+        entry.version_label(),
         checkout_sha.as_str(),
         "Lock version for checkout must NOT be a raw SHA"
     );
     assert!(
-        entry.version.as_str().starts_with('v'),
+        entry.version_label().starts_with('v'),
         "Lock version should be a semver tag, got: {:?}",
-        entry.version
+        entry.version_label()
     );
 }
 

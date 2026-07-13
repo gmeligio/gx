@@ -1,5 +1,5 @@
 use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
-use crate::domain::action::resolved::Commit;
+use crate::domain::action::resolved::{Commit, ResolvedRef};
 use crate::domain::action::spec::Spec;
 use crate::domain::action::specifier::Specifier;
 use crate::domain::action::uses_ref::RefType;
@@ -77,14 +77,15 @@ fn lock_from_two_tier(data: &TwoTierData) -> Lock {
             if let Some(commit_data) =
                 action_index.get(&(action_id.as_str(), res_data.version.as_str()))
             {
+                let ref_type = RefType::parse(&commit_data.ref_type);
                 entries.insert(
                     spec,
                     LockEntry {
-                        version,
+                        reference: ResolvedRef::from_stored(version, ref_type.as_ref()),
                         commit: Commit {
                             sha: CommitSha::from(commit_data.sha.as_str()),
                             repository: Repository::from(commit_data.repository.as_str()),
-                            ref_type: RefType::parse(&commit_data.ref_type),
+                            ref_type,
                             date: CommitDate::from(commit_data.date.as_str()),
                         },
                     },
@@ -136,7 +137,7 @@ fn build_lock_document(lock: &Lock) -> DocumentMut {
         };
 
         let mut entry_table = toml_edit::Table::new();
-        entry_table.insert("version", toml_edit::value(entry.version.as_str()));
+        entry_table.insert("version", toml_edit::value(entry.version_label()));
         id_table.insert(specifier_str, toml_edit::Item::Table(entry_table));
     }
 
@@ -151,7 +152,7 @@ fn build_lock_document(lock: &Lock) -> DocumentMut {
     let mut action_map: HashMap<(&str, &str), &Commit> = HashMap::new();
     for (spec, entry) in &sorted_entries {
         action_map
-            .entry((spec.id.as_str(), entry.version.as_str()))
+            .entry((spec.id.as_str(), entry.version_label()))
             .or_insert(&entry.commit);
     }
 
@@ -232,7 +233,7 @@ mod tests {
         let version = Version::from(Specifier::parse(specifier).to_lookup_tag());
         lock.set(
             &spec,
-            version,
+            ResolvedRef::Tag(version),
             Commit {
                 sha: CommitSha::from(sha),
                 repository: ActionId::from(action).base_repo(),

@@ -68,7 +68,7 @@ pub struct WorkflowPatch {
 mod tests {
     use super::{LockDiff, LockEntry, ManifestDiff};
     use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
-    use crate::domain::action::resolved::Commit;
+    use crate::domain::action::resolved::{Commit, ResolvedRef};
     use crate::domain::action::spec::Spec;
     use crate::domain::action::specifier::Specifier;
     use crate::domain::action::uses_ref::RefType;
@@ -100,7 +100,7 @@ mod tests {
             added: vec![(
                 Spec::new(ActionId::from("actions/checkout"), Specifier::parse("^4")),
                 LockEntry {
-                    version: Version::from("v4"),
+                    reference: ResolvedRef::Tag(Version::from("v4")),
                     commit: Commit {
                         sha: CommitSha::from("abc123"),
                         repository: Repository::from("actions/checkout"),

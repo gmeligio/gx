@@ -1,18 +1,28 @@
 use super::action::identity::Version;
-use super::action::resolved::Commit;
+use super::action::resolved::{Commit, ResolvedRef};
 use super::action::spec::Spec;
 use super::diff::LockDiff;
 use std::collections::{HashMap, HashSet};
 
-/// A single lock entry: resolved version + commit metadata.
+/// A single lock entry: resolved reference + commit metadata.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[expect(
     clippy::module_name_repetitions,
     reason = "LockEntry is clearer than Entry when imported"
 )]
 pub struct LockEntry {
-    pub version: Version,
+    pub reference: ResolvedRef,
     pub commit: Commit,
+}
+
+impl LockEntry {
+    /// The string written to the lock file's `version` slot, and the key under
+    /// which the commit is deduplicated. A bare commit pin round-trips through
+    /// its SHA (see [`ResolvedRef::label`]).
+    #[must_use]
+    pub fn version_label(&self) -> &str {
+        self.reference.label(&self.commit.sha)
+    }
 }
 
 /// Domain entity representing the resolved lock state.
@@ -38,9 +48,9 @@ impl Lock {
     }
 
     /// Set or update the entry for a spec.
-    pub fn set(&mut self, spec: &Spec, version: Version, commit: Commit) {
+    pub fn set(&mut self, spec: &Spec, reference: ResolvedRef, commit: Commit) {
         self.entries
-            .insert(spec.clone(), LockEntry { version, commit });
+            .insert(spec.clone(), LockEntry { reference, commit });
     }
 
     /// Check if the lock has an entry for the given spec.
@@ -55,7 +65,7 @@ impl Lock {
         let Some(entry) = self.entries.get(spec) else {
             return false;
         };
-        if entry.version.as_str().is_empty() {
+        if entry.version_label().is_empty() {
             return false;
         }
         !entry.commit.sha.as_str().is_empty()
@@ -64,12 +74,13 @@ impl Lock {
             && !entry.commit.date.as_str().is_empty()
     }
 
-    /// Set the version for a spec's entry.
+    /// Set the version label for a spec's entry, preserving its ref kind.
     pub fn set_version(&mut self, spec: &Spec, version: Option<String>) {
         if let Some(entry) = self.entries.get_mut(spec)
             && let Some(v) = version
         {
-            entry.version = Version::from(v.as_str());
+            entry.reference =
+                ResolvedRef::from_stored(Version::from(v.as_str()), entry.commit.ref_type.as_ref());
         }
     }
 
@@ -144,7 +155,7 @@ mod tests {
     use super::Lock;
     use crate::domain::action::identity::ActionId;
     use crate::domain::action::identity::{CommitDate, CommitSha, Repository, Version};
-    use crate::domain::action::resolved::Commit;
+    use crate::domain::action::resolved::{Commit, ResolvedRef};
     use crate::domain::action::spec::Spec;
     use crate::domain::action::specifier::Specifier;
     use crate::domain::action::uses_ref::RefType;
@@ -164,8 +175,11 @@ mod tests {
 
     fn set_action(lock: &mut Lock, action: &str, specifier: &str, sha: &str, version: &str) {
         let spec = make_key(action, specifier);
-        let ver = Version::from(version);
-        lock.set(&spec, ver, make_commit(sha));
+        lock.set(
+            &spec,
+            ResolvedRef::Tag(Version::from(version)),
+            make_commit(sha),
+        );
     }
 
     #[test]
@@ -191,7 +205,7 @@ mod tests {
             entry.commit.sha,
             CommitSha::from("abc123def456789012345678901234567890abcd")
         );
-        assert_eq!(entry.version, Version::from("v4.2.1"));
+        assert_eq!(entry.version_label(), "v4.2.1");
         assert!(lock.get(&make_key("actions/checkout", "^3")).is_none());
     }
 
@@ -296,7 +310,7 @@ mod tests {
         let spec = make_key("actions/checkout", "main");
         lock.set(
             &spec,
-            Version::from("main"),
+            ResolvedRef::Branch(Version::from("main")),
             Commit {
                 sha: CommitSha::from("abc123def456789012345678901234567890abcd"),
                 repository: Repository::from("actions/checkout"),
@@ -321,7 +335,7 @@ mod tests {
         lock.set_version(&spec, Some("v4.2.1".to_owned()));
 
         let entry = lock.get(&spec).unwrap();
-        assert_eq!(entry.version, Version::from("v4.2.1"));
+        assert_eq!(entry.version_label(), "v4.2.1");
         assert_eq!(
             entry.commit.sha,
             CommitSha::from("abc123def456789012345678901234567890abcd")

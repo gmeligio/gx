@@ -127,7 +127,7 @@ fn sha_first_lock_uses_workflow_sha_and_most_specific_version() {
         "SHA must be from workflow"
     );
     assert_eq!(
-        entry.version.as_str(),
+        entry.version_label(),
         "v3.6.1",
         "version must be most specific tag"
     );
@@ -241,7 +241,7 @@ fn out_of_range_pinned_sha_is_reresolved_within_range() {
     .unwrap();
 
     let entry = lock.get(&key).expect("lock entry must exist");
-    let version = entry.version.as_str();
+    let version = entry.version_label();
     assert_ne!(
         version, "v6.0.2",
         "out-of-range tag v6.0.2 must not be recorded under ^5"
@@ -279,7 +279,7 @@ fn out_of_range_pinned_sha_sub_major_is_reresolved() {
     .unwrap();
 
     let entry = lock.get(&key).expect("lock entry must exist");
-    let version = entry.version.as_str();
+    let version = entry.version_label();
     assert_ne!(
         version, "v1.16.0",
         "out-of-range tag v1.16.0 must not be recorded under ~1.15.2"
@@ -362,7 +362,7 @@ fn in_range_pin_emits_no_event() {
         "in-range pin must not emit PinOutOfRange, got: {events:?}"
     );
     assert_eq!(
-        lock.get(&key).expect("entry").version.as_str(),
+        lock.get(&key).expect("entry").version_label(),
         "v5.4.0",
         "in-range SHA-first version must be kept"
     );
@@ -402,7 +402,7 @@ fn init_derived_specifier_keeps_sha_version() {
         "derived specifier must not trip the range check, got: {events:?}"
     );
     assert_eq!(
-        lock.get(&key).expect("entry").version.as_str(),
+        lock.get(&key).expect("entry").version_label(),
         "v6.0.2",
         "SHA-first version (v6.0.2) satisfies derived ^6 and is kept"
     );

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use super::Error as TidyError;
-use crate::domain::action::identity::CommitSha;
+use crate::domain::action::identity::{CommitSha, Version};
 use crate::domain::action::spec::Spec as ActionSpec;
 use crate::domain::action::tag_selection::ShaIndex;
 use crate::domain::event::Event as SyncEvent;
@@ -101,24 +101,30 @@ fn populate_lock_entry<R: VersionRegistry>(
         .and_then(|sha| resolver.resolve_from_sha(&spec.id, sha, sha_index).ok());
     let Some(action) = sha_first else {
         let action = resolver.resolve(spec)?;
-        lock.set(spec, action.version, action.commit);
+        lock.set(spec, action.reference, action.commit);
         return Ok(None);
     };
 
     // The manifest range wins over the pinned tag: when the SHA's tag falls
-    // outside the range, re-resolve within range instead of recording it.
-    if spec.specifier.matches_version(&action.version) {
-        lock.set(spec, action.version, action.commit);
+    // outside the range, re-resolve within range instead of recording it. A
+    // bare commit pin has no tag, so the range is inapplicable by construction —
+    // no `is_sha` guard is needed to tell it apart from an out-of-range tag.
+    if spec.specifier.matches_version(&action.reference) {
+        lock.set(spec, action.reference, action.commit);
         return Ok(None);
     }
 
-    let reresolved = resolver.resolve(spec)?;
+    // Only a Tag can fall outside a range, so both the rejected pin and the
+    // re-resolved value are tags; label() yields their version string for the
+    // event either way.
+    let rejected = Version::from(action.reference.label(&action.commit.sha));
+    let within_range = resolver.resolve(spec)?;
     let event = SyncEvent::PinOutOfRange {
         spec: spec.clone(),
-        rejected: action.version,
-        resolved: reresolved.version.clone(),
+        rejected,
+        resolved: Version::from(within_range.reference.label(&within_range.commit.sha)),
     };
-    lock.set(spec, reresolved.version, reresolved.commit);
+    lock.set(spec, within_range.reference, within_range.commit);
     Ok(Some(event))
 }
 
