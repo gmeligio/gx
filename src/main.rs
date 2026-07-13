@@ -80,6 +80,9 @@ enum Commands {
         /// Upgrade to the latest version instead of safe update.
         #[arg(long)]
         latest: bool,
+        /// Emit the result as JSON on stdout (for scripting / unattended PRs).
+        #[arg(long)]
+        json: bool,
     },
     /// Run lint checks on workflows.
     ///
@@ -141,6 +144,83 @@ fn append_log_path(log_file: Option<&LogFile>, lines: &mut Vec<OutputLine>) {
     }
 }
 
+/// Run a command with the standard spinner → render → print flow shared by
+/// tidy, init, and lint. Returns the log file so `main` keeps it alive; exits
+/// the process directly on a non-zero report exit code.
+fn run_reported<C>(
+    printer: &Printer,
+    repo_root: &std::path::Path,
+    config: Config,
+    is_ci: bool,
+    log_file: Option<LogFile>,
+    spinner_text: &str,
+    command: &C,
+) -> Result<Option<LogFile>, GxError>
+where
+    C: gx::command::Command,
+    GxError: From<C::Error>,
+{
+    let spinner = printer.spinner(spinner_text);
+    let mut lf = log_file;
+    let report = {
+        let mut cb = make_cb(spinner.as_ref(), &mut lf, is_ci);
+        command.run(repo_root, config, &mut cb)?
+    };
+    finish_spinner(spinner);
+    let mut lines = report.render();
+    append_log_path(lf.as_ref(), &mut lines);
+    printer.print_lines(&lines);
+    if report.exit_code() != 0 {
+        std::process::exit(report.exit_code());
+    }
+    Ok(lf)
+}
+
+/// Run the upgrade command, rendering either human output or, with `--json`, a
+/// single JSON document on stdout. Returns the log file to keep it alive until
+/// `main` drops it. Exits the process directly on a non-zero report exit code.
+fn run_upgrade(
+    printer: &Printer,
+    repo_root: &std::path::Path,
+    config: Config,
+    log_file: Option<LogFile>,
+    action: Option<&str>,
+    latest: bool,
+    json: bool,
+) -> Result<Option<LogFile>, GxError> {
+    let request = upgrade::cli::resolve_upgrade_mode(action, latest)?;
+    // In JSON mode stdout must be a single JSON document, so suppress the spinner
+    // and the local log file (their progress noise would corrupt it).
+    let spinner = if json {
+        None
+    } else {
+        printer.spinner("Checking actions...")
+    };
+    let mut lf = if json { None } else { log_file };
+    let report = {
+        let mut cb = make_cb(spinner.as_ref(), &mut lf, printer.is_ci && !json);
+        upgrade::command::Upgrade { request }.run(repo_root, config, &mut cb)?
+    };
+    finish_spinner(spinner);
+
+    if json {
+        #[expect(clippy::print_stdout, reason = "JSON contract is written to stdout")]
+        {
+            println!("{}", report.to_json());
+        }
+    } else {
+        let mut lines = report.render();
+        append_log_path(lf.as_ref(), &mut lines);
+        printer.print_lines(&lines);
+    }
+
+    if report.exit_code() != 0 {
+        std::process::exit(report.exit_code());
+    }
+
+    Ok(lf)
+}
+
 fn main() -> Result<(), GxError> {
     let cli = Cli::parse();
 
@@ -154,14 +234,19 @@ fn main() -> Result<(), GxError> {
         Commands::Lint => "lint",
     };
 
+    // `--json` turns stdout into a single machine-readable document, so every
+    // human-facing line below (CI notice, log path, ".github not found") must be
+    // suppressed for it.
+    let json_mode = matches!(cli.command, Commands::Upgrade { json: true, .. });
+
     // Create log file for local runs (not CI)
-    let mut log_file: Option<LogFile> = if is_ci {
+    let mut log_file: Option<LogFile> = if is_ci || json_mode {
         None
     } else {
         LogFile::new(cmd_name).ok()
     };
 
-    if is_ci {
+    if is_ci && !json_mode {
         printer.print_lines(&[OutputLine::CiNotice {
             message: "CI detected, running in verbose mode".to_owned(),
         }]);
@@ -171,9 +256,17 @@ fn main() -> Result<(), GxError> {
     let repo_root = match repo::find_root(&cwd) {
         Ok(root) => root,
         Err(RepoError::GithubFolder) => {
-            printer.print_lines(&[OutputLine::Summary {
-                text: ".github folder not found. gx didn't modify any file.".to_owned(),
-            }]);
+            if json_mode {
+                // Emit a valid, empty JSON document so a consumer's parser never breaks.
+                #[expect(clippy::print_stdout, reason = "JSON contract is written to stdout")]
+                {
+                    println!("{}", upgrade::command::empty_json_report());
+                }
+            } else {
+                printer.print_lines(&[OutputLine::Summary {
+                    text: ".github folder not found. gx didn't modify any file.".to_owned(),
+                }]);
+            }
             return Ok(());
         }
         Err(e) => return Err(e.into()),
@@ -181,73 +274,49 @@ fn main() -> Result<(), GxError> {
 
     let config = Config::load(&repo_root)?;
 
-    match cli.command {
-        Commands::Tidy => {
-            let spinner = printer.spinner("Running tidy...");
-            let mut lf = log_file.take();
-            let report = {
-                let mut cb = make_cb(spinner.as_ref(), &mut lf, is_ci);
-                tidy::Tidy.run(&repo_root, config, &mut cb)?
-            };
-            finish_spinner(spinner);
-            let mut lines = report.render();
-            append_log_path(lf.as_ref(), &mut lines);
-            printer.print_lines(&lines);
-            if report.exit_code() != 0 {
-                std::process::exit(report.exit_code());
-            }
-            log_file = lf;
-        }
-        Commands::Init => {
-            let spinner = printer.spinner("Initializing...");
-            let mut lf = log_file.take();
-            let report = {
-                let mut cb = make_cb(spinner.as_ref(), &mut lf, is_ci);
-                init::Init.run(&repo_root, config, &mut cb)?
-            };
-            finish_spinner(spinner);
-            let mut lines = report.render();
-            append_log_path(lf.as_ref(), &mut lines);
-            printer.print_lines(&lines);
-            if report.exit_code() != 0 {
-                std::process::exit(report.exit_code());
-            }
-            log_file = lf;
-        }
-        Commands::Upgrade { action, latest } => {
-            let request = upgrade::cli::resolve_upgrade_mode(action.as_deref(), latest)?;
-            let spinner = printer.spinner("Checking actions...");
-            let mut lf = log_file.take();
-            let report = {
-                let mut cb = make_cb(spinner.as_ref(), &mut lf, is_ci);
-                upgrade::command::Upgrade { request }.run(&repo_root, config, &mut cb)?
-            };
-            finish_spinner(spinner);
-            let mut lines = report.render();
-            append_log_path(lf.as_ref(), &mut lines);
-            printer.print_lines(&lines);
-            if report.exit_code() != 0 {
-                std::process::exit(report.exit_code());
-            }
-            log_file = lf;
-        }
-        Commands::Lint => {
-            let spinner = printer.spinner("Linting...");
-            let mut lf = log_file.take();
-            let report = {
-                let mut cb = make_cb(spinner.as_ref(), &mut lf, is_ci);
-                lint::Lint.run(&repo_root, config, &mut cb)?
-            };
-            finish_spinner(spinner);
-            let mut lines = report.render();
-            append_log_path(lf.as_ref(), &mut lines);
-            printer.print_lines(&lines);
-            if report.exit_code() != 0 {
-                std::process::exit(report.exit_code());
-            }
-            log_file = lf;
-        }
-    }
+    let lf = log_file.take();
+    log_file = match cli.command {
+        Commands::Tidy => run_reported(
+            &printer,
+            &repo_root,
+            config,
+            is_ci,
+            lf,
+            "Running tidy...",
+            &tidy::Tidy,
+        )?,
+        Commands::Init => run_reported(
+            &printer,
+            &repo_root,
+            config,
+            is_ci,
+            lf,
+            "Initializing...",
+            &init::Init,
+        )?,
+        Commands::Lint => run_reported(
+            &printer,
+            &repo_root,
+            config,
+            is_ci,
+            lf,
+            "Linting...",
+            &lint::Lint,
+        )?,
+        Commands::Upgrade {
+            action,
+            latest,
+            json,
+        } => run_upgrade(
+            &printer,
+            &repo_root,
+            config,
+            lf,
+            action.as_deref(),
+            latest,
+            json,
+        )?,
+    };
 
     drop(log_file);
     Ok(())

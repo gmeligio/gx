@@ -98,12 +98,38 @@ npx --package renovate -- renovate-config-validator --strict
 > in-range minor/patch updates — see the boundary above. Do not treat a green Renovate dashboard as "actions
 > are up to date."
 
-**2. `gx upgrade` for in-range.** Run `gx upgrade` on a schedule or in CI and open a PR with the result — for
-example a scheduled workflow that runs `gx upgrade` and pipes the change to
-[`peter-evans/create-pull-request`](https://github.com/peter-evans/create-pull-request). A first-class,
-gx-shipped delivery path for this is tracked in
-[gx#110](https://github.com/gmeligio/gx/issues/110); until then, wire it yourself with the two building
-blocks above.
+**2. `gx upgrade` for in-range.** Run `gx upgrade` on a schedule or in CI and open a PR with the result. Two
+features make this a turnkey job rather than a text-scraping exercise:
+
+- **`gx upgrade --json`** emits a stable, machine-readable document on stdout — one entry per action with the
+  **old and new resolved versions** (`from`/`to`, not the range), whether the bump stayed `in_range`, and a
+  `compare` link. Build a PR body straight from it, no diff re-parsing:
+
+  ```console
+  $ gx upgrade --json
+  {
+    "upgrades": [
+      {
+        "action": "actions/checkout",
+        "from": "v6.0.1",
+        "to": "v6.0.3",
+        "in_range": true,
+        "compare": "https://github.com/actions/checkout/compare/v6.0.1...v6.0.3"
+      }
+    ],
+    "workflows_updated": 1,
+    "up_to_date": false
+  }
+  ```
+
+- The same **compare link** is written to the run's log file (and shown in CI verbose output), so anyone can
+  see *why* each pin moved without it cluttering the terminal summary.
+
+A minimal scheduled job: run `gx upgrade --json`, turn the `upgrades` array into a Markdown body (e.g. with
+`jq`), and hand it to [`peter-evans/create-pull-request`](https://github.com/peter-evans/create-pull-request).
+A copy-paste reference workflow shipped by gx is tracked in
+[gx#121](https://github.com/gmeligio/gx/issues/121); the `--json` contract above is the building block it will
+consume.
 
 ## Why gx does not ship `gx renovate init`
 
