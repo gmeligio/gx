@@ -17,6 +17,22 @@ impl ActionId {
     pub fn base_repo(&self) -> Repository {
         Repository::from(self.0.split('/').take(2).collect::<Vec<_>>().join("/"))
     }
+
+    /// Build the GitHub compare URL for a version transition on this action's
+    /// base repository, e.g. `https://github.com/actions/checkout/compare/v6.0.1...v6.0.3`.
+    ///
+    /// This is the single source of truth for changelog links: both the `--json`
+    /// contract and the log line derive their compare URL here. Subpath actions
+    /// collapse to their base repo (compare is a repo-level view).
+    #[must_use]
+    pub fn compare_url(&self, from: &Version, to: &Version) -> String {
+        format!(
+            "https://github.com/{}/compare/{}...{}",
+            self.base_repo(),
+            from,
+            to
+        )
+    }
 }
 
 impl fmt::Display for ActionId {
@@ -265,6 +281,25 @@ mod tests {
 
         let subpath = ActionId::from("github/codeql-action/upload-sarif");
         assert_eq!(subpath.base_repo().as_str(), "github/codeql-action");
+    }
+
+    #[test]
+    fn compare_url_builds_github_compare_link() {
+        let id = ActionId::from("actions/checkout");
+        assert_eq!(
+            id.compare_url(&Version::from("v6.0.1"), &Version::from("v6.0.3")),
+            "https://github.com/actions/checkout/compare/v6.0.1...v6.0.3"
+        );
+    }
+
+    #[test]
+    fn compare_url_collapses_subpath_to_base_repo() {
+        // A subpath action's changelog lives on its base repo, not the subpath.
+        let id = ActionId::from("github/codeql-action/upload-sarif");
+        assert_eq!(
+            id.compare_url(&Version::from("v3.28.0"), &Version::from("v3.29.0")),
+            "https://github.com/github/codeql-action/compare/v3.28.0...v3.29.0"
+        );
     }
 
     #[test]

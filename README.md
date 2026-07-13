@@ -52,10 +52,10 @@ cargo install gx
 ## Commands
 
 ```bash
-gx tidy      # Pin actions to commit SHAs and sync manifest if present
-gx upgrade   # Upgrade pinned actions to newer versions
-gx lint      # Check action pinning, security, workflow validity, and run: shell scripts (see docs/lint-rules.md)
-gx init      # Create a manifest and lock file from your current workflows
+gx tidy         # Pin actions to commit SHAs and sync manifest if present
+gx upgrade      # Upgrade pinned actions to newer versions (--json for CI/PR automation)
+gx lint         # Check action pinning, security, workflow validity, and run: shell scripts (see docs/lint-rules.md)
+gx init         # Create a manifest and lock file from your current workflows
 ```
 
 ## Already using another tool?
