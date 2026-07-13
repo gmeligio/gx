@@ -13,12 +13,6 @@ pub enum Event {
     ActionAdded(Spec),
     /// An action was removed from the manifest.
     ActionRemoved(ActionId),
-    /// An action's version was corrected from a SHA to the tag it points to.
-    VersionCorrected {
-        id: ActionId,
-        corrected: Version,
-        sha_points_to: Version,
-    },
     /// A SHA version in the manifest was upgraded to the best matching tag.
     ShaUpgraded { id: ActionId, tag: Version },
     /// A pinned SHA's tag was outside the manifest range, so it was re-resolved within range.
@@ -38,14 +32,6 @@ impl fmt::Display for Event {
         match self {
             Event::ActionAdded(spec) => write!(f, "+ {spec}"),
             Event::ActionRemoved(id) => write!(f, "- {id}"),
-            Event::VersionCorrected {
-                id,
-                corrected,
-                sha_points_to,
-            } => write!(
-                f,
-                "Corrected {id} version to {corrected} (SHA {sha_points_to} points to {corrected})"
-            ),
             Event::ShaUpgraded { id, tag } => write!(f, "~ {id} SHA upgraded to {tag}"),
             Event::PinOutOfRange {
                 spec,
@@ -126,16 +112,5 @@ mod tests {
         assert!(s.contains("actions/checkout@^5"));
         assert!(s.contains("v6.0.2"));
         assert!(s.contains("v5"));
-    }
-
-    #[test]
-    fn display_version_corrected() {
-        let event = Event::VersionCorrected {
-            id: ActionId::from("actions/checkout"),
-            corrected: Version::from("v4"),
-            sha_points_to: Version::from("v4"),
-        };
-        assert!(event.to_string().contains("Corrected"));
-        assert!(event.to_string().contains("actions/checkout"));
     }
 }
