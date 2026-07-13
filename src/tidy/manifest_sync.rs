@@ -5,17 +5,14 @@ use crate::domain::action::tag_selection::{ShaIndex, select_most_specific_tag};
 use crate::domain::event::Event as SyncEvent;
 use crate::domain::manifest::Manifest;
 use crate::domain::resolution::{ActionResolver, VersionRegistry};
-use crate::domain::workflow_actions::{ActionSet as WorkflowActionSet, Located as LocatedAction};
+use crate::domain::workflow_actions::ActionSet as WorkflowActionSet;
 use std::collections::HashSet;
 
 /// Remove unused actions from manifest and add missing ones.
 /// Returns events for each added action.
-pub(super) fn sync_manifest_actions<R: VersionRegistry>(
+pub(super) fn sync_manifest_actions(
     manifest: &mut Manifest,
-    located: &[LocatedAction],
     action_set: &WorkflowActionSet,
-    resolver: &ActionResolver<'_, R>,
-    sha_index: &mut ShaIndex,
 ) -> Vec<SyncEvent> {
     let mut events = Vec::new();
 
@@ -28,43 +25,17 @@ pub(super) fn sync_manifest_actions<R: VersionRegistry>(
         manifest.remove(action);
     }
 
-    // Add missing actions to manifest
+    // Add missing actions to manifest. The dominant version is written as-is:
+    // a `Pinned` ref votes with its tag comment and a plain `Ref` with its
+    // tag/branch, so the manifest records a human-readable specifier directly.
+    // A bare `ParsedRef::Sha` votes with its SHA string, which is written
+    // verbatim — the on-disk manifest then carries the SHA as its specifier,
+    // and `upgrade_sha_versions_to_tags` promotes it to a tag on a later pass.
     let missing: Vec<_> = workflow_actions.difference(&manifest_actions).collect();
     for action_id in missing {
         let version = select_dominant_version(action_id, action_set);
 
-        let corrected_version = if version.is_sha() {
-            let located_with_version = located.iter().find(|loc| {
-                &loc.action.id == action_id
-                    && loc.action.version == version
-                    && loc.action.sha.is_some()
-            });
-
-            located_with_version.map_or_else(
-                || version.clone(),
-                |located_action| {
-                    located_action.action.sha.as_ref().map_or_else(
-                        || version.clone(),
-                        |sha| {
-                            let (corrected, was_corrected) =
-                                resolver.correct_version(action_id, sha, &version, sha_index);
-                            if was_corrected {
-                                events.push(SyncEvent::VersionCorrected {
-                                    id: (*action_id).clone(),
-                                    corrected: corrected.clone(),
-                                    sha_points_to: corrected.clone(),
-                                });
-                            }
-                            corrected
-                        },
-                    )
-                },
-            )
-        } else {
-            version.clone()
-        };
-
-        let spec_version = Specifier::from_v1(corrected_version.as_str());
+        let spec_version = Specifier::from_v1(version.as_str());
         manifest.set((*action_id).clone(), spec_version.clone());
         let spec = ActionSpec::new((*action_id).clone(), spec_version.clone());
         events.push(SyncEvent::ActionAdded(spec));

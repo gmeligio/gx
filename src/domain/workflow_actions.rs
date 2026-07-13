@@ -1,18 +1,17 @@
-use super::action::identity::{ActionId, CommitSha, Version};
+use super::action::identity::{ActionId, Version};
+use super::action::uses_ref::ParsedRef;
 use std::collections::{HashMap, HashSet};
 
 /// An action as declared in a workflow file.
 ///
-/// Represents the interpreted form of a `uses:` line: the action identity,
-/// its version (from the comment or ref), and optionally the pinned SHA.
+/// Represents the interpreted form of a `uses:` line: the action identity and
+/// its typed reference (tag/branch, bare SHA, or SHA-with-comment pin).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkflowAction {
     /// The parsed action identifier.
     pub id: ActionId,
-    /// The resolved version.
-    pub version: Version,
-    /// The commit SHA, if the ref was a full SHA.
-    pub sha: Option<CommitSha>,
+    /// The typed parsed reference.
+    pub reference: ParsedRef,
 }
 
 /// Aggregates action versions discovered across all workflows.
@@ -45,17 +44,18 @@ impl ActionSet {
 
     /// Add an interpreted action reference to the set.
     pub fn add(&mut self, interpreted: &WorkflowAction) {
+        let version = interpreted.reference.label_version();
         self.versions
             .entry(interpreted.id.clone())
             .or_default()
-            .insert(interpreted.version.clone());
+            .insert(version.clone());
 
         // Track occurrence count for dominant_version selection
         let count = self
             .counts
             .entry(interpreted.id.clone())
             .or_default()
-            .entry(interpreted.version.clone())
+            .entry(version)
             .or_insert(0);
         *count = count.saturating_add(1);
     }
@@ -224,16 +224,24 @@ pub struct Located {
 #[cfg(test)]
 mod tests {
     use super::{
-        ActionId, ActionSet, JobId, Located, Location, StepIndex, Version, WorkflowAction,
-        WorkflowPath,
+        ActionId, ActionSet, JobId, Located, Location, ParsedRef, StepIndex, Version,
+        WorkflowAction, WorkflowPath,
     };
     use crate::domain::action::identity::CommitSha;
 
+    /// Build a `WorkflowAction` in the same shape `UsesRef::interpret` would:
+    /// a bare `version` becomes a `Ref`; a `version` + `sha` becomes a `Pinned`.
     fn make_interpreted(name: &str, version: &str, sha: Option<&str>) -> WorkflowAction {
+        let reference = sha.map_or_else(
+            || ParsedRef::Ref(Version::from(version)),
+            |sha_str| ParsedRef::Pinned {
+                sha: CommitSha::from(sha_str),
+                comment: Version::from(version),
+            },
+        );
         WorkflowAction {
             id: ActionId::from(name),
-            version: Version::from(version),
-            sha: sha.map(CommitSha::from),
+            reference,
         }
     }
 
@@ -290,8 +298,7 @@ mod tests {
         let action = Located {
             action: WorkflowAction {
                 id: ActionId::from("actions/checkout"),
-                version: Version::from("v4"),
-                sha: None,
+                reference: ParsedRef::Ref(Version::from("v4")),
             },
             location: loc.clone(),
         };

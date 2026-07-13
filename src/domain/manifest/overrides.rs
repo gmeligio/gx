@@ -98,7 +98,7 @@ pub fn sync(
             None => continue,
         };
 
-        let action_specifier = Specifier::from_v1(action.action.version.as_str());
+        let action_specifier = Specifier::from_v1(action.action.reference.label());
 
         if action_specifier == global_specifier {
             continue;
@@ -215,12 +215,12 @@ mod tests {
     }
 
     fn make_located(workflow: &str, action: &str, version: &str) -> LocatedAction {
+        use crate::domain::action::uses_ref::ParsedRef;
         use crate::domain::workflow_actions::WorkflowAction;
         LocatedAction {
             action: WorkflowAction {
                 id: ActionId::from(action),
-                version: Version::from(version),
-                sha: None,
+                reference: ParsedRef::Ref(Version::from(version)),
             },
             location: make_loc(workflow, None, None),
         }

@@ -82,7 +82,7 @@ fn build_pins(manifest: &Manifest, lock: &Lock, steps: &[&LocatedAction]) -> Vec
 )]
 mod tests {
     use super::{Lock, Manifest, build_pins};
-    use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
+    use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository};
     use crate::domain::action::resolved::{Commit, ResolvedRef};
     use crate::domain::action::spec::Spec;
     use crate::domain::action::specifier::Specifier;
@@ -115,12 +115,11 @@ mod tests {
             },
         );
 
-        // A located action referencing this action
+        // A located action referencing this action by bare SHA (`@<sha>`).
         let located = crate::domain::workflow_actions::Located {
             action: crate::domain::workflow_actions::WorkflowAction {
                 id: ActionId::from("actions/checkout"),
-                version: Version::from(sha),
-                sha: Some(CommitSha::from(sha)),
+                reference: crate::domain::action::uses_ref::ParsedRef::Sha(CommitSha::from(sha)),
             },
             location: WorkflowLocation {
                 workflow: WorkflowPath::new(".github/workflows/ci.yml"),

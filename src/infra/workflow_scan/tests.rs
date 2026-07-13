@@ -47,7 +47,7 @@ jobs:
     });
     assert!(build_checkout.is_some());
     let bc = build_checkout.unwrap();
-    assert_eq!(bc.action.version.as_str(), "v4");
+    assert_eq!(bc.action.reference.label(), "v4");
     assert_eq!(bc.location.step, Some(StepIndex::from(0_u16)));
 
     let test_checkout = located.iter().find(|a| {
@@ -59,7 +59,7 @@ jobs:
                 == Some("test")
     });
     assert!(test_checkout.is_some());
-    assert_eq!(test_checkout.unwrap().action.version.as_str(), "v3");
+    assert_eq!(test_checkout.unwrap().action.reference.label(), "v3");
 }
 
 #[test]
@@ -367,11 +367,11 @@ jobs:
 
     let mut legacy_keys: Vec<String> = via_legacy
         .iter()
-        .map(|a| format!("{}@{}", a.action.id.as_str(), a.action.version.as_str()))
+        .map(|a| format!("{}@{}", a.action.id.as_str(), a.action.reference.label()))
         .collect();
     let mut combined_keys: Vec<String> = via_combined
         .iter()
-        .map(|a| format!("{}@{}", a.action.id.as_str(), a.action.version.as_str()))
+        .map(|a| format!("{}@{}", a.action.id.as_str(), a.action.reference.label()))
         .collect();
     legacy_keys.sort();
     combined_keys.sort();
@@ -435,8 +435,8 @@ jobs:
             })
             .unwrap()
             .action
-            .version
-            .as_str()
+            .reference
+            .label()
             .to_owned()
     };
 

@@ -2,24 +2,26 @@ use super::{Context, Diagnostic, Rule, RuleName};
 use crate::config::Level;
 use crate::domain::action::spec::Spec;
 use crate::domain::action::specifier::Specifier;
+use crate::domain::action::uses_ref::ParsedRef;
 
 /// sha-mismatch rule: detects when a workflow SHA doesn't match the lock file.
 pub struct ShaMismatchRule;
 
 impl ShaMismatchRule {
     /// Check a single action for the sha-mismatch rule.
+    ///
+    /// Only a bare SHA ref (`uses: owner/repo@<sha>`, no comment) is looked up as
+    /// a SHA key — a `# comment` pin already carries its human version, and a
+    /// plain tag/branch has no SHA to reconcile.
     pub fn check_action(
         action: &crate::domain::workflow_actions::Located,
         lock: &crate::domain::lock::Lock,
     ) -> Option<Diagnostic> {
-        if !action.action.version.is_sha() {
+        let ParsedRef::Sha(sha) = &action.action.reference else {
             return None;
-        }
+        };
 
-        let key = Spec::new(
-            action.action.id.clone(),
-            Specifier::from_v1(action.action.version.as_str()),
-        );
+        let key = Spec::new(action.action.id.clone(), Specifier::from_v1(sha.as_str()));
         if lock.has(&key) {
             return None;
         }
@@ -27,7 +29,7 @@ impl ShaMismatchRule {
         let msg = format!(
             "action {} SHA {} not found in lock file",
             &action.action.id,
-            action.action.version.as_str()
+            sha.as_str()
         );
         Some(
             Diagnostic::new(RuleName::ShaMismatch, Level::Error, msg)

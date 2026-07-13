@@ -7,22 +7,18 @@ pub struct UnpinnedRule;
 impl UnpinnedRule {
     /// Check a single action for the unpinned rule.
     ///
-    /// An action is considered pinned when the `uses:` ref is a 40-char commit
-    /// SHA. That can present in two shapes after parsing:
-    ///
-    /// - `uses: owner/repo@<sha>` — the SHA lands in `version` (no comment).
-    /// - `uses: owner/repo@<sha> # vX.Y.Z` — the SHA lands in `sha`, and
-    ///   `version` holds the human-readable tag from the comment.
-    ///
-    /// Both shapes are valid pins, so we accept either.
+    /// An action is pinned when the `uses:` ref carries a commit SHA — either a
+    /// bare `@<sha>` or a `@<sha> # vX.Y.Z` pin. The typed reference answers this
+    /// directly: `pin_sha()` is `Some` for both pinned shapes and `None` for a
+    /// bare tag/branch ref.
     pub fn check_action(action: &crate::domain::workflow_actions::Located) -> Option<Diagnostic> {
-        if action.action.sha.is_some() || action.action.version.is_sha() {
+        if action.action.reference.pin_sha().is_some() {
             return None;
         }
         let msg = format!(
             "action {} uses tag reference {} instead of SHA pin",
             &action.action.id,
-            action.action.version.as_str()
+            action.action.reference.label()
         );
         Some(
             Diagnostic::new(RuleName::Unpinned, Level::Error, msg)
@@ -54,6 +50,7 @@ impl Rule for UnpinnedRule {
 mod tests {
     use super::{Level, Rule as _, RuleName, UnpinnedRule};
     use crate::domain::action::identity::{ActionId, CommitSha, Version};
+    use crate::domain::action::uses_ref::ParsedRef;
     use crate::domain::workflow_actions::{Located, Location, WorkflowAction, WorkflowPath};
 
     const VALID_SHA: &str = "8e8c483db84b4bee98b60c0593521ed34d9990e8";
@@ -62,12 +59,21 @@ mod tests {
         located_at(version, sha, None)
     }
 
+    /// Mirror `UsesRef::interpret`: `Some(sha)` → a `Pinned` pin; a bare 40-hex
+    /// `version` → `Sha`; anything else → a plain `Ref`.
     fn located_at(version: &str, sha: Option<&str>, line: Option<u32>) -> Located {
+        let reference = match sha {
+            Some(sha_str) => ParsedRef::Pinned {
+                sha: CommitSha::from(sha_str),
+                comment: Version::from(version),
+            },
+            None if CommitSha::is_valid(version) => ParsedRef::Sha(CommitSha::from(version)),
+            None => ParsedRef::Ref(Version::from(version)),
+        };
         Located {
             action: WorkflowAction {
                 id: ActionId::from("actions/checkout"),
-                version: Version::from(version),
-                sha: sha.map(CommitSha::from),
+                reference,
             },
             location: Location {
                 workflow: WorkflowPath::new(".github/workflows/ci.yml"),

@@ -60,26 +60,6 @@ impl Version {
         }
     }
 
-    /// Returns true if this version is a full commit SHA (40 hex characters).
-    #[must_use]
-    pub fn is_sha(&self) -> bool {
-        CommitSha::is_valid(&self.0)
-    }
-
-    /// Returns true if this version looks like a semantic version tag (e.g., "v4", "v4.1.0").
-    #[must_use]
-    pub fn is_semver_like(&self) -> bool {
-        let normalized = self
-            .0
-            .strip_prefix('v')
-            .or_else(|| self.0.strip_prefix('V'))
-            .unwrap_or(&self.0);
-        normalized
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_digit())
-    }
-
     /// Select the highest version from a list.
     /// Prefers the highest semantic version if available.
     #[must_use]
@@ -330,30 +310,6 @@ mod tests {
     fn version_normalized_without_v_prefix() {
         assert_eq!(Version::normalized("4").as_str(), "v4");
         assert_eq!(Version::normalized("4.1.0").as_str(), "v4.1.0");
-    }
-
-    #[test]
-    fn version_is_sha() {
-        assert!(Version::from("abc123def456789012345678901234567890abcd").is_sha());
-        assert!(!Version::from("v4").is_sha());
-        assert!(!Version::from("main").is_sha());
-    }
-
-    #[test]
-    fn version_is_semver_like() {
-        assert!(Version::from("v4").is_semver_like());
-        assert!(Version::from("v4.1").is_semver_like());
-        assert!(Version::from("v4.1.0").is_semver_like());
-        assert!(Version::from("4.1.0").is_semver_like());
-        assert!(Version::from("V4").is_semver_like());
-    }
-
-    #[test]
-    fn version_is_semver_like_invalid() {
-        assert!(!Version::from("main").is_semver_like());
-        assert!(!Version::from("develop").is_semver_like());
-        assert!(!Version::from("abc123def456789012345678901234567890abcd").is_semver_like());
-        assert!(!Version::from("").is_semver_like());
     }
 
     #[test]
