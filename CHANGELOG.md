@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.3](https://github.com/gmeligio/gx/compare/v0.8.2...v0.8.3) - 2026-07-13
+
+### Added
+
+- *(upgrade)* add --json output with resolved from/to and compare links ([#122](https://github.com/gmeligio/gx/pull/122))
+- *(lint)* show file:line in diagnostics via saphyr Spanned ([#106](https://github.com/gmeligio/gx/pull/106))
+
+### Fixed
+
+- *(tidy)* re-resolve out-of-range pinned SHA within manifest range ([#95](https://github.com/gmeligio/gx/pull/95)) ([#113](https://github.com/gmeligio/gx/pull/113))
+
+### Other
+
+- *(renovate)* document the honest gx <-> Renovate coexistence model ([#120](https://github.com/gmeligio/gx/pull/120))
+- *(domain)* remove orphaned SHA version-correction path ([#119](https://github.com/gmeligio/gx/pull/119))
+- *(domain)* type the parsed reference to end parse-side kind-discrimination ([#115](https://github.com/gmeligio/gx/pull/115)) ([#118](https://github.com/gmeligio/gx/pull/118))
+- *(domain)* type the resolved reference to end runtime kind-discrimination ([#114](https://github.com/gmeligio/gx/pull/114)) ([#116](https://github.com/gmeligio/gx/pull/116))
+- *(scan)* capture uses comments via saphyr Commented<String> ([#105](https://github.com/gmeligio/gx/pull/105))
+- *(deps)* bump serde-saphyr to 0.0.27 ([#102](https://github.com/gmeligio/gx/pull/102))
+
 ## [0.8.2](https://github.com/gmeligio/gx/compare/v0.8.1...v0.8.2) - 2026-06-06
 
 ### Added
