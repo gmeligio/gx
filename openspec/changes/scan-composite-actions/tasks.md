@@ -17,27 +17,27 @@
 
 ## 3. Discover and extract composite files
 
-- [ ] 3.1 Extract discovery into a free function over `repo_root` (design D4 mechanism) that returns the ordered file list with each path's kind, and have `FileScanner` (`scanner.rs:110-115`) call it instead of holding a `workflows_dir` field.
-- [ ] 3.2 Add the composite root to that function: `.github/actions/**/action.{yml,yaml}`, recursive, alongside the existing non-recursive `.github/workflows/*.{yml,yaml}`. Preserve the existing behavior that a bad glob is a `ScanFailed` and per-file read/parse problems are per-file errors.
-- [ ] 3.3 Sort within each group and emit workflows before composites, replacing today's all-`*.yml`-then-all-`*.yaml` filesystem order (`scanner.rs:83-95`). Add a test asserting two runs over the same tree yield identical order, and that a workflow sorts before a composite.
-- [ ] 3.4 In `extract_workflow` (`scanner.rs:146`), select the step list by kind: `jobs[].steps[]` with `job: Some(id)` for workflows, `runs.steps[]` with `job: None` for composites. Leave the `uses:` handling below the step lookup untouched — same `USES_RE`, same `.`/`docker://` skip (`scanner.rs:176`), same `UsesRef::new`.
-- [ ] 3.5 Update the `Scanner` trait docs in `src/domain/workflow.rs:27-76` — "workflow files" becomes "managed files (workflows and composite actions)". Method signatures and object-safety are unchanged; `scan_all_with_parsed` still returns one `Parsed` per file, now kind-tagged.
-- [ ] 3.6 Confirm tasks 1.5 and 1.6 now pass.
+- [x] 3.1 Extract discovery into a free function over `repo_root` (design D4 mechanism) that returns the ordered file list with each path's kind, and have `FileScanner` (`scanner.rs:110-115`) call it instead of holding a `workflows_dir` field.
+- [x] 3.2 Add the composite root to that function: `.github/actions/**/action.{yml,yaml}`, recursive, alongside the existing non-recursive `.github/workflows/*.{yml,yaml}`. Preserve the existing behavior that a bad glob is a `ScanFailed` and per-file read/parse problems are per-file errors.
+- [x] 3.3 Sort within each group and emit workflows before composites, replacing today's all-`*.yml`-then-all-`*.yaml` filesystem order (`scanner.rs:83-95`). Add a test asserting two runs over the same tree yield identical order, and that a workflow sorts before a composite.
+- [x] 3.4 In `extract_workflow` (`scanner.rs:146`), select the step list by kind: `jobs[].steps[]` with `job: Some(id)` for workflows, `runs.steps[]` with `job: None` for composites. Leave the `uses:` handling below the step lookup untouched — same `USES_RE`, same `.`/`docker://` skip (`scanner.rs:176`), same `UsesRef::new`.
+- [x] 3.5 Update the `Scanner` trait docs in `src/domain/workflow.rs:27-76` — "workflow files" becomes "managed files (workflows and composite actions)". Method signatures and object-safety are unchanged; `scan_all_with_parsed` still returns one `Parsed` per file, now kind-tagged.
+- [x] 3.6 Confirm tasks 1.5 and 1.6 now pass.
 
 ## 4. Write pins to composite files
 
-- [ ] 4.1 In `src/infra/workflow_update.rs`, make `update_all_with_pins` (`:85`) call the shared discovery function from 3.1 instead of its own hardcoded `.github/workflows` glob (`:31`, `:40-58`) — design D4, one discovery source. `apply_patches` (`:65`) already takes explicit paths; leave it alone.
-- [ ] 4.2 Add an assertion to the 1.3 upgrade test that the rewritten `action.yml` preserves indentation and all surrounding YAML, confirming the regex path (`:128`) needs no schema awareness.
-- [ ] 4.3 Add a test that `find_workflow_paths()` yields the composite file path, so `src/tidy/patches.rs:34` reaches it.
-- [ ] 4.4 Confirm tasks 1.2 and 1.3 now pass.
+- [x] 4.1 In `src/infra/workflow_update.rs`, make `update_all_with_pins` (`:85`) call the shared discovery function from 3.1 instead of its own hardcoded `.github/workflows` glob (`:31`, `:40-58`) — design D4, one discovery source. `apply_patches` (`:65`) already takes explicit paths; leave it alone.
+- [x] 4.2 Add an assertion to the 1.3 upgrade test that the rewritten `action.yml` preserves indentation and all surrounding YAML, confirming the regex path (`:128`) needs no schema awareness.
+- [x] 4.3 Add a test that `find_workflow_paths()` yields the composite file path, so `src/tidy/patches.rs:34` reaches it.
+- [x] 4.4 Confirm tasks 1.2 and 1.3 now pass.
 
 ## 5. Scope the lint rules
 
-- [ ] 5.1 In `src/lint/command.rs:65`, filter `scan_all_with_parsed`'s parses so `Context.workflows_full` (`src/lint/rule.rs:153`) carries workflow-kind files only (design D2 — boundary filter, not per-rule guards). Update the field doc to state the invariant.
-- [ ] 5.2 Add a test asserting `Context.workflows` and `Context.action_set` DO include composite-derived actions, so `unpinned`, `sha-mismatch`, `stale-comment`, and `unsynced-manifest` cover them with no rule-code change. Also assert `run-shellcheck` sees no composite file (the deferred opt-in stated in the lint delta).
-- [ ] 5.3 Add a test that a repository mixing workflow and composite diagnostics emits them in the same order on repeated runs, exercising the `None`-job branch of `diagnostic_sort_key` (`src/lint/command.rs:163-170`).
-- [ ] 5.4 Add tests that `matches_ignore_workflow`'s suffix match (`src/lint/rule.rs:207,217`) accepts a composite path, and that an ignore entry naming a `job` never suppresses a composite diagnostic (no job to match).
-- [ ] 5.5 Confirm task 1.4 now passes.
+- [x] 5.1 In `src/lint/command.rs:65`, filter `scan_all_with_parsed`'s parses so `Context.workflows_full` (`src/lint/rule.rs:153`) carries workflow-kind files only (design D2 — boundary filter, not per-rule guards). Update the field doc to state the invariant.
+- [x] 5.2 Add a test asserting `Context.workflows` and `Context.action_set` DO include composite-derived actions, so `unpinned`, `sha-mismatch`, `stale-comment`, and `unsynced-manifest` cover them with no rule-code change. Also assert `run-shellcheck` sees no composite file (the deferred opt-in stated in the lint delta).
+- [x] 5.3 Add a test that a repository mixing workflow and composite diagnostics emits them in the same order on repeated runs, exercising the `None`-job branch of `diagnostic_sort_key` (`src/lint/command.rs:163-170`).
+- [x] 5.4 Add tests that `matches_ignore_workflow`'s suffix match (`src/lint/rule.rs:207,217`) accepts a composite path, and that an ignore entry naming a `job` never suppresses a composite diagnostic (no job to match).
+- [x] 5.5 Confirm task 1.4 now passes.
 
 ## 6. Manifest override vocabulary
 
@@ -56,7 +56,7 @@
 
 ## 8. Re-scope the conflicting existing test
 
-- [ ] 8.1 Rewrite `tests/integ_tidy.rs::gx_tidy_skips_local_actions` (`:345`). Its current assertion that the manifest omits `.github/actions` (`:372`) conflates "local reference" with "composite file". It must assert only that the local `./.github/actions/foo` *reference* is absent from the manifest, while an action referenced by SHA/tag inside that same composite file IS present.
+- [x] 8.1 Rewrite `tests/integ_tidy.rs::gx_tidy_skips_local_actions` (`:345`). Its current assertion that the manifest omits `.github/actions` (`:372`) conflates "local reference" with "composite file". It must assert only that the local `./.github/actions/foo` *reference* is absent from the manifest, while an action referenced by SHA/tag inside that same composite file IS present.
 
 ## 9. Docs and verification
 

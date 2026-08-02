@@ -410,13 +410,13 @@ runs:
             .join("action.yml"),
     )
     .unwrap();
-    let expected_sha = FakeRegistry::fake_sha("actions/setup-node", "v4.0.0");
+    let expected_sha = FakeRegistry::fake_sha("actions/setup-node", "v4");
     assert!(
         action_content.contains(&format!("actions/setup-node@{expected_sha}")),
         "composite action must be pinned: {action_content}"
     );
     assert!(
-        action_content.contains("# v4.0.0"),
+        action_content.contains("# v4"),
         "composite pin must carry a version comment: {action_content}"
     );
 }

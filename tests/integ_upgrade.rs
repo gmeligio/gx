@@ -517,19 +517,19 @@ fn upgrade_rewrites_pin_inside_composite_action() {
     let updater = WorkflowWriter::new(&root);
     upgrade::plan::apply_upgrade_workflows(&updater, &plan.lock_changes, &plan.upgrades).unwrap();
 
-    let updated = fs::read_to_string(&action_path).unwrap();
+    let rewritten = fs::read_to_string(&action_path).unwrap();
     let new_sha = FakeRegistry::fake_sha("actions/checkout", "v5");
     assert!(
-        updated.contains(&format!("actions/checkout@{new_sha} # v5")),
-        "composite action pin should be advanced. Got:\n{updated}"
+        rewritten.contains(&format!("actions/checkout@{new_sha} # v5")),
+        "composite action pin should be advanced. Got:\n{rewritten}"
     );
     assert!(
-        updated.contains("    - uses: actions/checkout@"),
-        "indentation and surrounding YAML must be preserved. Got:\n{updated}"
+        rewritten.contains("    - uses: actions/checkout@"),
+        "indentation and surrounding YAML must be preserved. Got:\n{rewritten}"
     );
     assert!(
-        updated.starts_with("name: Setup\nruns:\n  using: composite\n"),
-        "surrounding YAML must be preserved. Got:\n{updated}"
+        rewritten.starts_with("name: Setup\nruns:\n  using: composite\n"),
+        "surrounding YAML must be preserved. Got:\n{rewritten}"
     );
 }
 
