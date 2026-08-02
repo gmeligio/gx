@@ -954,3 +954,297 @@ fn lint_config_parses_all_six_new_rule_names() {
         Level::Off
     );
 }
+
+// --- Composite action coverage (issue #150) ---
+
+/// Write a composite action definition at `.github/actions/{name}/action.yml`.
+fn write_composite(repo_root: &std::path::Path, name: &str, steps: &str) -> std::path::PathBuf {
+    let dir = repo_root.join(".github").join("actions").join(name);
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("action.yml");
+    fs::write(
+        &path,
+        format!("name: Setup\nruns:\n  using: composite\n  steps:\n{steps}"),
+    )
+    .unwrap();
+    path
+}
+
+/// A repo with one clean workflow and one composite action holding an unpinned ref.
+fn composite_repo(repo_root: &std::path::Path) {
+    let workflows_dir = repo_root.join(".github").join("workflows");
+    fs::create_dir_all(&workflows_dir).unwrap();
+    fs::write(
+        workflows_dir.join("ci.yml"),
+        "name: CI\non: [push]\npermissions:\n  contents: read\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: ./.github/actions/setup\n",
+    )
+    .unwrap();
+    write_composite(repo_root, "setup", "    - uses: actions/checkout@v4\n");
+}
+
+#[test]
+fn lint_unpinned_fires_on_composite_step() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let repo_root = temp_dir.path();
+    composite_repo(repo_root);
+
+    let mut manifest = Manifest::default();
+    manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
+    let lock = Lock::default();
+    let scanner = FileWorkflowScanner::new(repo_root);
+    let lint_config = Lint::default();
+
+    let diagnostics =
+        lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {})
+            .expect("Should succeed");
+
+    let unpinned: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.rule == gx::lint::RuleName::Unpinned)
+        .collect();
+
+    assert_eq!(unpinned.len(), 1, "expected one unpinned diagnostic");
+    let diag = unpinned[0];
+    assert_eq!(
+        diag.workflow.as_ref().map(gx::domain::workflow_actions::WorkflowPath::as_str),
+        Some(".github/actions/setup/action.yml")
+    );
+    assert!(diag.line.is_some(), "diagnostic should carry a source line");
+    assert!(diag.job.is_none(), "composite steps belong to no job");
+}
+
+#[test]
+fn lint_unsynced_manifest_counts_composite_references() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let repo_root = temp_dir.path();
+    composite_repo(repo_root);
+
+    let mut manifest = Manifest::default();
+    manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
+    let lock = Lock::default();
+    let scanner = FileWorkflowScanner::new(repo_root);
+    let lint_config = Lint::default();
+
+    let diagnostics =
+        lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {})
+            .expect("Should succeed");
+
+    let unsynced: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.rule == gx::lint::RuleName::UnsyncedManifest)
+        .collect();
+
+    assert!(
+        unsynced.is_empty(),
+        "action referenced from a composite is not orphaned: {unsynced:?}"
+    );
+}
+
+#[test]
+fn lint_workflow_schema_rules_skip_composite_files() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let repo_root = temp_dir.path();
+    composite_repo(repo_root);
+
+    let manifest = Manifest::default();
+    let lock = Lock::default();
+    let scanner = FileWorkflowScanner::new(repo_root);
+    let lint_config = Lint::default();
+
+    let diagnostics =
+        lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {})
+            .expect("Should succeed");
+
+    let on_composite: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| {
+            d.workflow
+                .as_ref()
+                .is_some_and(|w| w.as_str().contains(".github/actions/"))
+        })
+        .filter(|d| {
+            matches!(
+                d.rule,
+                gx::lint::RuleName::MissingPermissions
+                    | gx::lint::RuleName::ExcessivePermissions
+                    | gx::lint::RuleName::DangerousTrigger
+                    | gx::lint::RuleName::MissingConcurrency
+                    | gx::lint::RuleName::PrHeadCheckout
+                    | gx::lint::RuleName::UnprotectedSecrets
+                    | gx::lint::RuleName::DanglingReference
+                    | gx::lint::RuleName::InvalidExpression
+                    | gx::lint::RuleName::RunShellcheck
+            )
+        })
+        .collect();
+
+    assert!(
+        on_composite.is_empty(),
+        "workflow-schema rules must not fire on composite files: {on_composite:?}"
+    );
+}
+
+#[test]
+fn lint_run_shellcheck_skips_composite_run_bodies() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let repo_root = temp_dir.path();
+    let workflows_dir = repo_root.join(".github").join("workflows");
+    fs::create_dir_all(&workflows_dir).unwrap();
+    // A composite whose run: body has an unquoted expansion shellcheck flags (SC2086).
+    write_composite(
+        repo_root,
+        "setup",
+        "    - shell: bash\n      run: echo $FOO\n",
+    );
+
+    let manifest = Manifest::default();
+    let lock = Lock::default();
+    let scanner = FileWorkflowScanner::new(repo_root);
+    let lint_config = Lint::default();
+
+    let diagnostics =
+        lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {})
+            .expect("Should succeed");
+
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|d| d.rule == gx::lint::RuleName::RunShellcheck),
+        "run-shellcheck is deferred for composite files: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn lint_ignore_scoped_to_composite_file() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let repo_root = temp_dir.path();
+    let workflows_dir = repo_root.join(".github").join("workflows");
+    fs::create_dir_all(&workflows_dir).unwrap();
+    fs::write(
+        workflows_dir.join("ci.yml"),
+        "name: CI\non: [push]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/setup-node@v3\n",
+    )
+    .unwrap();
+    write_composite(repo_root, "setup", "    - uses: actions/checkout@v4\n");
+
+    let mut manifest = Manifest::default();
+    manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
+    manifest.set(
+        ActionId::from("actions/setup-node"),
+        Specifier::from_v1("v3"),
+    );
+    let lock = Lock::default();
+    let scanner = FileWorkflowScanner::new(repo_root);
+
+    let mut lint_config = Lint::default();
+    lint_config.rules.insert(
+        gx::lint::RuleName::Unpinned,
+        gx::config::Rule {
+            level: Level::Error,
+            ignore: vec![gx::config::IgnoreTarget {
+                action: None,
+                workflow: Some(".github/actions/setup/action.yml".to_owned()),
+                job: None,
+            }],
+        },
+    );
+
+    let diagnostics =
+        lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {})
+            .expect("Should succeed");
+
+    let unpinned: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.rule == gx::lint::RuleName::Unpinned)
+        .collect();
+
+    assert_eq!(
+        unpinned.len(),
+        1,
+        "composite ignored, workflow still reported: {unpinned:?}"
+    );
+    assert!(
+        unpinned[0]
+            .workflow
+            .as_ref()
+            .is_some_and(|w| w.as_str().contains("ci.yml"))
+    );
+}
+
+#[test]
+fn lint_ignore_with_job_does_not_match_composite() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let repo_root = temp_dir.path();
+    composite_repo(repo_root);
+
+    let mut manifest = Manifest::default();
+    manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
+    let lock = Lock::default();
+    let scanner = FileWorkflowScanner::new(repo_root);
+
+    let mut lint_config = Lint::default();
+    lint_config.rules.insert(
+        gx::lint::RuleName::Unpinned,
+        gx::config::Rule {
+            level: Level::Error,
+            ignore: vec![gx::config::IgnoreTarget {
+                action: None,
+                workflow: Some(".github/actions/setup/action.yml".to_owned()),
+                job: Some("build".to_owned()),
+            }],
+        },
+    );
+
+    let diagnostics =
+        lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {})
+            .expect("Should succeed");
+
+    assert_eq!(
+        diagnostics
+            .iter()
+            .filter(|d| d.rule == gx::lint::RuleName::Unpinned)
+            .count(),
+        1,
+        "a job-scoped ignore cannot match a composite step (no job)"
+    );
+}
+
+#[test]
+fn lint_diagnostic_order_is_stable_across_runs() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let repo_root = temp_dir.path();
+    let workflows_dir = repo_root.join(".github").join("workflows");
+    fs::create_dir_all(&workflows_dir).unwrap();
+    fs::write(
+        workflows_dir.join("ci.yml"),
+        "name: CI\non: [push]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/setup-node@v3\n",
+    )
+    .unwrap();
+    write_composite(repo_root, "setup", "    - uses: actions/checkout@v4\n");
+    write_composite(repo_root, "build", "    - uses: actions/cache@v3\n");
+
+    let manifest = Manifest::default();
+    let lock = Lock::default();
+    let scanner = FileWorkflowScanner::new(repo_root);
+    let lint_config = Lint::default();
+
+    let key = |ds: &[gx::lint::Diagnostic]| -> Vec<String> {
+        ds.iter()
+            .map(|d| {
+                format!(
+                    "{}|{}|{:?}",
+                    d.rule,
+                    d.workflow.as_ref().map_or("", |w| w.as_str()),
+                    d.step
+                )
+            })
+            .collect()
+    };
+
+    let first =
+        lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {}).unwrap();
+    let second =
+        lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {}).unwrap();
+
+    assert_eq!(key(&first), key(&second), "diagnostic order must be stable");
+}

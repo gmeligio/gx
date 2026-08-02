@@ -10,7 +10,8 @@ mod common;
 
 use common::registries::FakeRegistry;
 use common::setup::{
-    create_test_repo, lock_path, manifest_path, write_lock, write_manifest, write_workflow,
+    create_test_repo, lock_path, manifest_path, write_composite_action, write_lock, write_manifest,
+    write_workflow,
 };
 use gx::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
 use gx::domain::action::resolved::{Commit, ResolvedAction, ResolvedRef};
@@ -477,6 +478,58 @@ fn upgrade_targeted_does_not_repin_branch_ref() {
     assert!(
         updated_workflow.contains(&format!("my-org/my-action@{branch_sha} # main")),
         "Branch ref should not be re-pinned in targeted mode. Got:\n{updated_workflow}"
+    );
+}
+
+#[test]
+fn upgrade_rewrites_pin_inside_composite_action() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = create_test_repo(&temp_dir);
+
+    let old_sha = FakeRegistry::fake_sha("actions/checkout", "v4");
+    let action_path = write_composite_action(
+        &root,
+        "setup",
+        &format!(
+            "name: Setup\nruns:\n  using: composite\n  steps:\n    - uses: actions/checkout@{old_sha} # v4\n"
+        ),
+    );
+
+    let mut manifest = Manifest::default();
+    manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
+
+    let mut lock = Lock::default();
+    lock.set(
+        &ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4")),
+        ResolvedRef::Tag(Version::from("v4")),
+        Commit {
+            sha: CommitSha::from(old_sha.as_str()),
+            repository: Repository::from("actions/checkout"),
+            ref_type: Some(RefType::Tag),
+            date: CommitDate::from(""),
+        },
+    );
+
+    let registry = FakeRegistry::new().with_all_tags("actions/checkout", vec!["v4", "v5"]);
+    let request = UpgradeRequest::new(UpgradeMode::Latest, UpgradeScope::All);
+    let plan = upgrade::plan::plan(&manifest, &lock, &registry, &request, |_| {}).unwrap();
+
+    let updater = WorkflowWriter::new(&root);
+    upgrade::plan::apply_upgrade_workflows(&updater, &plan.lock_changes, &plan.upgrades).unwrap();
+
+    let updated = fs::read_to_string(&action_path).unwrap();
+    let new_sha = FakeRegistry::fake_sha("actions/checkout", "v5");
+    assert!(
+        updated.contains(&format!("actions/checkout@{new_sha} # v5")),
+        "composite action pin should be advanced. Got:\n{updated}"
+    );
+    assert!(
+        updated.contains("    - uses: actions/checkout@"),
+        "indentation and surrounding YAML must be preserved. Got:\n{updated}"
+    );
+    assert!(
+        updated.starts_with("name: Setup\nruns:\n  using: composite\n"),
+        "surrounding YAML must be preserved. Got:\n{updated}"
     );
 }
 

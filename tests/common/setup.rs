@@ -32,6 +32,18 @@ pub fn write_workflow(root: &Path, name: &str, content: &str) {
     f.write_all(content.as_bytes()).unwrap();
 }
 
+/// Write a composite action definition to `.github/actions/{name}/action.yml`,
+/// creating the directory. `name` may contain separators to nest the action
+/// (e.g. `"ci/setup"`).
+pub fn write_composite_action(root: &Path, name: &str, content: &str) -> PathBuf {
+    let dir = root.join(".github").join("actions").join(name);
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("action.yml");
+    let mut f = fs::File::create(&path).unwrap();
+    f.write_all(content.as_bytes()).unwrap();
+    path
+}
+
 /// Path to the manifest file: `.github/gx.toml`.
 pub fn manifest_path(root: &Path) -> PathBuf {
     root.join(".github").join("gx.toml")

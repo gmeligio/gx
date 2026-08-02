@@ -9,7 +9,7 @@
 mod common;
 
 use common::registries::{AuthRequiredRegistry, FakeRegistry};
-use common::setup::{create_empty_manifest, create_test_repo};
+use common::setup::{create_empty_manifest, create_test_repo, write_composite_action};
 use gx::domain::manifest::Manifest;
 use gx::domain::resolution::VersionRegistry;
 use gx::infra::lock::Store as LockStore;
@@ -368,8 +368,57 @@ jobs:
     let manifest_path = root.join(".github").join("gx.toml");
     let manifest_content = fs::read_to_string(&manifest_path).unwrap();
     assert!(manifest_content.contains("actions/checkout"));
+    // Local *references* are skipped. This says nothing about composite action
+    // *files*, which are scanned — see `gx_tidy_keeps_action_used_only_in_composite`.
     assert!(!manifest_content.contains("./local"));
-    assert!(!manifest_content.contains(".github/actions"));
+    assert!(!manifest_content.contains("./.github/actions"));
+}
+
+#[test]
+fn gx_tidy_keeps_action_used_only_in_composite() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = create_test_repo(&temp_dir);
+
+    create_empty_manifest(&root);
+    write_composite_action(
+        &root,
+        "setup",
+        "name: Setup
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+",
+    );
+
+    let registry = FakeRegistry::new().with_all_tags("actions/setup-node", vec!["v4.0.0"]);
+    assert!(run_tidy_with_registry(&root, &registry).is_ok());
+
+    let manifest_content = fs::read_to_string(root.join(".github").join("gx.toml")).unwrap();
+    assert!(
+        manifest_content.contains("actions/setup-node"),
+        "action used only in a composite must not be pruned: {manifest_content}"
+    );
+
+    let lock_content = fs::read_to_string(root.join(".github").join("gx.lock")).unwrap();
+    assert!(lock_content.contains("actions/setup-node"));
+
+    let action_content = fs::read_to_string(
+        root.join(".github")
+            .join("actions")
+            .join("setup")
+            .join("action.yml"),
+    )
+    .unwrap();
+    let expected_sha = FakeRegistry::fake_sha("actions/setup-node", "v4.0.0");
+    assert!(
+        action_content.contains(&format!("actions/setup-node@{expected_sha}")),
+        "composite action must be pinned: {action_content}"
+    );
+    assert!(
+        action_content.contains("# v4.0.0"),
+        "composite pin must carry a version comment: {action_content}"
+    );
 }
 
 #[test]

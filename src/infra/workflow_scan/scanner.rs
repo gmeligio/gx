@@ -294,3 +294,11 @@ impl crate::domain::workflow::Scanner for FileScanner {
 )]
 #[path = "tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[expect(
+    clippy::unwrap_used,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
+#[path = "composite_tests.rs"]
+mod composite_tests;
