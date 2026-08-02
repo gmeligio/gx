@@ -32,7 +32,8 @@ pub struct Report {
     pub skipped: Vec<(String, String)>,
     /// Warnings encountered during upgrade.
     pub warnings: Vec<String>,
-    /// Number of workflow files updated.
+    /// Number of managed files updated — workflows and composite action definitions.
+    /// The name is retained because it is the `--json` field name.
     pub workflows_updated: usize,
     /// True if everything was already up to date.
     pub up_to_date: bool,

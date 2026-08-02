@@ -69,18 +69,26 @@ fn glob_group(dir: &Path, stem: &str, kind: FileKind) -> Result<Vec<ManagedFile>
     Ok(found)
 }
 
-/// Which schema a file follows, inferred from its name. A file named
-/// `action.yml`/`action.yaml` is an action definition; anything else is a workflow.
+/// Which schema a file follows, decided — as discovery decides it — by location: a file
+/// under a `.github/actions` directory is an action definition, anything else a workflow.
 ///
-/// Discovery already knows each file's kind, so this is for the callers that arrive
-/// with a bare path (`scan_file`).
+/// Name alone is not enough. A workflow may legitimately be called
+/// `.github/workflows/action.yml`, and parsing it under the composite schema would find
+/// zero actions and report nothing — the silent miss this change exists to remove.
+///
+/// Discovery already knows each file's kind; this is for callers that arrive with a bare
+/// path (`scan_file`).
 #[must_use]
 pub fn kind_of(path: &Path) -> FileKind {
-    let is_action = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .is_some_and(|n| n == "action.yml" || n == "action.yaml");
-    if is_action {
+    let under_actions = path.ancestors().skip(1).any(|dir| {
+        dir.file_name().and_then(|n| n.to_str()) == Some("actions")
+            && dir
+                .parent()
+                .and_then(Path::file_name)
+                .and_then(|n| n.to_str())
+                == Some(".github")
+    });
+    if under_actions {
         FileKind::ActionDefinition
     } else {
         FileKind::Workflow

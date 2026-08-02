@@ -280,3 +280,50 @@ fn discovery_order_is_deterministic_workflows_before_composites() {
         ]
     );
 }
+
+#[test]
+fn kind_is_decided_by_location_not_file_name() {
+    use super::discovery::kind_of;
+    use crate::domain::workflow_parsed::FileKind;
+
+    // A workflow may legitimately be named action.yml; it is still a workflow.
+    assert_eq!(
+        kind_of(Path::new(".github/workflows/action.yml")),
+        FileKind::Workflow
+    );
+    assert_eq!(
+        kind_of(Path::new(".github/workflows/ci.yml")),
+        FileKind::Workflow
+    );
+    assert_eq!(
+        kind_of(Path::new(".github/actions/setup/action.yml")),
+        FileKind::ActionDefinition
+    );
+    assert_eq!(
+        kind_of(Path::new(".github/actions/ci/setup/action.yaml")),
+        FileKind::ActionDefinition
+    );
+    // An `actions` directory that is not directly under `.github` is not a
+    // discovery root.
+    assert_eq!(
+        kind_of(Path::new("src/actions/setup/action.yml")),
+        FileKind::Workflow
+    );
+}
+
+#[test]
+fn scan_file_reads_a_composite_under_the_right_schema() {
+    let temp_dir = TempDir::new().unwrap();
+    let path = create_test_action_file(
+        temp_dir.path(),
+        "setup/action.yml",
+        &composite("      - uses: actions/checkout@v4\n"),
+    );
+
+    let scanner = FileWorkflowScanner::new(temp_dir.path());
+    let action_set = scanner.scan_file(&path).unwrap();
+
+    let ids: Vec<_> = action_set.action_ids().collect();
+    assert_eq!(ids.len(), 1);
+    assert!(ids.contains(&&ActionId::from("actions/checkout")));
+}
