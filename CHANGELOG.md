@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- *(scan)* gx now manages `uses:` references inside composite actions
+  (`.github/actions/**/action.yml`), not workflows alone
+  ([#150](https://github.com/gmeligio/gx/issues/150)). In a repository with composite
+  actions this changes existing behavior:
+  - `gx tidy` **adds** actions it previously pruned as unreferenced, and rewrites
+    `.github/actions/**/action.yml` files to pin them.
+  - `gx upgrade` advances those pins.
+  - `gx lint` may report new diagnostics (typically `unpinned`) and so may begin exiting
+    non-zero on a repository that passed before. Narrow it with an `ignore` entry naming
+    the file if that is not wanted.
+  - Discovery order is now sorted and deterministic, which changes the order files are
+    listed in output.
+  - The human-readable summary counter reads "files" instead of "workflows"; the `--json`
+    field name is unchanged.
+
 ## [0.8.3](https://github.com/gmeligio/gx/compare/v0.8.2...v0.8.3) - 2026-07-13
 
 ### Added

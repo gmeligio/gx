@@ -60,9 +60,20 @@
 
 ## 9. Docs and verification
 
-- [ ] 9.1 Update `README.md` to state which files gx manages — `.github/workflows/*.yml` and `.github/actions/**/action.yml` — since discovery was previously undocumented and is now a spec contract.
-- [ ] 9.2 Update `docs/lint-rules.md`: describe the `workflow` ignore key as a file path matching either kind (`lint-rules.md:16,118,127`), and note that workflow-schema rules do not fire on composite action files.
-- [ ] 9.3 Update `docs/demo.tape` if the demo repository gains a composite action (its setup block at `demo.tape:11-26` currently creates only `.github/workflows/ci.yml`); if it does not, record that no change was needed and why.
-- [ ] 9.4 Note the behavioral break in the changelog entry: `gx tidy` now adds and rewrites composite-action references it previously pruned, and `gx lint` may report new `unpinned` diagnostics.
-- [ ] 9.5 Run `mise run test`, `mise run clippy:check`, and the code-health gates (`tests/code_health.rs`) — clean.
-- [ ] 9.6 Manually reproduce issue #150's scenario end to end: create a repo with a composite action, run `gx tidy`, confirm the actions are added rather than removed, and record the actual output here.
+- [x] 9.1 Update `README.md` to state which files gx manages — `.github/workflows/*.yml` and `.github/actions/**/action.yml` — since discovery was previously undocumented and is now a spec contract.
+- [x] 9.2 Update `docs/lint-rules.md`: describe the `workflow` ignore key as a file path matching either kind (`lint-rules.md:16,118,127`), and note that workflow-schema rules do not fire on composite action files.
+- [x] 9.3 Update `docs/demo.tape` if the demo repository gains a composite action (its setup block at `demo.tape:11-26` currently creates only `.github/workflows/ci.yml`); if it does not, record that no change was needed and why. — No change made. The demo is a 900x480 frame whose whole message is one `cat` → `gx tidy` → `cat` cycle on a single file. Adding a composite action needs a second file's before/after, which does not fit the frame and dilutes the core demonstration. Discovery is documented in `README.md` instead (task 9.1).
+- [x] 9.4 Note the behavioral break in the changelog entry: `gx tidy` now adds and rewrites composite-action references it previously pruned, and `gx lint` may report new `unpinned` diagnostics.
+- [x] 9.5 Run `mise run test`, `mise run clippy:check`, and the code-health gates (`tests/code_health.rs`) — clean. — 439 unit + 101 integration/code-health tests pass; clippy and rustfmt clean.
+- [x] 9.6 Manually reproduce issue #150's scenario end to end: create a repo with a composite action, run `gx tidy`, confirm the actions are added rather than removed, and record the actual output here. — Verified against the real GitHub API with a repo whose only `uses:` references live in `.github/actions/setup/action.yml`. `gx tidy` reported `✓ Up to date` and **retained** both actions in `gx.toml` (before this change it printed `− actions/checkout`, `− actions/setup-node`, `✓ 2 removed · 0 workflows`), wrote both to `gx.lock`, and pinned the file:
+
+```
+name: Setup
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+    - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+```
+
+`gx lint` on the same repo emitted only a legitimate `missing-concurrency` against `ci.yml` and **no** diagnostics against `action.yml`, confirming the D2 boundary filter (exit 0).

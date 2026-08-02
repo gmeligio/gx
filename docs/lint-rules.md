@@ -20,6 +20,14 @@ Levels are `error` (fail the run), `warn` (report but don't fail), or `off` (ski
 
 The `ignore` list takes intersection semantics: every key you specify must match for the ignore to apply. For workflow-security rules the `action` key is meaningless — diagnostics are scoped to a workflow (and sometimes a job/step), not to an action reference. Omit `action` when ignoring a workflow-security finding; specifying it will cause the ignore not to match.
 
+The `workflow` key holds a **file path** and matches either kind of file gx manages — a workflow (`.github/workflows/ci.yml`) or a composite action definition (`.github/actions/setup/action.yml`). A composite action has no jobs, so an ignore entry that also specifies `job` can never match a finding inside one.
+
+## Which files each family applies to
+
+Action-hygiene rules (`sha-mismatch`, `unpinned`, `stale-comment`, `unsynced-manifest`) evaluate every `uses:` reference gx manages, in workflow files **and** in composite action definitions under `.github/actions`.
+
+Workflow-security and workflow-validity rules evaluate workflow files only. A composite action has no `on:` block, no top-level `permissions:` block, and no jobs, so these rules have nothing to judge there and never report against such a file. `run-shellcheck` is likewise limited to workflow files for now.
+
 ## Action-hygiene rules
 
 ### sha-mismatch *(default: error)*
@@ -125,5 +133,15 @@ To skip a single job within a workflow:
 [lint.rules]
 unprotected-secrets = { level = "error", ignore = [
     { workflow = ".github/workflows/ci.yml", job = "publish" },
+] }
+```
+
+To skip a composite action definition, name its file path — a composite action has no
+jobs, so do not add a `job` key:
+
+```toml
+[lint.rules]
+unpinned = { level = "error", ignore = [
+    { workflow = ".github/actions/setup/action.yml" },
 ] }
 ```
