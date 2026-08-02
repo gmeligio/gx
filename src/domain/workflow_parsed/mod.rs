@@ -1,4 +1,7 @@
-#![expect(clippy::pub_use, reason = "reexport Trigger from extracted submodule")]
+#![expect(
+    clippy::pub_use,
+    reason = "reexport Trigger and Permissions from extracted submodules"
+)]
 
 use super::workflow_actions::WorkflowPath;
 use serde::de::{Deserializer, MapAccess, Visitor};
@@ -8,8 +11,10 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 mod de;
+mod permissions;
 mod trigger;
 
+pub use permissions::{Access, Permissions};
 pub use trigger::Trigger;
 
 use de::deserialize_needs;
@@ -64,84 +69,6 @@ impl<'de> Deserialize<'de> for AnyScalar {
             }
             fn visit_none<E: serde::de::Error>(self) -> Result<AnyScalar, E> {
                 Ok(AnyScalar(String::new()))
-            }
-        }
-        de.deserialize_any(V)
-    }
-}
-
-/// Access level for a single permission scope.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Access {
-    Read,
-    Write,
-    None,
-}
-
-/// A workflow's `permissions:` block, in one of GitHub's three shapes:
-/// `read-all`, `write-all`, or a per-scope map.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Permissions {
-    ReadAll,
-    WriteAll,
-    /// Empty `permissions: {}` — drops all defaults.
-    Empty,
-    Specific(BTreeMap<String, Access>),
-}
-
-impl Permissions {
-    /// True when this block grants anything broader than `contents: read`.
-    #[must_use]
-    pub fn is_excessive(&self) -> bool {
-        match self {
-            Self::WriteAll | Self::ReadAll => true,
-            Self::Empty => false,
-            Self::Specific(map) => map.iter().any(|(scope, access)| {
-                !(scope == "contents" && matches!(access, Access::Read | Access::None))
-            }),
-        }
-    }
-
-    /// True when this block grants any write scope.
-    #[must_use]
-    pub fn has_write(&self) -> bool {
-        match self {
-            Self::WriteAll => true,
-            Self::ReadAll | Self::Empty => false,
-            Self::Specific(map) => map.values().any(|a| matches!(a, Access::Write)),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for Permissions {
-    fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
-        struct V;
-        impl<'de> Visitor<'de> for V {
-            type Value = Permissions;
-
-            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("\"read-all\", \"write-all\", or a per-scope map")
-            }
-
-            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Permissions, E> {
-                match v {
-                    "read-all" => Ok(Permissions::ReadAll),
-                    "write-all" => Ok(Permissions::WriteAll),
-                    other => Err(E::custom(format!("unknown permissions shorthand: {other}"))),
-                }
-            }
-
-            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Permissions, A::Error> {
-                let mut out = BTreeMap::new();
-                while let Some((k, v)) = map.next_entry::<String, Access>()? {
-                    out.insert(k, v);
-                }
-                if out.is_empty() {
-                    Ok(Permissions::Empty)
-                } else {
-                    Ok(Permissions::Specific(out))
-                }
             }
         }
         de.deserialize_any(V)
@@ -347,11 +274,28 @@ impl<'de> Deserialize<'de> for JobSecrets {
     }
 }
 
-/// Top-level workflow parse. Structural fields only — `name`, `defaults`, `env`, `runs-on`
+/// Which GitHub schema a managed file follows. The two hold `uses:` references in
+/// different places — `jobs.<id>.steps` versus `runs.steps` — and only the workflow
+/// schema has `on:`, `permissions:`, and jobs, so the workflow-security and validity
+/// rules apply to it alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileKind {
+    /// A workflow under `.github/workflows`.
+    Workflow,
+    /// An action definition under `.github/actions`.
+    ActionDefinition,
+}
+
+/// Top-level parse of a managed file. Structural fields only — `name`, `env`, `runs-on`
 /// and friends are intentionally not captured.
+///
+/// For an [`FileKind::ActionDefinition`], the workflow-only fields (`on`, `permissions`,
+/// `concurrency`, `defaults`, `jobs`) are always empty; its steps live in `steps`.
 #[derive(Debug, Clone)]
 pub struct Parsed {
     pub path: WorkflowPath,
+    /// Which schema this file follows, decided by its location on disk.
+    pub kind: FileKind,
     pub on: Vec<Trigger>,
     pub permissions: Option<Permissions>,
     pub concurrency: Option<Concurrency>,
@@ -359,6 +303,10 @@ pub struct Parsed {
     /// effective shell (below the step's own `shell:` and the job's `defaults`).
     pub defaults: Option<Defaults>,
     pub jobs: Vec<Job>,
+    /// The steps of a composite action's `runs:` block. Empty for a workflow, and
+    /// empty for an action definition whose `runs.using` is not `composite` —
+    /// a `node20` or `docker` action has no `uses:` steps to manage.
+    pub steps: Vec<Step>,
 }
 
 /// Wire-format struct used only as a serde target. Public surface is `Parsed`.
@@ -379,6 +327,22 @@ struct WireWorkflow {
     /// The workflow's jobs, keyed by job id.
     #[serde(default)]
     jobs: BTreeMap<String, Job>,
+    /// The `runs:` block of an action definition. Absent in a workflow.
+    #[serde(default)]
+    runs: Option<Runs>,
+}
+
+/// The `runs:` block of an action definition. Only the fields needed to decide
+/// whether the file is composite and to reach its steps are captured.
+#[derive(Debug, Deserialize)]
+struct Runs {
+    /// The action's implementation kind: `composite`, `node20`, `docker`, …
+    #[serde(default)]
+    using: Option<String>,
+    /// The composite steps. Present only when `using` is `composite`; a `node20`
+    /// or `docker` action has `main`/`image` instead.
+    #[serde(default)]
+    steps: Vec<Step>,
 }
 
 impl Parsed {
@@ -389,6 +353,22 @@ impl Parsed {
     ///
     /// Returns the underlying `serde_saphyr` error if the YAML cannot be deserialized.
     pub fn from_yaml(path: WorkflowPath, content: &str) -> Result<Self, Box<serde_saphyr::Error>> {
+        Self::parse(path, FileKind::Workflow, content)
+    }
+
+    /// Parse a managed file into structural data. The `kind` is supplied by the caller
+    /// because a workflow and an action definition are distinguished by where the file
+    /// lives, not by its contents — sniffing the YAML shape would misattribute a
+    /// malformed file to the wrong schema.
+    ///
+    /// # Errors
+    ///
+    /// Returns the underlying `serde_saphyr` error if the YAML cannot be deserialized.
+    pub fn parse(
+        path: WorkflowPath,
+        kind: FileKind,
+        content: &str,
+    ) -> Result<Self, Box<serde_saphyr::Error>> {
         let wire: WireWorkflow = serde_saphyr::from_str(content).map_err(Box::new)?;
         let jobs = wire
             .jobs
@@ -398,13 +378,22 @@ impl Parsed {
                 job
             })
             .collect();
+        // Composite steps only. Any other `using` value is a legitimate action with no
+        // `uses:` steps to manage, so it yields an empty list rather than an error.
+        let steps = wire
+            .runs
+            .filter(|runs| runs.using.as_deref() == Some("composite"))
+            .map(|runs| runs.steps)
+            .unwrap_or_default();
         Ok(Self {
             path,
+            kind,
             on: wire.on.unwrap_or_default(),
             permissions: wire.permissions,
             concurrency: wire.concurrency,
             defaults: wire.defaults,
             jobs,
+            steps,
         })
     }
 

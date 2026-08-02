@@ -1006,7 +1006,9 @@ fn lint_unpinned_fires_on_composite_step() {
     assert_eq!(unpinned.len(), 1, "expected one unpinned diagnostic");
     let diag = unpinned[0];
     assert_eq!(
-        diag.workflow.as_ref().map(gx::domain::workflow_actions::WorkflowPath::as_str),
+        diag.workflow
+            .as_ref()
+            .map(gx::domain::workflow_actions::WorkflowPath::as_str),
         Some(".github/actions/setup/action.yml")
     );
     assert!(diag.line.is_some(), "diagnostic should carry a source line");

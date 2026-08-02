@@ -10,10 +10,10 @@
 
 ## 2. Parse the composite schema
 
-- [ ] 2.1 In `src/domain/workflow_parsed/mod.rs`, add a `Runs` wire shape capturing `using: Option<String>` and `steps: Vec<Step>`; reuse the existing `Step` struct unchanged (it already carries `uses`, `run`, `shell`, `with`, `env`).
-- [ ] 2.2 Add a file-kind discriminant to `Parsed` (design D1): `Workflow` carrying the existing `jobs`, vs `CompositeAction` carrying `runs.steps`. `runs.using` values other than `composite` yield a composite kind with an empty step list — not an error (spec: "Only composite actions contribute managed references").
-- [ ] 2.3 Decide the kind from the file path at parse entry (`Parsed::from_yaml` takes the path already), not from YAML shape sniffing — a workflow and an action definition are distinguished by location, and a malformed file must still be attributed to the right schema for its error message.
-- [ ] 2.4 Add unit tests in `src/domain/workflow_parsed/tests.rs`: a `runs.using: composite` document parses to the composite kind with its steps; a workflow document still parses to the workflow kind with its jobs; a `node20` action parses with zero steps.
+- [x] 2.1 In `src/domain/workflow_parsed/mod.rs`, add a `Runs` wire shape capturing `using: Option<String>` and `steps: Vec<Step>`; reuse the existing `Step` struct unchanged (it already carries `uses`, `run`, `shell`, `with`, `env`).
+- [x] 2.2 Add a file-kind discriminant to `Parsed` (design D1): `Workflow` carrying the existing `jobs`, vs `CompositeAction` carrying `runs.steps`. `runs.using` values other than `composite` yield a composite kind with an empty step list — not an error (spec: "Only composite actions contribute managed references").
+- [x] 2.3 Decide the kind from the file path at parse entry (`Parsed::from_yaml` takes the path already), not from YAML shape sniffing — a workflow and an action definition are distinguished by location, and a malformed file must still be attributed to the right schema for its error message.
+- [x] 2.4 Add unit tests in `src/domain/workflow_parsed/tests.rs`: a `runs.using: composite` document parses to the composite kind with its steps; a workflow document still parses to the workflow kind with its jobs; a `node20` action parses with zero steps.
 
 ## 3. Discover and extract composite files
 
