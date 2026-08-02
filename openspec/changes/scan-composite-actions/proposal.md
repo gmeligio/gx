@@ -32,7 +32,11 @@ spec, so this is an ADDED requirement, not only a modification.
 - **BREAKING (behavioral):** `gx tidy` in a repository with composite actions
   will now *add* entries it previously pruned, and `gx tidy`/`gx upgrade` will
   now *rewrite* `.github/actions/**/action.yml` files. Existing `gx lint` runs
-  may report new `unpinned` diagnostics. No file-format change.
+  may report new `unpinned` diagnostics. Discovery order becomes sorted and
+  deterministic, which changes the order files are listed in output for
+  existing repositories too. The human-readable summary noun changes from
+  "workflows" to "files"; the `--json` field name is unchanged. No file-format
+  change.
 - Local references (`uses: ./.github/actions/foo`) and `docker://` references
   continue to be skipped wherever they appear — including inside a composite
   action referencing another composite action.

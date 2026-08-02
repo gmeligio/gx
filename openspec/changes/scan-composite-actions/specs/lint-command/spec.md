@@ -5,9 +5,15 @@
 The system SHALL evaluate the rules that read workflow-schema structure —
 `missing-permissions`, `excessive-permissions`, `dangerous-trigger`,
 `missing-concurrency`, `pr-head-checkout`, `unprotected-secrets`,
-`dangling-reference`, and `invalid-expression` — against workflow files only. A composite action
-definition has no `on:` block, no top-level `permissions:` block, and no jobs;
-these rules SHALL NOT produce diagnostics for such a file.
+`dangling-reference`, `invalid-expression`, and `run-shellcheck` — against
+workflow files only. A composite action definition has no `on:` block, no
+top-level `permissions:` block, and no jobs; these rules SHALL NOT produce
+diagnostics for such a file.
+
+`run-shellcheck` is included because it reaches `run:` bodies through
+workflow-schema structure. Extending it to a composite action's `runs.steps` is
+deferred rather than impossible: that schema has no `defaults:` block, so the
+shell precedence chain the rule depends on needs its own decision first.
 
 **User value:** a maintainer who adopts composite actions gets the new pinning
 coverage without a wall of meaningless diagnostics telling them their
@@ -26,6 +32,40 @@ coverage without a wall of meaningless diagnostics telling them their
 - **THEN** `dangerous-trigger`, `missing-concurrency`, `unprotected-secrets`,
   `pr-head-checkout`, and `dangling-reference` produce no diagnostics for that
   file
+
+#### Scenario: run-shellcheck does not analyze composite run bodies
+- **GIVEN** `.github/actions/setup/action.yml` with `runs.using: composite` and
+  a `run:` step containing a shell issue shellcheck would report
+- **WHEN** the user runs `gx lint` with `run-shellcheck` enabled
+- **THEN** no diagnostic is produced for that file
+- **AND** equivalent `run:` bodies in workflow files are still analyzed
+
+### Requirement: Widened coverage may fail a previously passing repository
+
+gx SHALL NOT suppress diagnostics from newly covered composite action files,
+and SHALL NOT gate the widened coverage behind a flag. A repository that passes
+`gx lint` today MAY therefore begin reporting diagnostics — typically
+`unpinned` — and begin exiting non-zero. A user who wants the previous behavior
+SHALL narrow it explicitly with an `ignore` entry naming the file.
+
+**User value:** the maintainer whose composite actions were never pinned is
+told so. Defaulting to silence to protect a green build would preserve exactly
+the blind spot this change exists to close, and the user could not tell the
+difference between "covered and clean" and "not covered".
+
+#### Scenario: Previously green repository reports newly covered violations
+- **GIVEN** a repository that exits 0 on `gx lint` before this change
+- **AND** `.github/actions/setup/action.yml` references `actions/checkout@v4`
+  unpinned
+- **WHEN** the user runs `gx lint` after upgrading gx
+- **THEN** an `unpinned` diagnostic is produced for that file
+- **AND** the command exits non-zero per the existing error exit-code contract
+
+#### Scenario: User opts out explicitly
+- **GIVEN** the same repository
+- **AND** `unpinned` has `ignore = [{ workflow = ".github/actions/setup/action.yml" }]`
+- **WHEN** the user runs `gx lint`
+- **THEN** no diagnostic is produced for that file
 
 ## MODIFIED Requirements
 

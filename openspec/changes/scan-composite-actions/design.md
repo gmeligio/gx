@@ -136,6 +136,23 @@ already takes explicit paths and needs no change.
 Two discovery implementations that can disagree is the exact failure mode this
 change exists to fix — an action gx knows about but does not rewrite.
 
+**Mechanism:** extract discovery into a free function over `repo_root` that
+both `FileScanner` and `WorkflowWriter` call, rather than injecting a
+`&dyn Scanner` into the writer. Both types already own a `repo_root`
+(`scanner.rs:110`, `workflow_update.rs:31`), so a shared function keeps their
+constructors unchanged and avoids giving the writer a dependency on the
+`Scanner` trait — which must stay object-safe for `src/lint/command.rs:47` and
+gains nothing from a second implementor.
+
+Discovery order SHALL be deterministic: workflow files before composite files,
+each group sorted by path. Today `find_workflow_files` (`scanner.rs:83-95`)
+pushes all `*.yml` then all `*.yaml` in filesystem glob order, so introducing a
+sort is a small behavior change for existing repositories too — it affects the
+order of `UpdateResult`s and therefore the order changes are listed in output.
+Diagnostics are unaffected (they re-sort via `diagnostic_sort_key`,
+`src/lint/command.rs:163`). Determinism is worth the change: it makes output
+diffable across runs and machines.
+
 ### D5: A composite step override is `{ workflow = <path>, step = N }`
 
 **Decision:** relax `src/infra/manifest/convert.rs:115`, which currently errors
@@ -145,6 +162,35 @@ parallel `action_file` key: it is already a free-form path string
 (`src/config.rs:48`), matching is suffix-based (`src/lint/rule.rs:207`), and a
 second key would double the ignore/override vocabulary for no user benefit.
 Docs will describe the key as "the file path", not "the workflow path".
+
+Relaxing the validation is necessary but **not sufficient** — two resolution
+sites must gain a `job: None` branch, or the accepted override would parse
+cleanly and then silently never apply:
+
+- `resolve_version` (`overrides.rs:31-67`) has three tiers, and its
+  workflow-level tier requires `exc.step.is_none()` (`:61`). A
+  `{ workflow, step, job: None }` override therefore matches no tier and falls
+  through to the global default. It SHALL gain a **file+step tier** — workflow
+  matches, `exc.job.is_none()`, `exc.step == location.step` — ordered after the
+  job+step tier and before the workflow-level tier, so a composite step
+  override is more specific than a whole-file override.
+- `prune_stale` (`overrides.rs:135-178`) validates a step only inside
+  `if let (Some(job), Some(step))` (`:162`). A composite override would survive
+  on file-path match alone, outliving the step it names. It SHALL gain the
+  matching `(None, Some(step))` case, checking that a located action exists at
+  that file and step index with `job: None`.
+
+Precedence rationale: file+step is strictly narrower than file-only, and the
+two job-bearing tiers cannot collide with it (a composite location has
+`job: None`, so the job tiers never match), which makes the ordering
+unambiguous rather than merely conventional.
+
+Note that this is not only about hand-written overrides. `sync`
+(`overrides.rs:112-128`) copies `location.job` and `location.step` verbatim
+when one action appears at multiple versions, so once composite locations
+exist, gx will *generate* `{ workflow, step, job: None }` entries itself. The
+relaxed `convert.rs` validation is therefore load-bearing in both directions:
+without it, gx would write a `gx.toml` it then refuses to read back.
 
 **Trade-off accepted:** `workflow = ".github/actions/setup/action.yml"` reads
 slightly off. Renaming the key is a breaking `gx.toml` change and is not worth
@@ -200,7 +246,7 @@ Failure must not be silent — silence is the defect being fixed.
   `uses:` steps to manage. This is the one intentional silence, and it cannot
   hide a managed reference, because those schemas have no step list at all.
 - `gx tidy`/`gx upgrade` counters: the summary today reads `N workflows`
-  (`src/tidy/report.rs:8` `workflows_updated`, surfaced in `--json` per
+  (`src/tidy/report.rs:16` `workflows_updated`, surfaced in `--json` per
   `docs/renovate.md:120`). Composite files rewritten MUST be included in that
   count so a user watching the summary sees the writes happen; the JSON field
   name is retained to avoid a breaking output change, and the human-facing

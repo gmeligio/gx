@@ -87,6 +87,13 @@ manage.
 - **THEN** no actions are discovered from that file
 - **AND** no error or warning is reported
 
+#### Scenario: An action definition with no `using` key contributes nothing
+- **GIVEN** `.github/actions/tool/action.yml` that declares `runs.steps` but
+  omits `runs.using`
+- **WHEN** gx scans the repository
+- **THEN** no actions are discovered from that file
+- **AND** no error or warning is reported
+
 ### Requirement: Local and docker references are skipped in every file kind
 
 gx SHALL skip a `uses:` value beginning with `.` (a local action reference such
@@ -148,3 +155,39 @@ to pin in its own file is the failure this change exists to remove.
 - **WHEN** the user runs `gx tidy`
 - **THEN** the file is rewritten to the resolved SHA with a `# v4...` comment
 - **AND** the count of files updated reported in the summary includes it
+
+### Requirement: The summary counts files, not workflows
+
+The `gx tidy` and `gx upgrade` summary counter SHALL count every file gx
+rewrote, of either kind, and its human-readable label SHALL name files rather
+than workflows. The corresponding `--json` field name SHALL be retained
+unchanged, so existing automation that reads it does not break.
+
+**User value:** a user who rewrote three workflows and one composite action
+sees `4 files`, which matches what changed on disk. `3 workflows` would
+under-report and leave them wondering whether the composite file was written.
+
+#### Scenario: Mixed rewrite is counted and labelled as files
+- **GIVEN** a repository where `gx tidy` rewrites two workflow files and one
+  composite action file
+- **WHEN** the command completes
+- **THEN** the summary reports 3 files updated
+- **AND** the `--json` output reports the same count under its existing field
+  name
+
+### Requirement: Discovery order is deterministic
+
+gx SHALL enumerate discovered files in a stable order that does not depend on
+filesystem enumeration order: workflow files first, then composite action
+files, each group ordered by path.
+
+**User value:** a user comparing `gx tidy --json` output across runs, machines,
+or CI containers sees the same ordering, so a diff reflects real changes rather
+than directory-read order.
+
+#### Scenario: Repeated runs list changes in the same order
+- **GIVEN** a repository with several workflow files and several composite
+  action files, all requiring updates
+- **WHEN** the user runs `gx tidy` twice on unchanged inputs
+- **THEN** the files are reported in the same order both times
+- **AND** workflow files are reported before composite action files
