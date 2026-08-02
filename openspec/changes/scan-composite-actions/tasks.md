@@ -50,9 +50,9 @@
 
 ## 7. Output and reporting
 
-- [ ] 7.1 Add a test asserting a mixed run (two workflows + one composite rewritten) reports 3 in `workflows_updated` (`src/tidy/report.rs:16`), so summaries reflect the writes. Keep the `--json` field name to avoid a breaking output change (`docs/renovate.md:120`).
-- [ ] 7.2 Change the human-facing summary noun from "workflows" to "files" in `src/tidy/report.rs:66` and `src/upgrade/report.rs:118`, and update the two unit-test expectations that pin the old wording (`tidy/report.rs:117` `"… · 2 workflows"`, `upgrade/report.rs:184` `"2 upgraded · 1 workflow"`). Leave the JSON key alone. Backed by the `file-discovery` requirement "The summary counts files, not workflows".
-- [ ] 7.3 Add an assertion to the 1.4 lint test that the rendered line reads `.github/actions/setup/action.yml:<n>:`, confirming `src/output/lines.rs:111-118` needs no change.
+- [x] 7.1 Add a test asserting a mixed run (two workflows + one composite rewritten) reports 3 in `workflows_updated` (`src/tidy/report.rs:16`), so summaries reflect the writes. Keep the `--json` field name to avoid a breaking output change (`docs/renovate.md:120`).
+- [x] 7.2 Change the human-facing summary noun from "workflows" to "files" in `src/tidy/report.rs:66` and `src/upgrade/report.rs:118`, and update the two unit-test expectations that pin the old wording (`tidy/report.rs:117` `"… · 2 workflows"`, `upgrade/report.rs:184` `"2 upgraded · 1 workflow"`). Leave the JSON key alone. Backed by the `file-discovery` requirement "The summary counts files, not workflows".
+- [x] 7.3 Add an assertion to the 1.4 lint test that the rendered line reads `.github/actions/setup/action.yml:<n>:`, confirming `src/output/lines.rs:111-118` needs no change.
 
 ## 8. Re-scope the conflicting existing test
 

@@ -113,9 +113,11 @@ impl CommandReport for Report {
         lines.push(OutputLine::Blank);
 
         let upgrade_count = self.upgrades.len();
+        // "files", not "workflows": the count now covers composite action definitions
+        // too. The `--json` field name is unchanged so automation does not break.
         let wf = self.workflows_updated;
         let summary = format!(
-            "{} upgraded · {} workflow{}",
+            "{} upgraded · {} file{}",
             upgrade_count,
             wf,
             if wf == 1 { "" } else { "s" }
@@ -181,7 +183,7 @@ mod tests {
             to: "v3.6.2".to_owned(),
         }));
         assert!(lines.contains(&OutputLine::Summary {
-            text: "2 upgraded · 1 workflow".to_owned(),
+            text: "2 upgraded · 1 file".to_owned(),
         }));
     }
 
