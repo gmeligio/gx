@@ -50,6 +50,12 @@ pub fn managed_files(repo_root: &Path) -> Result<Vec<ManagedFile>, WorkflowError
 
 /// Glob one discovery root for both YAML extensions. `stem` is the file-name pattern
 /// without extension, and may contain `**/` to recurse.
+///
+/// The `kind` is a property of the root, not of the file name — every hit under
+/// `.github/actions` is an action definition and every hit under `.github/workflows` is
+/// a workflow. This agrees with [`FileKind::of_path`], which is the single owner of that
+/// question for callers arriving with a bare path; `discovery_kind_agrees_with_of_path`
+/// pins the two together.
 fn glob_group(dir: &Path, stem: &str, kind: FileKind) -> Result<Vec<ManagedFile>, WorkflowError> {
     let mut found = Vec::new();
     for extension in &["yml", "yaml"] {
@@ -67,32 +73,6 @@ fn glob_group(dir: &Path, stem: &str, kind: FileKind) -> Result<Vec<ManagedFile>
         }
     }
     Ok(found)
-}
-
-/// Which schema a file follows, decided — as discovery decides it — by location: a file
-/// under a `.github/actions` directory is an action definition, anything else a workflow.
-///
-/// Name alone is not enough. A workflow may legitimately be called
-/// `.github/workflows/action.yml`, and parsing it under the composite schema would find
-/// zero actions and report nothing — the silent miss this change exists to remove.
-///
-/// Discovery already knows each file's kind; this is for callers that arrive with a bare
-/// path (`scan_file`).
-#[must_use]
-pub fn kind_of(path: &Path) -> FileKind {
-    let under_actions = path.ancestors().skip(1).any(|dir| {
-        dir.file_name().and_then(|n| n.to_str()) == Some("actions")
-            && dir
-                .parent()
-                .and_then(Path::file_name)
-                .and_then(|n| n.to_str())
-                == Some(".github")
-    });
-    if under_actions {
-        FileKind::ActionDefinition
-    } else {
-        FileKind::Workflow
-    }
 }
 
 /// The paths of every managed file, in discovery order.

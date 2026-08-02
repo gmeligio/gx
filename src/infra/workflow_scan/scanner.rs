@@ -1,4 +1,4 @@
-use super::discovery::{self, kind_of};
+use super::discovery;
 use crate::domain::action::uses_ref::UsesRef;
 use crate::domain::workflow::Error as WorkflowError;
 use crate::domain::workflow_actions::{JobId, StepIndex, WorkflowPath};
@@ -212,7 +212,8 @@ impl FileScanner {
         workflow_path: &Path,
     ) -> Result<crate::domain::workflow_actions::ActionSet, WorkflowError> {
         let rel = self.rel_path(workflow_path);
-        let (_, actions) = Self::extract_workflow(workflow_path, &rel, kind_of(workflow_path))?;
+        let (_, actions) =
+            Self::extract_workflow(workflow_path, &rel, FileKind::of_path(workflow_path))?;
         let mut action_set = crate::domain::workflow_actions::ActionSet::new();
         for action in &actions {
             action_set.add(&action.uses_ref.interpret());

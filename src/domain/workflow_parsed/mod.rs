@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_saphyr::{Commented, Spanned};
 use std::collections::BTreeMap;
 use std::fmt;
+use std::path::Path;
 
 mod de;
 mod permissions;
@@ -284,6 +285,33 @@ pub enum FileKind {
     Workflow,
     /// An action definition under `.github/actions`.
     ActionDefinition,
+}
+
+impl FileKind {
+    /// Decide a file's schema from its path. This is the **single** place that answers
+    /// the question — every layer that needs a file's kind calls here rather than
+    /// re-deriving it, because the plausible-looking alternatives are wrong.
+    ///
+    /// Kind follows **location**, not file name. A workflow may legitimately be called
+    /// `.github/workflows/action.yml`; reading it under the composite schema would find
+    /// zero actions and report nothing, and accepting a job-less step override for it
+    /// would produce an override that can never apply and is pruned on the next run.
+    #[must_use]
+    pub fn of_path(path: &Path) -> Self {
+        let under_actions = path.ancestors().skip(1).any(|dir| {
+            dir.file_name().and_then(|n| n.to_str()) == Some("actions")
+                && dir
+                    .parent()
+                    .and_then(Path::file_name)
+                    .and_then(|n| n.to_str())
+                    == Some(".github")
+        });
+        if under_actions {
+            Self::ActionDefinition
+        } else {
+            Self::Workflow
+        }
+    }
 }
 
 /// Top-level parse of a managed file. Structural fields only — `name`, `env`, `runs-on`

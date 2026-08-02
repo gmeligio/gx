@@ -163,6 +163,28 @@ fn composite_step_override_without_job_roundtrips() {
 }
 
 #[test]
+fn load_override_step_without_job_is_error_for_workflow_named_action_yml() {
+    // A workflow may legitimately be named `action.yml`. Kind is decided by
+    // location, so this is still a workflow and a bare step is still ambiguous.
+    // Deciding by file name here would accept an override that `resolve_version`
+    // can never apply (a workflow step always has `job: Some`) and that
+    // `prune_stale` then deletes.
+    let content = r#"
+[actions]
+"actions/checkout" = "v4"
+
+[actions.overrides]
+"actions/checkout" = [
+  { workflow = ".github/workflows/action.yml", step = 0, version = "v3" },
+]
+"#;
+    let mut file = NamedTempFile::new().unwrap();
+    file.write_all(content.as_bytes()).unwrap();
+
+    assert!(parse(file.path()).is_err());
+}
+
+#[test]
 fn load_override_step_without_job_is_error() {
     let content = r#"
 [actions]

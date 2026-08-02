@@ -426,3 +426,37 @@ fn action_without_using_key_parses_with_zero_steps() {
 
     assert!(parsed.steps.is_empty());
 }
+
+#[test]
+fn file_kind_follows_location_not_file_name() {
+    use std::path::Path;
+
+    // A workflow may legitimately be named action.yml; it is still a workflow.
+    assert_eq!(
+        FileKind::of_path(Path::new(".github/workflows/action.yml")),
+        FileKind::Workflow
+    );
+    assert_eq!(
+        FileKind::of_path(Path::new(".github/workflows/ci.yml")),
+        FileKind::Workflow
+    );
+    assert_eq!(
+        FileKind::of_path(Path::new(".github/actions/setup/action.yml")),
+        FileKind::ActionDefinition
+    );
+    assert_eq!(
+        FileKind::of_path(Path::new(".github/actions/ci/setup/action.yaml")),
+        FileKind::ActionDefinition
+    );
+    // An `actions` directory that is not directly under `.github` is not a
+    // discovery root.
+    assert_eq!(
+        FileKind::of_path(Path::new("src/actions/setup/action.yml")),
+        FileKind::Workflow
+    );
+    // An action definition named something else is still under .github/actions.
+    assert_eq!(
+        FileKind::of_path(Path::new(".github/actions/setup/steps.yml")),
+        FileKind::ActionDefinition
+    );
+}

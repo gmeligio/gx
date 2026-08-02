@@ -282,36 +282,6 @@ fn discovery_order_is_deterministic_workflows_before_composites() {
 }
 
 #[test]
-fn kind_is_decided_by_location_not_file_name() {
-    use super::discovery::kind_of;
-    use crate::domain::workflow_parsed::FileKind;
-
-    // A workflow may legitimately be named action.yml; it is still a workflow.
-    assert_eq!(
-        kind_of(Path::new(".github/workflows/action.yml")),
-        FileKind::Workflow
-    );
-    assert_eq!(
-        kind_of(Path::new(".github/workflows/ci.yml")),
-        FileKind::Workflow
-    );
-    assert_eq!(
-        kind_of(Path::new(".github/actions/setup/action.yml")),
-        FileKind::ActionDefinition
-    );
-    assert_eq!(
-        kind_of(Path::new(".github/actions/ci/setup/action.yaml")),
-        FileKind::ActionDefinition
-    );
-    // An `actions` directory that is not directly under `.github` is not a
-    // discovery root.
-    assert_eq!(
-        kind_of(Path::new("src/actions/setup/action.yml")),
-        FileKind::Workflow
-    );
-}
-
-#[test]
 fn scan_file_reads_a_composite_under_the_right_schema() {
     let temp_dir = TempDir::new().unwrap();
     let path = create_test_action_file(
@@ -326,4 +296,31 @@ fn scan_file_reads_a_composite_under_the_right_schema() {
     let ids: Vec<_> = action_set.action_ids().collect();
     assert_eq!(ids.len(), 1);
     assert!(ids.contains(&&ActionId::from("actions/checkout")));
+}
+
+#[test]
+fn discovery_kind_agrees_with_of_path() {
+    use crate::domain::workflow_parsed::FileKind;
+
+    let temp_dir = TempDir::new().unwrap();
+    create_test_workflow(temp_dir.path(), "ci.yml", "name: CI");
+    // A workflow named action.yml — the case where a file-name rule would disagree.
+    create_test_workflow(temp_dir.path(), "action.yml", "name: Odd");
+    create_test_action_file(temp_dir.path(), "setup/action.yml", "name: Setup");
+    create_test_action_file(temp_dir.path(), "a/b/action.yaml", "name: Nested");
+
+    let files = super::discovery::managed_files(temp_dir.path()).unwrap();
+    assert_eq!(files.len(), 4);
+
+    // Discovery tags kind by root; `of_path` derives it from the path. If these ever
+    // disagree, some layer is re-deriving the kind with a different rule — the defect
+    // that let a workflow-file override bypass its "step requires job" validation.
+    for file in &files {
+        assert_eq!(
+            file.kind,
+            FileKind::of_path(&file.path),
+            "discovery and FileKind::of_path disagree for {}",
+            file.path.display()
+        );
+    }
 }
