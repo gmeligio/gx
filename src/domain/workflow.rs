@@ -23,9 +23,13 @@ pub struct UpdateResult {
     pub changes: Vec<String>,
 }
 
-/// Trait for scanning workflow files and extracting action references.
+/// Trait for scanning the files gx manages and extracting action references.
+///
+/// "Managed files" are workflows (`.github/workflows`) and composite action definitions
+/// (`.github/actions/**/action.yml`). Both hold `uses:` references, at
+/// `jobs.<id>.steps` and `runs.steps` respectively; a composite step carries no job.
 pub trait Scanner {
-    /// Scan all workflow files, yielding one `LocatedAction` per step.
+    /// Scan all managed files, yielding one `LocatedAction` per step.
     ///
     /// Each item is a `Result` — errors are per-file and do not abort the scan.
     /// The caller decides whether to collect, short-circuit, or continue past errors.
@@ -33,37 +37,38 @@ pub trait Scanner {
         &self,
     ) -> Box<dyn Iterator<Item = Result<crate::domain::workflow_actions::Located, Error>> + '_>;
 
-    /// Enumerate all workflow file paths.
+    /// Enumerate all managed file paths.
     ///
     /// Each item is a `Result` — errors are per-file.
     fn scan_paths(&self) -> Box<dyn Iterator<Item = Result<std::path::PathBuf, Error>> + '_>;
 
-    /// Scan all workflow files and collect into a `Vec`. Fails on the first error.
+    /// Scan all managed files and collect into a `Vec`. Fails on the first error.
     ///
     /// # Errors
     ///
-    /// Returns an error if any workflow file cannot be read or parsed.
+    /// Returns an error if any managed file cannot be read or parsed.
     fn scan_all_located(&self) -> Result<Vec<crate::domain::workflow_actions::Located>, Error> {
         self.scan().collect()
     }
 
-    /// Find all workflow file paths and collect into a `Vec`.
+    /// Find all managed file paths and collect into a `Vec`.
     ///
     /// # Errors
     ///
-    /// Returns an error if the workflow directory cannot be read.
+    /// Returns an error if a discovery directory cannot be read.
     fn find_workflow_paths(&self) -> Result<Vec<std::path::PathBuf>, Error> {
         self.scan_paths().collect()
     }
 
-    /// Parse every workflow once and return both the structural `Parsed` model
+    /// Parse every managed file once and return both the structural `Parsed` model
     /// and the existing `Located` action list. The lint command uses this to
     /// feed both action-hygiene rules and workflow-security rules from a single
-    /// parse pass.
+    /// parse pass. Each `Parsed` carries the schema its file follows, so callers can
+    /// scope schema-specific rules to workflows.
     ///
     /// # Errors
     ///
-    /// Returns an error if any workflow file cannot be read or parsed.
+    /// Returns an error if any managed file cannot be read or parsed.
     fn scan_all_with_parsed(
         &self,
     ) -> Result<

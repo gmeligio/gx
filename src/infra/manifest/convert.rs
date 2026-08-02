@@ -71,6 +71,13 @@ pub struct LintData {
 
 // ---- conversion ----
 
+/// True when an override's `workflow` path names a composite action definition rather
+/// than a workflow. Such a file has no jobs, so a bare `step` is unambiguous there.
+fn is_action_definition(path: &str) -> bool {
+    let file = path.rsplit(['/', '\\']).next().unwrap_or(path);
+    file == "action.yml" || file == "action.yaml"
+}
+
 /// Convert deserialized manifest data into a domain `Manifest`.
 pub fn manifest_from_data(
     data: ManifestData,
@@ -111,8 +118,10 @@ pub fn manifest_from_data(
 
         let mut converted = Vec::new();
         for exc in toml_overrides {
-            // Validation: step without job
-            if exc.step.is_some() && exc.job.is_none() {
+            // Validation: step without job. A workflow step is identified by its job,
+            // so omitting one is ambiguous. A composite action has no jobs at all, so
+            // there its step index alone is the whole address.
+            if exc.step.is_some() && exc.job.is_none() && !is_action_definition(&exc.workflow) {
                 return Err(ManifestError::Validation(format!(
                     "override for \"{}\" in \"{}\" has a step but no job",
                     action_str, exc.workflow

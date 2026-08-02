@@ -41,12 +41,12 @@
 
 ## 6. Manifest override vocabulary
 
-- [ ] 6.1 Add a failing unit test first: an override `{ workflow = ".github/actions/setup/action.yml", step = 0 }` applies to the located action at step 0 of that file. It fails today because `resolve_version`'s workflow-level tier requires `exc.step.is_none()` (`src/domain/manifest/overrides.rs:61`), so the override matches no tier.
-- [ ] 6.2 In `src/infra/manifest/convert.rs:115-120`, relax the "`step` requires `job`" validation so a composite-file override `{ workflow = "…/action.yml", step = N }` is accepted (design D5). Keep the duplicate-scope check (`:123-130`) intact.
-- [ ] 6.3 In `resolve_version` (`overrides.rs:31-67`), add the file+step tier: workflow matches, `exc.job.is_none()`, `exc.step == location.step`. Order it after the job+step tier and before the workflow-level tier. Update the resolution-order doc comment (`:23-29`) from three tiers to four.
-- [ ] 6.4 In `prune_stale` (`overrides.rs:162-171`), add the `(None, Some(step))` case: a composite override survives only while a located action exists at that file and step index with `job: None`. Today it survives on file-path match alone, outliving the step it names.
-- [ ] 6.5 Add unit tests: a composite step override applies (6.1 now passes); a file-level override still wins where no step override matches; a composite override is pruned when the file no longer references that step; a job-bearing override is unaffected by the new tier.
-- [ ] 6.6 Add a round-trip test for `sync`-generated composite overrides: `sync` (`overrides.rs:112-128`) copies `location.job`/`location.step` verbatim, so with composite locations it emits `{ workflow, step, job: None }` itself. Assert such an entry is written by `patch.rs` and read back by `convert.rs` without error — without 6.2, gx would write a manifest it then refuses to parse.
+- [x] 6.1 Add a failing unit test first: an override `{ workflow = ".github/actions/setup/action.yml", step = 0 }` applies to the located action at step 0 of that file. It fails today because `resolve_version`'s workflow-level tier requires `exc.step.is_none()` (`src/domain/manifest/overrides.rs:61`), so the override matches no tier.
+- [x] 6.2 In `src/infra/manifest/convert.rs:115-120`, relax the "`step` requires `job`" validation so a composite-file override `{ workflow = "…/action.yml", step = N }` is accepted (design D5). Keep the duplicate-scope check (`:123-130`) intact.
+- [x] 6.3 In `resolve_version` (`overrides.rs:31-67`), add the file+step tier: workflow matches, `exc.job.is_none()`, `exc.step == location.step`. Order it after the job+step tier and before the workflow-level tier. Update the resolution-order doc comment (`:23-29`) from three tiers to four.
+- [x] 6.4 In `prune_stale` (`overrides.rs:162-171`), add the `(None, Some(step))` case: a composite override survives only while a located action exists at that file and step index with `job: None`. Today it survives on file-path match alone, outliving the step it names.
+- [x] 6.5 Add unit tests: a composite step override applies (6.1 now passes); a file-level override still wins where no step override matches; a composite override is pruned when the file no longer references that step; a job-bearing override is unaffected by the new tier.
+- [x] 6.6 Add a round-trip test for `sync`-generated composite overrides: `sync` (`overrides.rs:112-128`) copies `location.job`/`location.step` verbatim, so with composite locations it emits `{ workflow, step, job: None }` itself. Assert such an entry is written by `patch.rs` and read back by `convert.rs` without error — without 6.2, gx would write a manifest it then refuses to parse.
 
 ## 7. Output and reporting
 

@@ -20,19 +20,24 @@ pub struct ActionOverride {
     pub version: Specifier,
 }
 
-/// Resolve the effective specifier for an action at a given workflow location.
+/// Resolve the effective specifier for an action at a given file location.
 ///
 /// Resolution order (most specific wins):
-/// 1. Step-level override (workflow + job + step)
-/// 2. Job-level override (workflow + job)
-/// 3. Workflow-level override (workflow only)
-/// 4. Global default (returned as `None` — caller falls back to it)
+/// 1. Job-step override (file + job + step)
+/// 2. Job-level override (file + job)
+/// 3. File-step override (file + step, no job) — a composite action's step, which
+///    belongs to no job
+/// 4. File-level override (file only)
+/// 5. Global default (returned as `None` — caller falls back to it)
+///
+/// Tiers 1–2 and tier 3 cannot collide: a composite location has `job: None`, so the
+/// job-bearing tiers never match it, and a workflow location always has a job.
 #[must_use]
 pub fn resolve_version<'ovr>(
     overrides: &'ovr [ActionOverride],
     location: &WorkflowLocation,
 ) -> Option<&'ovr Specifier> {
-    // Step-level: workflow + job + step all match
+    // Job-step: file + job + step all match
     if let (Some(job), Some(step)) = (&location.job, location.step) {
         for exc in overrides {
             if exc.workflow == location.workflow
@@ -44,7 +49,7 @@ pub fn resolve_version<'ovr>(
         }
     }
 
-    // Job-level: workflow + job match, no step in override
+    // Job-level: file + job match, no step in override
     if let Some(job) = &location.job {
         for exc in overrides {
             if exc.workflow == location.workflow
@@ -56,7 +61,19 @@ pub fn resolve_version<'ovr>(
         }
     }
 
-    // Workflow-level: workflow matches, no job/step in override
+    // File-step: file + step match with no job on either side. Narrower than
+    // file-level, so it is checked first.
+    if let Some(step) = location.step
+        && location.job.is_none()
+    {
+        for exc in overrides {
+            if exc.workflow == location.workflow && exc.job.is_none() && exc.step == Some(step) {
+                return Some(&exc.version);
+            }
+        }
+    }
+
+    // File-level: file matches, no job/step in override
     for exc in overrides {
         if exc.workflow == location.workflow && exc.job.is_none() && exc.step.is_none() {
             return Some(&exc.version);
@@ -159,15 +176,32 @@ pub fn prune_stale(
                             return false;
                         }
                     }
-                    if let (Some(job), Some(step)) = (&exc.job, exc.step) {
-                        let step_exists = located.iter().any(|a| {
-                            a.location.workflow == exc.workflow
-                                && a.location.job.as_ref() == Some(job)
-                                && a.location.step == Some(step)
-                        });
-                        if !step_exists {
-                            return false;
+                    match (&exc.job, exc.step) {
+                        (Some(job), Some(step)) => {
+                            let step_exists = located.iter().any(|a| {
+                                a.location.workflow == exc.workflow
+                                    && a.location.job.as_ref() == Some(job)
+                                    && a.location.step == Some(step)
+                            });
+                            if !step_exists {
+                                return false;
+                            }
                         }
+                        // A composite step: no job to match, so validate the step index
+                        // against the job-less locations in this file. Without this the
+                        // override would survive on file-path match alone, outliving the
+                        // step it names.
+                        (None, Some(step)) => {
+                            let step_exists = located.iter().any(|a| {
+                                a.location.workflow == exc.workflow
+                                    && a.location.job.is_none()
+                                    && a.location.step == Some(step)
+                            });
+                            if !step_exists {
+                                return false;
+                            }
+                        }
+                        (_, None) => {}
                     }
                     true
                 })
@@ -472,3 +506,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "overrides_composite_tests.rs"]
+mod composite_tests;

@@ -127,6 +127,42 @@ fn load_override_without_global_is_error() {
 }
 
 #[test]
+fn composite_step_override_without_job_roundtrips() {
+    // A composite action has no jobs, so a bare `step` is its whole address. `sync`
+    // generates these itself from composite locations, so gx must read back what it
+    // writes.
+    let file = NamedTempFile::new().unwrap();
+    let store = Store::new(file.path());
+
+    let mut manifest = Manifest::default();
+    manifest.set(ActionId::from("actions/checkout"), Specifier::parse("^4"));
+    manifest.add_override(
+        ActionId::from("actions/checkout"),
+        ActionOverride {
+            workflow: WorkflowPath::new(".github/actions/setup/action.yml"),
+            job: None,
+            step: Some(StepIndex::from(0_u16)),
+            version: Specifier::parse("^3"),
+        },
+    );
+
+    store.save(&manifest).unwrap();
+
+    // A composite step override must parse back, not be rejected as "step without job".
+    let loaded = parse(file.path()).unwrap();
+    let overrides = loaded
+        .value
+        .overrides_for(&ActionId::from("actions/checkout"));
+    assert_eq!(overrides.len(), 1);
+    assert_eq!(
+        overrides[0].workflow,
+        WorkflowPath::new(".github/actions/setup/action.yml")
+    );
+    assert_eq!(overrides[0].step, Some(StepIndex::from(0_u16)));
+    assert_eq!(overrides[0].job, None);
+}
+
+#[test]
 fn load_override_step_without_job_is_error() {
     let content = r#"
 [actions]
