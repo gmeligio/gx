@@ -140,7 +140,6 @@ Print the chosen `type(scope): subject` before committing, then:
 git add openspec/changes/<n>/
 git diff --cached --quiet || git commit -m "<type>(<scope>): propose <n>"
 ```
-
 **Guardrails**
 - Create ALL artifacts needed for implementation (as defined by schema's `apply.requires`)
 - Always read dependency artifacts before creating a new one
