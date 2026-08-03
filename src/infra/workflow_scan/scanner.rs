@@ -11,14 +11,11 @@ use thiserror::Error;
 // Splits an action reference into `owner/repo` (or path) and its `@ref`.
 static_regex!(USES_RE, r"^([^@\s]+)@([^\s#]+)");
 
-/// Internal I/O errors for workflow operations.
+/// Errors from reading one managed file. Discovery errors are raised in
+/// [`super::discovery`], which owns the globbing.
 #[derive(Debug, Error)]
 enum IoWorkflowError {
-    /// A glob pattern could not be compiled.
-    #[error("glob pattern error")]
-    Glob(#[from] glob::PatternError),
-
-    /// A workflow file could not be read from disk.
+    /// A managed file could not be read from disk.
     #[error("read error: {}", path.display())]
     Read {
         /// The file path that could not be read.
@@ -27,7 +24,7 @@ enum IoWorkflowError {
         source: std::io::Error,
     },
 
-    /// A workflow file could not be parsed as YAML.
+    /// A managed file could not be parsed as YAML.
     #[error("YAML parse error: {}", path.display())]
     Parse {
         /// The file path that could not be parsed.
@@ -35,28 +32,17 @@ enum IoWorkflowError {
         /// The underlying YAML parse error.
         source: Box<serde_saphyr::Error>,
     },
-
-    /// A regex pattern could not be compiled.
-    #[error("regex error")]
-    Regex(#[from] regex::Error),
 }
 
 impl From<IoWorkflowError> for WorkflowError {
     fn from(err: IoWorkflowError) -> Self {
         match err {
-            IoWorkflowError::Glob(e) => WorkflowError::ScanFailed {
-                reason: e.to_string(),
-            },
             IoWorkflowError::Read { path, source } => WorkflowError::ScanFailed {
                 reason: format!("failed to read {}: {}", path.display(), source),
             },
             IoWorkflowError::Parse { path, source } => WorkflowError::ParseFailed {
                 path: path.to_string_lossy().to_string(),
                 reason: source.to_string(),
-            },
-            IoWorkflowError::Regex(e) => WorkflowError::UpdateFailed {
-                path: String::new(),
-                reason: e.to_string(),
             },
         }
     }
@@ -137,12 +123,13 @@ impl FileScanner {
     }
 
     /// Find every managed file in the repository — workflows and action definitions —
-    /// in discovery order.
+    /// in discovery order. Callers outside this module reach this through the
+    /// `Scanner::find_workflow_paths` trait method.
     ///
     /// # Errors
     ///
     /// Returns an error if the glob pattern is invalid.
-    pub fn find_workflows(&self) -> Result<Vec<PathBuf>, WorkflowError> {
+    fn find_managed_paths(&self) -> Result<Vec<PathBuf>, WorkflowError> {
         discovery::managed_paths(&self.repo_root)
     }
 
@@ -267,7 +254,7 @@ impl crate::domain::workflow::Scanner for FileScanner {
     }
 
     fn scan_paths(&self) -> Box<dyn Iterator<Item = Result<PathBuf, WorkflowError>> + '_> {
-        match self.find_workflows() {
+        match self.find_managed_paths() {
             Ok(paths) => Box::new(paths.into_iter().map(Ok)),
             Err(e) => Box::new(std::iter::once(Err(e))),
         }

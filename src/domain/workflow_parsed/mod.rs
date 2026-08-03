@@ -288,14 +288,9 @@ pub enum FileKind {
 }
 
 impl FileKind {
-    /// Decide a file's schema from its path. This is the **single** place that answers
-    /// the question — every layer that needs a file's kind calls here rather than
-    /// re-deriving it, because the plausible-looking alternatives are wrong.
-    ///
-    /// Kind follows **location**, not file name. A workflow may legitimately be called
-    /// `.github/workflows/action.yml`; reading it under the composite schema would find
-    /// zero actions and report nothing, and accepting a job-less step override for it
-    /// would produce an override that can never apply and is pruned on the next run.
+    /// The one place that decides a file's schema. Kind follows location, not file name:
+    /// `.github/workflows/action.yml` is a workflow. Read it as a composite and gx finds
+    /// zero actions and reports nothing.
     #[must_use]
     pub fn of_path(path: &Path) -> Self {
         let under_actions = path.ancestors().skip(1).any(|dir| {

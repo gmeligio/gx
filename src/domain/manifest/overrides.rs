@@ -30,8 +30,8 @@ pub struct ActionOverride {
 /// 4. File-level override (file only)
 /// 5. Global default (returned as `None` — caller falls back to it)
 ///
-/// Tiers 1–2 and tier 3 cannot collide: a composite location has `job: None`, so the
-/// job-bearing tiers never match it, and a workflow location always has a job.
+/// Tiers 1–2 and 3 cannot collide — a composite location has no job, a workflow location
+/// always has one.
 #[must_use]
 pub fn resolve_version<'ovr>(
     overrides: &'ovr [ActionOverride],
@@ -163,47 +163,23 @@ pub fn prune_stale(
         .map(|(id, overrides)| {
             let pruned: Vec<ActionOverride> = overrides
                 .iter()
+                // An override survives only while some scanned location still matches
+                // every field it names. Job and step are matched against the *same*
+                // location, so a composite override — step but no job — is checked
+                // against job-less locations and cannot outlive the step it addresses.
                 .filter(|exc| {
                     if !live_workflows.contains(exc.workflow.as_str()) {
                         return false;
                     }
-                    if let Some(job) = &exc.job {
-                        let job_exists = located.iter().any(|a| {
-                            a.location.workflow == exc.workflow
-                                && a.location.job.as_ref() == Some(job)
-                        });
-                        if !job_exists {
-                            return false;
-                        }
+                    // A file-level override names neither, so the live file is enough.
+                    if exc.job.is_none() && exc.step.is_none() {
+                        return true;
                     }
-                    match (&exc.job, exc.step) {
-                        (Some(job), Some(step)) => {
-                            let step_exists = located.iter().any(|a| {
-                                a.location.workflow == exc.workflow
-                                    && a.location.job.as_ref() == Some(job)
-                                    && a.location.step == Some(step)
-                            });
-                            if !step_exists {
-                                return false;
-                            }
-                        }
-                        // A composite step: no job to match, so validate the step index
-                        // against the job-less locations in this file. Without this the
-                        // override would survive on file-path match alone, outliving the
-                        // step it names.
-                        (None, Some(step)) => {
-                            let step_exists = located.iter().any(|a| {
-                                a.location.workflow == exc.workflow
-                                    && a.location.job.is_none()
-                                    && a.location.step == Some(step)
-                            });
-                            if !step_exists {
-                                return false;
-                            }
-                        }
-                        (_, None) => {}
-                    }
-                    true
+                    located.iter().any(|a| {
+                        a.location.workflow == exc.workflow
+                            && a.location.job == exc.job
+                            && (exc.step.is_none() || a.location.step == exc.step)
+                    })
                 })
                 .cloned()
                 .collect();
@@ -503,6 +479,59 @@ mod tests {
                 .get(&ActionId::from("actions/checkout"))
                 .is_none_or(Vec::is_empty),
             "stale deploy.yml override must be removed"
+        );
+    }
+
+    /// A job-level override outlives its job when the job is renamed or deleted while the
+    /// file stays. The file-path check alone would keep it.
+    #[test]
+    fn prune_stale_removes_job_override_when_job_is_gone() {
+        let mut actions_overrides: HashMap<ActionId, Vec<ActionOverride>> = HashMap::new();
+        actions_overrides.insert(
+            ActionId::from("actions/checkout"),
+            vec![ActionOverride {
+                workflow: WorkflowPath::new(".github/workflows/ci.yml"),
+                job: Some(JobId::from("deleted")),
+                step: None,
+                version: Specifier::from_v1("v3"),
+            }],
+        );
+
+        let mut live = make_located(".github/workflows/ci.yml", "actions/checkout", "v4");
+        live.location = make_loc(".github/workflows/ci.yml", Some("build"), Some(0));
+        prune_stale(&mut actions_overrides, &[live]);
+
+        assert!(
+            actions_overrides
+                .get(&ActionId::from("actions/checkout"))
+                .is_none_or(Vec::is_empty),
+            "override naming a job that no longer exists must be pruned"
+        );
+    }
+
+    /// The same override survives while its job is still present.
+    #[test]
+    fn prune_stale_keeps_job_override_while_job_exists() {
+        let mut actions_overrides: HashMap<ActionId, Vec<ActionOverride>> = HashMap::new();
+        actions_overrides.insert(
+            ActionId::from("actions/checkout"),
+            vec![ActionOverride {
+                workflow: WorkflowPath::new(".github/workflows/ci.yml"),
+                job: Some(JobId::from("build")),
+                step: None,
+                version: Specifier::from_v1("v3"),
+            }],
+        );
+
+        let mut live = make_located(".github/workflows/ci.yml", "actions/checkout", "v4");
+        live.location = make_loc(".github/workflows/ci.yml", Some("build"), Some(0));
+        prune_stale(&mut actions_overrides, &[live]);
+
+        assert_eq!(
+            actions_overrides
+                .get(&ActionId::from("actions/checkout"))
+                .map(Vec::len),
+            Some(1)
         );
     }
 }

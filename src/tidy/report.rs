@@ -63,8 +63,6 @@ impl CommandReport for Report {
         if !self.upgraded.is_empty() {
             parts.push(format!("{} upgraded", self.upgraded.len()));
         }
-        // "files", not "workflows": the count now covers composite action definitions
-        // too. The `--json` field name is unchanged so automation does not break.
         let wf = self.workflows_updated;
         parts.push(format!("{} file{}", wf, if wf == 1 { "" } else { "s" }));
 

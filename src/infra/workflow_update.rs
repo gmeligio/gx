@@ -40,7 +40,7 @@ impl WorkflowWriter {
     /// # Errors
     ///
     /// Returns an error if the glob pattern is invalid.
-    pub fn find_workflows(&self) -> Result<Vec<PathBuf>, WorkflowError> {
+    pub fn find_managed_paths(&self) -> Result<Vec<PathBuf>, WorkflowError> {
         discovery::managed_paths(&self.repo_root)
     }
 
@@ -74,7 +74,7 @@ impl WorkflowWriter {
         pins: &[ResolvedAction],
     ) -> Result<Vec<UpdateResult>, WorkflowError> {
         let actions = Self::pins_to_map(pins);
-        let workflows = self.find_workflows()?;
+        let workflows = self.find_managed_paths()?;
         let mut results = Vec::new();
 
         for workflow in workflows {

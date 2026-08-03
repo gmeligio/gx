@@ -63,13 +63,13 @@ jobs:
 }
 
 #[test]
-fn find_workflows() {
+fn find_managed_paths() {
     let temp_dir = TempDir::new().unwrap();
     create_test_workflow(temp_dir.path(), "ci.yml", "name: CI");
     create_test_workflow(temp_dir.path(), "deploy.yaml", "name: Deploy");
 
     let parser = FileWorkflowScanner::new(temp_dir.path());
-    let workflows = parser.find_workflows().unwrap();
+    let workflows = parser.find_managed_paths().unwrap();
 
     assert_eq!(workflows.len(), 2);
 }

@@ -115,7 +115,11 @@ pub fn manifest_from_data(
             // Validation: step without job. A workflow step is identified by its job,
             // so omitting one is ambiguous. A composite action has no jobs at all, so
             // there its step index alone is the whole address.
-            let kind = FileKind::of_path(Path::new(&exc.workflow));
+            //
+            // Normalize first: the manifest is hand-editable, and `of_path` reads path
+            // components, which a `\` separator would hide.
+            let workflow_path = WorkflowPath::new(exc.workflow.clone());
+            let kind = FileKind::of_path(Path::new(workflow_path.as_str()));
             if exc.step.is_some() && exc.job.is_none() && kind != FileKind::ActionDefinition {
                 return Err(ManifestError::Validation(format!(
                     "override for \"{}\" in \"{}\" has a step but no job",
@@ -146,7 +150,7 @@ pub fn manifest_from_data(
                 .map_err(ManifestError::Validation)?;
 
             converted.push(ActionOverride {
-                workflow: WorkflowPath::new(exc.workflow),
+                workflow: workflow_path,
                 job: exc.job.map(JobId::from),
                 step: step_index,
                 version: specifier,
