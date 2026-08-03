@@ -58,20 +58,7 @@ gx lint         # Check action pinning, security, workflow validity, and run: sh
 gx init         # Create a manifest and lock file from your current workflows
 ```
 
-### Which files gx manages
-
-gx finds `uses:` references in two places:
-
-- `.github/workflows/*.yml` (and `.yaml`) — workflow files
-- `.github/actions/**/action.yml` (and `.yaml`) — composite action definitions, at any
-  nesting depth
-
-Factoring repeated steps into a composite action therefore keeps them pinned, upgraded,
-and linted. Local references (`uses: ./.github/actions/setup`) and `docker://` references
-are skipped — neither has a registry version to manage.
-
-The workflow-security and workflow-validity lint rules apply to workflow files only: a
-composite action has no `on:`, no top-level `permissions:`, and no jobs.
+All of these cover your workflows and any composite actions in `.github/actions`.
 
 ## Already using another tool?
 
