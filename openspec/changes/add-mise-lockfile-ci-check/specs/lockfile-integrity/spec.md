@@ -4,7 +4,7 @@
 
 The project SHALL provide local git hooks (via prek, installed and pinned through mise) that regenerate every tracked lockfile (`Cargo.lock`, `.config/mise.lock`, `.github/gx.lock`) when its inputs change, so a contributor's lockfile is current before the commit lands. When a hook regenerates `.config/mise.lock`, it SHALL re-stage the regenerated file so the commit succeeds on retry without a manual `git add`. When a hook modifies `Cargo.lock` or `.github/gx.lock`, the commit SHALL be blocked so the contributor re-stages the regenerated file. CI SHALL remain the enforcement backstop for commits made without the hooks installed, and SHALL verify `.config/mise.lock` directly rather than deferring to the release pipeline.
 
-**User value:** Contributors get immediate local feedback and an auto-regenerated lock instead of a failed PR discovered later. `Cargo.lock` has a CI backstop (`cargo --locked`) and `.config/mise.lock` has one too (`mise run lock:check`), so drift in either fails the pull request that surfaces it, naming the offending field. `.github/gx.lock` still has no CI check; its writer is gx compiled from this repo's own source, so it has no floating input that could drift independently of a contributor's commit.
+**User value:** Contributors get immediate local feedback and an auto-regenerated lock instead of a failed PR discovered later. `Cargo.lock` has a CI backstop (`cargo --locked`) and `.config/mise.lock` has one too (`mise run lock:check`), so drift in either fails the pull request that surfaces it, naming the offending field, instead of surfacing much later as a release-pipeline abort whose error message points at the wrong cause. The mise check inherits CI's tool-cache state, so it detects drift on the same cold-cache runs that produce it rather than guaranteeing detection on every run. `.github/gx.lock` still has no CI check; its writer is gx compiled from this repo's own source, so it cannot rewrite the lockfile independently of a contributor's commit.
 
 #### Scenario: Cargo.lock is regenerated when Cargo.toml changes
 
@@ -53,8 +53,8 @@ The project SHALL provide local git hooks (via prek, installed and pinned throug
 
 #### Scenario: CI backstops a drifted mise.lock, whatever its origin
 
-- **GIVEN** a `.config/mise.lock` that does not match what `mise install` produces
-- **AND** the drift originated either from a hook-bypassing commit or from CI's own mise binary being newer than the one that wrote the committed lockfile
+- **GIVEN** a `.config/mise.lock` that does not match what `mise install` produces under CI's install conditions
+- **AND** the drift originated either from a hook-bypassing commit or from CI itself, where a cold tool cache makes mise reinstall and rewrite entries that a warm cache leaves untouched
 - **WHEN** CI runs on the pull request
 - **THEN** the `Lockfile` job fails the PR before merge
 - **AND** the failure output includes the diff, naming the field that changed
