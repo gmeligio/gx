@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+#MISE description="Verify .config/mise.lock is unchanged by an install (CI)"
+#MISE depends=["lock"]
+# Verify-by-writing: `mise install --locked` cannot be used here. mise >= 2026.6.0
+# can't write a lock entry for the `core:rust` backend resolved from
+# rust-toolchain.toml, yet `locked = true` *requires* rust to be in the lockfile —
+# the catch-22 documented in .config/mise.toml. So the only way to check the
+# lockfile is to let `lock` rewrite it and assert nothing moved.
+#
+# Scoped to the lockfile (not a bare `git status`) so unrelated writes by other
+# tooling don't trip it. --exit-code prints the patch, naming the field that
+# changed — the detail the release-pipeline abort hides.
+#
+# Note this reports what `lock` *left behind*, not what it found: entries mise
+# regenerates from its own install state are repaired by `lock` and never
+# reported. What survives to here is drift mise won't reconcile — the CI case,
+# where a cold cache makes mise write entries the committed file doesn't have.
+git diff --exit-code -- .config/mise.lock

@@ -35,8 +35,8 @@ repos:
             language: system
           - id: mise-lockfile
             name: mise Lockfile
-            description: Regenerate .config/mise.lock (e.g. after a mise binary upgrade). Never uses --locked (core:rust catch-22).
-            entry: mise install
+            description: Regenerate .config/mise.lock (e.g. after a mise binary upgrade) via the mise task (single source of truth) and re-stage. Never uses --locked (core:rust catch-22).
+            entry: bash -c 'mise run lock && git add -u'
             pass_filenames: false
             always_run: true
             language: system

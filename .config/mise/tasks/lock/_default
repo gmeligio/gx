@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+#MISE description="Sync .config/mise.lock with the installed tools"
+# Don't rename: the `_default` filename is what gives this the bare `lock` name.
+#
+# `mise lock`, not `mise install`: install only writes entries as a side effect of
+# installing, so it reports "all tools are installed" and leaves a wrong checksum
+# in place. `mise lock` refreshes checksums and URLs for every locked platform, so
+# it actually reconciles the file — which is what makes re-staging it safe.
+mise lock

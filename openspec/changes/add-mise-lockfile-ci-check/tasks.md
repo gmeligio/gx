@@ -1,15 +1,15 @@
 ## 1. Lock task pair
 
-- [ ] 1.1 Create `.config/mise/tasks/lock/_default` running `mise install`, with `#MISE description="Sync .config/mise.lock with the installed tools"` and a `Don't rename` comment matching the convention in `clippy/_default` and `format/_default`
-- [ ] 1.2 Create `.config/mise/tasks/lock/check` running the mutating task then `git diff --exit-code -- .config/mise.lock`, with `#MISE description="Verify .config/mise.lock is unchanged by an install (CI)"`
-- [ ] 1.3 Comment in `lock/check` why it cannot use `--locked` (the `core:rust` / `locked = false` catch-22 documented in `.config/mise.toml`), so the next reader does not "simplify" it into a broken form
-- [ ] 1.4 Verify `mise tasks` lists both `lock` and `lock:check` with their descriptions
+- [x] 1.1 Create `.config/mise/tasks/lock/_default` running `mise install`, with `#MISE description="Sync .config/mise.lock with the installed tools"` and a `Don't rename` comment matching the convention in `clippy/_default` and `format/_default`
+- [x] 1.2 Create `.config/mise/tasks/lock/check` running the mutating task then `git diff --exit-code -- .config/mise.lock`, with `#MISE description="Verify .config/mise.lock is unchanged by an install (CI)"`
+- [x] 1.3 Comment in `lock/check` why it cannot use `--locked` (the `core:rust` / `locked = false` catch-22 documented in `.config/mise.toml`), so the next reader does not "simplify" it into a broken form
+- [x] 1.4 Verify `mise tasks` lists both `lock` and `lock:check` with their descriptions
 
 ## 2. Local hook
 
-- [ ] 2.1 Change the `mise-lockfile` hook entry in `.pre-commit-config.yaml` to `bash -c 'mise run lock && git add -u'`
-- [ ] 2.2 Update that hook's description: it now re-stages rather than blocking, and it delegates to the mise task rather than calling `mise install` inline
-- [ ] 2.3 Confirm the hook no longer invokes `mise install` directly, satisfying the "no inline check commands" requirement
+- [x] 2.1 Change the `mise-lockfile` hook entry in `.pre-commit-config.yaml` to `bash -c 'mise run lock && git add -u'`
+- [x] 2.2 Update that hook's description: it now re-stages rather than blocking, and it delegates to the mise task rather than calling `mise install` inline
+- [x] 2.3 Confirm the hook no longer invokes `mise install` directly, satisfying the "no inline check commands" requirement
 
 ## 3. CI and local gate
 
