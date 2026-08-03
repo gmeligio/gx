@@ -40,14 +40,22 @@ Rejected: adjusting the existing naming pattern for simplicity. It is one hop fr
 
 `lock/` has no naming hazard: it is a new directory, and `lock/_default` yields the bare `lock` name (the file-based convention established in #103).
 
-**Decision 2: `lock:check` re-runs `mise install` rather than assuming mise-action already did.**
-The task is then self-contained and runnable locally without depending on a prior step, satisfying "every environment invokes it identically". The redundant install in CI is a warm no-op (verified), costing seconds.
+**Decision 2: `lock:check` must NOT run the mutating task first.**
+The obvious construction — `depends=["lock"]`, then diff — cannot ever fail. `mise lock` is *convergent*: it drives any input to the same correct output, so it repairs the drift before `git diff` compares, and the diff is always empty. Verified against six drift kinds (appended line, tampered checksum, deleted platform entry, bumped version, removed `url_api`, read-only/offline) — all exited 0. A check that cannot fail is worse than no check, because it looks like coverage.
+
+So `lock:check` is a bare `git diff --exit-code -- .config/mise.lock`. The suspect content must reach the diff untouched. In CI that content is mise-action's own `mise install` write, which runs before this step — precisely the CI-originated drift this exists to catch. The cost is that the task is not self-contained: it verifies whatever the environment last wrote rather than deriving the expected state itself. That is inherent to verifying a convergent writer without a validate-only mode (`mise lock --dry-run` reports but always exits 0, so it cannot serve).
 
 **Decision 3: scope the diff to `.config/mise.lock`, and let it print.**
 `git diff --exit-code -- .config/mise.lock` rather than a bare `git status` check: a bare check would trip on incidental writes from other tooling and reproduce exactly the misleading signal release-plz gives today. `--exit-code` prints the patch by default, naming the field mise started writing — the thing that required separate investigation at #66 and #112.
 
-**Decision 4: the local hook auto-fixes and re-stages; CI verifies.**
-`mise install` already repairs the file, so the hook only lacked `git add -u`. Adding it makes the hook consistent with its three siblings. This contradicts the current `lockfile-integrity` requirement that a hook-modified lockfile blocks the commit, so that requirement is amended for `.config/mise.lock` rather than silently violated. Note the honest limit: prek still reports `Failed` on the run that fixes things — "auto-fix" means one-shot repair with the fix staged, not an invisible commit. That is exactly how `cargo-fmt` behaves today.
+**Decision 4: the local hook repairs with `mise lock`, then re-stages; CI verifies.**
+`mise install` is *not* a lockfile repairer — it writes entries only as a side effect of installing, so against a tampered checksum it reports "all tools are installed" and leaves the bad value in place. Pairing that with `git add -u` would silently stage a falsified supply-chain checksum, which is strictly worse than the failure this change set out to fix. Verified: injected checksum survived `mise install` and was staged.
+
+`mise lock` ("Update lockfile checksums and URLs for all specified platforms") genuinely reconciles the file, which is what makes re-staging safe. Verified: the same injected checksum is repaired, and the corrected content is what gets staged. The hook is therefore `mise run lock && git add -u`, consistent with its three siblings.
+
+This contradicts the current `lockfile-integrity` requirement that a hook-modified lockfile blocks the commit, so that requirement is amended for `.config/mise.lock` rather than silently violated. Note the honest limit: prek still reports `Failed` on the run that fixes things — "auto-fix" means one-shot repair with the fix staged, not an invisible commit. That is exactly how `cargo-fmt` behaves today.
+
+The same convergence that makes `mise lock` right here is what makes it wrong inside `lock:check` (Decision 2). Repair and detection have opposite requirements, so they use different commands.
 
 **Decision 5: reverse Decision 5 of `2026-06-06-add-prek-lockfile-hooks`.**
 That decision deliberately omitted this CI job ("it was the reverted 'Lockfiles' job … deliberately not re-added") on the reasoning that the only route to CI drift is a bypassed or un-installed local hook, implausible for a solo, always-bootstrapped repo. The premise held; the gap bit anyway through a route it did not consider — **drift originating in CI's own install conditions**, not in a contributor's commit. The hooks were installed and the committed lockfile was correct; what varied was whether CI's mise cache hit. No hook installation could have prevented that, because nothing about the commit was wrong. The decision is reversed on new evidence, not overruled.
@@ -58,7 +66,8 @@ That decision deliberately omitted this CI job ("it was the reverted 'Lockfiles'
 ## Risks / Trade-offs
 
 - **A cache miss turns an unrelated PR red** → The gate fires on whichever PR first runs with a cold mise cache after the lockfile stops being a fixed point; that author neither caused nor can cleanly fix it. Mitigated by the local auto-fix making the remedy mechanical (`mise run lock`, commit) and by the printed diff naming the field. Note this is the failure surfacing, not the gate creating it — today the same drift reaches the release pipeline instead, where it is both later and harder to read.
-- **The redundant `mise install` in `lock:check`** → Warm no-op, seconds; buys a self-contained task. Accepted.
+- **`lock:check` verifies the environment's last write, not a derived expectation** → It cannot distinguish "nobody wrote" from "a write produced no change", so in an environment where no install ran it passes vacuously. Accepted: in CI, mise-action always runs `mise install` first, and locally the pre-commit hook has already reconciled the file. The alternative — reconstructing expected state in a temp copy — costs more logic than any other task in this repo for a case the hook already covers.
+- **The check may never fire in practice** → If the hook does its job, `main` stays a fixed point and the job stays green. A permanently-green check earns trust it hasn't tested. Accepted as regression protection for the paths the hook cannot cover: commits made with `-n`, clones where `prek install` never ran, bad merge resolutions, and CI installs that write something local `mise lock` does not.
 - **Ninth parallel job** → No change to serial critical path; ~30s wall-clock, in parallel with 8 existing jobs.
 - **The auto-restage weakens the "contributor sees the regenerated lock" signal** → prek still reports `Failed` and names the hook, so the regeneration remains visible; only the manual `git add` disappears.
 - **The gate is only as cold as CI's cache** → `lock:check` runs after `mise-action`, so on a cache hit it verifies a warm install and cannot surface cold-install-only drift. It would therefore have passed on the two runs that followed the failure. This is a real coverage limit, accepted: the gate still catches the drift on the same cache-miss runs that trigger it, which is where the release pipeline catches it today — only sooner and with a readable diff.

@@ -29,7 +29,9 @@ Every project check (format, clippy, supply-chain/deny, lockfile tidy, lockfile 
 
 ### Requirement: Local and pre-commit mutate; CI verifies
 
-Checks that can fix their target (format, clippy, lockfile sync) SHALL mutate in the local and pre-commit environments and SHALL be verified non-mutating in CI. The mutating task and its `:check` verification variant SHALL share the same configuration (same `rustfmt.toml`, same `--all` scope, same lint set, same lockfile settings) so that only the verb differs. CI SHALL NOT modify the working tree. A `:check` variant whose underlying tool can only verify by writing SHALL run the mutating command and then assert the target is unchanged, failing with the resulting diff.
+Checks that can fix their target (format, clippy, lockfile sync) SHALL mutate in the local and pre-commit environments and SHALL be verified non-mutating in CI. The mutating task and its `:check` verification variant SHALL share the same configuration (same `rustfmt.toml`, same `--all` scope, same lint set, same lockfile settings) so that only the verb differs. CI SHALL NOT modify the working tree.
+
+A `:check` variant for a *convergent* writer — one that drives any input to the same correct output, such as `mise lock` — SHALL NOT invoke the mutating task before verifying, because doing so repairs the drift it exists to detect and the check can never fail. Such a variant SHALL verify the content the environment already produced.
 
 **User value:** A contributor's commit is auto-formatted and its lockfiles auto-synced in one shot instead of being told they are wrong; CI gates the immutable pushed commit and never silently rewrites contributor code. Because the mutate and verify variants share one configuration, they cannot disagree on what "correct" means.
 
@@ -48,13 +50,20 @@ Checks that can fix their target (format, clippy, lockfile sync) SHALL mutate in
 - **AND** a violation fails the job loudly with a diff/error
 - **AND** the working tree is never modified by CI
 
-#### Scenario: A write-only tool is verified by asserting no change
+#### Scenario: A convergent writer is verified without re-running it
 
-- **GIVEN** a check whose tool cannot verify without writing (`mise install`, which must write the lockfile because `locked = false` is required by the `core:rust` backend)
-- **WHEN** its `:check` variant runs in CI
-- **THEN** it runs the mutating task and then asserts the target file is unchanged
+- **GIVEN** a check whose tool has no validate-only mode and repairs whatever it is given (`mise lock`; `--dry-run` reports but always exits 0)
+- **WHEN** its `:check` variant runs
+- **THEN** it asserts the target file is unchanged without first invoking the mutating task
 - **AND** a difference fails the job with the diff printed, naming the field that changed
 - **AND** the assertion is scoped to that lockfile, so unrelated writes by other tooling do not trip it
+
+#### Scenario: The mutating task repairs rather than merely writing
+
+- **GIVEN** the lockfile-sync task and a `.config/mise.lock` containing an incorrect checksum
+- **WHEN** the pre-commit hook runs the mutating task
+- **THEN** the task reconciles the incorrect value rather than leaving it in place
+- **AND** the corrected content is what gets re-staged, so a repair can never stage falsified checksums
 
 ### Requirement: CI reports check failures per check
 

@@ -27,6 +27,6 @@
 
 ## 5. Update specs
 
-- [ ] 5.1 Apply the `lockfile-integrity` delta to `openspec/specs/lockfile-integrity/spec.md`
-- [ ] 5.2 Apply the `task-execution-consistency` delta to `openspec/specs/task-execution-consistency/spec.md`
-- [ ] 5.3 Add a note to `openspec/changes/archive/2026-06-06-add-prek-lockfile-hooks/design.md` Decision 5 recording that it was reversed, and why (drift originating in CI's own install conditions, not from a bypassed hook), so the reversal is discoverable from where the original decision is documented
+- [x] 5.1 `lockfile-integrity` delta written; `openspec archive` applies it to `openspec/specs/lockfile-integrity/spec.md` (applying it by hand here would double-apply at archive time)
+- [x] 5.2 `task-execution-consistency` delta written; `openspec archive` applies it to `openspec/specs/task-execution-consistency/spec.md`
+- [x] 5.3 Add a note to `openspec/changes/archive/2026-06-06-add-prek-lockfile-hooks/design.md` Decision 5 recording that it was reversed, and why (drift originating in CI's own install conditions, not from a bypassed hook), so the reversal is discoverable from where the original decision is documented
