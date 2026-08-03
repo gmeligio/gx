@@ -8,11 +8,11 @@
 
 ## 2. Define the new types
 
-- [ ] 2.1 Add `Slot` with variants `WorkflowStep { job, step }`, `CompositeStep { step }`, `WorkflowJob { job }`
-- [ ] 2.2 Add `SiteId { file: WorkflowPath, slot: Slot }` deriving `Hash + PartialEq + Eq + Clone + Debug`
-- [ ] 2.3 Add `Origin { line: Option<u32> }`
-- [ ] 2.4 Unit test: two `SiteId`s equal under differing `Origin.line` compare AND hash equal — the invariant `Location` could not state
-- [ ] 2.5 Unit test: `Slot` construction from each schema — workflow step yields `WorkflowStep`, composite step yields `CompositeStep`
+- [x] 2.1 Add `Slot` with variants `WorkflowStep { job, step }`, `CompositeStep { step }`, `WorkflowJob { job }`
+- [x] 2.2 Add `SiteId { file: WorkflowPath, slot: Slot }` deriving `Hash + PartialEq + Eq + Clone + Debug`
+- [x] 2.3 Add `Origin { line: Option<u32> }`
+- [x] 2.4 Unit test: two `SiteId`s equal under differing `Origin.line` compare AND hash equal — the invariant `Location` could not state
+- [x] 2.5 Unit test: `Slot` construction from each schema — workflow step yields `WorkflowStep`, composite step yields `CompositeStep`
 
 ## 3. Switch `Located` over
 

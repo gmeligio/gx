@@ -107,3 +107,143 @@ impl std::fmt::Display for StepIndex {
         write!(f, "{}", self.0)
     }
 }
+
+/// Where within a file a reference sits.
+///
+/// Replaces an earlier `(Option<JobId>, Option<StepIndex>)` pair, two of whose four
+/// representable combinations the scanner never produced. The composite case was
+/// distinguished by `job.is_none() && step.is_some()`; that rule now holds by
+/// construction rather than by convention, so the tiers of override resolution cannot
+/// collide.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Slot {
+    /// A step of a workflow job: `jobs.<job>.steps[<step>]`.
+    WorkflowStep {
+        /// The job the step belongs to.
+        job: JobId,
+        /// 0-based index within that job's steps.
+        step: StepIndex,
+    },
+    /// A step of a composite action: `runs.steps[<step>]`. A composite action has no
+    /// jobs, so there is no job id to carry — gx does not fabricate one.
+    CompositeStep {
+        /// 0-based index within `runs.steps`.
+        step: StepIndex,
+    },
+    /// A job-level `uses:` — a reusable-workflow call, which has no step index.
+    WorkflowJob {
+        /// The job holding the `uses:`.
+        job: JobId,
+    },
+}
+
+/// The identity of a reference site: which file, and where within it.
+///
+/// This is what user configuration addresses and what override resolution matches on.
+/// It deliberately carries no provenance — see [`Origin`] — so that two references to
+/// the same site compare and hash equal regardless of where they were read from.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SiteId {
+    /// Relative path from repo root, e.g. `.github/workflows/ci.yml`.
+    pub file: WorkflowPath,
+    /// Position within that file.
+    pub slot: Slot,
+}
+
+/// Where a reference was read from, for reporting.
+///
+/// Separate from [`SiteId`] because provenance must never participate in matching: an
+/// override written by hand has no line number, and would otherwise fail to match the
+/// same site discovered by a parse.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Origin {
+    /// 1-based source line of the `uses:` scalar, when known. `None` for sites
+    /// synthesized outside a parse (e.g. manifest-derived entries).
+    pub line: Option<u32>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{JobId, Origin, SiteId, Slot, StepIndex, WorkflowPath};
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher as _};
+
+    fn hash_of<T: Hash>(value: &T) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        value.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    fn workflow_site() -> SiteId {
+        SiteId {
+            file: WorkflowPath::new(".github/workflows/ci.yml"),
+            slot: Slot::WorkflowStep {
+                job: JobId::from("build"),
+                step: StepIndex::from(0),
+            },
+        }
+    }
+
+    /// The invariant the previous `Location` could not state: identity is independent of
+    /// provenance. `Location` derived `Eq` but not `Hash` precisely because its `line`
+    /// field would have poisoned it.
+    #[test]
+    fn identity_is_independent_of_origin() {
+        let (a, b) = (workflow_site(), workflow_site());
+        let (origin_a, origin_b) = (Origin { line: Some(12) }, Origin { line: Some(40) });
+
+        assert_eq!(a, b, "same site must compare equal");
+        assert_eq!(hash_of(&a), hash_of(&b), "same site must hash equal");
+        assert_ne!(
+            origin_a, origin_b,
+            "differing provenance is still observable, just not part of identity"
+        );
+    }
+
+    #[test]
+    fn sites_in_different_files_are_distinct() {
+        let mut other = workflow_site();
+        other.file = WorkflowPath::new(".github/workflows/release.yml");
+        assert_ne!(workflow_site(), other);
+    }
+
+    /// A composite step and a workflow step at the same index are different addresses.
+    /// Under the previous `Option` pair both were `step: Some(0)`, distinguished only by
+    /// `job` being `None`.
+    #[test]
+    fn composite_step_is_distinct_from_workflow_step() {
+        let composite = SiteId {
+            file: WorkflowPath::new(".github/actions/setup/action.yml"),
+            slot: Slot::CompositeStep {
+                step: StepIndex::from(0),
+            },
+        };
+        let workflow = SiteId {
+            file: WorkflowPath::new(".github/actions/setup/action.yml"),
+            slot: Slot::WorkflowStep {
+                job: JobId::from("build"),
+                step: StepIndex::from(0),
+            },
+        };
+        assert_ne!(composite, workflow);
+    }
+
+    #[test]
+    fn job_level_uses_has_no_step() {
+        let job_level = Slot::WorkflowJob {
+            job: JobId::from("release"),
+        };
+        assert_ne!(
+            job_level,
+            Slot::WorkflowStep {
+                job: JobId::from("release"),
+                step: StepIndex::from(0),
+            }
+        );
+    }
+
+    #[test]
+    fn origin_defaults_to_no_line() {
+        assert_eq!(Origin::default().line, None);
+    }
+}
