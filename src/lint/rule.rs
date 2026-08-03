@@ -147,9 +147,16 @@ pub struct Context<'ctx> {
     pub lock: &'ctx Lock,
     /// All located actions from scanned workflows.
     pub workflows: &'ctx [LocatedAction],
-    /// Structural per-workflow parses, consumed by the workflow-security rules.
-    /// Action-hygiene rules (sha-mismatch, unpinned, stale-comment, unsynced-manifest)
-    /// continue to use `workflows`; this field is empty when no workflows were scanned.
+    /// Structural per-workflow parses, consumed by the workflow-security and
+    /// workflow-validity rules.
+    ///
+    /// **Invariant: workflow files only.** Composite action definitions are filtered out
+    /// before this is built, because they have no `on:`, no top-level `permissions:`, and
+    /// no jobs — every rule reading this field would misjudge them. Their `uses:`
+    /// references still reach the action-hygiene rules (sha-mismatch, unpinned,
+    /// stale-comment, unsynced-manifest) through `workflows` and `action_set`.
+    ///
+    /// Empty when no workflows were scanned.
     pub workflows_full: &'ctx [ParsedWorkflow],
     /// Aggregated action set from all workflows.
     pub action_set: &'ctx WorkflowActionSet,

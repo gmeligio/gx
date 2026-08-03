@@ -1,4 +1,6 @@
-#![expect(
+// `allow`, not `expect`: usage varies per integration-test crate, so in a crate
+// that happens to use every item the expectation would itself be unfulfilled.
+#![allow(
     dead_code,
     reason = "shared test helpers: not every integration test crate uses every item"
 )]

@@ -1,9 +1,9 @@
+use super::discovery;
 use crate::domain::action::uses_ref::UsesRef;
 use crate::domain::workflow::Error as WorkflowError;
 use crate::domain::workflow_actions::{JobId, StepIndex, WorkflowPath};
-use crate::domain::workflow_parsed::Parsed;
+use crate::domain::workflow_parsed::{FileKind, Parsed, Step};
 use crate::regex::static_regex;
-use glob::glob;
 use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -11,14 +11,11 @@ use thiserror::Error;
 // Splits an action reference into `owner/repo` (or path) and its `@ref`.
 static_regex!(USES_RE, r"^([^@\s]+)@([^\s#]+)");
 
-/// Internal I/O errors for workflow operations.
+/// Errors from reading one managed file. Discovery errors are raised in
+/// [`super::discovery`], which owns the globbing.
 #[derive(Debug, Error)]
 enum IoWorkflowError {
-    /// A glob pattern could not be compiled.
-    #[error("glob pattern error")]
-    Glob(#[from] glob::PatternError),
-
-    /// A workflow file could not be read from disk.
+    /// A managed file could not be read from disk.
     #[error("read error: {}", path.display())]
     Read {
         /// The file path that could not be read.
@@ -27,7 +24,7 @@ enum IoWorkflowError {
         source: std::io::Error,
     },
 
-    /// A workflow file could not be parsed as YAML.
+    /// A managed file could not be parsed as YAML.
     #[error("YAML parse error: {}", path.display())]
     Parse {
         /// The file path that could not be parsed.
@@ -35,18 +32,11 @@ enum IoWorkflowError {
         /// The underlying YAML parse error.
         source: Box<serde_saphyr::Error>,
     },
-
-    /// A regex pattern could not be compiled.
-    #[error("regex error")]
-    Regex(#[from] regex::Error),
 }
 
 impl From<IoWorkflowError> for WorkflowError {
     fn from(err: IoWorkflowError) -> Self {
         match err {
-            IoWorkflowError::Glob(e) => WorkflowError::ScanFailed {
-                reason: e.to_string(),
-            },
             IoWorkflowError::Read { path, source } => WorkflowError::ScanFailed {
                 reason: format!("failed to read {}: {}", path.display(), source),
             },
@@ -54,55 +44,63 @@ impl From<IoWorkflowError> for WorkflowError {
                 path: path.to_string_lossy().to_string(),
                 reason: source.to_string(),
             },
-            IoWorkflowError::Regex(e) => WorkflowError::UpdateFailed {
-                path: String::new(),
-                reason: e.to_string(),
-            },
         }
     }
 }
 
-/// Action data extracted from a workflow file.
+/// Action data extracted from a managed file.
 /// Call `uses_ref.interpret()` to get domain types.
 #[derive(Debug, Clone)]
 struct ExtractedAction {
-    /// The parsed `uses:` reference from the workflow step.
+    /// The parsed `uses:` reference from the step.
     uses_ref: UsesRef,
     /// The workflow/job/step location where this action was found.
     location: crate::domain::workflow_actions::Location,
 }
 
-/// Find all workflow files in a workflows directory.
+/// Pull the registry `uses:` references out of one step list, tagging each with its
+/// location. `job` is `None` for a composite action's steps, which belong to no job.
 ///
-/// # Errors
-///
-/// Returns an error if the glob pattern is invalid or file access fails.
-fn find_workflow_files(workflows_dir: &Path) -> Result<Vec<PathBuf>, IoWorkflowError> {
-    let mut workflows = Vec::new();
+/// Local references (`./…`) and `docker://` references are skipped: neither is a
+/// registry action with a version to manage.
+fn extract_steps(
+    steps: &[Step],
+    workflow_rel_path: &WorkflowPath,
+    job: Option<&JobId>,
+    out: &mut Vec<ExtractedAction>,
+) {
+    for (step_idx, step) in steps.iter().enumerate() {
+        let Some(uses) = step.uses_ref() else {
+            continue;
+        };
+        let Some(cap) = USES_RE.captures(uses) else {
+            continue;
+        };
+        let action_name = cap[1].to_string();
+        let uses_ref = cap[2].to_string();
 
-    for extension in &["yml", "yaml"] {
-        let pattern = workflows_dir
-            .join(format!("*.{extension}"))
-            .to_string_lossy()
-            .to_string();
-
-        for entry in glob(&pattern)? {
-            match entry {
-                Ok(path) => workflows.push(path),
-                Err(_e) => {}
-            }
+        if action_name.starts_with('.') || action_name.starts_with("docker://") {
+            continue;
         }
-    }
 
-    Ok(workflows)
+        let comment = step.uses_comment().map(ToOwned::to_owned);
+
+        out.push(ExtractedAction {
+            uses_ref: UsesRef::new(action_name, uses_ref, comment),
+            location: crate::domain::workflow_actions::Location {
+                workflow: workflow_rel_path.clone(),
+                job: job.cloned(),
+                step: StepIndex::try_from(step_idx).ok(),
+                line: step.uses_line(),
+            },
+        });
+    }
 }
 
-/// Parser for extracting action information from workflow files.
+/// Parser for extracting action information from managed files.
 pub struct FileScanner {
     /// Root directory of the repository.
     repo_root: PathBuf,
-    /// Path to the `.github/workflows` directory.
-    workflows_dir: PathBuf,
 }
 
 impl FileScanner {
@@ -110,7 +108,6 @@ impl FileScanner {
     pub fn new(repo_root: &Path) -> Self {
         Self {
             repo_root: repo_root.to_path_buf(),
-            workflows_dir: repo_root.join(".github").join("workflows"),
         }
     }
 
@@ -125,20 +122,29 @@ impl FileScanner {
         )
     }
 
-    /// Find all workflow files in the repository's `.github/workflows` folder.
+    /// Find every managed file in the repository — workflows and action definitions —
+    /// in discovery order. Callers outside this module reach this through the
+    /// `Scanner::find_workflow_paths` trait method.
     ///
     /// # Errors
     ///
     /// Returns an error if the glob pattern is invalid.
-    pub fn find_workflows(&self) -> Result<Vec<PathBuf>, WorkflowError> {
-        find_workflow_files(&self.workflows_dir).map_err(Into::into)
+    fn find_managed_paths(&self) -> Result<Vec<PathBuf>, WorkflowError> {
+        discovery::managed_paths(&self.repo_root)
     }
 
-    /// Parse a workflow file once and return both the structural `Parsed` model and
-    /// the list of `uses:` action references with their location metadata.
+    /// Find every managed file with the schema each one follows.
     ///
-    /// The action list is derived from `parsed.jobs[].steps[].uses`, each carrying its
-    /// inline version comment (e.g. `# v4`).
+    /// # Errors
+    ///
+    /// Returns an error if the glob pattern is invalid.
+    fn find_managed(&self) -> Result<Vec<discovery::ManagedFile>, WorkflowError> {
+        discovery::managed_files(&self.repo_root)
+    }
+
+    /// Parse a managed file once and return both the structural `Parsed` model and
+    /// the list of `uses:` action references with their location metadata, each
+    /// carrying its inline version comment (e.g. `# v4`).
     ///
     /// # Errors
     ///
@@ -146,6 +152,7 @@ impl FileScanner {
     fn extract_workflow(
         workflow_path: &Path,
         workflow_rel_path: &WorkflowPath,
+        kind: FileKind,
     ) -> Result<(Parsed, Vec<ExtractedAction>), IoWorkflowError> {
         let content =
             fs::read_to_string(workflow_path).map_err(|source| IoWorkflowError::Read {
@@ -153,41 +160,26 @@ impl FileScanner {
                 source,
             })?;
 
-        let parsed = Parsed::from_yaml(workflow_rel_path.clone(), &content).map_err(|source| {
-            IoWorkflowError::Parse {
-                path: workflow_path.to_path_buf(),
-                source,
-            }
-        })?;
+        let parsed =
+            Parsed::parse(workflow_rel_path.clone(), kind, &content).map_err(|source| {
+                IoWorkflowError::Parse {
+                    path: workflow_path.to_path_buf(),
+                    source,
+                }
+            })?;
 
         let mut actions = Vec::new();
 
-        for job in &parsed.jobs {
-            for (step_idx, step) in job.steps.iter().enumerate() {
-                let Some(uses) = step.uses_ref() else {
-                    continue;
-                };
-                let Some(cap) = USES_RE.captures(uses) else {
-                    continue;
-                };
-                let action_name = cap[1].to_string();
-                let uses_ref = cap[2].to_string();
-
-                if action_name.starts_with('.') || action_name.starts_with("docker://") {
-                    continue;
+        // Only the step lookup differs between the schemas; extraction below is shared.
+        match kind {
+            FileKind::Workflow => {
+                for job in &parsed.jobs {
+                    let job_id = JobId::from(job.id.clone());
+                    extract_steps(&job.steps, workflow_rel_path, Some(&job_id), &mut actions);
                 }
-
-                let comment = step.uses_comment().map(ToOwned::to_owned);
-
-                actions.push(ExtractedAction {
-                    uses_ref: UsesRef::new(action_name, uses_ref, comment),
-                    location: crate::domain::workflow_actions::Location {
-                        workflow: workflow_rel_path.clone(),
-                        job: Some(JobId::from(job.id.clone())),
-                        step: StepIndex::try_from(step_idx).ok(),
-                        line: step.uses_line(),
-                    },
-                });
+            }
+            FileKind::ActionDefinition => {
+                extract_steps(&parsed.steps, workflow_rel_path, None, &mut actions);
             }
         }
 
@@ -204,7 +196,8 @@ impl FileScanner {
         workflow_path: &Path,
     ) -> Result<crate::domain::workflow_actions::ActionSet, WorkflowError> {
         let rel = self.rel_path(workflow_path);
-        let (_, actions) = Self::extract_workflow(workflow_path, &rel)?;
+        let (_, actions) =
+            Self::extract_workflow(workflow_path, &rel, FileKind::of_path(workflow_path))?;
         let mut action_set = crate::domain::workflow_actions::ActionSet::new();
         for action in &actions {
             action_set.add(&action.uses_ref.interpret());
@@ -216,8 +209,9 @@ impl FileScanner {
     fn located_from_file(
         workflow_path: &Path,
         workflow_rel_path: &WorkflowPath,
+        kind: FileKind,
     ) -> Result<Vec<crate::domain::workflow_actions::Located>, WorkflowError> {
-        let (_, actions) = Self::extract_workflow(workflow_path, workflow_rel_path)
+        let (_, actions) = Self::extract_workflow(workflow_path, workflow_rel_path, kind)
             .map_err(WorkflowError::from)?;
         Ok(actions
             .into_iter()
@@ -239,14 +233,14 @@ impl crate::domain::workflow::Scanner for FileScanner {
             dyn Iterator<Item = Result<crate::domain::workflow_actions::Located, WorkflowError>>,
         >;
 
-        let workflows = match self.find_workflows() {
+        let files = match self.find_managed() {
             Ok(w) => w,
             Err(e) => return Box::new(std::iter::once(Err(e))),
         };
 
-        Box::new(workflows.into_iter().flat_map(move |workflow_path| {
-            let rel = self.rel_path(&workflow_path);
-            match Self::located_from_file(&workflow_path, &rel) {
+        Box::new(files.into_iter().flat_map(move |file| {
+            let rel = self.rel_path(&file.path);
+            match Self::located_from_file(&file.path, &rel, file.kind) {
                 Ok(actions) => {
                     let iter: LocatedIter = Box::new(actions.into_iter().map(Ok));
                     iter
@@ -257,7 +251,7 @@ impl crate::domain::workflow::Scanner for FileScanner {
     }
 
     fn scan_paths(&self) -> Box<dyn Iterator<Item = Result<PathBuf, WorkflowError>> + '_> {
-        match self.find_workflows() {
+        match self.find_managed_paths() {
             Ok(paths) => Box::new(paths.into_iter().map(Ok)),
             Err(e) => Box::new(std::iter::once(Err(e))),
         }
@@ -266,13 +260,13 @@ impl crate::domain::workflow::Scanner for FileScanner {
     fn scan_all_with_parsed(
         &self,
     ) -> Result<(Vec<crate::domain::workflow_actions::Located>, Vec<Parsed>), WorkflowError> {
-        let workflows = self.find_workflows()?;
+        let files = self.find_managed()?;
         let mut located = Vec::new();
         let mut parsed = Vec::new();
-        for workflow_path in workflows {
-            let rel = self.rel_path(&workflow_path);
+        for file in files {
+            let rel = self.rel_path(&file.path);
             let (p, actions) =
-                Self::extract_workflow(&workflow_path, &rel).map_err(WorkflowError::from)?;
+                Self::extract_workflow(&file.path, &rel, file.kind).map_err(WorkflowError::from)?;
             located.extend(
                 actions
                     .into_iter()
@@ -294,3 +288,12 @@ impl crate::domain::workflow::Scanner for FileScanner {
 )]
 #[path = "tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[expect(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
+#[path = "composite_tests.rs"]
+mod composite_tests;

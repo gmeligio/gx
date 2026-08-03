@@ -58,6 +58,8 @@ gx lint         # Check action pinning, security, workflow validity, and run: sh
 gx init         # Create a manifest and lock file from your current workflows
 ```
 
+All of these cover your workflows and any composite actions in `.github/actions`.
+
 ## Already using another tool?
 
 gx works alongside your existing setup.

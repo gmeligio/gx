@@ -9,7 +9,7 @@
 mod common;
 
 use common::registries::{AuthRequiredRegistry, FakeRegistry};
-use common::setup::{create_empty_manifest, create_test_repo};
+use common::setup::{create_empty_manifest, create_test_repo, write_composite_action};
 use gx::domain::manifest::Manifest;
 use gx::domain::resolution::VersionRegistry;
 use gx::infra::lock::Store as LockStore;
@@ -368,8 +368,56 @@ jobs:
     let manifest_path = root.join(".github").join("gx.toml");
     let manifest_content = fs::read_to_string(&manifest_path).unwrap();
     assert!(manifest_content.contains("actions/checkout"));
+    // Local *references* are skipped; composite action *files* are still scanned.
     assert!(!manifest_content.contains("./local"));
-    assert!(!manifest_content.contains(".github/actions"));
+    assert!(!manifest_content.contains("./.github/actions"));
+}
+
+#[test]
+fn gx_tidy_keeps_action_used_only_in_composite() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = create_test_repo(&temp_dir);
+
+    create_empty_manifest(&root);
+    write_composite_action(
+        &root,
+        "setup",
+        "name: Setup
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+",
+    );
+
+    let registry = FakeRegistry::new().with_all_tags("actions/setup-node", vec!["v4.0.0"]);
+    assert!(run_tidy_with_registry(&root, &registry).is_ok());
+
+    let manifest_content = fs::read_to_string(root.join(".github").join("gx.toml")).unwrap();
+    assert!(
+        manifest_content.contains("actions/setup-node"),
+        "action used only in a composite must not be pruned: {manifest_content}"
+    );
+
+    let lock_content = fs::read_to_string(root.join(".github").join("gx.lock")).unwrap();
+    assert!(lock_content.contains("actions/setup-node"));
+
+    let action_content = fs::read_to_string(
+        root.join(".github")
+            .join("actions")
+            .join("setup")
+            .join("action.yml"),
+    )
+    .unwrap();
+    let expected_sha = FakeRegistry::fake_sha("actions/setup-node", "v4");
+    assert!(
+        action_content.contains(&format!("actions/setup-node@{expected_sha}")),
+        "composite action must be pinned: {action_content}"
+    );
+    assert!(
+        action_content.contains("# v4"),
+        "composite pin must carry a version comment: {action_content}"
+    );
 }
 
 #[test]
@@ -787,5 +835,47 @@ fn gx_tidy_removes_stale_override() {
     assert!(
         !manifest_content.contains("old-workflow.yml"),
         "Stale override should be removed, got:\n{manifest_content}"
+    );
+}
+
+#[test]
+fn gx_tidy_counts_composite_files_as_updated() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = create_test_repo(&temp_dir);
+
+    create_empty_manifest(&root);
+    for name in ["ci.yml", "release.yml"] {
+        fs::write(
+            root.join(".github").join("workflows").join(name),
+            "name: W\njobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n",
+        )
+        .unwrap();
+    }
+    write_composite_action(
+        &root,
+        "setup",
+        "name: Setup
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v4
+",
+    );
+
+    let registry = FakeRegistry::new().with_all_tags("actions/checkout", vec!["v4"]);
+    let manifest_path = root.join(".github").join("gx.toml");
+    let scanner = FileWorkflowScanner::new(&root);
+    let updater = WorkflowWriter::new(&root);
+    let manifest = manifest::parse(&manifest_path).unwrap().value;
+    let lock = LockStore::new(&root.join(".github").join("gx.lock"))
+        .load()
+        .unwrap();
+
+    let plan = tidy::plan(&manifest, &lock, &registry, &scanner, |_| {}).unwrap();
+    let count = tidy::apply_workflow_patches(&updater, &plan.workflows).unwrap();
+
+    assert_eq!(
+        count, 3,
+        "two workflows plus one composite action were rewritten"
     );
 }

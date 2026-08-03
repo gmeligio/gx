@@ -12,7 +12,8 @@ pub struct Report {
     pub added: Vec<(ActionId, Specifier)>,
     /// Actions upgraded (sha→tag or version bump): (action, from, to).
     pub upgraded: Vec<(ActionId, String, Specifier)>,
-    /// Number of workflow files updated.
+    /// Number of managed files updated — workflows and composite action definitions.
+    /// The name is fixed by the `--json` contract.
     pub workflows_updated: usize,
 }
 
@@ -63,7 +64,7 @@ impl CommandReport for Report {
             parts.push(format!("{} upgraded", self.upgraded.len()));
         }
         let wf = self.workflows_updated;
-        parts.push(format!("{} workflow{}", wf, if wf == 1 { "" } else { "s" }));
+        parts.push(format!("{} file{}", wf, if wf == 1 { "" } else { "s" }));
 
         lines.push(OutputLine::Summary {
             text: parts.join(" · "),
@@ -114,7 +115,7 @@ mod tests {
             version: "^2".to_owned(),
         }));
         assert!(lines.contains(&OutputLine::Summary {
-            text: "1 removed · 2 added · 1 upgraded · 2 workflows".to_owned(),
+            text: "1 removed · 2 added · 1 upgraded · 2 files".to_owned(),
         }));
     }
 }

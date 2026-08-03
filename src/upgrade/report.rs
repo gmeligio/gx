@@ -32,7 +32,8 @@ pub struct Report {
     pub skipped: Vec<(String, String)>,
     /// Warnings encountered during upgrade.
     pub warnings: Vec<String>,
-    /// Number of workflow files updated.
+    /// Number of managed files updated — workflows and composite action definitions.
+    /// The name is fixed by the `--json` contract.
     pub workflows_updated: usize,
     /// True if everything was already up to date.
     pub up_to_date: bool,
@@ -115,7 +116,7 @@ impl CommandReport for Report {
         let upgrade_count = self.upgrades.len();
         let wf = self.workflows_updated;
         let summary = format!(
-            "{} upgraded · {} workflow{}",
+            "{} upgraded · {} file{}",
             upgrade_count,
             wf,
             if wf == 1 { "" } else { "s" }
@@ -181,7 +182,7 @@ mod tests {
             to: "v3.6.2".to_owned(),
         }));
         assert!(lines.contains(&OutputLine::Summary {
-            text: "2 upgraded · 1 workflow".to_owned(),
+            text: "2 upgraded · 1 file".to_owned(),
         }));
     }
 

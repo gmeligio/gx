@@ -1,8 +1,8 @@
+use super::workflow_scan::discovery;
 use crate::domain::action::identity::ActionId;
 use crate::domain::action::resolved::ResolvedAction;
 use crate::domain::diff::WorkflowPatch;
 use crate::domain::workflow::{Error as WorkflowError, UpdateResult};
-use glob::glob;
 use regex::Regex;
 use std::collections::HashMap;
 use std::fs;
@@ -18,43 +18,30 @@ fn format_uses_ref(action: &ResolvedAction) -> String {
     }
 }
 
-/// Writer for updating action versions in workflow files.
+/// Writer for updating action versions in managed files.
 pub struct WorkflowWriter {
-    /// Path to the `.github/workflows` directory.
-    workflows_dir: PathBuf,
+    /// Root directory of the repository.
+    repo_root: PathBuf,
 }
 
 impl WorkflowWriter {
     #[must_use]
     pub fn new(repo_root: &Path) -> Self {
         Self {
-            workflows_dir: repo_root.join(".github").join("workflows"),
+            repo_root: repo_root.to_path_buf(),
         }
     }
 
-    /// Find all workflow files in the repository's `.github/workflows` folder.
+    /// Find every managed file — workflows and composite action definitions.
+    ///
+    /// Shares one discovery source with the scanner: a file gx reads references from is
+    /// a file gx writes pins to, so the two can never disagree.
     ///
     /// # Errors
     ///
     /// Returns an error if the glob pattern is invalid.
-    pub fn find_workflows(&self) -> Result<Vec<PathBuf>, WorkflowError> {
-        let mut workflows = Vec::new();
-        for extension in &["yml", "yaml"] {
-            let pattern = self
-                .workflows_dir
-                .join(format!("*.{extension}"))
-                .to_string_lossy()
-                .to_string();
-            for path in glob(&pattern)
-                .map_err(|e| WorkflowError::ScanFailed {
-                    reason: e.to_string(),
-                })?
-                .flatten()
-            {
-                workflows.push(path);
-            }
-        }
-        Ok(workflows)
+    pub fn find_managed_paths(&self) -> Result<Vec<PathBuf>, WorkflowError> {
+        discovery::managed_paths(&self.repo_root)
     }
 
     /// Apply a set of workflow patches, writing pin changes to workflow files.
@@ -87,7 +74,7 @@ impl WorkflowWriter {
         pins: &[ResolvedAction],
     ) -> Result<Vec<UpdateResult>, WorkflowError> {
         let actions = Self::pins_to_map(pins);
-        let workflows = self.find_workflows()?;
+        let workflows = self.find_managed_paths()?;
         let mut results = Vec::new();
 
         for workflow in workflows {

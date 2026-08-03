@@ -127,6 +127,59 @@ fn load_override_without_global_is_error() {
 }
 
 #[test]
+fn composite_step_override_without_job_roundtrips() {
+    // `sync` generates bare-step overrides from composite locations, so the reader must
+    // accept what the writer emits.
+    let file = NamedTempFile::new().unwrap();
+    let store = Store::new(file.path());
+
+    let mut manifest = Manifest::default();
+    manifest.set(ActionId::from("actions/checkout"), Specifier::parse("^4"));
+    manifest.add_override(
+        ActionId::from("actions/checkout"),
+        ActionOverride {
+            workflow: WorkflowPath::new(".github/actions/setup/action.yml"),
+            job: None,
+            step: Some(StepIndex::from(0_u16)),
+            version: Specifier::parse("^3"),
+        },
+    );
+
+    store.save(&manifest).unwrap();
+
+    let loaded = parse(file.path()).unwrap();
+    let overrides = loaded
+        .value
+        .overrides_for(&ActionId::from("actions/checkout"));
+    assert_eq!(overrides.len(), 1);
+    assert_eq!(
+        overrides[0].workflow,
+        WorkflowPath::new(".github/actions/setup/action.yml")
+    );
+    assert_eq!(overrides[0].step, Some(StepIndex::from(0_u16)));
+    assert_eq!(overrides[0].job, None);
+}
+
+#[test]
+fn load_override_step_without_job_is_error_for_workflow_named_action_yml() {
+    // Kind follows location, so a bare step here is still ambiguous. Deciding by file
+    // name would accept an override `resolve_version` can never apply.
+    let content = r#"
+[actions]
+"actions/checkout" = "v4"
+
+[actions.overrides]
+"actions/checkout" = [
+  { workflow = ".github/workflows/action.yml", step = 0, version = "v3" },
+]
+"#;
+    let mut file = NamedTempFile::new().unwrap();
+    file.write_all(content.as_bytes()).unwrap();
+
+    assert!(parse(file.path()).is_err());
+}
+
+#[test]
 fn load_override_step_without_job_is_error() {
     let content = r#"
 [actions]

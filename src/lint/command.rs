@@ -21,6 +21,7 @@ use crate::domain::workflow::{Error as WorkflowError, Scanner as WorkflowScanner
 use crate::domain::workflow_actions::{
     ActionSet as WorkflowActionSet, JobId, StepIndex, WorkflowPath,
 };
+use crate::domain::workflow_parsed::FileKind;
 use crate::infra::workflow_scan::FileScanner as FileWorkflowScanner;
 use std::path::Path;
 use thiserror::Error;
@@ -62,7 +63,14 @@ pub fn collect_diagnostics(
 
     // Single parse pass yields both per-step action references and the
     // structural Parsed view the workflow-security rules consume.
-    let (located, parsed_workflows) = scanner.scan_all_with_parsed()?;
+    let (located, parsed_files) = scanner.scan_all_with_parsed()?;
+
+    // Filtered once here rather than guarded for in each schema-only rule, so a rule
+    // reading `workflows_full` structurally cannot see a composite file.
+    let parsed_workflows: Vec<_> = parsed_files
+        .into_iter()
+        .filter(|p| p.kind == FileKind::Workflow)
+        .collect();
 
     // Phase 1: per-action rules
     for action in &located {

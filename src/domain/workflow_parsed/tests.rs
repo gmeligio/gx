@@ -367,3 +367,96 @@ fn effective_shell_normalizes_template_forms() {
     // empty value falls back to bash
     assert_eq!(effective_shell(Some("   "), None, None), "bash");
 }
+
+fn parse_action(content: &str) -> Parsed {
+    Parsed::parse(
+        WorkflowPath::new(".github/actions/setup/action.yml"),
+        FileKind::ActionDefinition,
+        content,
+    )
+    .unwrap()
+}
+
+#[test]
+fn composite_action_parses_to_action_kind_with_steps() {
+    let parsed = parse_action(
+        "name: Setup
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v4
+    - run: echo hi
+      shell: bash
+",
+    );
+
+    assert_eq!(parsed.kind, FileKind::ActionDefinition);
+    assert_eq!(parsed.steps.len(), 2);
+    assert_eq!(parsed.steps[0].uses_ref(), Some("actions/checkout@v4"));
+    assert!(parsed.jobs.is_empty(), "an action definition has no jobs");
+}
+
+#[test]
+fn workflow_parses_to_workflow_kind_with_jobs() {
+    let parsed = parse(
+        "on: push
+jobs:
+  build:
+    steps:
+      - uses: actions/checkout@v4
+",
+    );
+
+    assert_eq!(parsed.kind, FileKind::Workflow);
+    assert_eq!(parsed.jobs.len(), 1);
+    assert!(parsed.steps.is_empty(), "a workflow has no composite steps");
+}
+
+#[test]
+fn non_composite_action_parses_with_zero_steps() {
+    let parsed = parse_action("name: Tool\nruns:\n  using: node20\n  main: index.js\n");
+
+    assert_eq!(parsed.kind, FileKind::ActionDefinition);
+    assert!(parsed.steps.is_empty());
+}
+
+#[test]
+fn action_without_using_key_parses_with_zero_steps() {
+    let parsed = parse_action("name: Tool\nruns:\n  steps:\n    - uses: actions/checkout@v4\n");
+
+    assert!(parsed.steps.is_empty());
+}
+
+#[test]
+fn file_kind_follows_location_not_file_name() {
+    use std::path::Path;
+
+    // A workflow may legitimately be named action.yml; it is still a workflow.
+    assert_eq!(
+        FileKind::of_path(Path::new(".github/workflows/action.yml")),
+        FileKind::Workflow
+    );
+    assert_eq!(
+        FileKind::of_path(Path::new(".github/workflows/ci.yml")),
+        FileKind::Workflow
+    );
+    assert_eq!(
+        FileKind::of_path(Path::new(".github/actions/setup/action.yml")),
+        FileKind::ActionDefinition
+    );
+    assert_eq!(
+        FileKind::of_path(Path::new(".github/actions/ci/setup/action.yaml")),
+        FileKind::ActionDefinition
+    );
+    // An `actions` directory that is not directly under `.github` is not a
+    // discovery root.
+    assert_eq!(
+        FileKind::of_path(Path::new("src/actions/setup/action.yml")),
+        FileKind::Workflow
+    );
+    // An action definition named something else is still under .github/actions.
+    assert_eq!(
+        FileKind::of_path(Path::new(".github/actions/setup/steps.yml")),
+        FileKind::ActionDefinition
+    );
+}
