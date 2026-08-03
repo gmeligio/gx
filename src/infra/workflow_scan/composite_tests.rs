@@ -50,7 +50,7 @@ fn scan_finds_composite_action() {
     assert_eq!(located.len(), 1);
     assert_eq!(located[0].action.id, ActionId::from("actions/setup-node"));
     assert_eq!(
-        located[0].location.workflow.as_str(),
+        located[0].site.file.as_str(),
         ".github/actions/setup/action.yml"
     );
 }
@@ -69,7 +69,7 @@ fn scan_finds_nested_composite_action() {
 
     assert_eq!(located.len(), 1);
     assert_eq!(
-        located[0].location.workflow.as_str(),
+        located[0].site.file.as_str(),
         ".github/actions/ci/setup/action.yml"
     );
 }
@@ -88,7 +88,7 @@ fn scan_finds_composite_action_yaml_extension() {
 
     assert_eq!(located.len(), 1);
     assert_eq!(
-        located[0].location.workflow.as_str(),
+        located[0].site.file.as_str(),
         ".github/actions/setup/action.yaml"
     );
 }
@@ -185,16 +185,16 @@ fn composite_step_has_no_job_and_carries_step_and_line() {
     assert_eq!(located.len(), 2);
     for action in &located {
         assert!(
-            action.location.job.is_none(),
+            action.site.slot.job().is_none(),
             "composite steps belong to no job"
         );
-        assert!(action.location.line.is_some(), "line should be recorded");
+        assert!(action.origin.line.is_some(), "line should be recorded");
     }
     let node = located
         .iter()
         .find(|a| a.action.id == ActionId::from("actions/setup-node"))
         .unwrap();
-    assert_eq!(node.location.step, Some(StepIndex::from(1_u16)));
+    assert_eq!(node.site.slot.step(), Some(StepIndex::from(1_u16)));
 }
 
 #[test]
@@ -234,7 +234,7 @@ fn composite_keeps_per_step_comment() {
     let label_at = |step: u16| {
         located
             .iter()
-            .find(|a| a.location.step == Some(StepIndex::from(step)))
+            .find(|a| a.site.slot.step() == Some(StepIndex::from(step)))
             .unwrap()
             .action
             .reference

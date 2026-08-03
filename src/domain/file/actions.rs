@@ -1,4 +1,4 @@
-use super::site::{JobId, StepIndex, WorkflowPath};
+use super::site::{Id, Origin};
 use crate::domain::action::identity::{ActionId, Version};
 use crate::domain::action::uses_ref::ParsedRef;
 use std::collections::{HashMap, HashSet};
@@ -97,35 +97,22 @@ impl ActionSet {
     }
 }
 
-/// The precise location of a `uses:` reference within the workflow tree.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Location {
-    /// Relative path from repo root, e.g. ".github/workflows/ci.yml".
-    pub workflow: WorkflowPath,
-    /// Job id, e.g. "build".
-    pub job: Option<JobId>,
-    /// 0-based step index within the job.
-    pub step: Option<StepIndex>,
-    /// 1-based source line of the `uses:` scalar, when known. `None` for locations
-    /// synthesized outside a parse (e.g. manifest-derived entries).
-    pub line: Option<u32>,
-}
-
-/// A single action reference with its full location context.
+/// A single action reference: what it is, where it lives, and where it was read from.
 #[derive(Debug, Clone)]
 pub struct Located {
     /// The interpreted action reference (id, version, optional SHA).
     pub action: WorkflowAction,
-    pub location: Location,
+    /// Which file and position — the identity user config addresses.
+    pub site: Id,
+    /// Where it was read from, for reporting only.
+    pub origin: Origin,
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ActionId, ActionSet, JobId, Located, Location, ParsedRef, StepIndex, Version,
-        WorkflowAction, WorkflowPath,
-    };
+    use super::{ActionId, ActionSet, Located, ParsedRef, Version, WorkflowAction};
     use crate::domain::action::identity::CommitSha;
+    use crate::domain::file::site::{Id, JobId, Origin, Slot, StepIndex, WorkflowPath};
 
     /// Build a `WorkflowAction` in the same shape `UsesRef::interpret` would:
     /// a bare `version` becomes a `Ref`; a `version` + `sha` becomes a `Pinned`.
@@ -170,37 +157,41 @@ mod tests {
 
     #[test]
     fn workflow_location_equality() {
-        let loc1 = Location {
-            workflow: WorkflowPath::new(".github/workflows/ci.yml"),
-            job: Some(JobId::from("build")),
-            step: Some(StepIndex::from(0_u16)),
-            line: None,
+        let loc1 = Id {
+            file: WorkflowPath::new(".github/workflows/ci.yml"),
+            slot: Slot::WorkflowStep {
+                job: JobId::from("build"),
+                step: StepIndex::from(0_u16),
+            },
         };
-        let loc2 = Location {
-            workflow: WorkflowPath::new(".github/workflows/ci.yml"),
-            job: Some(JobId::from("build")),
-            step: Some(StepIndex::from(0_u16)),
-            line: None,
+        let loc2 = Id {
+            file: WorkflowPath::new(".github/workflows/ci.yml"),
+            slot: Slot::WorkflowStep {
+                job: JobId::from("build"),
+                step: StepIndex::from(0_u16),
+            },
         };
         assert_eq!(loc1, loc2);
     }
 
     #[test]
     fn located_action_stores_location() {
-        let loc = Location {
-            workflow: WorkflowPath::new(".github/workflows/ci.yml"),
-            job: Some(JobId::from("build")),
-            step: Some(StepIndex::from(0_u16)),
-            line: None,
+        let loc = Id {
+            file: WorkflowPath::new(".github/workflows/ci.yml"),
+            slot: Slot::WorkflowStep {
+                job: JobId::from("build"),
+                step: StepIndex::from(0_u16),
+            },
         };
         let action = Located {
             action: WorkflowAction {
                 id: ActionId::from("actions/checkout"),
                 reference: ParsedRef::Ref(Version::from("v4")),
             },
-            location: loc.clone(),
+            site: loc.clone(),
+            origin: Origin::default(),
         };
-        assert_eq!(action.location, loc);
+        assert_eq!(action.site, loc);
         assert_eq!(action.action.id.as_str(), "actions/checkout");
     }
 

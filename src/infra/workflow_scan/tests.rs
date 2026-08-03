@@ -39,22 +39,22 @@ jobs:
     // Find the build-job checkout entry
     let build_checkout = located.iter().find(|a| {
         a.action.id == ActionId::from("actions/checkout")
-            && a.location
-                .job
-                .as_ref()
+            && a.site
+                .slot
+                .job()
                 .map(crate::domain::file::site::JobId::as_str)
                 == Some("build")
     });
     assert!(build_checkout.is_some());
     let bc = build_checkout.unwrap();
     assert_eq!(bc.action.reference.label(), "v4");
-    assert_eq!(bc.location.step, Some(StepIndex::from(0_u16)));
+    assert_eq!(bc.site.slot.step(), Some(StepIndex::from(0_u16)));
 
     let test_checkout = located.iter().find(|a| {
         a.action.id == ActionId::from("actions/checkout")
-            && a.location
-                .job
-                .as_ref()
+            && a.site
+                .slot
+                .job()
                 .map(crate::domain::file::site::JobId::as_str)
                 == Some("test")
     });
@@ -425,9 +425,9 @@ jobs:
             .iter()
             .find(|a| {
                 a.action.id == ActionId::from("actions/checkout")
-                    && a.location
-                        .job
-                        .as_ref()
+                    && a.site
+                        .slot
+                        .job()
                         .map(crate::domain::file::site::JobId::as_str)
                         == Some(job)
             })

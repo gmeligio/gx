@@ -137,13 +137,33 @@ pub enum Slot {
     },
 }
 
+impl Slot {
+    /// The job this site belongs to, if its schema has jobs.
+    #[must_use]
+    pub fn job(&self) -> Option<&JobId> {
+        match self {
+            Self::WorkflowStep { job, .. } | Self::WorkflowJob { job } => Some(job),
+            Self::CompositeStep { .. } => None,
+        }
+    }
+
+    /// The step index within its list, if this site is a step.
+    #[must_use]
+    pub fn step(&self) -> Option<StepIndex> {
+        match self {
+            Self::WorkflowStep { step, .. } | Self::CompositeStep { step } => Some(*step),
+            Self::WorkflowJob { .. } => None,
+        }
+    }
+}
+
 /// The identity of a reference site: which file, and where within it.
 ///
 /// This is what user configuration addresses and what override resolution matches on.
 /// It deliberately carries no provenance — see [`Origin`] — so that two references to
 /// the same site compare and hash equal regardless of where they were read from.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct SiteId {
+pub struct Id {
     /// Relative path from repo root, e.g. `.github/workflows/ci.yml`.
     pub file: WorkflowPath,
     /// Position within that file.
@@ -152,7 +172,7 @@ pub struct SiteId {
 
 /// Where a reference was read from, for reporting.
 ///
-/// Separate from [`SiteId`] because provenance must never participate in matching: an
+/// Separate from [`Id`] because provenance must never participate in matching: an
 /// override written by hand has no line number, and would otherwise fail to match the
 /// same site discovered by a parse.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -164,7 +184,7 @@ pub struct Origin {
 
 #[cfg(test)]
 mod tests {
-    use super::{JobId, Origin, SiteId, Slot, StepIndex, WorkflowPath};
+    use super::{Id, JobId, Origin, Slot, StepIndex, WorkflowPath};
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher as _};
 
@@ -174,8 +194,8 @@ mod tests {
         hasher.finish()
     }
 
-    fn workflow_site() -> SiteId {
-        SiteId {
+    fn workflow_site() -> Id {
+        Id {
             file: WorkflowPath::new(".github/workflows/ci.yml"),
             slot: Slot::WorkflowStep {
                 job: JobId::from("build"),
@@ -212,13 +232,13 @@ mod tests {
     /// `job` being `None`.
     #[test]
     fn composite_step_is_distinct_from_workflow_step() {
-        let composite = SiteId {
+        let composite = Id {
             file: WorkflowPath::new(".github/actions/setup/action.yml"),
             slot: Slot::CompositeStep {
                 step: StepIndex::from(0),
             },
         };
-        let workflow = SiteId {
+        let workflow = Id {
             file: WorkflowPath::new(".github/actions/setup/action.yml"),
             slot: Slot::WorkflowStep {
                 job: JobId::from("build"),

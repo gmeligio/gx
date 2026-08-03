@@ -22,8 +22,8 @@ impl UnpinnedRule {
         );
         Some(
             Diagnostic::new(RuleName::Unpinned, Level::Error, msg)
-                .with_workflow(action.location.workflow.clone())
-                .with_line(action.location.line),
+                .with_workflow(action.site.file.clone())
+                .with_line(action.origin.line),
         )
     }
 }
@@ -51,8 +51,8 @@ mod tests {
     use super::{Level, Rule as _, RuleName, UnpinnedRule};
     use crate::domain::action::identity::{ActionId, CommitSha, Version};
     use crate::domain::action::uses_ref::ParsedRef;
-    use crate::domain::file::actions::{Located, Location, WorkflowAction};
-    use crate::domain::file::site::WorkflowPath;
+    use crate::domain::file::actions::{Located, WorkflowAction};
+    use crate::domain::file::site::{Id, Origin, Slot, StepIndex, WorkflowPath};
 
     const VALID_SHA: &str = "8e8c483db84b4bee98b60c0593521ed34d9990e8";
 
@@ -76,12 +76,13 @@ mod tests {
                 id: ActionId::from("actions/checkout"),
                 reference,
             },
-            location: Location {
-                workflow: WorkflowPath::new(".github/workflows/ci.yml"),
-                job: None,
-                step: None,
-                line,
+            site: Id {
+                file: WorkflowPath::new(".github/workflows/ci.yml"),
+                slot: Slot::CompositeStep {
+                    step: StepIndex::from(0_u16),
+                },
             },
+            origin: Origin { line },
         }
     }
 

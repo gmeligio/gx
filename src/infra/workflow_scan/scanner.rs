@@ -2,7 +2,7 @@ use super::discovery;
 use crate::domain::action::uses_ref::UsesRef;
 use crate::domain::file::parsed::{FileKind, Parsed, Step};
 use crate::domain::file::scan::Error as WorkflowError;
-use crate::domain::file::site::{JobId, StepIndex, WorkflowPath};
+use crate::domain::file::site::{Id, JobId, Origin, Slot, StepIndex, WorkflowPath};
 use crate::regex::static_regex;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -54,19 +54,25 @@ impl From<IoWorkflowError> for WorkflowError {
 struct ExtractedAction {
     /// The parsed `uses:` reference from the step.
     uses_ref: UsesRef,
-    /// The workflow/job/step location where this action was found.
-    location: crate::domain::file::actions::Location,
+    /// Which file and position this action was found at.
+    site: Id,
+    /// Where it was read from, for reporting.
+    origin: Origin,
 }
 
 /// Pull the registry `uses:` references out of one step list, tagging each with its
-/// location. `job` is `None` for a composite action's steps, which belong to no job.
+/// site. `slot_for` builds the [`Slot`] for a given step index, which is what differs
+/// between the two schemas: a workflow step belongs to a job, a composite step does not.
 ///
 /// Local references (`./…`) and `docker://` references are skipped: neither is a
 /// registry action with a version to manage.
+///
+/// A step index beyond [`StepIndex`]'s range skips the step: gx cannot address it, so
+/// recording it under a wrong index would be worse than not managing it.
 fn extract_steps(
     steps: &[Step],
     workflow_rel_path: &WorkflowPath,
-    job: Option<&JobId>,
+    slot_for: impl Fn(StepIndex) -> Slot,
     out: &mut Vec<ExtractedAction>,
 ) {
     for (step_idx, step) in steps.iter().enumerate() {
@@ -83,14 +89,19 @@ fn extract_steps(
             continue;
         }
 
+        let Ok(index) = StepIndex::try_from(step_idx) else {
+            continue;
+        };
+
         let comment = step.uses_comment().map(ToOwned::to_owned);
 
         out.push(ExtractedAction {
             uses_ref: UsesRef::new(action_name, uses_ref, comment),
-            location: crate::domain::file::actions::Location {
-                workflow: workflow_rel_path.clone(),
-                job: job.cloned(),
-                step: StepIndex::try_from(step_idx).ok(),
+            site: Id {
+                file: workflow_rel_path.clone(),
+                slot: slot_for(index),
+            },
+            origin: Origin {
                 line: step.uses_line(),
             },
         });
@@ -175,11 +186,24 @@ impl FileScanner {
             FileKind::Workflow => {
                 for job in &parsed.jobs {
                     let job_id = JobId::from(job.id.clone());
-                    extract_steps(&job.steps, workflow_rel_path, Some(&job_id), &mut actions);
+                    extract_steps(
+                        &job.steps,
+                        workflow_rel_path,
+                        |step| Slot::WorkflowStep {
+                            job: job_id.clone(),
+                            step,
+                        },
+                        &mut actions,
+                    );
                 }
             }
             FileKind::ActionDefinition => {
-                extract_steps(&parsed.steps, workflow_rel_path, None, &mut actions);
+                extract_steps(
+                    &parsed.steps,
+                    workflow_rel_path,
+                    |step| Slot::CompositeStep { step },
+                    &mut actions,
+                );
             }
         }
 
@@ -217,7 +241,8 @@ impl FileScanner {
             .into_iter()
             .map(|action| crate::domain::file::actions::Located {
                 action: action.uses_ref.interpret(),
-                location: action.location,
+                site: action.site,
+                origin: action.origin,
             })
             .collect())
     }
@@ -255,6 +280,10 @@ impl crate::domain::file::scan::Scanner for FileScanner {
         }
     }
 
+    fn repo_rel(&self, path: &Path) -> WorkflowPath {
+        self.rel_path(path)
+    }
+
     fn scan_all_with_parsed(
         &self,
     ) -> Result<(Vec<crate::domain::file::actions::Located>, Vec<Parsed>), WorkflowError> {
@@ -270,7 +299,8 @@ impl crate::domain::file::scan::Scanner for FileScanner {
                     .into_iter()
                     .map(|a| crate::domain::file::actions::Located {
                         action: a.uses_ref.interpret(),
-                        location: a.location,
+                        site: a.site,
+                        origin: a.origin,
                     }),
             );
             parsed.push(p);

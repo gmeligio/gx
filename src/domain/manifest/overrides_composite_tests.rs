@@ -3,22 +3,22 @@
 
 use super::*;
 use crate::domain::action::identity::{ActionId, Version};
-use crate::domain::file::actions::{Located as LocatedAction, Location as WorkflowLocation};
-use crate::domain::file::site::{JobId, StepIndex, WorkflowPath};
+use crate::domain::file::actions::Located as LocatedAction;
+use crate::domain::file::site::{Id, JobId, Origin, Slot, StepIndex, WorkflowPath};
 use std::collections::HashMap;
 
 const ACTION_FILE: &str = ".github/actions/setup/action.yml";
 
-fn composite_loc(step: u16) -> WorkflowLocation {
-    WorkflowLocation {
-        workflow: WorkflowPath::new(ACTION_FILE),
-        job: None,
-        step: Some(StepIndex::from(step)),
-        line: None,
+fn composite_loc(step: u16) -> Id {
+    Id {
+        file: WorkflowPath::new(ACTION_FILE),
+        slot: Slot::CompositeStep {
+            step: StepIndex::from(step),
+        },
     }
 }
 
-fn located_at(loc: WorkflowLocation) -> LocatedAction {
+fn located_at(loc: Id) -> LocatedAction {
     use crate::domain::action::uses_ref::ParsedRef;
     use crate::domain::file::actions::WorkflowAction;
     LocatedAction {
@@ -26,7 +26,8 @@ fn located_at(loc: WorkflowLocation) -> LocatedAction {
             id: ActionId::from("actions/checkout"),
             reference: ParsedRef::Ref(Version::from("v4")),
         },
-        location: loc,
+        site: loc,
+        origin: Origin::default(),
     }
 }
 
@@ -82,11 +83,12 @@ fn job_bearing_override_is_unaffected_by_the_file_step_tier() {
         version: Specifier::parse("^3"),
     }];
 
-    let workflow_loc = WorkflowLocation {
-        workflow: WorkflowPath::new(".github/workflows/ci.yml"),
-        job: Some(JobId::from("build")),
-        step: Some(StepIndex::from(0_u16)),
-        line: None,
+    let workflow_loc = Id {
+        file: WorkflowPath::new(".github/workflows/ci.yml"),
+        slot: Slot::WorkflowStep {
+            job: JobId::from("build"),
+            step: StepIndex::from(0_u16),
+        },
     };
     assert_eq!(
         resolve_version(&overrides, &workflow_loc),

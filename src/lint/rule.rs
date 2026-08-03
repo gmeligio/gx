@@ -290,7 +290,7 @@ pub(super) fn matches_ignore(
 
     let diag_action = located_actions
         .iter()
-        .find(|loc| loc.location.workflow == *diag_workflow)
+        .find(|loc| loc.site.file == *diag_workflow)
         .map(|loc| &loc.action.id);
 
     if let Some(target_action) = &target.action {

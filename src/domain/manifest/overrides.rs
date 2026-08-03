@@ -1,10 +1,8 @@
 use crate::domain::action::identity::ActionId;
 use crate::domain::action::spec::Spec;
 use crate::domain::action::specifier::Specifier;
-use crate::domain::file::actions::{
-    ActionSet as WorkflowActionSet, Located as LocatedAction, Location as WorkflowLocation,
-};
-use crate::domain::file::site::{JobId, StepIndex, WorkflowPath};
+use crate::domain::file::actions::{ActionSet as WorkflowActionSet, Located as LocatedAction};
+use crate::domain::file::site::{Id, JobId, Slot, StepIndex, WorkflowPath};
 use std::collections::HashSet;
 
 /// A version override for a specific file location.
@@ -21,58 +19,105 @@ pub struct ActionOverride {
     pub version: Specifier,
 }
 
-/// Resolve the effective specifier for an action at a given file location.
+/// Resolve the effective specifier for an action at a given site.
 ///
 /// Resolution order, most specific first: job-step, job, file-step, file, then the global
 /// default (returned as `None` — the caller falls back to it). File-step addresses a
 /// composite action's step, which belongs to no job.
 ///
-/// The job-bearing tiers and file-step cannot collide — a composite location has no job,
-/// a workflow location always has one.
+/// The tiers are disjoint by construction: [`Slot`] gives a site exactly one shape, so a
+/// composite step can never be tested against a job-bearing tier.
 #[must_use]
 pub fn resolve_version<'ovr>(
     overrides: &'ovr [ActionOverride],
-    location: &WorkflowLocation,
+    site: &Id,
 ) -> Option<&'ovr Specifier> {
-    if let (Some(job), Some(step)) = (&location.job, location.step) {
-        for exc in overrides {
-            if exc.workflow == location.workflow
-                && exc.job.as_ref() == Some(job)
-                && exc.step == Some(step)
+    let in_file = |exc: &&ActionOverride| exc.workflow == site.file;
+
+    match &site.slot {
+        Slot::WorkflowStep { job, step } => {
+            if let Some(exc) = overrides
+                .iter()
+                .filter(in_file)
+                .find(|exc| exc.job.as_ref() == Some(job) && exc.step == Some(*step))
+            {
+                return Some(&exc.version);
+            }
+            if let Some(exc) = overrides
+                .iter()
+                .filter(in_file)
+                .find(|exc| exc.job.as_ref() == Some(job) && exc.step.is_none())
+            {
+                return Some(&exc.version);
+            }
+        }
+        Slot::WorkflowJob { job } => {
+            if let Some(exc) = overrides
+                .iter()
+                .filter(in_file)
+                .find(|exc| exc.job.as_ref() == Some(job) && exc.step.is_none())
+            {
+                return Some(&exc.version);
+            }
+        }
+        Slot::CompositeStep { step } => {
+            if let Some(exc) = overrides
+                .iter()
+                .filter(in_file)
+                .find(|exc| exc.job.is_none() && exc.step == Some(*step))
             {
                 return Some(&exc.version);
             }
         }
     }
 
-    if let Some(job) = &location.job {
-        for exc in overrides {
-            if exc.workflow == location.workflow
-                && exc.job.as_ref() == Some(job)
-                && exc.step.is_none()
-            {
-                return Some(&exc.version);
-            }
-        }
-    }
+    overrides
+        .iter()
+        .filter(in_file)
+        .find(|exc| exc.job.is_none() && exc.step.is_none())
+        .map(|exc| &exc.version)
+}
 
-    if let Some(step) = location.step
-        && location.job.is_none()
-    {
-        for exc in overrides {
-            if exc.workflow == location.workflow && exc.job.is_none() && exc.step == Some(step) {
-                return Some(&exc.version);
-            }
-        }
+/// The override that addresses exactly this site, if one exists.
+///
+/// Unlike [`resolve_version`], this does not walk the precedence tiers — it asks whether
+/// an override names this precise site, which is what `sync` needs to avoid writing a
+/// duplicate and what `prune_stale` needs to know an override still has a target.
+fn addresses(exc: &ActionOverride, site: &Id) -> bool {
+    if exc.workflow != site.file {
+        return false;
     }
-
-    for exc in overrides {
-        if exc.workflow == location.workflow && exc.job.is_none() && exc.step.is_none() {
-            return Some(&exc.version);
+    match &site.slot {
+        Slot::WorkflowStep { job, step } => {
+            exc.job.as_ref() == Some(job) && exc.step == Some(*step)
         }
+        Slot::WorkflowJob { job } => exc.job.as_ref() == Some(job) && exc.step.is_none(),
+        Slot::CompositeStep { step } => exc.job.is_none() && exc.step == Some(*step),
     }
+}
 
-    None
+/// Build the override that names exactly this site.
+fn override_for(site: &Id, version: Specifier) -> ActionOverride {
+    let (job, step) = scope_of(site);
+    ActionOverride {
+        workflow: site.file.clone(),
+        job,
+        step,
+        version,
+    }
+}
+
+/// A site's scope in the `(job, step)` shape `ActionOverride` and the manifest use.
+///
+/// `ActionOverride` stays an `Option` pair because it is a *selector*: a job-scoped
+/// override names every step in that job. [`Id`] is a single address. The two are
+/// deliberately different shapes; this converts one to the other.
+fn scope_of(site: &Id) -> (Option<JobId>, Option<StepIndex>) {
+    match &site.slot {
+        Slot::WorkflowStep { job, step } => (Some(job.clone()), Some(*step)),
+        Slot::WorkflowJob { job } => (Some(job.clone()), None),
+        Slot::CompositeStep { step } => (None, Some(*step)),
+    }
 }
 
 /// Compute all lock keys needed for overrides: one per (action, version) pair.
@@ -118,22 +163,15 @@ pub fn sync(
             .get(&action.action.id)
             .map_or(empty, Vec::as_slice);
 
-        let already_covered = existing_overrides.iter().any(|o| {
-            o.workflow == action.location.workflow
-                && o.job == action.location.job
-                && o.step == action.location.step
-        });
+        let already_covered = existing_overrides
+            .iter()
+            .any(|o| addresses(o, &action.site));
 
         if !already_covered {
             actions_overrides
                 .entry(action.action.id.clone())
                 .or_default()
-                .push(ActionOverride {
-                    workflow: action.location.workflow.clone(),
-                    job: action.location.job.clone(),
-                    step: action.location.step,
-                    version: action_specifier,
-                });
+                .push(override_for(&action.site, action_specifier));
         }
     }
 }
@@ -145,10 +183,7 @@ pub fn prune_stale(
     actions_overrides: &mut std::collections::HashMap<ActionId, Vec<ActionOverride>>,
     located: &[LocatedAction],
 ) {
-    let live_workflows: HashSet<&str> = located
-        .iter()
-        .map(|a| a.location.workflow.as_str())
-        .collect();
+    let live_workflows: HashSet<&str> = located.iter().map(|a| a.site.file.as_str()).collect();
 
     let updates: Vec<(ActionId, Vec<ActionOverride>)> = actions_overrides
         .iter()
@@ -166,9 +201,10 @@ pub fn prune_stale(
                         return true;
                     }
                     located.iter().any(|a| {
-                        a.location.workflow == exc.workflow
-                            && a.location.job == exc.job
-                            && (exc.step.is_none() || a.location.step == exc.step)
+                        let (job, step) = scope_of(&a.site);
+                        a.site.file == exc.workflow
+                            && job == exc.job
+                            && (exc.step.is_none() || step == exc.step)
                     })
                 })
                 .cloned()
@@ -187,338 +223,8 @@ pub fn prune_stale(
 }
 
 #[cfg(test)]
-#[expect(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::get_unwrap,
-    reason = "tests use unwrap, indexing, and other patterns freely"
-)]
-mod tests {
-    use super::{ActionOverride, LocatedAction, prune_stale, resolve_version, sync};
-    use crate::domain::action::identity::{ActionId, Version};
-    use crate::domain::action::spec::Spec;
-    use crate::domain::action::specifier::Specifier;
-    use crate::domain::file::actions::{
-        ActionSet as WorkflowActionSet, Location as WorkflowLocation,
-    };
-    use crate::domain::file::site::{JobId, StepIndex, WorkflowPath};
-
-    use std::collections::HashMap;
-    fn make_loc(workflow: &str, job: Option<&str>, step: Option<u16>) -> WorkflowLocation {
-        WorkflowLocation {
-            workflow: WorkflowPath::new(workflow),
-            job: job.map(JobId::from),
-            step: step.map(StepIndex::from),
-            line: None,
-        }
-    }
-
-    fn make_located(workflow: &str, action: &str, version: &str) -> LocatedAction {
-        use crate::domain::action::uses_ref::ParsedRef;
-        use crate::domain::file::actions::WorkflowAction;
-        LocatedAction {
-            action: WorkflowAction {
-                id: ActionId::from(action),
-                reference: ParsedRef::Ref(Version::from(version)),
-            },
-            location: make_loc(workflow, None, None),
-        }
-    }
-
-    #[test]
-    fn resolve_version_returns_none_when_no_overrides() {
-        let overrides: Vec<ActionOverride> = vec![];
-        let loc = make_loc(".github/workflows/ci.yml", Some("build"), Some(0));
-        assert_eq!(resolve_version(&overrides, &loc), None);
-    }
-
-    #[test]
-    fn resolve_version_workflow_level() {
-        let overrides = vec![ActionOverride {
-            workflow: WorkflowPath::new(".github/workflows/ci.yml"),
-            job: None,
-            step: None,
-            version: Specifier::parse("^3"),
-        }];
-        let loc = make_loc(".github/workflows/ci.yml", Some("build"), Some(0));
-        assert_eq!(
-            resolve_version(&overrides, &loc),
-            Some(&Specifier::parse("^3"))
-        );
-    }
-
-    #[test]
-    fn resolve_version_step_level_wins_over_workflow() {
-        let overrides = vec![
-            ActionOverride {
-                workflow: WorkflowPath::new(".github/workflows/ci.yml"),
-                job: None,
-                step: None,
-                version: Specifier::parse("^3"),
-            },
-            ActionOverride {
-                workflow: WorkflowPath::new(".github/workflows/ci.yml"),
-                job: Some(JobId::from("build")),
-                step: Some(StepIndex::from(0_u16)),
-                version: Specifier::parse("^2"),
-            },
-        ];
-        let loc = make_loc(".github/workflows/ci.yml", Some("build"), Some(0));
-        assert_eq!(
-            resolve_version(&overrides, &loc),
-            Some(&Specifier::parse("^2"))
-        );
-    }
-
-    #[test]
-    fn sync_no_op_when_single_version() {
-        let mut actions_overrides: HashMap<ActionId, Vec<ActionOverride>> = HashMap::new();
-        let mut actions_global: HashMap<ActionId, Spec> = HashMap::new();
-        actions_global.insert(
-            ActionId::from("actions/checkout"),
-            Spec::new(ActionId::from("actions/checkout"), Specifier::parse("^4")),
-        );
-
-        let mut action_set = WorkflowActionSet::new();
-        let located = vec![make_located(
-            ".github/workflows/ci.yml",
-            "actions/checkout",
-            "v4",
-        )];
-        for a in &located {
-            action_set.add(&a.action);
-        }
-
-        sync(
-            &mut actions_overrides,
-            &actions_global,
-            &located,
-            &action_set,
-        );
-        assert!(
-            actions_overrides
-                .get(&ActionId::from("actions/checkout"))
-                .is_none_or(Vec::is_empty)
-        );
-    }
-
-    #[test]
-    fn sync_adds_override_for_minority_version() {
-        let mut actions_overrides: HashMap<ActionId, Vec<ActionOverride>> = HashMap::new();
-        let mut actions_global: HashMap<ActionId, Spec> = HashMap::new();
-        actions_global.insert(
-            ActionId::from("actions/checkout"),
-            Spec::new(ActionId::from("actions/checkout"), Specifier::parse("^4")),
-        );
-
-        let mut action_set = WorkflowActionSet::new();
-        let located = vec![
-            make_located(".github/workflows/ci.yml", "actions/checkout", "v4"),
-            make_located(".github/workflows/ci.yml", "actions/checkout", "v4"),
-            make_located(".github/workflows/windows.yml", "actions/checkout", "v3"),
-        ];
-        for a in &located {
-            action_set.add(&a.action);
-        }
-
-        sync(
-            &mut actions_overrides,
-            &actions_global,
-            &located,
-            &action_set,
-        );
-        let overrides = actions_overrides
-            .get(&ActionId::from("actions/checkout"))
-            .unwrap();
-        assert_eq!(overrides.len(), 1);
-        assert_eq!(
-            overrides[0].workflow,
-            WorkflowPath::new(".github/workflows/windows.yml")
-        );
-        assert_eq!(overrides[0].version, Specifier::from_v1("v3"));
-    }
-
-    #[test]
-    fn prune_stale_removes_override_for_missing_workflow() {
-        let mut actions_overrides: HashMap<ActionId, Vec<ActionOverride>> = HashMap::new();
-        actions_overrides.insert(
-            ActionId::from("actions/checkout"),
-            vec![ActionOverride {
-                workflow: WorkflowPath::new(".github/workflows/deploy.yml"),
-                job: None,
-                step: None,
-                version: Specifier::parse("v3"),
-            }],
-        );
-
-        let located = vec![make_located(
-            ".github/workflows/ci.yml",
-            "actions/checkout",
-            "v4",
-        )];
-        prune_stale(&mut actions_overrides, &located);
-
-        assert!(
-            actions_overrides
-                .get(&ActionId::from("actions/checkout"))
-                .is_none_or(Vec::is_empty)
-        );
-    }
-
-    #[test]
-    fn prune_stale_keeps_live_overrides() {
-        let mut actions_overrides: HashMap<ActionId, Vec<ActionOverride>> = HashMap::new();
-        actions_overrides.insert(
-            ActionId::from("actions/checkout"),
-            vec![ActionOverride {
-                workflow: WorkflowPath::new(".github/workflows/ci.yml"),
-                job: None,
-                step: None,
-                version: Specifier::parse("v3"),
-            }],
-        );
-
-        let located = vec![make_located(
-            ".github/workflows/ci.yml",
-            "actions/checkout",
-            "v4",
-        )];
-        prune_stale(&mut actions_overrides, &located);
-
-        assert_eq!(
-            actions_overrides
-                .get(&ActionId::from("actions/checkout"))
-                .map(Vec::len),
-            Some(1)
-        );
-    }
-
-    /// Multiple workflows with v6.0.1 + one with v5 → `sync` creates override for v5.
-    #[test]
-    fn sync_multiple_sha_workflows_with_minority_version() {
-        let mut actions_overrides: HashMap<ActionId, Vec<ActionOverride>> = HashMap::new();
-        let mut actions_global: HashMap<ActionId, Spec> = HashMap::new();
-        // Global is v6.0.1 (dominant version)
-        actions_global.insert(
-            ActionId::from("actions/checkout"),
-            Spec::new(
-                ActionId::from("actions/checkout"),
-                Specifier::from_v1("v6.0.1"),
-            ),
-        );
-
-        let mut action_set = WorkflowActionSet::new();
-        let located = vec![
-            make_located(".github/workflows/ci.yml", "actions/checkout", "v6.0.1"),
-            make_located(".github/workflows/build.yml", "actions/checkout", "v6.0.1"),
-            make_located(".github/workflows/windows.yml", "actions/checkout", "v5"),
-        ];
-        for a in &located {
-            action_set.add(&a.action);
-        }
-
-        sync(
-            &mut actions_overrides,
-            &actions_global,
-            &located,
-            &action_set,
-        );
-
-        let overrides = actions_overrides
-            .get(&ActionId::from("actions/checkout"))
-            .expect("override must exist for minority version");
-        assert_eq!(overrides.len(), 1, "exactly one override for v5");
-        assert!(
-            overrides[0].workflow.as_str().ends_with("windows.yml"),
-            "override must be scoped to windows.yml"
-        );
-        assert_eq!(
-            overrides[0].version,
-            Specifier::from_v1("v5"),
-            "override version must be v5"
-        );
-    }
-
-    #[test]
-    fn prune_stale_removes_deploy_yml_when_only_ci_exists() {
-        let mut actions_overrides: HashMap<ActionId, Vec<ActionOverride>> = HashMap::new();
-        actions_overrides.insert(
-            ActionId::from("actions/checkout"),
-            vec![ActionOverride {
-                workflow: WorkflowPath::new(".github/workflows/deploy.yml"),
-                job: None,
-                step: None,
-                version: Specifier::from_v1("v3"),
-            }],
-        );
-
-        // Only ci.yml is live — deploy.yml has been deleted
-        let located = vec![make_located(
-            ".github/workflows/ci.yml",
-            "actions/checkout",
-            "v4",
-        )];
-        prune_stale(&mut actions_overrides, &located);
-
-        assert!(
-            actions_overrides
-                .get(&ActionId::from("actions/checkout"))
-                .is_none_or(Vec::is_empty),
-            "stale deploy.yml override must be removed"
-        );
-    }
-
-    #[test]
-    fn prune_stale_removes_job_override_when_job_is_gone() {
-        let mut actions_overrides: HashMap<ActionId, Vec<ActionOverride>> = HashMap::new();
-        actions_overrides.insert(
-            ActionId::from("actions/checkout"),
-            vec![ActionOverride {
-                workflow: WorkflowPath::new(".github/workflows/ci.yml"),
-                job: Some(JobId::from("deleted")),
-                step: None,
-                version: Specifier::from_v1("v3"),
-            }],
-        );
-
-        let mut live = make_located(".github/workflows/ci.yml", "actions/checkout", "v4");
-        live.location = make_loc(".github/workflows/ci.yml", Some("build"), Some(0));
-        prune_stale(&mut actions_overrides, &[live]);
-
-        assert!(
-            actions_overrides
-                .get(&ActionId::from("actions/checkout"))
-                .is_none_or(Vec::is_empty),
-            "override naming a job that no longer exists must be pruned"
-        );
-    }
-
-    #[test]
-    fn prune_stale_keeps_job_override_while_job_exists() {
-        let mut actions_overrides: HashMap<ActionId, Vec<ActionOverride>> = HashMap::new();
-        actions_overrides.insert(
-            ActionId::from("actions/checkout"),
-            vec![ActionOverride {
-                workflow: WorkflowPath::new(".github/workflows/ci.yml"),
-                job: Some(JobId::from("build")),
-                step: None,
-                version: Specifier::from_v1("v3"),
-            }],
-        );
-
-        let mut live = make_located(".github/workflows/ci.yml", "actions/checkout", "v4");
-        live.location = make_loc(".github/workflows/ci.yml", Some("build"), Some(0));
-        prune_stale(&mut actions_overrides, &[live]);
-
-        assert_eq!(
-            actions_overrides
-                .get(&ActionId::from("actions/checkout"))
-                .map(Vec::len),
-            Some(1)
-        );
-    }
-}
+#[path = "overrides_tests.rs"]
+mod tests;
 
 #[cfg(test)]
 #[path = "overrides_composite_tests.rs"]

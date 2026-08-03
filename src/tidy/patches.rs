@@ -20,11 +20,11 @@ pub(super) fn compute_workflow_patches<P: WorkflowScanner>(
     lock: &Lock,
     scanner: &P,
 ) -> Result<Vec<WorkflowPatch>, TidyError> {
-    let mut by_location: HashMap<crate::domain::file::site::WorkflowPath, Vec<&LocatedAction>> =
+    let mut by_file: HashMap<crate::domain::file::site::WorkflowPath, Vec<&LocatedAction>> =
         HashMap::new();
     for action in located {
-        by_location
-            .entry(action.location.workflow.clone())
+        by_file
+            .entry(action.site.file.clone())
             .or_default()
             .push(action);
     }
@@ -33,11 +33,12 @@ pub(super) fn compute_workflow_patches<P: WorkflowScanner>(
     let mut patches = Vec::new();
 
     for workflow_path in &workflows {
-        let abs_str = workflow_path.to_string_lossy().replace('\\', "/");
-        let steps: &[&LocatedAction] = by_location
-            .iter()
-            .find(|(loc, _)| abs_str.ends_with(loc.as_str()))
-            .map_or(&[], |(_, steps)| steps.as_slice());
+        // Exact key, not a suffix match: when one managed file's path ends with
+        // another's, a suffix match over an unordered map pairs a file with the wrong
+        // file's pins, and which one wins varies between runs.
+        let steps: &[&LocatedAction] = by_file
+            .get(&scanner.repo_rel(workflow_path))
+            .map_or(&[], Vec::as_slice);
         let pins = build_pins(manifest, lock, steps);
         if !pins.is_empty() {
             patches.push(WorkflowPatch {
@@ -54,7 +55,7 @@ pub(super) fn compute_workflow_patches<P: WorkflowScanner>(
 fn build_pins(manifest: &Manifest, lock: &Lock, steps: &[&LocatedAction]) -> Vec<ResolvedAction> {
     let mut map = HashMap::<ActionId, ResolvedAction>::new();
     for action in steps {
-        if let Some(version) = manifest.resolve_version(&action.action.id, &action.location) {
+        if let Some(version) = manifest.resolve_version(&action.action.id, &action.site) {
             let key = Spec::new(action.action.id.clone(), version.clone());
             if let Some(entry) = lock.get(&key) {
                 map.insert(
@@ -85,8 +86,9 @@ mod tests {
     use crate::domain::action::spec::Spec;
     use crate::domain::action::specifier::Specifier;
     use crate::domain::action::uses_ref::RefType;
-    use crate::domain::file::actions::Location as WorkflowLocation;
+    use crate::domain::file::site::Id as WorkflowLocation;
     use crate::domain::file::site::{JobId, StepIndex, WorkflowPath};
+    use crate::domain::file::site::{Origin, Slot};
 
     /// Task 4.2: SHA-only manifest version produces `@SHA` without trailing
     /// `# SHA` comment in workflow output.
@@ -118,12 +120,14 @@ mod tests {
                 id: ActionId::from("actions/checkout"),
                 reference: crate::domain::action::uses_ref::ParsedRef::Sha(CommitSha::from(sha)),
             },
-            location: WorkflowLocation {
-                workflow: WorkflowPath::new(".github/workflows/ci.yml"),
-                job: Some(JobId::from("build")),
-                step: Some(StepIndex::from(0_u16)),
-                line: None,
+            site: WorkflowLocation {
+                file: WorkflowPath::new(".github/workflows/ci.yml"),
+                slot: Slot::WorkflowStep {
+                    job: JobId::from("build"),
+                    step: StepIndex::from(0_u16),
+                },
             },
+            origin: Origin::default(),
         };
 
         let pins = build_pins(&manifest, &lock, &[&located]);

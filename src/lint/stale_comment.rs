@@ -39,8 +39,8 @@ impl StaleCommentRule {
         );
         Some(
             Diagnostic::new(RuleName::StaleComment, Level::Warn, msg)
-                .with_workflow(action.location.workflow.clone())
-                .with_line(action.location.line),
+                .with_workflow(action.site.file.clone())
+                .with_line(action.origin.line),
         )
     }
 }
@@ -74,8 +74,8 @@ mod tests {
     use crate::domain::action::spec::Spec;
     use crate::domain::action::specifier::Specifier;
     use crate::domain::action::uses_ref::RefType;
-    use crate::domain::file::actions::{ActionSet, Located, Location};
-    use crate::domain::file::site::WorkflowPath;
+    use crate::domain::file::actions::{ActionSet, Located};
+    use crate::domain::file::site::{Id, Origin, Slot, StepIndex, WorkflowPath};
     use crate::domain::lock::Lock;
     use crate::domain::manifest::Manifest;
 
@@ -112,12 +112,13 @@ mod tests {
                 id: ActionId::from(action),
                 reference,
             },
-            location: Location {
-                workflow: WorkflowPath::new(workflow),
-                job: None,
-                step: None,
-                line: None,
+            site: Id {
+                file: WorkflowPath::new(workflow),
+                slot: Slot::CompositeStep {
+                    step: StepIndex::from(0_u16),
+                },
             },
+            origin: Origin { line: None },
         }
     }
 
