@@ -48,11 +48,11 @@ impl From<IoWorkflowError> for WorkflowError {
     }
 }
 
-/// Action data extracted from a workflow file.
+/// Action data extracted from a managed file.
 /// Call `uses_ref.interpret()` to get domain types.
 #[derive(Debug, Clone)]
 struct ExtractedAction {
-    /// The parsed `uses:` reference from the workflow step.
+    /// The parsed `uses:` reference from the step.
     uses_ref: UsesRef,
     /// The workflow/job/step location where this action was found.
     location: crate::domain::workflow_actions::Location,
@@ -142,11 +142,9 @@ impl FileScanner {
         discovery::managed_files(&self.repo_root)
     }
 
-    /// Parse a workflow file once and return both the structural `Parsed` model and
-    /// the list of `uses:` action references with their location metadata.
-    ///
-    /// The action list is derived from `parsed.jobs[].steps[].uses`, each carrying its
-    /// inline version comment (e.g. `# v4`).
+    /// Parse a managed file once and return both the structural `Parsed` model and
+    /// the list of `uses:` action references with their location metadata, each
+    /// carrying its inline version comment (e.g. `# v4`).
     ///
     /// # Errors
     ///
@@ -172,8 +170,7 @@ impl FileScanner {
 
         let mut actions = Vec::new();
 
-        // Workflow steps live under a job; composite steps have no job to belong to.
-        // Below this lookup the two schemas are identical.
+        // Only the step lookup differs between the schemas; extraction below is shared.
         match kind {
             FileKind::Workflow => {
                 for job in &parsed.jobs {

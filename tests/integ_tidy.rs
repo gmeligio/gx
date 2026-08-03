@@ -368,8 +368,7 @@ jobs:
     let manifest_path = root.join(".github").join("gx.toml");
     let manifest_content = fs::read_to_string(&manifest_path).unwrap();
     assert!(manifest_content.contains("actions/checkout"));
-    // Local *references* are skipped. This says nothing about composite action
-    // *files*, which are scanned — see `gx_tidy_keeps_action_used_only_in_composite`.
+    // Local *references* are skipped; composite action *files* are still scanned.
     assert!(!manifest_content.contains("./local"));
     assert!(!manifest_content.contains("./.github/actions"));
 }

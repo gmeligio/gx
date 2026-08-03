@@ -1,6 +1,5 @@
 //! Discovery and extraction tests for composite action definitions
-//! (`.github/actions/**/action.yml`). Kept beside `tests.rs`, which covers the
-//! workflow schema.
+//! (`.github/actions/**/action.yml`).
 
 use super::FileScanner as FileWorkflowScanner;
 use crate::domain::action::identity::ActionId;
@@ -102,8 +101,7 @@ fn scan_ignores_non_action_yaml_beside_definition() {
         "setup/action.yml",
         &composite("      - uses: actions/checkout@v4\n"),
     );
-    // A sibling file that is not an action definition. Were it read as one,
-    // it would either contribute an action or raise a parse error.
+    // Read as an action definition this would contribute an action or fail to parse.
     create_test_action_file(
         temp_dir.path(),
         "setup/config.yml",
@@ -312,9 +310,8 @@ fn discovery_kind_agrees_with_of_path() {
     let files = super::discovery::managed_files(temp_dir.path()).unwrap();
     assert_eq!(files.len(), 4);
 
-    // Discovery tags kind by root; `of_path` derives it from the path. If these ever
-    // disagree, some layer is re-deriving the kind with a different rule — the defect
-    // that let a workflow-file override bypass its "step requires job" validation.
+    // Discovery tags kind by root; `of_path` derives it from the path. Disagreement
+    // means some layer re-derives the kind with a different rule.
     for file in &files {
         assert_eq!(
             file.kind,

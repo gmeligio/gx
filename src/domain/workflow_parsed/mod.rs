@@ -116,8 +116,7 @@ impl Defaults {
 ///
 /// The returned token is normalized: a `shell:` value carrying a flag/template form
 /// (`bash -e {0}`, `sh -e {0}`) is reduced to its leading word, so callers can match on
-/// `"bash"`/`"sh"` directly. The fourth GitHub source — the runner-OS default — is a
-/// documented non-goal for this cut; an absent shell is treated as `bash`.
+/// `"bash"`/`"sh"` directly. GitHub's runner-OS default is not consulted.
 #[must_use]
 pub fn effective_shell(
     step_shell: Option<&str>,
@@ -138,7 +137,8 @@ fn normalize_shell(raw: &str) -> String {
     raw.split_whitespace().next().unwrap_or("bash").to_owned()
 }
 
-/// A single step within a job, with the structural fields rule logic needs.
+/// A single step of a job or a composite action, with the structural fields rule
+/// logic needs.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Step {
     #[serde(default)]
@@ -401,8 +401,8 @@ impl Parsed {
                 job
             })
             .collect();
-        // Composite steps only. Any other `using` value is a legitimate action with no
-        // `uses:` steps to manage, so it yields an empty list rather than an error.
+        // A non-composite `using` is a legitimate action with no steps to manage, so it
+        // yields an empty list rather than an error.
         let steps = wire
             .runs
             .filter(|runs| runs.using.as_deref() == Some("composite"))

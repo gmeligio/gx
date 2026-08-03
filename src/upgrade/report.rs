@@ -33,7 +33,7 @@ pub struct Report {
     /// Warnings encountered during upgrade.
     pub warnings: Vec<String>,
     /// Number of managed files updated — workflows and composite action definitions.
-    /// The name is retained because it is the `--json` field name.
+    /// The name is fixed by the `--json` contract.
     pub workflows_updated: usize,
     /// True if everything was already up to date.
     pub up_to_date: bool,

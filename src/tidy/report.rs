@@ -13,7 +13,7 @@ pub struct Report {
     /// Actions upgraded (sha→tag or version bump): (action, from, to).
     pub upgraded: Vec<(ActionId, String, Specifier)>,
     /// Number of managed files updated — workflows and composite action definitions.
-    /// The name is retained because it is the `--json` field name.
+    /// The name is fixed by the `--json` contract.
     pub workflows_updated: usize,
 }
 

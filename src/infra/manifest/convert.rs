@@ -112,12 +112,9 @@ pub fn manifest_from_data(
 
         let mut converted = Vec::new();
         for exc in toml_overrides {
-            // Validation: step without job. A workflow step is identified by its job,
-            // so omitting one is ambiguous. A composite action has no jobs at all, so
-            // there its step index alone is the whole address.
-            //
-            // Normalize first: the manifest is hand-editable, and `of_path` reads path
-            // components, which a `\` separator would hide.
+            // A composite action has no jobs, so there a step index alone is the whole
+            // address. Normalize first: the manifest is hand-editable, and `of_path`
+            // reads path components, which a `\` separator would hide.
             let workflow_path = WorkflowPath::new(exc.workflow.clone());
             let kind = FileKind::of_path(Path::new(workflow_path.as_str()));
             if exc.step.is_some() && exc.job.is_none() && kind != FileKind::ActionDefinition {

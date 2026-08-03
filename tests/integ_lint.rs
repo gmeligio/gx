@@ -955,8 +955,6 @@ fn lint_config_parses_all_six_new_rule_names() {
     );
 }
 
-// --- Composite action coverage (issue #150) ---
-
 /// Write a composite action definition at `.github/actions/{name}/action.yml`.
 fn write_composite(repo_root: &std::path::Path, name: &str, steps: &str) -> std::path::PathBuf {
     let dir = repo_root.join(".github").join("actions").join(name);

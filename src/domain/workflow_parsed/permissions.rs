@@ -1,5 +1,4 @@
-//! The `permissions:` block and its three YAML shapes. Extracted from the parse
-//! module so that module stays within the file-size budget.
+//! The `permissions:` block and its YAML shapes.
 
 use serde::Deserialize;
 use serde::de::{Deserializer, MapAccess, Visitor};

@@ -332,8 +332,6 @@ fn scan_iterator_matches_scan_all_located() {
 
 #[test]
 fn scan_all_with_parsed_matches_scan_all_located() {
-    // Task 1.3 regression test: the combined single-pass parse must produce
-    // exactly the same WorkflowAction list as the legacy per-iterator path.
     let temp_dir = TempDir::new().unwrap();
     create_test_workflow(
         temp_dir.path(),

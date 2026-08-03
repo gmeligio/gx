@@ -230,8 +230,6 @@ fn upgrade_multiple_workflows_empty_manifest() {
     assert!(result.is_ok());
 }
 
-/// Reproduces the bug where `upgrade` replaces SHAs with bare version tags
-/// for actions that have no available upgrade.
 #[test]
 fn upgrade_preserves_sha_for_non_upgraded_actions() {
     let temp_dir = TempDir::new().unwrap();

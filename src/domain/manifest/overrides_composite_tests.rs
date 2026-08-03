@@ -1,5 +1,5 @@
 //! Override resolution and pruning for composite-action step locations, which carry
-//! a step index but no job. Kept beside the workflow-location tests in `overrides.rs`.
+//! a step index but no job.
 
 use super::*;
 use crate::domain::action::identity::{ActionId, Version};

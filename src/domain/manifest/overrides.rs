@@ -7,14 +7,15 @@ use crate::domain::workflow_actions::{
 };
 use std::collections::HashSet;
 
-/// A version override for a specific workflow location.
+/// A version override for a specific file location.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActionOverride {
     /// Relative path from repo root, e.g. ".github/workflows/deploy.yml".
     pub workflow: WorkflowPath,
-    /// Job id, if scoped to a job.
+    /// Job id, if scoped to a job. Always `None` for a composite action's step.
     pub job: Option<JobId>,
-    /// 0-based step index, if scoped to a step (requires job).
+    /// 0-based step index, if scoped to a step. Requires a job in a workflow;
+    /// stands alone in a composite action, which has none.
     pub step: Option<StepIndex>,
     /// The specifier to use at this location.
     pub version: Specifier,
@@ -22,22 +23,17 @@ pub struct ActionOverride {
 
 /// Resolve the effective specifier for an action at a given file location.
 ///
-/// Resolution order (most specific wins):
-/// 1. Job-step override (file + job + step)
-/// 2. Job-level override (file + job)
-/// 3. File-step override (file + step, no job) — a composite action's step, which
-///    belongs to no job
-/// 4. File-level override (file only)
-/// 5. Global default (returned as `None` — caller falls back to it)
+/// Resolution order, most specific first: job-step, job, file-step, file, then the global
+/// default (returned as `None` — the caller falls back to it). File-step addresses a
+/// composite action's step, which belongs to no job.
 ///
-/// Tiers 1–2 and 3 cannot collide — a composite location has no job, a workflow location
-/// always has one.
+/// The job-bearing tiers and file-step cannot collide — a composite location has no job,
+/// a workflow location always has one.
 #[must_use]
 pub fn resolve_version<'ovr>(
     overrides: &'ovr [ActionOverride],
     location: &WorkflowLocation,
 ) -> Option<&'ovr Specifier> {
-    // Job-step: file + job + step all match
     if let (Some(job), Some(step)) = (&location.job, location.step) {
         for exc in overrides {
             if exc.workflow == location.workflow
@@ -49,7 +45,6 @@ pub fn resolve_version<'ovr>(
         }
     }
 
-    // Job-level: file + job match, no step in override
     if let Some(job) = &location.job {
         for exc in overrides {
             if exc.workflow == location.workflow
@@ -61,8 +56,6 @@ pub fn resolve_version<'ovr>(
         }
     }
 
-    // File-step: file + step match with no job on either side. Narrower than
-    // file-level, so it is checked first.
     if let Some(step) = location.step
         && location.job.is_none()
     {
@@ -73,7 +66,6 @@ pub fn resolve_version<'ovr>(
         }
     }
 
-    // File-level: file matches, no job/step in override
     for exc in overrides {
         if exc.workflow == location.workflow && exc.job.is_none() && exc.step.is_none() {
             return Some(&exc.version);
@@ -163,15 +155,13 @@ pub fn prune_stale(
         .map(|(id, overrides)| {
             let pruned: Vec<ActionOverride> = overrides
                 .iter()
-                // An override survives only while some scanned location still matches
-                // every field it names. Job and step are matched against the *same*
-                // location, so a composite override — step but no job — is checked
-                // against job-less locations and cannot outlive the step it addresses.
+                // An override lives while one scanned location matches every field it
+                // names. Job and step must match the *same* location, so a composite
+                // override — step, no job — is checked against job-less locations.
                 .filter(|exc| {
                     if !live_workflows.contains(exc.workflow.as_str()) {
                         return false;
                     }
-                    // A file-level override names neither, so the live file is enough.
                     if exc.job.is_none() && exc.step.is_none() {
                         return true;
                     }
@@ -404,8 +394,6 @@ mod tests {
         );
     }
 
-    // --- Override lifecycle tests (migrated from tidy/tests.rs) ---
-
     /// Multiple workflows with v6.0.1 + one with v5 → `sync` creates override for v5.
     #[test]
     fn sync_multiple_sha_workflows_with_minority_version() {
@@ -452,7 +440,6 @@ mod tests {
         );
     }
 
-    /// Stale override for deploy.yml (which no longer exists) is removed by prune.
     #[test]
     fn prune_stale_removes_deploy_yml_when_only_ci_exists() {
         let mut actions_overrides: HashMap<ActionId, Vec<ActionOverride>> = HashMap::new();
@@ -482,8 +469,6 @@ mod tests {
         );
     }
 
-    /// A job-level override outlives its job when the job is renamed or deleted while the
-    /// file stays. The file-path check alone would keep it.
     #[test]
     fn prune_stale_removes_job_override_when_job_is_gone() {
         let mut actions_overrides: HashMap<ActionId, Vec<ActionOverride>> = HashMap::new();
@@ -509,7 +494,6 @@ mod tests {
         );
     }
 
-    /// The same override survives while its job is still present.
     #[test]
     fn prune_stale_keeps_job_override_while_job_exists() {
         let mut actions_overrides: HashMap<ActionId, Vec<ActionOverride>> = HashMap::new();

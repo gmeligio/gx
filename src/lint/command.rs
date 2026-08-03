@@ -65,11 +65,8 @@ pub fn collect_diagnostics(
     // structural Parsed view the workflow-security rules consume.
     let (located, parsed_files) = scanner.scan_all_with_parsed()?;
 
-    // Composite action definitions are filtered out here, at the boundary, rather than
-    // guarded for in each schema-only rule. A composite file has no `on:`, no top-level
-    // `permissions:`, and no jobs, so `missing-permissions` — which flags an *absent*
-    // block — would fire on every one of them. Filtering once makes the invariant
-    // structural: a rule reading `workflows_full` cannot see a composite file at all.
+    // Filtered once here rather than guarded for in each schema-only rule, so a rule
+    // reading `workflows_full` structurally cannot see a composite file.
     let parsed_workflows: Vec<_> = parsed_files
         .into_iter()
         .filter(|p| p.kind == FileKind::Workflow)

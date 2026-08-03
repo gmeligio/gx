@@ -128,9 +128,8 @@ fn load_override_without_global_is_error() {
 
 #[test]
 fn composite_step_override_without_job_roundtrips() {
-    // A composite action has no jobs, so a bare `step` is its whole address. `sync`
-    // generates these itself from composite locations, so gx must read back what it
-    // writes.
+    // `sync` generates bare-step overrides from composite locations, so the reader must
+    // accept what the writer emits.
     let file = NamedTempFile::new().unwrap();
     let store = Store::new(file.path());
 
@@ -148,7 +147,6 @@ fn composite_step_override_without_job_roundtrips() {
 
     store.save(&manifest).unwrap();
 
-    // A composite step override must parse back, not be rejected as "step without job".
     let loaded = parse(file.path()).unwrap();
     let overrides = loaded
         .value
@@ -164,11 +162,8 @@ fn composite_step_override_without_job_roundtrips() {
 
 #[test]
 fn load_override_step_without_job_is_error_for_workflow_named_action_yml() {
-    // A workflow may legitimately be named `action.yml`. Kind is decided by
-    // location, so this is still a workflow and a bare step is still ambiguous.
-    // Deciding by file name here would accept an override that `resolve_version`
-    // can never apply (a workflow step always has `job: Some`) and that
-    // `prune_stale` then deletes.
+    // Kind follows location, so a bare step here is still ambiguous. Deciding by file
+    // name would accept an override `resolve_version` can never apply.
     let content = r#"
 [actions]
 "actions/checkout" = "v4"
