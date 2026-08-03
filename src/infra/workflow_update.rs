@@ -2,7 +2,7 @@ use super::workflow_scan::discovery;
 use crate::domain::action::identity::ActionId;
 use crate::domain::action::resolved::ResolvedAction;
 use crate::domain::diff::WorkflowPatch;
-use crate::domain::workflow::{Error as WorkflowError, UpdateResult};
+use crate::domain::file::scan::{Error as WorkflowError, UpdateResult};
 use regex::Regex;
 use std::collections::HashMap;
 use std::fs;

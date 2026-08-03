@@ -1,8 +1,8 @@
 use super::discovery;
 use crate::domain::action::uses_ref::UsesRef;
-use crate::domain::workflow::Error as WorkflowError;
-use crate::domain::workflow_actions::{JobId, StepIndex, WorkflowPath};
-use crate::domain::workflow_parsed::{FileKind, Parsed, Step};
+use crate::domain::file::parsed::{FileKind, Parsed, Step};
+use crate::domain::file::scan::Error as WorkflowError;
+use crate::domain::file::site::{JobId, StepIndex, WorkflowPath};
 use crate::regex::static_regex;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -55,7 +55,7 @@ struct ExtractedAction {
     /// The parsed `uses:` reference from the step.
     uses_ref: UsesRef,
     /// The workflow/job/step location where this action was found.
-    location: crate::domain::workflow_actions::Location,
+    location: crate::domain::file::actions::Location,
 }
 
 /// Pull the registry `uses:` references out of one step list, tagging each with its
@@ -87,7 +87,7 @@ fn extract_steps(
 
         out.push(ExtractedAction {
             uses_ref: UsesRef::new(action_name, uses_ref, comment),
-            location: crate::domain::workflow_actions::Location {
+            location: crate::domain::file::actions::Location {
                 workflow: workflow_rel_path.clone(),
                 job: job.cloned(),
                 step: StepIndex::try_from(step_idx).ok(),
@@ -194,11 +194,11 @@ impl FileScanner {
     pub fn scan_file(
         &self,
         workflow_path: &Path,
-    ) -> Result<crate::domain::workflow_actions::ActionSet, WorkflowError> {
+    ) -> Result<crate::domain::file::actions::ActionSet, WorkflowError> {
         let rel = self.rel_path(workflow_path);
         let (_, actions) =
             Self::extract_workflow(workflow_path, &rel, FileKind::of_path(workflow_path))?;
-        let mut action_set = crate::domain::workflow_actions::ActionSet::new();
+        let mut action_set = crate::domain::file::actions::ActionSet::new();
         for action in &actions {
             action_set.add(&action.uses_ref.interpret());
         }
@@ -210,12 +210,12 @@ impl FileScanner {
         workflow_path: &Path,
         workflow_rel_path: &WorkflowPath,
         kind: FileKind,
-    ) -> Result<Vec<crate::domain::workflow_actions::Located>, WorkflowError> {
+    ) -> Result<Vec<crate::domain::file::actions::Located>, WorkflowError> {
         let (_, actions) = Self::extract_workflow(workflow_path, workflow_rel_path, kind)
             .map_err(WorkflowError::from)?;
         Ok(actions
             .into_iter()
-            .map(|action| crate::domain::workflow_actions::Located {
+            .map(|action| crate::domain::file::actions::Located {
                 action: action.uses_ref.interpret(),
                 location: action.location,
             })
@@ -223,15 +223,13 @@ impl FileScanner {
     }
 }
 
-impl crate::domain::workflow::Scanner for FileScanner {
+impl crate::domain::file::scan::Scanner for FileScanner {
     fn scan(
         &self,
-    ) -> Box<
-        dyn Iterator<Item = Result<crate::domain::workflow_actions::Located, WorkflowError>> + '_,
-    > {
-        type LocatedIter = Box<
-            dyn Iterator<Item = Result<crate::domain::workflow_actions::Located, WorkflowError>>,
-        >;
+    ) -> Box<dyn Iterator<Item = Result<crate::domain::file::actions::Located, WorkflowError>> + '_>
+    {
+        type LocatedIter =
+            Box<dyn Iterator<Item = Result<crate::domain::file::actions::Located, WorkflowError>>>;
 
         let files = match self.find_managed() {
             Ok(w) => w,
@@ -259,7 +257,7 @@ impl crate::domain::workflow::Scanner for FileScanner {
 
     fn scan_all_with_parsed(
         &self,
-    ) -> Result<(Vec<crate::domain::workflow_actions::Located>, Vec<Parsed>), WorkflowError> {
+    ) -> Result<(Vec<crate::domain::file::actions::Located>, Vec<Parsed>), WorkflowError> {
         let files = self.find_managed()?;
         let mut located = Vec::new();
         let mut parsed = Vec::new();
@@ -270,7 +268,7 @@ impl crate::domain::workflow::Scanner for FileScanner {
             located.extend(
                 actions
                     .into_iter()
-                    .map(|a| crate::domain::workflow_actions::Located {
+                    .map(|a| crate::domain::file::actions::Located {
                         action: a.uses_ref.interpret(),
                         location: a.location,
                     }),

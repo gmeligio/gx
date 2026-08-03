@@ -3,10 +3,10 @@ use crate::domain::action::identity::ActionId;
 use crate::domain::action::resolved::ResolvedAction;
 use crate::domain::action::spec::Spec;
 use crate::domain::diff::WorkflowPatch;
+use crate::domain::file::actions::Located as LocatedAction;
+use crate::domain::file::scan::Scanner as WorkflowScanner;
 use crate::domain::lock::Lock;
 use crate::domain::manifest::Manifest;
-use crate::domain::workflow::Scanner as WorkflowScanner;
-use crate::domain::workflow_actions::Located as LocatedAction;
 use std::collections::HashMap;
 
 /// Compute workflow patches (pin maps) without writing files.
@@ -20,10 +20,8 @@ pub(super) fn compute_workflow_patches<P: WorkflowScanner>(
     lock: &Lock,
     scanner: &P,
 ) -> Result<Vec<WorkflowPatch>, TidyError> {
-    let mut by_location: HashMap<
-        crate::domain::workflow_actions::WorkflowPath,
-        Vec<&LocatedAction>,
-    > = HashMap::new();
+    let mut by_location: HashMap<crate::domain::file::site::WorkflowPath, Vec<&LocatedAction>> =
+        HashMap::new();
     for action in located {
         by_location
             .entry(action.location.workflow.clone())
@@ -87,9 +85,8 @@ mod tests {
     use crate::domain::action::spec::Spec;
     use crate::domain::action::specifier::Specifier;
     use crate::domain::action::uses_ref::RefType;
-    use crate::domain::workflow_actions::{
-        JobId, Location as WorkflowLocation, StepIndex, WorkflowPath,
-    };
+    use crate::domain::file::actions::Location as WorkflowLocation;
+    use crate::domain::file::site::{JobId, StepIndex, WorkflowPath};
 
     /// Task 4.2: SHA-only manifest version produces `@SHA` without trailing
     /// `# SHA` comment in workflow output.
@@ -116,8 +113,8 @@ mod tests {
         );
 
         // A located action referencing this action by bare SHA (`@<sha>`).
-        let located = crate::domain::workflow_actions::Located {
-            action: crate::domain::workflow_actions::WorkflowAction {
+        let located = crate::domain::file::actions::Located {
+            action: crate::domain::file::actions::WorkflowAction {
                 id: ActionId::from("actions/checkout"),
                 reference: crate::domain::action::uses_ref::ParsedRef::Sha(CommitSha::from(sha)),
             },

@@ -1,7 +1,7 @@
 use super::FileScanner as FileWorkflowScanner;
 use crate::domain::action::identity::ActionId;
-use crate::domain::workflow::Scanner as _;
-use crate::domain::workflow_actions::StepIndex;
+use crate::domain::file::scan::Scanner as _;
+use crate::domain::file::site::StepIndex;
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -42,7 +42,7 @@ jobs:
             && a.location
                 .job
                 .as_ref()
-                .map(crate::domain::workflow_actions::JobId::as_str)
+                .map(crate::domain::file::site::JobId::as_str)
                 == Some("build")
     });
     assert!(build_checkout.is_some());
@@ -55,7 +55,7 @@ jobs:
             && a.location
                 .job
                 .as_ref()
-                .map(crate::domain::workflow_actions::JobId::as_str)
+                .map(crate::domain::file::site::JobId::as_str)
                 == Some("test")
     });
     assert!(test_checkout.is_some());
@@ -165,7 +165,7 @@ fn scan_all_located_derives_action_set() {
 
     let parser = FileWorkflowScanner::new(temp_dir.path());
     let located = parser.scan_all_located().unwrap();
-    let action_set = crate::domain::workflow_actions::ActionSet::from_located(&located);
+    let action_set = crate::domain::file::actions::ActionSet::from_located(&located);
 
     assert_eq!(action_set.action_ids().count(), 2);
 }
@@ -386,7 +386,7 @@ jobs:
     assert!(
         ci.on
             .iter()
-            .any(|t| matches!(t, crate::domain::workflow_parsed::Trigger::PullRequest))
+            .any(|t| matches!(t, crate::domain::file::parsed::Trigger::PullRequest))
     );
     let deploy = parsed
         .iter()
@@ -397,7 +397,7 @@ jobs:
         deploy
             .on
             .iter()
-            .any(|t| matches!(t, crate::domain::workflow_parsed::Trigger::Push))
+            .any(|t| matches!(t, crate::domain::file::parsed::Trigger::Push))
     );
 }
 
@@ -428,7 +428,7 @@ jobs:
                     && a.location
                         .job
                         .as_ref()
-                        .map(crate::domain::workflow_actions::JobId::as_str)
+                        .map(crate::domain::file::site::JobId::as_str)
                         == Some(job)
             })
             .unwrap()

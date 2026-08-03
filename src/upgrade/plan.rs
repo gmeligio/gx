@@ -5,10 +5,10 @@ use crate::domain::action::upgrade::{
     Action as UpgradeAction, Candidate as UpgradeCandidate, find_upgrade_candidate,
 };
 use crate::domain::diff::{LockDiff, ManifestDiff, WorkflowPatch};
+use crate::domain::file::scan::Error as WorkflowError;
 use crate::domain::lock::Lock;
 use crate::domain::manifest::Manifest;
 use crate::domain::resolution::{ActionResolver, Error as ResolutionError, VersionRegistry};
-use crate::domain::workflow::Error as WorkflowError;
 use crate::infra::workflow_update::WorkflowWriter;
 use thiserror::Error;
 

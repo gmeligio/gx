@@ -3,9 +3,8 @@
 
 use super::*;
 use crate::domain::action::identity::{ActionId, Version};
-use crate::domain::workflow_actions::{
-    JobId, Located as LocatedAction, Location as WorkflowLocation, StepIndex, WorkflowPath,
-};
+use crate::domain::file::actions::{Located as LocatedAction, Location as WorkflowLocation};
+use crate::domain::file::site::{JobId, StepIndex, WorkflowPath};
 use std::collections::HashMap;
 
 const ACTION_FILE: &str = ".github/actions/setup/action.yml";
@@ -21,7 +20,7 @@ fn composite_loc(step: u16) -> WorkflowLocation {
 
 fn located_at(loc: WorkflowLocation) -> LocatedAction {
     use crate::domain::action::uses_ref::ParsedRef;
-    use crate::domain::workflow_actions::WorkflowAction;
+    use crate::domain::file::actions::WorkflowAction;
     LocatedAction {
         action: WorkflowAction {
             id: ActionId::from("actions/checkout"),

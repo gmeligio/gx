@@ -11,7 +11,7 @@ impl UnpinnedRule {
     /// bare `@<sha>` or a `@<sha> # vX.Y.Z` pin. The typed reference answers this
     /// directly: `pin_sha()` is `Some` for both pinned shapes and `None` for a
     /// bare tag/branch ref.
-    pub fn check_action(action: &crate::domain::workflow_actions::Located) -> Option<Diagnostic> {
+    pub fn check_action(action: &crate::domain::file::actions::Located) -> Option<Diagnostic> {
         if action.action.reference.pin_sha().is_some() {
             return None;
         }
@@ -51,7 +51,8 @@ mod tests {
     use super::{Level, Rule as _, RuleName, UnpinnedRule};
     use crate::domain::action::identity::{ActionId, CommitSha, Version};
     use crate::domain::action::uses_ref::ParsedRef;
-    use crate::domain::workflow_actions::{Located, Location, WorkflowAction, WorkflowPath};
+    use crate::domain::file::actions::{Located, Location, WorkflowAction};
+    use crate::domain::file::site::WorkflowPath;
 
     const VALID_SHA: &str = "8e8c483db84b4bee98b60c0593521ed34d9990e8";
 

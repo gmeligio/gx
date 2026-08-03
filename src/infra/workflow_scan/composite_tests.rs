@@ -3,8 +3,8 @@
 
 use super::FileScanner as FileWorkflowScanner;
 use crate::domain::action::identity::ActionId;
-use crate::domain::workflow::Scanner as _;
-use crate::domain::workflow_actions::StepIndex;
+use crate::domain::file::scan::Scanner as _;
+use crate::domain::file::site::StepIndex;
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -298,7 +298,7 @@ fn scan_file_reads_a_composite_under_the_right_schema() {
 
 #[test]
 fn discovery_kind_agrees_with_of_path() {
-    use crate::domain::workflow_parsed::FileKind;
+    use crate::domain::file::parsed::FileKind;
 
     let temp_dir = TempDir::new().unwrap();
     create_test_workflow(temp_dir.path(), "ci.yml", "name: CI");

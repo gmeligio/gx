@@ -4,7 +4,7 @@ use super::action::identity::ActionId;
 use super::action::spec::Spec;
 use super::action::specifier::Specifier;
 use super::diff::ManifestDiff;
-use super::workflow_actions::{ActionSet, Located, Location};
+use super::file::actions::{ActionSet, Located, Location};
 use overrides::ActionOverride;
 use std::collections::{HashMap, HashSet};
 
@@ -216,7 +216,8 @@ impl Manifest {
 )]
 mod tests {
     use super::{ActionId, ActionOverride, Manifest, Specifier};
-    use crate::domain::workflow_actions::{JobId, Location, StepIndex, WorkflowPath};
+    use crate::domain::file::actions::Location;
+    use crate::domain::file::site::{JobId, StepIndex, WorkflowPath};
 
     fn make_loc(workflow: &str, job: Option<&str>, step: Option<u16>) -> Location {
         Location {

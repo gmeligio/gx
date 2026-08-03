@@ -1,8 +1,8 @@
 use super::Error as ManifestError;
 use crate::domain::action::identity::ActionId;
 use crate::domain::diff::ManifestDiff;
+use crate::domain::file::site::StepIndex;
 use crate::domain::manifest::overrides::ActionOverride;
-use crate::domain::workflow_actions::StepIndex;
 use std::fs;
 use std::path::Path;
 use toml_edit::DocumentMut;
@@ -88,7 +88,7 @@ fn override_entry_matches(
             == ovr
                 .job
                 .as_ref()
-                .map(crate::domain::workflow_actions::JobId::as_str)
+                .map(crate::domain::file::site::JobId::as_str)
         && step.and_then(|s| StepIndex::try_from(s).ok()) == ovr.step
 }
 
@@ -232,8 +232,8 @@ mod tests {
     use crate::domain::action::identity::ActionId;
     use crate::domain::action::specifier::Specifier;
     use crate::domain::diff::ManifestDiff;
+    use crate::domain::file::site::{JobId, WorkflowPath};
     use crate::domain::manifest::overrides::ActionOverride;
-    use crate::domain::workflow_actions::{JobId, WorkflowPath};
     use std::fs;
     use std::io::Write as _;
     use tempfile::NamedTempFile;

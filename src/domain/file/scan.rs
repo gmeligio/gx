@@ -35,7 +35,7 @@ pub trait Scanner {
     /// The caller decides whether to collect, short-circuit, or continue past errors.
     fn scan(
         &self,
-    ) -> Box<dyn Iterator<Item = Result<crate::domain::workflow_actions::Located, Error>> + '_>;
+    ) -> Box<dyn Iterator<Item = Result<crate::domain::file::actions::Located, Error>> + '_>;
 
     /// Enumerate all managed file paths.
     ///
@@ -47,7 +47,7 @@ pub trait Scanner {
     /// # Errors
     ///
     /// Returns an error if any managed file cannot be read or parsed.
-    fn scan_all_located(&self) -> Result<Vec<crate::domain::workflow_actions::Located>, Error> {
+    fn scan_all_located(&self) -> Result<Vec<crate::domain::file::actions::Located>, Error> {
         self.scan().collect()
     }
 
@@ -73,8 +73,8 @@ pub trait Scanner {
         &self,
     ) -> Result<
         (
-            Vec<crate::domain::workflow_actions::Located>,
-            Vec<crate::domain::workflow_parsed::Parsed>,
+            Vec<crate::domain::file::actions::Located>,
+            Vec<crate::domain::file::parsed::Parsed>,
         ),
         Error,
     >;

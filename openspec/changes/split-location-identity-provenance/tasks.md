@@ -1,9 +1,10 @@
 ## 1. Create the leaf module
 
-- [ ] 1.1 Create `src/domain/site.rs` and register it in `src/domain/mod.rs`
-- [ ] 1.2 Move `WorkflowPath`, `JobId`, `StepIndex` from `src/domain/workflow_actions.rs:99-200` into `site.rs` unchanged; re-export from `workflow_actions` so existing imports keep compiling
-- [ ] 1.3 Verify `site.rs` imports nothing from `crate::domain` — the leaf property the follow-up work depends on
-- [ ] 1.4 Confirm `mise run test` passes with only the move applied
+- [x] 1.1 Create `src/domain/file/site.rs` and register `file` in `src/domain/mod.rs`
+- [x] 1.2 Move `WorkflowPath`, `JobId`, `StepIndex` from `workflow_actions.rs:99-200` into `site.rs` unchanged; update importers to `domain::file::site` directly (a `pub use` shim is rejected by `clippy::pub_use`)
+- [x] 1.3 Verify `site.rs` imports nothing from `crate::domain` — the leaf property the follow-up work depends on
+- [x] 1.4 Confirm `mise run test` passes with only the move applied
+- [x] 1.5 Group the managed-file modules under `src/domain/file/`: `workflow_parsed/` → `parsed/`, `workflow_actions.rs` → `actions.rs`, `workflow.rs` → `scan.rs`, plus `site.rs`. Required — `src/domain/` was at the 8-file budget enforced by `tests/code_health.rs:626`
 
 ## 2. Define the new types
 

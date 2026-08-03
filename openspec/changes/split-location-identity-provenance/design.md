@@ -58,11 +58,11 @@ encoded as an `Option` shape: `job.is_none() && step.is_some()`, read that way a
 
 ## Decisions
 
-### 1. A new leaf module `src/domain/site.rs`, not a growth of `workflow_actions`
+### 1. A new leaf module `site`, not a growth of `workflow_actions`
 
-`site.rs` imports nothing from `domain`. `WorkflowPath`, `JobId`, and
-`StepIndex` (`workflow_actions.rs:99-200`) move into it unchanged — they are
-self-contained newtypes with no `action::` dependency.
+`site` imports nothing from `domain`. `WorkflowPath`, `JobId`, and `StepIndex`
+(`workflow_actions.rs:99-200`) move into it unchanged — they are self-contained
+newtypes with no `action::` dependency.
 
 Leaf placement is what makes the follow-up work legal: `manifest/overrides.rs`
 and, later, a relocated lint-policy module can both depend on `site` without
@@ -73,6 +73,28 @@ there. Rejected — `workflow_actions.rs:2` imports `action::uses_ref::ParsedRef
 while `action/uses_ref.rs:2` imports `workflow_actions::WorkflowAction`. That
 pair is already one mutually-recursive unit; adding the addressing types to it
 would pull `manifest` into the cycle's blast radius.
+
+**Amended during implementation.** `src/domain/` was already at the 8-file
+budget enforced by `tests/code_health.rs:626`, so a flat `site.rs` could not be
+added without paying for the slot. Rather than raise the gate, the four modules
+that together describe a managed file are now grouped:
+
+```
+src/domain/file/
+  site.rs      addressing — which file, and where within it (leaf)
+  actions.rs   the references themselves        (was workflow_actions.rs)
+  parsed/      file bodies, per schema          (was workflow_parsed/)
+  scan.rs      the discovery/read port          (was workflow.rs)
+```
+
+This is the grouping the `workflow_*` prefix was already signalling. It takes
+`src/domain/` from 8 flat files to 6 and removes the budget as a recurring cost
+for adding a type. It does not pre-empt #138 (capability-named modules) or the
+`workflow_parsed` split that #155 identifies — both still apply within `file/`.
+
+A `pub use` re-export shim in `actions.rs` was tried first, to keep existing
+imports compiling; `clippy::pub_use` is denied by this project, so importers
+now name `domain::file::site` directly.
 
 ### 2. `Slot` as a sum type, and it does not merge with `FileKind`
 

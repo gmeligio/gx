@@ -3,9 +3,9 @@ use crate::domain::action::spec::Spec as ActionSpec;
 use crate::domain::action::specifier::Specifier;
 use crate::domain::action::tag_selection::{ShaIndex, select_most_specific_tag};
 use crate::domain::event::Event as SyncEvent;
+use crate::domain::file::actions::ActionSet as WorkflowActionSet;
 use crate::domain::manifest::Manifest;
 use crate::domain::resolution::{ActionResolver, VersionRegistry};
-use crate::domain::workflow_actions::ActionSet as WorkflowActionSet;
 use std::collections::HashSet;
 
 /// Remove unused actions from manifest and add missing ones.

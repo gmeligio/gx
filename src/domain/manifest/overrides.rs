@@ -1,10 +1,10 @@
 use crate::domain::action::identity::ActionId;
 use crate::domain::action::spec::Spec;
 use crate::domain::action::specifier::Specifier;
-use crate::domain::workflow_actions::{
-    ActionSet as WorkflowActionSet, JobId, Located as LocatedAction, Location as WorkflowLocation,
-    StepIndex, WorkflowPath,
+use crate::domain::file::actions::{
+    ActionSet as WorkflowActionSet, Located as LocatedAction, Location as WorkflowLocation,
 };
+use crate::domain::file::site::{JobId, StepIndex, WorkflowPath};
 use std::collections::HashSet;
 
 /// A version override for a specific file location.
@@ -199,10 +199,10 @@ mod tests {
     use crate::domain::action::identity::{ActionId, Version};
     use crate::domain::action::spec::Spec;
     use crate::domain::action::specifier::Specifier;
-    use crate::domain::workflow_actions::{
-        ActionSet as WorkflowActionSet, JobId, Location as WorkflowLocation, StepIndex,
-        WorkflowPath,
+    use crate::domain::file::actions::{
+        ActionSet as WorkflowActionSet, Location as WorkflowLocation,
     };
+    use crate::domain::file::site::{JobId, StepIndex, WorkflowPath};
 
     use std::collections::HashMap;
     fn make_loc(workflow: &str, job: Option<&str>, step: Option<u16>) -> WorkflowLocation {
@@ -216,7 +216,7 @@ mod tests {
 
     fn make_located(workflow: &str, action: &str, version: &str) -> LocatedAction {
         use crate::domain::action::uses_ref::ParsedRef;
-        use crate::domain::workflow_actions::WorkflowAction;
+        use crate::domain::file::actions::WorkflowAction;
         LocatedAction {
             action: WorkflowAction {
                 id: ActionId::from(action),
