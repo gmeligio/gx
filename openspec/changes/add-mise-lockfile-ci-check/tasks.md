@@ -1,7 +1,7 @@
 ## 1. Lock task pair
 
 - [x] 1.1 Create `.config/mise/tasks/lock/_default` running `mise install`, with `#MISE description="Sync .config/mise.lock with the installed tools"` and a `Don't rename` comment matching the convention in `clippy/_default` and `format/_default`
-- [x] 1.2 Create `.config/mise/tasks/lock/check` running the mutating task then `git diff --exit-code -- .config/mise.lock`, with `#MISE description="Verify .config/mise.lock is unchanged by an install (CI)"`
+- [x] 1.2 Create `.config/mise/tasks/lock/check` as a bare `git diff --exit-code -- .config/mise.lock`, with no `depends` on `lock` — invoking the convergent mutating task first would repair the drift before the diff sees it, making the check unfailable (verified against six drift kinds)
 - [x] 1.3 Comment in `lock/check` why it cannot use `--locked` (the `core:rust` / `locked = false` catch-22 documented in `.config/mise.toml`), so the next reader does not "simplify" it into a broken form
 - [x] 1.4 Verify `mise tasks` lists both `lock` and `lock:check` with their descriptions
 

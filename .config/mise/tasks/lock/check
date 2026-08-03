@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Verify .config/mise.lock is unchanged by an install (CI)"
+#MISE description="Verify .config/mise.lock is not dirty (CI)"
 # No `depends=["lock"]`: `mise lock` is convergent — it drives any input to the
 # correct output — so repairing first would erase the very drift this checks for,
 # and the diff would always be empty. The suspect content must reach `git diff`
