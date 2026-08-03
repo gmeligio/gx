@@ -6,13 +6,13 @@ Developer checks have one definition (a mise task) that every environment — lo
 
 ### Requirement: Developer checks have one definition invoked by every environment
 
-Every project check (format, clippy, supply-chain/deny, lockfile tidy, compile check) SHALL be defined exactly once as a mise task. The local shell, the pre-commit hooks, and CI SHALL all invoke that check through `mise run <task>` rather than re-spelling the underlying `cargo`/`clippy`/`rustfmt` command. No `build.yml` step and no pre-commit hook SHALL invoke `cargo`, `clippy`, or `rustfmt` directly for a check that has a mise task.
+Every project check (format, clippy, supply-chain/deny, lockfile tidy, lockfile sync, compile check) SHALL be defined exactly once as a mise task. The local shell, the pre-commit hooks, and CI SHALL all invoke that check through `mise run <task>` rather than re-spelling the underlying `cargo`/`clippy`/`rustfmt`/`mise` command. No `build.yml` step and no pre-commit hook SHALL invoke `cargo`, `clippy`, `rustfmt`, or `mise install` directly for a check that has a mise task.
 
 **User value:** Contributors never get a CI failure caused by a check that passed locally but used different flags than CI — the drift class that caused the PR #102 `cargo-deny unmatched-skip-root` failure (the `-D warnings` flag lived only in the mise task). Changing a check's flags in one place moves every environment at once. This is the same contributor-facing guarantee as `lockfile-integrity`, applied to check definitions.
 
 #### Scenario: A check's flags live in exactly one place
 
-- **GIVEN** any check that runs in both CI and locally (format, clippy, deny, check)
+- **GIVEN** any check that runs in both CI and locally (format, clippy, deny, check, lock)
 - **WHEN** its command or flags need to change
 - **THEN** the change is made once in the check's mise task
 - **AND** CI and the pre-commit hook both pick up the change because they call `mise run <task>`, not a copied command
@@ -21,14 +21,23 @@ Every project check (format, clippy, supply-chain/deny, lockfile tidy, compile c
 
 - **GIVEN** the CI workflow `build.yml`
 - **WHEN** a check job runs
-- **THEN** its `run:` step is `mise run <task>` (e.g. `mise run format:check`, `mise run clippy:check`, `mise run check`, `mise run deny`)
-- **AND** no check job invokes `cargo fmt`, `cargo clippy`, or `rustfmt` directly
+- **THEN** its `run:` step is `mise run <task>` (e.g. `mise run format:check`, `mise run clippy:check`, `mise run check`, `mise run deny`, `mise run lock:check`)
+- **AND** no check job invokes `cargo fmt`, `cargo clippy`, `rustfmt`, or `mise install` directly
+
+#### Scenario: Pre-commit hooks contain no inline check commands
+
+- **GIVEN** the pre-commit hook configuration
+- **WHEN** a hook runs a check that has a mise task
+- **THEN** its entry invokes `mise run <task>` rather than the underlying tool
+- **AND** this includes the lockfile-sync hook, which invokes `mise run lock` rather than `mise install` directly
 
 ### Requirement: Local and pre-commit mutate; CI verifies
 
-Checks that can fix code (format, clippy) SHALL mutate in the local and pre-commit environments and SHALL be verified non-mutating in CI. The mutating task and its `:check` verification variant SHALL share the same configuration (same `rustfmt.toml`, same `--all` scope, same lint set) so that only the verb differs. CI SHALL NOT modify the working tree.
+Checks that can fix their target (format, clippy, lockfile sync) SHALL mutate in the local and pre-commit environments and SHALL be verified non-mutating in CI. The mutating task and its `:check` verification variant SHALL share the same configuration (same `rustfmt.toml`, same `--all` scope, same lint set, same lockfile settings) so that only the verb differs. CI SHALL NOT modify the working tree.
 
-**User value:** A contributor's commit is auto-formatted in one shot instead of being told it is misformatted; CI gates the immutable pushed commit and never silently rewrites contributor code. Because the mutate and verify variants share one configuration, they cannot disagree on what "formatted" means.
+A `:check` variant for a *convergent* writer — one that drives any input to the same correct output, such as `mise lock` — SHALL NOT invoke the mutating task before verifying, because doing so repairs the drift it exists to detect and the check can never fail. Such a variant SHALL verify the content the environment already produced.
+
+**User value:** A contributor's commit is auto-formatted and its lockfiles auto-synced in one shot instead of being told they are wrong; CI gates the immutable pushed commit and never silently rewrites contributor code. Because the mutate and verify variants share one configuration, they cannot disagree on what "correct" means.
 
 #### Scenario: Pre-commit fixes and re-stages in one shot
 
@@ -45,30 +54,45 @@ Checks that can fix code (format, clippy) SHALL mutate in the local and pre-comm
 - **AND** a violation fails the job loudly with a diff/error
 - **AND** the working tree is never modified by CI
 
+#### Scenario: A convergent writer is verified without re-running it
+
+- **GIVEN** a check whose tool has no validate-only mode and repairs whatever it is given (`mise lock`; `--dry-run` reports but always exits 0)
+- **WHEN** its `:check` variant runs
+- **THEN** it asserts the target file is unchanged without first invoking the mutating task
+- **AND** a difference fails the job with the diff printed, naming the field that changed
+- **AND** the assertion is scoped to that lockfile, so unrelated writes by other tooling do not trip it
+
+#### Scenario: The mutating task repairs rather than merely writing
+
+- **GIVEN** the lockfile-sync task and a `.config/mise.lock` containing an incorrect checksum
+- **WHEN** the pre-commit hook runs the mutating task
+- **THEN** the task reconciles the incorrect value rather than leaving it in place
+- **AND** the corrected content is what gets re-staged, so a repair can never stage falsified checksums
+
 ### Requirement: CI reports check failures per check
 
 The CI workflow SHALL run checks as separate parallel jobs so that a failure names the specific check that failed.
 
-**User value:** A contributor sees exactly which check failed (Format, Clippy, Check, Deny, …) rather than one opaque aggregated step, and CI wall-clock stays at the parallel maximum rather than the serial sum of all checks.
+**User value:** A contributor sees exactly which check failed (Format, Clippy, Check, Deny, Lockfile, …) rather than one opaque aggregated step, and CI wall-clock stays at the parallel maximum rather than the serial sum of all checks.
 
 #### Scenario: A failing check is identifiable
 
 - **GIVEN** the CI pipeline with parallel per-check jobs
 - **WHEN** one check fails
-- **THEN** the corresponding named job (e.g. `Clippy`) reports the failure
+- **THEN** the corresponding named job (e.g. `Clippy`, `Lockfile`) reports the failure
 - **AND** the other check jobs report their own independent status
 
 ### Requirement: A single local command runs the fast verification set
 
-There SHALL be one mise task that, when run, executes the fast local verification set (compile check, format verification, lint verification, file-size budgets, and unit tests) by depending on the existing per-check tasks rather than re-spelling their commands. Running it SHALL reproduce the verdict of the CI PR-check jobs for those checks. The task SHALL aggregate by reference (its `depends` list names other tasks), so adding or changing a check's command happens once in that check's own task and the gate picks it up automatically.
+There SHALL be one mise task that, when run, executes the fast local verification set (compile check, format verification, lint verification, file-size budgets, lockfile verification, and unit tests) by depending on the existing per-check tasks rather than re-spelling their commands. Running it SHALL reproduce the verdict of the CI PR-check jobs for those checks. The task SHALL aggregate by reference (its `depends` list names other tasks), so adding or changing a check's command happens once in that check's own task and the gate picks it up automatically.
 
-**User value:** A contributor gets the happy-path "did I break anything?" answer with one command instead of memorizing and running five. Because the gate composes the same tasks CI runs, "passes locally" predicts "passes in CI" for the fast checks. Because it aggregates by reference, the gate cannot drift from the individual checks' commands — only the *membership* of the set is duplicated (with CI's separate jobs), and that is documented with a sync comment.
+**User value:** A contributor gets the happy-path "did I break anything?" answer with one command instead of memorizing and running six. Because the gate composes the same tasks CI runs, "passes locally" predicts "passes in CI" for the fast checks. Because it aggregates by reference, the gate cannot drift from the individual checks' commands — only the *membership* of the set is duplicated (with CI's separate jobs), and that is documented with a sync comment.
 
 #### Scenario: One command runs the fast verification set
 
 - **GIVEN** a contributor with mise available
 - **WHEN** they run the local gate task (`mise run test`)
-- **THEN** mise runs the compile check, format verification, lint verification, file-size budget check, and unit tests by resolving the task's `depends`
+- **THEN** mise runs the compile check, format verification, lint verification, file-size budget check, lockfile verification, and unit tests by resolving the task's `depends`
 - **AND** any single failing member fails the gate
 - **AND** the members run in parallel (mise default), so wall-clock approximates the slowest member rather than the sum
 
