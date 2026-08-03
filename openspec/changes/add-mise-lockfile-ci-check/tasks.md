@@ -13,16 +13,16 @@
 
 ## 3. CI and local gate
 
-- [ ] 3.1 Add a `lockfile` job to `.github/workflows/build.yml` named `Lockfile`, following the same three-step shape as the other 8 jobs, with `run: mise run lock:check`
-- [ ] 3.2 Add `lock:check` to the `depends` list in `.config/mise/tasks/test/_default`, keeping it in sync with the PR-check jobs as its comment requires
-- [ ] 3.3 Confirm `.github/gx.lock` still matches the workflows after editing `build.yml` (the `gx-lockfile` hook should handle this on commit; verify it did)
+- [x] 3.1 Add a `lockfile` job to `.github/workflows/build.yml` named `Lockfile`, following the same three-step shape as the other 8 jobs, with `run: mise run lock:check`
+- [x] 3.2 Add `lock:check` to the `depends` list in `.config/mise/tasks/test/_default`, keeping it in sync with the PR-check jobs as its comment requires
+- [x] 3.3 Confirm `.github/gx.lock` still matches the workflows after editing `build.yml` (the `gx-lockfile` hook should handle this on commit; verify it did)
 
 ## 4. Verify behavior
 
-- [ ] 4.1 Drift detection: inject a line into `.config/mise.lock`, run `mise run lock:check`, confirm non-zero exit and that the injected line appears in the printed diff
-- [ ] 4.2 Clean pass: run `mise run lock:check` twice against an untouched tree, confirm exit 0 both times (proves the task is not itself a writer that dirties the file)
-- [ ] 4.3 Hook auto-fix: stage an unrelated file, inject drift, commit; confirm prek reports `Failed` with "files were modified by this hook", the lockfile is reverted and staged, and an immediate re-commit succeeds
-- [ ] 4.4 Gate membership: confirm `mise run test` resolves `lock:check`, and that a drifted lockfile fails the gate
+- [x] 4.1 Drift detection: inject a line into `.config/mise.lock`, run `mise run lock:check`, confirm non-zero exit and that the injected line appears in the printed diff
+- [x] 4.2 Clean pass: run `mise run lock:check` twice against an untouched tree, confirm exit 0 both times (proves the task is not itself a writer that dirties the file)
+- [x] 4.3 Hook auto-fix: stage an unrelated file, inject drift, commit; confirm prek reports `Failed` with "files were modified by this hook", the lockfile is reverted and staged, and an immediate re-commit succeeds
+- [x] 4.4 Gate membership: confirm `mise run test` resolves `lock:check`, and that a drifted lockfile fails the gate
 - [ ] 4.5 CI: confirm the `Lockfile` job appears and passes on this change's own PR
 
 ## 5. Update specs
