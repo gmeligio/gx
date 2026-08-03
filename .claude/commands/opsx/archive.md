@@ -117,11 +117,27 @@ Archive a completed change in the experimental workflow.
    ```
 
    **7b. Commit the archive move.** Stage `openspec/` and commit only if
-   there is a staged diff.
+   there is a staged diff. Build a Conventional Commit prefix from the
+   staged change — do not hardcode the type, and do not use the change-id
+   as the scope:
+
+   - **type**: infer from the diff's user-facing *outcome*, not the
+     technique used (a refactor that fixes a bug is `fix`, not `refactor`).
+     Choose one of: `feat`, `fix`, `docs`, `chore`, `ci`, `refactor`,
+     `perf`, `test`, `build`, `style`, `revert`. A move that only relocates
+     artifacts under `openspec/changes/` is `docs`.
+   - **scope**: the affected code area, derived from the primary top-level
+     directory or module the diff touches — the existing directory/module
+     name, not an invented synonym, and not the change-id. An archive move
+     touching only `openspec/changes/` yields scope `openspec`. When the
+     diff spans multiple unrelated areas, pick the dominant area.
+   - **subject**: `archive <change-name>`.
+
+   Print the chosen `type(scope): subject` before committing, then:
 
    ```bash
    git add -A openspec/
-   git diff --cached --quiet || git commit -m "docs: archive <change-name>"
+   git diff --cached --quiet || git commit -m "<type>(<scope>): archive <change-name>"
    ```
 
    **7c. `OPSX_NO_PR=1` opt-out.** When this environment variable is set,
@@ -202,7 +218,7 @@ Archive a completed change in the experimental workflow.
        exit 1
        ;;
      *)
-       gh pr create --title "<change-name>" --body "$BODY"
+       gh pr create --title "<type>(<scope>): <change-name>" --body "$BODY"
        PR_NUMBER=$(gh pr view --json number -q .number)
        PR_URL=$(gh pr view --json url -q .url)
        echo "Opened PR #$PR_NUMBER ($PR_URL)."
@@ -210,10 +226,13 @@ Archive a completed change in the experimental workflow.
    esac
    ```
 
-   Conventional-Commit titles are enforced by `bash-guard.sh`. If
-   `<change-name>` is not a Conventional Commit subject on its own,
-   prefix it with an appropriate type/scope before calling
-   `gh pr create` (e.g. `feat(<scope>): <change-name>`).
+   Conventional-Commit titles are enforced by `bash-guard.sh`. Build the
+   `<type>(<scope>)` prefix the same way as the commit in step 7b: infer
+   **type** from the diff's user-facing outcome (one of `feat`, `fix`,
+   `docs`, `chore`, `ci`, `refactor`, `perf`, `test`, `build`, `style`,
+   `revert`), and derive **scope** from the primary code area the change
+   touches — the existing directory/module name, not the change-id. Use
+   the same `type(scope)` you printed in step 7b.
 
 8. **Watch pipeline and fix issues**
 
