@@ -33,10 +33,17 @@ repos:
             pass_filenames: false
             files: ^\.github/(workflows/.*|gx\.toml)$
             language: system
+          - id: mise-version
+            name: mise Version
+            description: Sync each workflow's MISE_VERSION with min_version in .config/mise.toml via the mise mise-version task and re-stage.
+            entry: bash -c 'mise run mise-version && git add -u'
+            pass_filenames: false
+            files: ^(\.config/mise\.toml|\.github/workflows/.*)$
+            language: system
           - id: mise-lockfile
             name: mise Lockfile
-            description: Regenerate .config/mise.lock (e.g. after a mise binary upgrade). Never uses --locked (core:rust catch-22).
-            entry: mise install
+            description: Regenerate .config/mise.lock via the mise lock task and stage only it, since this runs on every commit.
+            entry: bash -c 'mise run lock && git add .config/mise.lock'
             pass_filenames: false
             always_run: true
             language: system

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Verify .config/mise.lock is not dirty (CI)"
+# Reads what installing the tools already wrote, so it must not depend on
+# `lock` — regenerating the file first would erase the drift it looks for.
+git diff --exit-code -- .config/mise.lock

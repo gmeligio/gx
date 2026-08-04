@@ -1,8 +1,4 @@
-## Lockfile Integrity
-
-Contributors keep every tracked lockfile current automatically through local git hooks, with CI as the backstop.
-
----
+## MODIFIED Requirements
 
 ### Requirement: Lockfiles are kept current by local git hooks
 

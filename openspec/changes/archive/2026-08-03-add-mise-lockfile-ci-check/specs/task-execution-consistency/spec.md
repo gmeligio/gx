@@ -1,8 +1,4 @@
-## Task Execution Consistency
-
-Developer checks have one definition (a mise task) that every environment — local shell, pre-commit hooks, and CI — invokes identically, so a check that passes locally passes in CI.
-
----
+## MODIFIED Requirements
 
 ### Requirement: Developer checks have one definition invoked by every environment
 
