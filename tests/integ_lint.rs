@@ -980,6 +980,57 @@ fn composite_repo(repo_root: &std::path::Path) {
     write_composite(repo_root, "setup", "    - uses: actions/checkout@v4\n");
 }
 
+/// Safety net for the `carry-file-kind` change: the full diagnostic set for a repo holding
+/// both file kinds must not move. Kind stops being re-derived from each file's path and is
+/// carried from discovery instead; on a repo laid out the way every repo is today the two
+/// answers agree, so every rule must reach the same verdict on the same file as before.
+///
+/// Asserts the whole set rather than one rule: a change that silently reclassified a file
+/// would show up as a rule appearing or vanishing, which a single-rule assertion misses.
+#[test]
+fn lint_verdicts_are_stable_across_both_file_kinds() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let repo_root = temp_dir.path();
+    composite_repo(repo_root);
+
+    let mut manifest = Manifest::default();
+    manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
+    let lock = Lock::default();
+    let scanner = FileWorkflowScanner::new(repo_root);
+    let lint_config = Lint::default();
+
+    let diagnostics =
+        lint::collect_diagnostics(&manifest, &lock, &scanner, &lint_config, &mut |_| {})
+            .expect("Should succeed");
+
+    let mut actual: Vec<String> = diagnostics
+        .iter()
+        .map(|d| {
+            format!(
+                "{:?} {}",
+                d.rule,
+                d.workflow
+                    .as_ref()
+                    .map_or("-", gx::domain::file::site::WorkflowPath::as_str)
+            )
+        })
+        .collect();
+    actual.sort();
+
+    // Note what is absent: `MissingConcurrency` fires on the workflow but NOT on the
+    // composite, which has no `concurrency:` block and cannot have one. That asymmetry is
+    // the property this change must preserve — it is today enforced by a filter that can
+    // be deleted without a compile error.
+    assert_eq!(
+        actual,
+        vec![
+            "MissingConcurrency .github/workflows/ci.yml".to_owned(),
+            "Unpinned .github/actions/setup/action.yml".to_owned(),
+        ],
+        "lint verdicts moved for a repo with both file kinds"
+    );
+}
+
 #[test]
 fn lint_unpinned_fires_on_composite_step() {
     let temp_dir = tempfile::tempdir().unwrap();

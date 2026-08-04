@@ -1,7 +1,7 @@
 ## 1. Pin current behavior before changing it
 
-- [ ] 1.1 Add an integration assertion that `gx lint` output is unchanged for a fixture repo containing both workflows and `.github/actions` composites — the no-op guarantee for every repo today. This is the safety net for groups 2–5.
-- [ ] 1.2 Run `mise run test:all` and confirm 1.1 passes against unmodified code, so a later failure means the change broke something rather than the test being wrong.
+- [x] 1.1 Add an integration assertion that `gx lint` output is unchanged for a fixture repo containing both workflows and `.github/actions` composites — the no-op guarantee for every repo today. This is the safety net for groups 2–5.
+- [x] 1.2 Run `mise run test:all` and confirm 1.1 passes against unmodified code, so a later failure means the change broke something rather than the test being wrong.
 
 ## 2. Split `Parsed` into a real sum type
 
