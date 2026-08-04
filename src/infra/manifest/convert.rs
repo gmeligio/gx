@@ -3,7 +3,6 @@ use crate::config::Rule;
 use crate::domain::action::identity::ActionId;
 use crate::domain::action::spec::Spec as ActionSpec;
 use crate::domain::action::specifier::Specifier;
-use crate::domain::file::parsed::FileKind;
 use crate::domain::file::site::{JobId, Scope, StepIndex, WorkflowPath};
 use crate::domain::manifest::Manifest;
 use crate::domain::manifest::overrides::ActionOverride;
@@ -139,23 +138,17 @@ pub fn manifest_from_data(
                 .map_err(ManifestError::Validation)?;
 
             // The four `(job, step)` combinations the TOML admits map onto three scopes.
-            // A step without a job is a composite action's step, which is only coherent
-            // in a file that has no jobs; on a workflow it names nothing.
+            // A step without a job is a composite action's step. Whether the named file is
+            // in fact an action definition is not knowable here: the manifest is parsed
+            // before any scan (`Config::load`), so there is no discovered file set to ask.
+            // Such an override on a workflow parses and then selects nothing, because a
+            // workflow's sites all carry a job. Reporting an override that resolves to no
+            // site belongs with `overrides::prune_stale`, which runs after the scan and can
+            // see what the address actually names.
             let scope = match (exc.job.map(JobId::from), step_index) {
                 (Some(job), Some(step)) => Scope::JobStep { job, step },
                 (Some(job), None) => Scope::Job { job },
-                (None, Some(step)) => {
-                    if FileKind::of_path(Path::new(workflow_path.as_str()))
-                        == FileKind::ActionDefinition
-                    {
-                        Scope::CompositeStep { step }
-                    } else {
-                        return Err(ManifestError::Validation(format!(
-                            "override for \"{}\" in \"{}\" has a step but no job",
-                            action_str, exc.workflow
-                        )));
-                    }
-                }
+                (None, Some(step)) => Scope::CompositeStep { step },
                 (None, None) => Scope::File,
             };
 

@@ -9,12 +9,13 @@ use serde::{Deserialize, Serialize};
 use serde_saphyr::{Commented, Spanned};
 use std::collections::BTreeMap;
 use std::fmt;
-use std::path::Path;
 
 mod de;
+mod kind;
 mod permissions;
 mod trigger;
 
+pub use kind::FileKind;
 pub use permissions::{Access, Permissions};
 pub use trigger::Trigger;
 
@@ -272,40 +273,6 @@ impl<'de> Deserialize<'de> for JobSecrets {
             }
         }
         de.deserialize_any(V)
-    }
-}
-
-/// Which GitHub schema a managed file follows. The two hold `uses:` references in
-/// different places — `jobs.<id>.steps` versus `runs.steps` — and only the workflow
-/// schema has `on:`, `permissions:`, and jobs, so the workflow-security and validity
-/// rules apply to it alone.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FileKind {
-    /// A workflow under `.github/workflows`.
-    Workflow,
-    /// An action definition under `.github/actions`.
-    ActionDefinition,
-}
-
-impl FileKind {
-    /// The one place that decides a file's schema. Kind follows location, not file name:
-    /// `.github/workflows/action.yml` is a workflow. Read it as a composite and gx finds
-    /// zero actions and reports nothing.
-    #[must_use]
-    pub fn of_path(path: &Path) -> Self {
-        let under_actions = path.ancestors().skip(1).any(|dir| {
-            dir.file_name().and_then(|n| n.to_str()) == Some("actions")
-                && dir
-                    .parent()
-                    .and_then(Path::file_name)
-                    .and_then(|n| n.to_str())
-                    == Some(".github")
-        });
-        if under_actions {
-            Self::ActionDefinition
-        } else {
-            Self::Workflow
-        }
     }
 }
 

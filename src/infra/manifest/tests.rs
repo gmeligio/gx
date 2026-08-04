@@ -157,10 +157,15 @@ fn composite_step_override_without_job_roundtrips() {
     assert_eq!(overrides[0].scope.job(), None);
 }
 
+/// A bare step parses to a composite-step scope regardless of the file it names — parse
+/// time cannot know which schema that file follows. On a workflow the scope selects
+/// nothing, so the override is inert rather than misapplied.
+///
+/// `.github/workflows/action.yml` is the sharpest case: a rule deciding by file name would
+/// call this an action definition, and a rule deciding by directory would not. Neither
+/// question is asked here.
 #[test]
-fn load_override_step_without_job_is_error_for_workflow_named_action_yml() {
-    // Kind follows location, so a bare step here is still ambiguous. Deciding by file
-    // name would accept an override `resolve_version` can never apply.
+fn load_override_step_without_job_parses_whatever_the_file_is_named() {
     let content = r#"
 [actions]
 "actions/checkout" = "v4"
@@ -173,25 +178,15 @@ fn load_override_step_without_job_is_error_for_workflow_named_action_yml() {
     let mut file = NamedTempFile::new().unwrap();
     file.write_all(content.as_bytes()).unwrap();
 
-    assert!(parse(file.path()).is_err());
-}
+    // A bare-step override is well-formed whatever the file it names.
+    let loaded = parse(file.path()).unwrap();
+    let overrides = loaded
+        .value
+        .overrides_for(&ActionId::from("actions/checkout"));
 
-#[test]
-fn load_override_step_without_job_is_error() {
-    let content = r#"
-[actions]
-"actions/checkout" = "v4"
-
-[actions.overrides]
-"actions/checkout" = [
-  { workflow = ".github/workflows/ci.yml", step = 0, version = "v3" },
-]
-"#;
-    let mut file = NamedTempFile::new().unwrap();
-    file.write_all(content.as_bytes()).unwrap();
-
-    let result = parse(file.path());
-    assert!(result.is_err());
+    assert_eq!(overrides.len(), 1);
+    assert_eq!(overrides[0].scope.step(), Some(StepIndex::from(0_u16)));
+    assert_eq!(overrides[0].scope.job(), None);
 }
 
 #[test]

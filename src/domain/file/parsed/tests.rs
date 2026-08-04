@@ -427,36 +427,51 @@ fn action_without_using_key_parses_with_zero_steps() {
     assert!(parsed.steps.is_empty());
 }
 
+/// Kind is supplied by the caller, so a file's path has no say in how it is read. This is
+/// what makes an action definition outside `.github/actions` readable at all — the
+/// precondition for following local `uses:` edges, where the edge names the target and its
+/// location is arbitrary.
+///
+/// Before this, kind was recomputed by looking for an `actions` ancestor under `.github`,
+/// so the same bytes at `tools/build/action.yml` parsed under the workflow schema and
+/// yielded nothing.
 #[test]
-fn file_kind_follows_location_not_file_name() {
-    use std::path::Path;
+fn kind_comes_from_the_caller_not_the_path() {
+    let composite =
+        "name: Build\nruns:\n  using: composite\n  steps:\n    - uses: actions/checkout@v4\n";
+
+    // An action definition anywhere is read as one.
+    for path in [
+        ".github/actions/setup/action.yml",
+        "tools/build/action.yml",
+        "examples/ci/action.yaml",
+    ] {
+        let parsed = Parsed::parse(
+            WorkflowPath::new(path.to_owned()),
+            FileKind::ActionDefinition,
+            composite,
+        )
+        .unwrap();
+        assert_eq!(
+            parsed.steps.len(),
+            1,
+            "composite steps should be read at {path}"
+        );
+        assert!(parsed.jobs.is_empty(), "an action has no jobs at {path}");
+    }
 
     // A workflow may legitimately be named action.yml; it is still a workflow.
-    assert_eq!(
-        FileKind::of_path(Path::new(".github/workflows/action.yml")),
-        FileKind::Workflow
-    );
-    assert_eq!(
-        FileKind::of_path(Path::new(".github/workflows/ci.yml")),
-        FileKind::Workflow
-    );
-    assert_eq!(
-        FileKind::of_path(Path::new(".github/actions/setup/action.yml")),
-        FileKind::ActionDefinition
-    );
-    assert_eq!(
-        FileKind::of_path(Path::new(".github/actions/ci/setup/action.yaml")),
-        FileKind::ActionDefinition
-    );
-    // An `actions` directory that is not directly under `.github` is not a
-    // discovery root.
-    assert_eq!(
-        FileKind::of_path(Path::new("src/actions/setup/action.yml")),
-        FileKind::Workflow
-    );
-    // An action definition named something else is still under .github/actions.
-    assert_eq!(
-        FileKind::of_path(Path::new(".github/actions/setup/steps.yml")),
-        FileKind::ActionDefinition
+    let workflow =
+        "name: CI\non: [push]\njobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n";
+    let parsed = Parsed::parse(
+        WorkflowPath::new(".github/workflows/action.yml".to_owned()),
+        FileKind::Workflow,
+        workflow,
+    )
+    .unwrap();
+    assert_eq!(parsed.jobs.len(), 1);
+    assert!(
+        parsed.steps.is_empty(),
+        "workflow steps live under jobs, not runs"
     );
 }

@@ -5,25 +5,25 @@
 
 ## 2. Split `Parsed` into a real sum type
 
-- [ ] 2.1 Create the new module (D6) and move `FileKind` into it, leaving `parsed/mod.rs` re-exporting so existing imports keep working. Confirm `mise run lint:size` still passes before adding anything — `parsed/mod.rs` is at 431 lines against a 440 logic-line budget.
+- [x] 2.1 Create the new module (D6) and move `FileKind` into it, leaving `parsed/mod.rs` re-exporting so existing imports keep working. Confirm `mise run lint:size` still passes before adding anything — `parsed/mod.rs` is at 431 lines against a 440 logic-line budget.
 - [ ] 2.2 In the new module, define `ParsedWorkflow { path, on, permissions, concurrency, defaults, jobs }` and `ParsedAction { path, steps }` as structs, and `Parsed` as the enum over them with `path()` reachable from either variant. Every field needs a `///` — `missing_docs_in_private_items` is on.
 - [ ] 2.3 Rewrite `Parsed::parse` to build the variant from the caller-supplied `kind`, absorbing the existing `match kind { Workflow => …jobs, ActionDefinition => …steps }` at `scanner.rs:185-208`. Keep the non-composite `runs.using` case yielding an action with no steps — not an error.
 - [ ] 2.4 Keep `Parsed::from_yaml` (`parsed/mod.rs:378-380`) as a workflow-only constructor so the parse test surface does not churn.
-- [ ] 2.5 Update `src/domain/file/parsed/tests.rs` for the new shape, including `parsed/tests.rs:458-461` which asserts `of_path` behavior that is about to be deleted.
+- [x] 2.5 Update `src/domain/file/parsed/tests.rs` for the new shape, including `parsed/tests.rs:458-461` which asserts `of_path` behavior that is about to be deleted.
 
 ## 3. Delete the second derivation
 
-- [ ] 3.1 Delete `FileKind::of_path` (`parsed/mod.rs:290-309`) and fix the two production call sites the compiler reports: `src/infra/workflow_scan/scanner.rs:224` and `src/infra/manifest/convert.rs:148`.
-- [ ] 3.2 In `src/infra/workflow_scan/scanner.rs`, thread `ManagedFile.kind` from discovery through to `Parsed` construction so the kind assigned at `discovery.rs:82-85` is the kind parsed with. Do not add a kind field to `site::Id` (D2).
-- [ ] 3.3 Delete the drift-guard test `discovery_kind_agrees_with_of_path` (`src/infra/workflow_scan/composite_tests.rs:299-323`) — with one derivation there is nothing to agree with. Replace it with a test asserting kind is what discovery said, read back off the parsed file.
-- [ ] 3.4 Update the `discovery.rs:22-23` doc comment, which currently explains the drift risk between the two derivations, and `discovery.rs:1`'s "single source of truth" claim — now literally true.
+- [x] 3.1 Delete `FileKind::of_path` (`parsed/mod.rs:290-309`) and fix the two production call sites the compiler reports: `src/infra/workflow_scan/scanner.rs:224` and `src/infra/manifest/convert.rs:148`.
+- [x] 3.2 In `src/infra/workflow_scan/scanner.rs`, thread `ManagedFile.kind` from discovery through to `Parsed` construction so the kind assigned at `discovery.rs:82-85` is the kind parsed with. Do not add a kind field to `site::Id` (D2). — `scan` and `scan_all_with_parsed` already passed `file.kind`; the only path deriving kind from a path was `scan_file`, which now takes it as a parameter.
+- [x] 3.3 Delete the drift-guard test `discovery_kind_agrees_with_of_path` (`src/infra/workflow_scan/composite_tests.rs:299-323`) — with one derivation there is nothing to agree with. Replace it with a test asserting kind is what discovery said, read back off the parsed file.
+- [x] 3.4 Update the `discovery.rs:22-23` doc comment, which currently explains the drift risk between the two derivations, and `discovery.rs:1`'s "single source of truth" claim — now literally true.
 
 ## 4. Make bare-step override validation shape-only
 
-- [ ] 4.1 Change `src/infra/manifest/convert.rs:147-158` to map a `step`-without-`job` override to `Scope::CompositeStep` on any path, dropping the `of_path` question. Do not substitute an inline path-shape heuristic — that is `of_path` under another name (design D4).
-- [ ] 4.2 Invert `step_without_job_on_a_workflow_is_rejected` (`src/infra/manifest/override_scope_tests.rs:16`): it must now assert the override parses and then selects no site on a workflow, rather than asserting a parse error. Update its doc comment, which states the old rationale.
-- [ ] 4.3 Confirm `step_without_job_on_a_composite_action_is_accepted` (`override_scope_tests.rs:39`) still passes unchanged, and that the write/read round-trip test at `override_scope_tests.rs:95-124` still holds.
-- [ ] 4.4 Do not touch lint `ignore` targets (#162) or `prune_stale` reporting (#163) — both are out of scope; see design D4's rejected alternatives.
+- [x] 4.1 Change `src/infra/manifest/convert.rs:147-158` to map a `step`-without-`job` override to `Scope::CompositeStep` on any path, dropping the `of_path` question. Do not substitute an inline path-shape heuristic — that is `of_path` under another name (design D4).
+- [x] 4.2 Invert `step_without_job_on_a_workflow_is_rejected` (`src/infra/manifest/override_scope_tests.rs:16`): it must now assert the override parses and then selects no site on a workflow, rather than asserting a parse error. Update its doc comment, which states the old rationale.
+- [x] 4.3 Confirm `step_without_job_on_a_composite_action_is_accepted` (`override_scope_tests.rs:39`) still passes unchanged, and that the write/read round-trip test at `override_scope_tests.rs:95-124` still holds.
+- [x] 4.4 Do not touch lint `ignore` targets (#162) or `prune_stale` reporting (#163) — both are out of scope; see design D4's rejected alternatives.
 
 ## 5. Make the `workflows_full` invariant structural
 
@@ -35,9 +35,9 @@
 
 ## 6. Cover the #124 precondition
 
-- [ ] 6.1 Add a test that a file classified `ActionDefinition` whose path is outside `.github/actions` parses under the action schema and yields its `runs.steps` references. Drive it by constructing the kind directly — kind comes from the caller, not the path, which is the point.
+- [x] 6.1 Add a test that a file classified `ActionDefinition` whose path is outside `.github/actions` parses under the action schema and yields its `runs.steps` references. Drive it by constructing the kind directly — kind comes from the caller, not the path, which is the point.
 - [ ] 6.2 Add a test that such a file is absent from `workflows_full` and produces no workflow-schema diagnostics, matching the new `lint-command` scenario.
-- [ ] 6.3 Add a test that `.github/workflows/action.yml` is still read as a workflow (kind follows discovery, not file name).
+- [x] 6.3 Add a test that `.github/workflows/action.yml` is still read as a workflow (kind follows discovery, not file name).
 
 ## 7. Gate and document
 
