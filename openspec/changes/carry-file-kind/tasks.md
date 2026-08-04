@@ -1,0 +1,47 @@
+## 1. Pin current behavior before changing it
+
+- [ ] 1.1 Add a failing test asserting a `gx.toml` override naming `.github/actions/setup/steps.yml` is rejected with an error naming the path (the live silently-inert bug, D4). Place it beside the existing override-scope tests in `src/infra/manifest/override_scope_tests.rs`.
+- [ ] 1.2 Add an integration assertion that `gx lint` output is unchanged for a fixture repo containing both workflows and `.github/actions` composites — the no-op guarantee for every repo today.
+- [ ] 1.3 Run `mise run test:all` and confirm 1.1 fails for the stated reason (accepted, then matches nothing) and 1.2 passes.
+
+## 2. Split `Parsed` into a real sum type
+
+- [ ] 2.1 In `src/domain/file/parsed/mod.rs`, define `ParsedWorkflow { path, on, permissions, concurrency, defaults, jobs }` and `ParsedAction { path, steps }` as structs, and `Parsed` as the enum over them with `path()` reachable from either variant.
+- [ ] 2.2 Rewrite `Parsed::parse` to build the variant from the caller-supplied `kind`, absorbing the existing `match kind { Workflow => …jobs, ActionDefinition => …steps }` at `scanner.rs:185-190`. Keep the non-composite `runs.using` case yielding an action with no steps — not an error.
+- [ ] 2.3 Keep a workflow-only entry point equivalent to `Parsed::from_yaml` (`parsed/mod.rs:378-380`) so the existing test surface does not churn.
+- [ ] 2.4 Update `src/domain/file/parsed/tests.rs` for the new shape, including `parsed/tests.rs:458-461` which asserts `of_path` behavior that is about to be deleted.
+
+## 3. Delete the second derivation
+
+- [ ] 3.1 Delete `FileKind::of_path` (`parsed/mod.rs:290-309`) and fix the two production call sites the compiler reports: `src/infra/workflow_scan/scanner.rs:224` and `src/infra/manifest/convert.rs:148`.
+- [ ] 3.2 In `src/infra/workflow_scan/scanner.rs`, thread `ManagedFile.kind` from discovery through to `Parsed` construction so the kind assigned at `discovery.rs:82-85` is the kind parsed with. Do not add a kind field to `site::Id` (D2).
+- [ ] 3.3 Delete the drift-guard test `discovery_kind_agrees_with_of_path` (`src/infra/workflow_scan/composite_tests.rs:299-323`) — with one derivation there is nothing to agree with. Replace it with a test asserting kind is what discovery said, read back off the parsed file.
+- [ ] 3.4 Update the `discovery.rs:22-23` doc comment, which currently explains the drift risk between the two derivations, and `discovery.rs:1`'s "single source of truth" claim — now literally true.
+
+## 4. Make override validation consult the discovered set
+
+- [ ] 4.1 Change `src/infra/manifest/convert.rs:147-158` to validate a bare-step override by resolving the named path against the discovered file set and its kind, rather than inspecting the path's shape.
+- [ ] 4.2 Emit an error naming the path and stating gx does not scan it when the path is absent from the discovered set. Message must name the file — "invalid override" alone reproduces the current unhelpfulness (see design Observability).
+- [ ] 4.3 Confirm task 1.1 now passes, and that an override naming a scanned `action.yml` still applies with no `job` key.
+- [ ] 4.4 Apply the same treatment to lint `ignore` targets if they share the validation path; if they do not, note it for #162 rather than widening this change.
+
+## 5. Make the `workflows_full` invariant structural
+
+- [ ] 5.1 In `src/lint/rule.rs`, retype `Context.workflows_full` to the real `ParsedWorkflow` struct, removing the `Parsed` type alias at `rule.rs:8`. Replace the prose invariant comment at `rule.rs:152` with a note that it is now a compile error to violate.
+- [ ] 5.2 In `src/lint/command.rs:69-72`, replace the `.filter(|p| p.kind == FileKind::Workflow)` with a partition producing `Vec<ParsedWorkflow>`, so deleting it stops compiling.
+- [ ] 5.3 Update the eight workflow-schema rules the compiler now flags — `dangerous_trigger`, `excessive_permissions`, `missing_concurrency`, `missing_permissions`, `pr_head_checkout`, `unprotected_secrets`, `dangling_reference`, `invalid_expression` — signature only, no body changes.
+- [ ] 5.4 Update `src/lint/run_shellcheck/mod.rs:51`. Do not extend it to composite `run:` bodies — that stays deferred to #160; the narrower type makes the gap explicit.
+- [ ] 5.5 Confirm the three `workflows_full: &[]` sites in `src/lint/stale_comment.rs` (149, 178, 210) and `src/lint/run_shellcheck/tests.rs:146` still compile.
+
+## 6. Cover the #124 precondition
+
+- [ ] 6.1 Add a test that a file classified `ActionDefinition` whose path is outside `.github/actions` parses under the action schema and yields its `runs.steps` references. Drive it by constructing the kind directly — kind comes from the caller, not the path, which is the point.
+- [ ] 6.2 Add a test that such a file is absent from `workflows_full` and produces no workflow-schema diagnostics, matching the new `lint-command` scenario.
+- [ ] 6.3 Add a test that `.github/workflows/action.yml` is still read as a workflow (kind follows discovery, not file name).
+
+## 7. Gate and document
+
+- [ ] 7.1 Run `mise run format`, then `mise run test` — budget for the strict wall: `missing_docs_in_private_items` on every new private struct and its fields, `too_many_lines`, and fulfilled `#[expect(...)]`. Keep any `#[cfg(test)] mod tests` at the very bottom of its file.
+- [ ] 7.2 Run `mise run test:all` and confirm 1.2's no-op assertion still holds — `gx lint`, `gx tidy`, `gx upgrade` output unchanged on a conventional repo.
+- [ ] 7.3 Add a CHANGELOG entry under Fixed for the override behavior change (D4), naming the symptom users would have seen: an override that appeared to do nothing.
+- [ ] 7.4 Comment on #154 that this landed, and on #124 that its blocker is clear.
