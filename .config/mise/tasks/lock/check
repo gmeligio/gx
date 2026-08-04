@@ -1,15 +1,8 @@
 #!/usr/bin/env bash
 #MISE description="Verify .config/mise.lock is not dirty (CI)"
-# No `depends=["lock"]`: `mise lock` is convergent — it drives any input to the
-# correct output — so repairing first would erase the very drift this checks for,
-# and the diff would always be empty. The suspect content must reach `git diff`
-# untouched.
-#
-# In CI that content is mise-action's own `mise install` write, which runs before
-# this task; on a cold tool cache that install resolves entries a warm cache
-# skips, which is the drift class that aborted release-plz run 30849375177.
-#
-# Scoped to the lockfile (not a bare `git status`) so unrelated writes by other
-# tooling don't trip it. --exit-code prints the patch, naming the field that
-# changed — the detail the release-pipeline abort hides.
+# Deliberately no `depends=["lock"]`: `mise lock` would rewrite the file
+# correctly and leave nothing to find. What this task inspects is whatever the
+# preceding `mise install` already wrote — on a cold tool cache that install
+# resolves entries a warm cache skips, and those extra entries are the drift
+# that fails a release mid-flight.
 git diff --exit-code -- .config/mise.lock

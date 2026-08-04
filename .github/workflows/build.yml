@@ -8,8 +8,8 @@ on:
 permissions:
     contents: read
 
-# Synced from min_version in .config/mise.toml by `mise run mise-version`.
-# Don't edit by hand — change min_version instead and re-run that task.
+# Written by `mise run mise-version`. Change min_version in .config/mise.toml
+# instead; edits here are overwritten.
 env:
     MISE_VERSION: 2026.7.13
 
