@@ -1,5 +1,5 @@
 use super::*;
-use crate::domain::workflow_actions::WorkflowPath;
+use crate::domain::file::site::WorkflowPath;
 use crate::infra::shellcheck::FakeChecker;
 
 fn parse(content: &str) -> Parsed {
@@ -137,7 +137,7 @@ fn missing_binary_emits_single_skip_diagnostic() {
     };
     let manifest = crate::domain::manifest::Manifest::default();
     let lock = crate::domain::lock::Lock::default();
-    let action_set = crate::domain::workflow_actions::ActionSet::new();
+    let action_set = crate::domain::file::actions::ActionSet::new();
     let wfs = [one_bash_step("rm $X/y")];
     let ctx = Context {
         manifest: &manifest,

@@ -13,7 +13,7 @@ impl StaleCommentRule {
     /// Only a `# comment` pin (`uses: owner/repo@<sha> # v4`) can carry a stale
     /// comment: it pairs a pinned SHA with a human-readable version to reconcile.
     pub fn check_action(
-        action: &crate::domain::workflow_actions::Located,
+        action: &crate::domain::file::actions::Located,
         lock: &crate::domain::lock::Lock,
     ) -> Option<Diagnostic> {
         let ParsedRef::Pinned { sha, comment } = &action.action.reference else {
@@ -39,8 +39,8 @@ impl StaleCommentRule {
         );
         Some(
             Diagnostic::new(RuleName::StaleComment, Level::Warn, msg)
-                .with_workflow(action.location.workflow.clone())
-                .with_line(action.location.line),
+                .with_workflow(action.site.file.clone())
+                .with_line(action.origin.line),
         )
     }
 }
@@ -74,9 +74,10 @@ mod tests {
     use crate::domain::action::spec::Spec;
     use crate::domain::action::specifier::Specifier;
     use crate::domain::action::uses_ref::RefType;
+    use crate::domain::file::actions::{ActionSet, Located};
+    use crate::domain::file::site::{Id, Origin, Slot, StepIndex, WorkflowPath};
     use crate::domain::lock::Lock;
     use crate::domain::manifest::Manifest;
-    use crate::domain::workflow_actions::{ActionSet, Located, Location, WorkflowPath};
 
     fn make_lock(action: &str, version: &str, sha: &str) -> Lock {
         let mut lock = Lock::default();
@@ -95,7 +96,7 @@ mod tests {
 
     fn make_located(action: &str, version: &str, sha: Option<&str>, workflow: &str) -> Located {
         use crate::domain::action::uses_ref::ParsedRef;
-        use crate::domain::workflow_actions::WorkflowAction;
+        use crate::domain::file::actions::WorkflowAction;
         // Mirror `UsesRef::interpret`: a `# comment` pin → `Pinned`; a bare
         // 40-hex ref → `Sha`; otherwise a plain tag/branch `Ref`.
         let reference = match sha {
@@ -111,12 +112,13 @@ mod tests {
                 id: ActionId::from(action),
                 reference,
             },
-            location: Location {
-                workflow: WorkflowPath::new(workflow),
-                job: None,
-                step: None,
-                line: None,
+            site: Id {
+                file: WorkflowPath::new(workflow),
+                slot: Slot::CompositeStep {
+                    step: StepIndex::from(0_u16),
+                },
             },
+            origin: Origin { line: None },
         }
     }
 

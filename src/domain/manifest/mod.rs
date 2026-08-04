@@ -4,7 +4,8 @@ use super::action::identity::ActionId;
 use super::action::spec::Spec;
 use super::action::specifier::Specifier;
 use super::diff::ManifestDiff;
-use super::workflow_actions::{ActionSet, Located, Location};
+use super::file::actions::{ActionSet, Located};
+use super::file::site::Id;
 use overrides::ActionOverride;
 use std::collections::{HashMap, HashSet};
 
@@ -54,9 +55,9 @@ impl Manifest {
     /// 3. Workflow-level override (workflow only)
     /// 4. Global default
     #[must_use]
-    pub fn resolve_version(&self, id: &ActionId, location: &Location) -> Option<&Specifier> {
+    pub fn resolve_version(&self, id: &ActionId, site: &Id) -> Option<&Specifier> {
         if let Some(ovrs) = self.overrides.get(id)
-            && let Some(v) = overrides::resolve_version(ovrs, location)
+            && let Some(v) = overrides::resolve_version(ovrs, site)
         {
             return Some(v);
         }
@@ -216,14 +217,32 @@ impl Manifest {
 )]
 mod tests {
     use super::{ActionId, ActionOverride, Manifest, Specifier};
-    use crate::domain::workflow_actions::{JobId, Location, StepIndex, WorkflowPath};
+    use crate::domain::file::site::{Id, JobId, Scope, Slot, StepIndex, WorkflowPath};
 
-    fn make_loc(workflow: &str, job: Option<&str>, step: Option<u16>) -> Location {
-        Location {
-            workflow: WorkflowPath::new(workflow),
-            job: job.map(JobId::from),
-            step: step.map(StepIndex::from),
-            line: None,
+    /// Build a site from the `(job, step)` shape the manifest uses. `None`/`Some` here
+    /// mirrors how a test names a scope; the resulting `Slot` is the single address.
+    fn make_loc(workflow: &str, job: Option<&str>, step: Option<u16>) -> Id {
+        let slot = match (job, step) {
+            (Some(j), Some(s)) => Slot::WorkflowStep {
+                job: JobId::from(j),
+                step: StepIndex::from(s),
+            },
+            (Some(j), None) => Slot::WorkflowJob {
+                job: JobId::from(j),
+            },
+            (None, Some(s)) => Slot::CompositeStep {
+                step: StepIndex::from(s),
+            },
+            // Every site has a position; there is no "file-scoped" slot. Callers passing
+            // `(None, None)` want any site in the file — a file-scoped *override* still
+            // matches it, which is the tier being exercised.
+            (None, None) => Slot::CompositeStep {
+                step: StepIndex::from(0_u16),
+            },
+        };
+        Id {
+            file: WorkflowPath::new(workflow),
+            slot,
         }
     }
 
@@ -254,8 +273,7 @@ mod tests {
             ActionId::from("actions/checkout"),
             ActionOverride {
                 workflow: WorkflowPath::new(".github/workflows/ci.yml"),
-                job: None,
-                step: None,
+                scope: Scope::File,
                 version: Specifier::parse("^3"),
             },
         );
@@ -375,8 +393,7 @@ mod tests {
             ActionId::from("actions/checkout"),
             ActionOverride {
                 workflow: WorkflowPath::new(".github/workflows/ci.yml"),
-                job: None,
-                step: None,
+                scope: Scope::File,
                 version: Specifier::parse("^3"),
             },
         );
@@ -394,8 +411,7 @@ mod tests {
             ActionId::from("actions/checkout"),
             ActionOverride {
                 workflow: WorkflowPath::new(".github/workflows/ci.yml"),
-                job: None,
-                step: None,
+                scope: Scope::File,
                 version: Specifier::parse("^3"),
             },
         );
@@ -427,8 +443,7 @@ mod tests {
             ActionId::from("actions/checkout"),
             ActionOverride {
                 workflow: WorkflowPath::new(".github/workflows/windows.yml"),
-                job: None,
-                step: None,
+                scope: Scope::File,
                 version: Specifier::parse("^3"),
             },
         );
@@ -445,8 +460,7 @@ mod tests {
             ActionId::from("actions/checkout"),
             ActionOverride {
                 workflow: WorkflowPath::new(".github/workflows/ci.yml"),
-                job: None,
-                step: None,
+                scope: Scope::File,
                 version: Specifier::parse("^3"),
             },
         );
@@ -454,8 +468,7 @@ mod tests {
             ActionId::from("actions/checkout"),
             ActionOverride {
                 workflow: WorkflowPath::new(".github/workflows/deploy.yml"),
-                job: None,
-                step: None,
+                scope: Scope::File,
                 version: Specifier::parse("^3"),
             },
         );

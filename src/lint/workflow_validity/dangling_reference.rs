@@ -1,6 +1,6 @@
 use crate::config::Level;
-use crate::domain::workflow_actions::JobId;
-use crate::domain::workflow_parsed::Parsed;
+use crate::domain::file::parsed::Parsed;
+use crate::domain::file::site::JobId;
 use crate::lint::{Context, Diagnostic, Rule, RuleName};
 use std::collections::BTreeSet;
 
@@ -59,7 +59,7 @@ impl Rule for DanglingReferenceRule {
 )]
 mod tests {
     use super::*;
-    use crate::domain::workflow_actions::WorkflowPath;
+    use crate::domain::file::site::WorkflowPath;
 
     fn parse(content: &str) -> Parsed {
         Parsed::from_yaml(WorkflowPath::new(".github/workflows/ci.yml"), content).unwrap()

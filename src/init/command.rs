@@ -1,7 +1,7 @@
 use super::report::Report;
 use crate::command::Command;
 use crate::config::Config;
-use crate::domain::workflow::Error as WorkflowError;
+use crate::domain::file::scan::Error as WorkflowError;
 use crate::infra::github::{Error as GithubError, Registry as GithubRegistry};
 use crate::infra::lock::Error as LockFileError;
 use crate::infra::manifest::Error as ManifestError;

@@ -1,6 +1,6 @@
 use crate::config::Level;
-use crate::domain::workflow_actions::{JobId, StepIndex};
-use crate::domain::workflow_parsed::{Job, Parsed, Step};
+use crate::domain::file::parsed::{Job, Parsed, Step};
+use crate::domain::file::site::{JobId, StepIndex};
 use crate::lint::{Context, Diagnostic, Rule, RuleName};
 
 /// Expression fragments that pull HEAD code from an untrusted PR. We match textually
@@ -60,7 +60,7 @@ fn is_privileged(workflow: &Parsed) -> bool {
 fn job_has_write_perms(job: &Job) -> bool {
     job.permissions
         .as_ref()
-        .is_some_and(crate::domain::workflow_parsed::Permissions::has_write)
+        .is_some_and(crate::domain::file::parsed::Permissions::has_write)
 }
 
 /// Reports whether the step references `secrets.*` in its `run`, `with`, or `env`.
@@ -115,7 +115,7 @@ impl Rule for PrHeadCheckoutRule {
 )]
 mod tests {
     use super::*;
-    use crate::domain::workflow_actions::WorkflowPath;
+    use crate::domain::file::site::WorkflowPath;
 
     fn parse(content: &str) -> Parsed {
         Parsed::from_yaml(WorkflowPath::new(".github/workflows/x.yml"), content).unwrap()

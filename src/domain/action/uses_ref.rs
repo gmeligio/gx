@@ -1,5 +1,5 @@
 use super::identity::{ActionId, CommitSha, Version};
-use crate::domain::workflow_actions::WorkflowAction;
+use crate::domain::file::actions::WorkflowAction;
 use std::fmt;
 
 /// The type of reference that was resolved.
@@ -77,7 +77,7 @@ impl ParsedRef {
 
     /// The version-shaped label for this reference.
     ///
-    /// This is the key aggregated by [`ActionSet`](crate::domain::workflow_actions::ActionSet)
+    /// This is the key aggregated by [`ActionSet`](crate::domain::file::actions::ActionSet)
     /// and the string handed to `Specifier::from_v1`. For [`Ref`](Self::Ref) /
     /// [`Pinned`](Self::Pinned) it is the tag/comment; for a bare
     /// [`Sha`](Self::Sha) it is the SHA string itself, preserving the existing

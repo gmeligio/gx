@@ -3,10 +3,10 @@ use crate::config::Rule;
 use crate::domain::action::identity::ActionId;
 use crate::domain::action::spec::Spec as ActionSpec;
 use crate::domain::action::specifier::Specifier;
+use crate::domain::file::parsed::FileKind;
+use crate::domain::file::site::{JobId, Scope, StepIndex, WorkflowPath};
 use crate::domain::manifest::Manifest;
 use crate::domain::manifest::overrides::ActionOverride;
-use crate::domain::workflow_actions::{JobId, StepIndex, WorkflowPath};
-use crate::domain::workflow_parsed::FileKind;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
@@ -112,27 +112,19 @@ pub fn manifest_from_data(
 
         let mut converted = Vec::new();
         for exc in toml_overrides {
-            // A composite action has no jobs, so there a step index alone is the whole
-            // address. Normalize first: the manifest is hand-editable, and `of_path`
-            // reads path components, which a `\` separator would hide.
             let workflow_path = WorkflowPath::new(exc.workflow.clone());
-            let kind = FileKind::of_path(Path::new(workflow_path.as_str()));
-            if exc.step.is_some() && exc.job.is_none() && kind != FileKind::ActionDefinition {
-                return Err(ManifestError::Validation(format!(
-                    "override for \"{}\" in \"{}\" has a step but no job",
-                    action_str, exc.workflow
-                )));
-            }
 
-            // Validation: duplicate scope
-            let scope = (exc.workflow.clone(), exc.job.clone(), exc.step);
-            if seen_scopes.contains(&scope) {
+            // Validation: duplicate scope. Compares the raw TOML triple, before it is
+            // parsed into a `Scope`, so two entries writing the same keys collide even
+            // if one would have been rejected below.
+            let toml_scope = (exc.workflow.clone(), exc.job.clone(), exc.step);
+            if seen_scopes.contains(&toml_scope) {
                 return Err(ManifestError::Validation(format!(
                     "duplicate override scope for \"{}\" in \"{}\"",
                     action_str, exc.workflow
                 )));
             }
-            seen_scopes.push(scope);
+            seen_scopes.push(toml_scope);
 
             let specifier = if is_v2 {
                 Specifier::parse(&exc.version)
@@ -146,10 +138,30 @@ pub fn manifest_from_data(
                 .transpose()
                 .map_err(ManifestError::Validation)?;
 
+            // The four `(job, step)` combinations the TOML admits map onto three scopes.
+            // A step without a job is a composite action's step, which is only coherent
+            // in a file that has no jobs; on a workflow it names nothing.
+            let scope = match (exc.job.map(JobId::from), step_index) {
+                (Some(job), Some(step)) => Scope::JobStep { job, step },
+                (Some(job), None) => Scope::Job { job },
+                (None, Some(step)) => {
+                    if FileKind::of_path(Path::new(workflow_path.as_str()))
+                        == FileKind::ActionDefinition
+                    {
+                        Scope::CompositeStep { step }
+                    } else {
+                        return Err(ManifestError::Validation(format!(
+                            "override for \"{}\" in \"{}\" has a step but no job",
+                            action_str, exc.workflow
+                        )));
+                    }
+                }
+                (None, None) => Scope::File,
+            };
+
             converted.push(ActionOverride {
                 workflow: workflow_path,
-                job: exc.job.map(JobId::from),
-                step: step_index,
+                scope,
                 version: specifier,
             });
         }
@@ -193,10 +205,10 @@ pub fn build_manifest_document(manifest: &Manifest) -> DocumentMut {
             for ovr in *ovrs {
                 let mut inline = toml_edit::InlineTable::new();
                 inline.insert("workflow", ovr.workflow.as_str().into());
-                if let Some(job) = &ovr.job {
+                if let Some(job) = ovr.scope.job() {
                     inline.insert("job", toml_edit::Value::from(job.as_str()));
                 }
-                if let Some(step) = ovr.step {
+                if let Some(step) = ovr.scope.step() {
                     inline.insert("step", i64::from(step).into());
                 }
                 inline.insert("version", ovr.version.as_str().into());
@@ -222,8 +234,8 @@ mod tests {
     use super::{Manifest, build_manifest_document};
     use crate::domain::action::identity::ActionId;
     use crate::domain::action::specifier::Specifier;
+    use crate::domain::file::site::{Scope, WorkflowPath};
     use crate::domain::manifest::overrides::ActionOverride;
-    use crate::domain::workflow_actions::WorkflowPath;
     use crate::infra::manifest::{Store, parse};
     use std::fs;
     use std::io::Write as _;
@@ -333,8 +345,7 @@ mod tests {
             ActionId::from("actions/checkout"),
             ActionOverride {
                 workflow: WorkflowPath::new(".github/workflows/ci.yml"),
-                job: None,
-                step: None,
+                scope: Scope::File,
                 version: Specifier::parse("^3"),
             },
         );

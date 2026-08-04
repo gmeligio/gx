@@ -14,7 +14,7 @@ impl ShaMismatchRule {
     /// a SHA key — a `# comment` pin already carries its human version, and a
     /// plain tag/branch has no SHA to reconcile.
     pub fn check_action(
-        action: &crate::domain::workflow_actions::Located,
+        action: &crate::domain::file::actions::Located,
         lock: &crate::domain::lock::Lock,
     ) -> Option<Diagnostic> {
         let ParsedRef::Sha(sha) = &action.action.reference else {
@@ -33,8 +33,8 @@ impl ShaMismatchRule {
         );
         Some(
             Diagnostic::new(RuleName::ShaMismatch, Level::Error, msg)
-                .with_workflow(action.location.workflow.clone())
-                .with_line(action.location.line),
+                .with_workflow(action.site.file.clone())
+                .with_line(action.origin.line),
         )
     }
 }

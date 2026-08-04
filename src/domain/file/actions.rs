@@ -1,5 +1,6 @@
-use super::action::identity::{ActionId, Version};
-use super::action::uses_ref::ParsedRef;
+use super::site::{Id, Origin};
+use crate::domain::action::identity::{ActionId, Version};
+use crate::domain::action::uses_ref::ParsedRef;
 use std::collections::{HashMap, HashSet};
 
 /// An action as declared in a workflow file.
@@ -96,138 +97,22 @@ impl ActionSet {
     }
 }
 
-/// A workflow file path with forward-slash normalization.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct WorkflowPath(String);
-
-impl WorkflowPath {
-    pub fn new<S: Into<String>>(path: S) -> Self {
-        Self(path.into().replace('\\', "/"))
-    }
-
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for WorkflowPath {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-/// A workflow job identifier.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct JobId(String);
-
-impl JobId {
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for JobId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl From<String> for JobId {
-    fn from(s: String) -> Self {
-        Self(s)
-    }
-}
-
-impl From<&str> for JobId {
-    fn from(s: &str) -> Self {
-        Self(s.to_owned())
-    }
-}
-
-/// A 0-based step index within a workflow job.
-///
-/// Wraps `u16` to make `From<StepIndex> for i64` infallible,
-/// eliminating `expect("step index overflow")` in TOML serialization.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct StepIndex(u16);
-
-impl StepIndex {
-    /// Returns the raw `u16` value.
-    #[must_use]
-    pub fn as_u16(self) -> u16 {
-        self.0
-    }
-}
-
-impl From<u16> for StepIndex {
-    fn from(value: u16) -> Self {
-        Self(value)
-    }
-}
-
-impl From<StepIndex> for i64 {
-    fn from(value: StepIndex) -> Self {
-        Self::from(value.0)
-    }
-}
-
-impl TryFrom<i64> for StepIndex {
-    type Error = String;
-
-    fn try_from(value: i64) -> Result<Self, Self::Error> {
-        let raw = u16::try_from(value)
-            .map_err(|_| format!("invalid step index: {value} (must be 0..=65535)"))?;
-        Ok(Self(raw))
-    }
-}
-
-impl TryFrom<usize> for StepIndex {
-    type Error = String;
-
-    fn try_from(value: usize) -> Result<Self, Self::Error> {
-        let raw = u16::try_from(value)
-            .map_err(|_| format!("invalid step index: {value} (must be 0..=65535)"))?;
-        Ok(Self(raw))
-    }
-}
-
-impl std::fmt::Display for StepIndex {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-/// The precise location of a `uses:` reference within the workflow tree.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Location {
-    /// Relative path from repo root, e.g. ".github/workflows/ci.yml".
-    pub workflow: WorkflowPath,
-    /// Job id, e.g. "build".
-    pub job: Option<JobId>,
-    /// 0-based step index within the job.
-    pub step: Option<StepIndex>,
-    /// 1-based source line of the `uses:` scalar, when known. `None` for locations
-    /// synthesized outside a parse (e.g. manifest-derived entries).
-    pub line: Option<u32>,
-}
-
-/// A single action reference with its full location context.
+/// A single action reference: what it is, where it lives, and where it was read from.
 #[derive(Debug, Clone)]
 pub struct Located {
     /// The interpreted action reference (id, version, optional SHA).
     pub action: WorkflowAction,
-    pub location: Location,
+    /// Which file and position — the identity user config addresses.
+    pub site: Id,
+    /// Where it was read from, for reporting only.
+    pub origin: Origin,
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ActionId, ActionSet, JobId, Located, Location, ParsedRef, StepIndex, Version,
-        WorkflowAction, WorkflowPath,
-    };
+    use super::{ActionId, ActionSet, Located, ParsedRef, Version, WorkflowAction};
     use crate::domain::action::identity::CommitSha;
+    use crate::domain::file::site::{Id, JobId, Origin, Slot, StepIndex, WorkflowPath};
 
     /// Build a `WorkflowAction` in the same shape `UsesRef::interpret` would:
     /// a bare `version` becomes a `Ref`; a `version` + `sha` becomes a `Pinned`.
@@ -272,37 +157,41 @@ mod tests {
 
     #[test]
     fn workflow_location_equality() {
-        let loc1 = Location {
-            workflow: WorkflowPath::new(".github/workflows/ci.yml"),
-            job: Some(JobId::from("build")),
-            step: Some(StepIndex::from(0_u16)),
-            line: None,
+        let loc1 = Id {
+            file: WorkflowPath::new(".github/workflows/ci.yml"),
+            slot: Slot::WorkflowStep {
+                job: JobId::from("build"),
+                step: StepIndex::from(0_u16),
+            },
         };
-        let loc2 = Location {
-            workflow: WorkflowPath::new(".github/workflows/ci.yml"),
-            job: Some(JobId::from("build")),
-            step: Some(StepIndex::from(0_u16)),
-            line: None,
+        let loc2 = Id {
+            file: WorkflowPath::new(".github/workflows/ci.yml"),
+            slot: Slot::WorkflowStep {
+                job: JobId::from("build"),
+                step: StepIndex::from(0_u16),
+            },
         };
         assert_eq!(loc1, loc2);
     }
 
     #[test]
     fn located_action_stores_location() {
-        let loc = Location {
-            workflow: WorkflowPath::new(".github/workflows/ci.yml"),
-            job: Some(JobId::from("build")),
-            step: Some(StepIndex::from(0_u16)),
-            line: None,
+        let loc = Id {
+            file: WorkflowPath::new(".github/workflows/ci.yml"),
+            slot: Slot::WorkflowStep {
+                job: JobId::from("build"),
+                step: StepIndex::from(0_u16),
+            },
         };
         let action = Located {
             action: WorkflowAction {
                 id: ActionId::from("actions/checkout"),
                 reference: ParsedRef::Ref(Version::from("v4")),
             },
-            location: loc.clone(),
+            site: loc.clone(),
+            origin: Origin::default(),
         };
-        assert_eq!(action.location, loc);
+        assert_eq!(action.site, loc);
         assert_eq!(action.action.id.as_str(), "actions/checkout");
     }
 

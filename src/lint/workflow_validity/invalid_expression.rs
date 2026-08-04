@@ -1,6 +1,6 @@
 use crate::config::Level;
-use crate::domain::workflow_actions::{JobId, StepIndex};
-use crate::domain::workflow_parsed::{Job, Parsed, Step};
+use crate::domain::file::parsed::{Job, Parsed, Step};
+use crate::domain::file::site::{JobId, StepIndex};
 use crate::lint::{Context, Diagnostic, Rule, RuleName};
 use crate::regex::static_regex;
 use std::collections::BTreeSet;
@@ -173,7 +173,7 @@ impl Rule for InvalidExpressionRule {
 )]
 mod tests {
     use super::*;
-    use crate::domain::workflow_actions::WorkflowPath;
+    use crate::domain::file::site::WorkflowPath;
 
     fn parse(content: &str) -> Parsed {
         Parsed::from_yaml(WorkflowPath::new(".github/workflows/x.yml"), content).unwrap()

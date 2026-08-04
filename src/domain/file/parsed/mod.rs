@@ -3,7 +3,7 @@
     reason = "reexport Trigger and Permissions from extracted submodules"
 )]
 
-use super::workflow_actions::WorkflowPath;
+use super::site::WorkflowPath;
 use serde::de::{Deserializer, MapAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use serde_saphyr::{Commented, Spanned};

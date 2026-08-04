@@ -11,7 +11,7 @@ impl UnpinnedRule {
     /// bare `@<sha>` or a `@<sha> # vX.Y.Z` pin. The typed reference answers this
     /// directly: `pin_sha()` is `Some` for both pinned shapes and `None` for a
     /// bare tag/branch ref.
-    pub fn check_action(action: &crate::domain::workflow_actions::Located) -> Option<Diagnostic> {
+    pub fn check_action(action: &crate::domain::file::actions::Located) -> Option<Diagnostic> {
         if action.action.reference.pin_sha().is_some() {
             return None;
         }
@@ -22,8 +22,8 @@ impl UnpinnedRule {
         );
         Some(
             Diagnostic::new(RuleName::Unpinned, Level::Error, msg)
-                .with_workflow(action.location.workflow.clone())
-                .with_line(action.location.line),
+                .with_workflow(action.site.file.clone())
+                .with_line(action.origin.line),
         )
     }
 }
@@ -51,7 +51,8 @@ mod tests {
     use super::{Level, Rule as _, RuleName, UnpinnedRule};
     use crate::domain::action::identity::{ActionId, CommitSha, Version};
     use crate::domain::action::uses_ref::ParsedRef;
-    use crate::domain::workflow_actions::{Located, Location, WorkflowAction, WorkflowPath};
+    use crate::domain::file::actions::{Located, WorkflowAction};
+    use crate::domain::file::site::{Id, Origin, Slot, StepIndex, WorkflowPath};
 
     const VALID_SHA: &str = "8e8c483db84b4bee98b60c0593521ed34d9990e8";
 
@@ -75,12 +76,13 @@ mod tests {
                 id: ActionId::from("actions/checkout"),
                 reference,
             },
-            location: Location {
-                workflow: WorkflowPath::new(".github/workflows/ci.yml"),
-                job: None,
-                step: None,
-                line,
+            site: Id {
+                file: WorkflowPath::new(".github/workflows/ci.yml"),
+                slot: Slot::CompositeStep {
+                    step: StepIndex::from(0_u16),
+                },
             },
+            origin: Origin { line },
         }
     }
 

@@ -35,7 +35,7 @@ pub trait Scanner {
     /// The caller decides whether to collect, short-circuit, or continue past errors.
     fn scan(
         &self,
-    ) -> Box<dyn Iterator<Item = Result<crate::domain::workflow_actions::Located, Error>> + '_>;
+    ) -> Box<dyn Iterator<Item = Result<crate::domain::file::actions::Located, Error>> + '_>;
 
     /// Enumerate all managed file paths.
     ///
@@ -47,7 +47,7 @@ pub trait Scanner {
     /// # Errors
     ///
     /// Returns an error if any managed file cannot be read or parsed.
-    fn scan_all_located(&self) -> Result<Vec<crate::domain::workflow_actions::Located>, Error> {
+    fn scan_all_located(&self) -> Result<Vec<crate::domain::file::actions::Located>, Error> {
         self.scan().collect()
     }
 
@@ -59,6 +59,14 @@ pub trait Scanner {
     fn find_workflow_paths(&self) -> Result<Vec<std::path::PathBuf>, Error> {
         self.scan_paths().collect()
     }
+
+    /// The repo-relative form of a path this scanner produced.
+    ///
+    /// Discovery yields absolute paths while a [`Id`](crate::domain::file::site::Id)
+    /// names a file relative to the repo root. Callers pairing the two must go through
+    /// here: matching the two forms by string suffix is ambiguous when one managed file's
+    /// path ends with another's, which nested composite action directories make reachable.
+    fn repo_rel(&self, path: &std::path::Path) -> crate::domain::file::site::WorkflowPath;
 
     /// Parse every managed file once and return both the structural `Parsed` model
     /// and the existing `Located` action list. The lint command uses this to
@@ -73,8 +81,8 @@ pub trait Scanner {
         &self,
     ) -> Result<
         (
-            Vec<crate::domain::workflow_actions::Located>,
-            Vec<crate::domain::workflow_parsed::Parsed>,
+            Vec<crate::domain::file::actions::Located>,
+            Vec<crate::domain::file::parsed::Parsed>,
         ),
         Error,
     >;
