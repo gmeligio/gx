@@ -1,5 +1,5 @@
 use crate::config::Level;
-use crate::domain::file::parsed::{Parsed, Trigger};
+use crate::domain::file::parsed::{ParsedWorkflow, Trigger};
 use crate::lint::{Context, Diagnostic, Rule, RuleName};
 
 /// `dangerous-trigger` rule: emits an error per `pull_request_target` or `workflow_run`
@@ -9,7 +9,7 @@ pub struct DangerousTriggerRule;
 
 impl DangerousTriggerRule {
     /// Yields one diagnostic per matched trigger so the user can act on each line.
-    pub fn check_workflow(workflow: &Parsed) -> Vec<Diagnostic> {
+    pub fn check_workflow(workflow: &ParsedWorkflow) -> Vec<Diagnostic> {
         workflow
             .on
             .iter()
@@ -37,7 +37,7 @@ impl DangerousTriggerRule {
     }
 
     /// Builds an error diagnostic naming the dangerous trigger and its mitigation hint.
-    fn diagnostic(workflow: &Parsed, trigger: &str, hint: &str) -> Diagnostic {
+    fn diagnostic(workflow: &ParsedWorkflow, trigger: &str, hint: &str) -> Diagnostic {
         let msg = format!("dangerous trigger `{trigger}` — {hint}");
         Diagnostic::new(RuleName::DangerousTrigger, Level::Error, msg)
             .with_workflow(workflow.path.clone())
@@ -69,9 +69,10 @@ impl Rule for DangerousTriggerRule {
 )]
 mod tests {
     use super::*;
+    use crate::domain::file::parsed::Parsed;
     use crate::domain::file::site::WorkflowPath;
 
-    fn parse(content: &str) -> Parsed {
+    fn parse(content: &str) -> ParsedWorkflow {
         Parsed::from_yaml(WorkflowPath::new(".github/workflows/x.yml"), content).unwrap()
     }
 

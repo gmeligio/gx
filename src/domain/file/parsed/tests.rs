@@ -1,12 +1,13 @@
 #![expect(
     clippy::unwrap_used,
     clippy::indexing_slicing,
-    reason = "tests use unwrap and indexing freely"
+    clippy::panic,
+    reason = "tests use unwrap, indexing, and panic on an unexpected variant freely"
 )]
 
 use super::*;
 
-fn parse(content: &str) -> Parsed {
+fn parse(content: &str) -> ParsedWorkflow {
     Parsed::from_yaml(WorkflowPath::new(".github/workflows/x.yml"), content).unwrap()
 }
 
@@ -368,13 +369,17 @@ fn effective_shell_normalizes_template_forms() {
     assert_eq!(effective_shell(Some("   "), None, None), "bash");
 }
 
-fn parse_action(content: &str) -> Parsed {
-    Parsed::parse(
+fn parse_action(content: &str) -> ParsedAction {
+    let parsed = Parsed::parse(
         WorkflowPath::new(".github/actions/setup/action.yml"),
         FileKind::ActionDefinition,
         content,
     )
-    .unwrap()
+    .unwrap();
+    match parsed {
+        Parsed::Action(action) => action,
+        Parsed::Workflow(_) => panic!("parsing with ActionDefinition must yield an action"),
+    }
 }
 
 #[test]
@@ -390,10 +395,10 @@ runs:
 ",
     );
 
-    assert_eq!(parsed.kind, FileKind::ActionDefinition);
+    // That an action definition has no jobs is now structural — `ParsedAction` has no
+    // `jobs` field to assert emptiness on.
     assert_eq!(parsed.steps.len(), 2);
     assert_eq!(parsed.steps[0].uses_ref(), Some("actions/checkout@v4"));
-    assert!(parsed.jobs.is_empty(), "an action definition has no jobs");
 }
 
 #[test]
@@ -407,16 +412,14 @@ jobs:
 ",
     );
 
-    assert_eq!(parsed.kind, FileKind::Workflow);
+    // "A workflow has no composite steps" is structural: `ParsedWorkflow` has no `steps`.
     assert_eq!(parsed.jobs.len(), 1);
-    assert!(parsed.steps.is_empty(), "a workflow has no composite steps");
 }
 
 #[test]
 fn non_composite_action_parses_with_zero_steps() {
     let parsed = parse_action("name: Tool\nruns:\n  using: node20\n  main: index.js\n");
 
-    assert_eq!(parsed.kind, FileKind::ActionDefinition);
     assert!(parsed.steps.is_empty());
 }
 
@@ -427,36 +430,97 @@ fn action_without_using_key_parses_with_zero_steps() {
     assert!(parsed.steps.is_empty());
 }
 
+/// Kind is supplied by the caller, so a file's path has no say in how it is read. This is
+/// what makes an action definition outside `.github/actions` readable at all — the
+/// precondition for following local `uses:` edges, where the edge names the target and its
+/// location is arbitrary.
+///
+/// Before this, kind was recomputed by looking for an `actions` ancestor under `.github`,
+/// so the same bytes at `tools/build/action.yml` parsed under the workflow schema and
+/// yielded nothing.
 #[test]
-fn file_kind_follows_location_not_file_name() {
-    use std::path::Path;
+fn kind_comes_from_the_caller_not_the_path() {
+    let composite =
+        "name: Build\nruns:\n  using: composite\n  steps:\n    - uses: actions/checkout@v4\n";
+
+    // An action definition anywhere is read as one.
+    for path in [
+        ".github/actions/setup/action.yml",
+        "tools/build/action.yml",
+        "examples/ci/action.yaml",
+    ] {
+        let parsed = Parsed::parse(
+            WorkflowPath::new(path.to_owned()),
+            FileKind::ActionDefinition,
+            composite,
+        )
+        .unwrap();
+        let Parsed::Action(action) = parsed else {
+            panic!("{path} must parse as an action definition");
+        };
+        assert_eq!(
+            action.steps.len(),
+            1,
+            "composite steps should be read at {path}"
+        );
+    }
 
     // A workflow may legitimately be named action.yml; it is still a workflow.
+    let workflow =
+        "name: CI\non: [push]\njobs:\n  build:\n    steps:\n      - uses: actions/checkout@v4\n";
+    let parsed = Parsed::parse(
+        WorkflowPath::new(".github/workflows/action.yml".to_owned()),
+        FileKind::Workflow,
+        workflow,
+    )
+    .unwrap();
+    let Parsed::Workflow(wf) = parsed else {
+        panic!("a file discovered as a workflow must parse as one");
+    };
+    assert_eq!(wf.jobs.len(), 1);
+}
+
+/// The narrowing the workflow-schema lint rules go through drops action definitions
+/// wherever they live. Those rules take `ParsedWorkflow`, so an action definition cannot
+/// reach them — that is what stops a composite outside `.github/actions` from being flagged
+/// for the `on:`, `permissions:`, and `concurrency:` blocks its schema cannot have.
+#[test]
+fn as_workflow_drops_action_definitions_wherever_they_live() {
+    let composite =
+        "name: Build\nruns:\n  using: composite\n  steps:\n    - uses: actions/checkout@v4\n";
+    let workflow = "name: CI\non: [push]\njobs:\n  build:\n    steps: []\n";
+
+    let files = [
+        (".github/workflows/ci.yml", FileKind::Workflow, workflow),
+        (
+            ".github/actions/setup/action.yml",
+            FileKind::ActionDefinition,
+            composite,
+        ),
+        (
+            "tools/build/action.yml",
+            FileKind::ActionDefinition,
+            composite,
+        ),
+    ];
+
+    let parsed: Vec<_> = files
+        .into_iter()
+        .map(|(path, kind, content)| {
+            Parsed::parse(WorkflowPath::new(path.to_owned()), kind, content).unwrap()
+        })
+        .collect();
+
+    let narrowed: Vec<&str> = parsed
+        .iter()
+        .filter_map(Parsed::as_workflow)
+        .map(|w| w.path.as_str())
+        .collect();
+
     assert_eq!(
-        FileKind::of_path(Path::new(".github/workflows/action.yml")),
-        FileKind::Workflow
-    );
-    assert_eq!(
-        FileKind::of_path(Path::new(".github/workflows/ci.yml")),
-        FileKind::Workflow
-    );
-    assert_eq!(
-        FileKind::of_path(Path::new(".github/actions/setup/action.yml")),
-        FileKind::ActionDefinition
-    );
-    assert_eq!(
-        FileKind::of_path(Path::new(".github/actions/ci/setup/action.yaml")),
-        FileKind::ActionDefinition
-    );
-    // An `actions` directory that is not directly under `.github` is not a
-    // discovery root.
-    assert_eq!(
-        FileKind::of_path(Path::new("src/actions/setup/action.yml")),
-        FileKind::Workflow
-    );
-    // An action definition named something else is still under .github/actions.
-    assert_eq!(
-        FileKind::of_path(Path::new(".github/actions/setup/steps.yml")),
-        FileKind::ActionDefinition
+        narrowed,
+        vec![".github/workflows/ci.yml"],
+        "only the workflow survives narrowing; the composite outside .github/actions is \
+         dropped just like the conventional one"
     );
 }

@@ -182,9 +182,9 @@ impl FileScanner {
         let mut actions = Vec::new();
 
         // Only the step lookup differs between the schemas; extraction below is shared.
-        match kind {
-            FileKind::Workflow => {
-                for job in &parsed.jobs {
+        match &parsed {
+            Parsed::Workflow(workflow) => {
+                for job in &workflow.jobs {
                     let job_id = JobId::from(job.id.clone());
                     extract_steps(
                         &job.steps,
@@ -197,9 +197,9 @@ impl FileScanner {
                     );
                 }
             }
-            FileKind::ActionDefinition => {
+            Parsed::Action(action) => {
                 extract_steps(
-                    &parsed.steps,
+                    &action.steps,
                     workflow_rel_path,
                     |step| Slot::CompositeStep { step },
                     &mut actions,
@@ -210,18 +210,20 @@ impl FileScanner {
         Ok((parsed, actions))
     }
 
-    /// Scan a single workflow and aggregate actions into a `WorkflowActionSet`.
+    /// Scan a single managed file and aggregate actions into a `WorkflowActionSet`.
+    ///
+    /// `kind` comes from discovery, not from the path — see [`discovery`](super::discovery).
     ///
     /// # Errors
     ///
-    /// Returns an error if the workflow file cannot be processed.
+    /// Returns an error if the file cannot be processed.
     pub fn scan_file(
         &self,
         workflow_path: &Path,
+        kind: FileKind,
     ) -> Result<crate::domain::file::actions::ActionSet, WorkflowError> {
         let rel = self.rel_path(workflow_path);
-        let (_, actions) =
-            Self::extract_workflow(workflow_path, &rel, FileKind::of_path(workflow_path))?;
+        let (_, actions) = Self::extract_workflow(workflow_path, &rel, kind)?;
         let mut action_set = crate::domain::file::actions::ActionSet::new();
         for action in &actions {
             action_set.add(&action.uses_ref.interpret());

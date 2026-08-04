@@ -2,6 +2,16 @@
     clippy::pub_use,
     reason = "reexport Trigger and Permissions from extracted submodules"
 )]
+#![expect(
+    clippy::module_name_repetitions,
+    reason = "ParsedWorkflow/ParsedAction name the variants of Parsed; the shared prefix is \
+              the point, and callers import them from this module's public surface"
+)]
+#![expect(
+    clippy::multiple_inherent_impl,
+    reason = "parsing constructors need WireWorkflow, which lives here; the accessors live \
+              beside the type in file.rs"
+)]
 
 use super::site::WorkflowPath;
 use serde::de::{Deserializer, MapAccess, Visitor};
@@ -9,12 +19,15 @@ use serde::{Deserialize, Serialize};
 use serde_saphyr::{Commented, Spanned};
 use std::collections::BTreeMap;
 use std::fmt;
-use std::path::Path;
 
 mod de;
+mod file;
+mod kind;
 mod permissions;
 mod trigger;
 
+pub use file::{Parsed, ParsedAction, ParsedWorkflow};
+pub use kind::FileKind;
 pub use permissions::{Access, Permissions};
 pub use trigger::Trigger;
 
@@ -275,63 +288,6 @@ impl<'de> Deserialize<'de> for JobSecrets {
     }
 }
 
-/// Which GitHub schema a managed file follows. The two hold `uses:` references in
-/// different places — `jobs.<id>.steps` versus `runs.steps` — and only the workflow
-/// schema has `on:`, `permissions:`, and jobs, so the workflow-security and validity
-/// rules apply to it alone.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FileKind {
-    /// A workflow under `.github/workflows`.
-    Workflow,
-    /// An action definition under `.github/actions`.
-    ActionDefinition,
-}
-
-impl FileKind {
-    /// The one place that decides a file's schema. Kind follows location, not file name:
-    /// `.github/workflows/action.yml` is a workflow. Read it as a composite and gx finds
-    /// zero actions and reports nothing.
-    #[must_use]
-    pub fn of_path(path: &Path) -> Self {
-        let under_actions = path.ancestors().skip(1).any(|dir| {
-            dir.file_name().and_then(|n| n.to_str()) == Some("actions")
-                && dir
-                    .parent()
-                    .and_then(Path::file_name)
-                    .and_then(|n| n.to_str())
-                    == Some(".github")
-        });
-        if under_actions {
-            Self::ActionDefinition
-        } else {
-            Self::Workflow
-        }
-    }
-}
-
-/// Top-level parse of a managed file. Structural fields only — `name`, `env`, `runs-on`
-/// and friends are intentionally not captured.
-///
-/// For an [`FileKind::ActionDefinition`], the workflow-only fields (`on`, `permissions`,
-/// `concurrency`, `defaults`, `jobs`) are always empty; its steps live in `steps`.
-#[derive(Debug, Clone)]
-pub struct Parsed {
-    pub path: WorkflowPath,
-    /// Which schema this file follows, decided by its location on disk.
-    pub kind: FileKind,
-    pub on: Vec<Trigger>,
-    pub permissions: Option<Permissions>,
-    pub concurrency: Option<Concurrency>,
-    /// The workflow-level `defaults:` block. Lowest-precedence source for a step's
-    /// effective shell (below the step's own `shell:` and the job's `defaults`).
-    pub defaults: Option<Defaults>,
-    pub jobs: Vec<Job>,
-    /// The steps of a composite action's `runs:` block. Empty for a workflow, and
-    /// empty for an action definition whose `runs.using` is not `composite` —
-    /// a `node20` or `docker` action has no `uses:` steps to manage.
-    pub steps: Vec<Step>,
-}
-
 /// Wire-format struct used only as a serde target. Public surface is `Parsed`.
 #[derive(Debug, Deserialize)]
 struct WireWorkflow {
@@ -369,20 +325,28 @@ struct Runs {
 }
 
 impl Parsed {
-    /// Parse a workflow YAML string into structural data. The `path` is supplied by the
-    /// caller because it is not present in the YAML itself.
+    /// Parse a workflow YAML string, skipping the kind dispatch [`Parsed::parse`] does.
+    ///
+    /// Test-only: production always knows the kind discovery assigned, so it goes through
+    /// `parse`. This exists so a rule test can write a workflow body and get a
+    /// [`ParsedWorkflow`] without naming a kind the test has no say in.
     ///
     /// # Errors
     ///
     /// Returns the underlying `serde_saphyr` error if the YAML cannot be deserialized.
-    pub fn from_yaml(path: WorkflowPath, content: &str) -> Result<Self, Box<serde_saphyr::Error>> {
-        Self::parse(path, FileKind::Workflow, content)
+    #[cfg(test)]
+    pub fn from_yaml(
+        path: WorkflowPath,
+        content: &str,
+    ) -> Result<ParsedWorkflow, Box<serde_saphyr::Error>> {
+        let wire = Self::deserialize(content)?;
+        Ok(Self::into_workflow(path, wire))
     }
 
     /// Parse a managed file into structural data. The `kind` is supplied by the caller
     /// because a workflow and an action definition are distinguished by where the file
-    /// lives, not by its contents — sniffing the YAML shape would misattribute a
-    /// malformed file to the wrong schema.
+    /// was found, not by its contents — sniffing the YAML shape would misattribute a
+    /// malformed file to the wrong schema, and a path says only where a file sits.
     ///
     /// # Errors
     ///
@@ -392,38 +356,45 @@ impl Parsed {
         kind: FileKind,
         content: &str,
     ) -> Result<Self, Box<serde_saphyr::Error>> {
-        let wire: WireWorkflow = serde_saphyr::from_str(content).map_err(Box::new)?;
-        let jobs = wire
-            .jobs
-            .into_iter()
-            .map(|(id, mut job)| {
-                job.id = id;
-                job
-            })
-            .collect();
-        // A non-composite `using` is a legitimate action with no steps to manage, so it
-        // yields an empty list rather than an error.
-        let steps = wire
-            .runs
-            .filter(|runs| runs.using.as_deref() == Some("composite"))
-            .map(|runs| runs.steps)
-            .unwrap_or_default();
-        Ok(Self {
+        let wire = Self::deserialize(content)?;
+        Ok(match kind {
+            FileKind::Workflow => Self::Workflow(Self::into_workflow(path, wire)),
+            FileKind::ActionDefinition => Self::Action(ParsedAction {
+                path,
+                // A non-composite `using` is a legitimate action with no steps to manage,
+                // so it yields an empty list rather than an error.
+                steps: wire
+                    .runs
+                    .filter(|runs| runs.using.as_deref() == Some("composite"))
+                    .map(|runs| runs.steps)
+                    .unwrap_or_default(),
+            }),
+        })
+    }
+
+    /// Deserialize the shared wire form. Both schemas are accepted by one serde target;
+    /// which half is read is decided by the caller-supplied kind, not by what is present.
+    fn deserialize(content: &str) -> Result<WireWorkflow, Box<serde_saphyr::Error>> {
+        serde_saphyr::from_str(content).map_err(Box::new)
+    }
+
+    /// Build the workflow view from the wire form, keying each job by its `jobs:` map key.
+    fn into_workflow(path: WorkflowPath, wire: WireWorkflow) -> ParsedWorkflow {
+        ParsedWorkflow {
             path,
-            kind,
             on: wire.on.unwrap_or_default(),
             permissions: wire.permissions,
             concurrency: wire.concurrency,
             defaults: wire.defaults,
-            jobs,
-            steps,
-        })
-    }
-
-    /// True if any trigger in `on` matches.
-    #[must_use]
-    pub fn has_trigger(&self, t: &Trigger) -> bool {
-        self.on.iter().any(|x| x == t)
+            jobs: wire
+                .jobs
+                .into_iter()
+                .map(|(id, mut job)| {
+                    job.id = id;
+                    job
+                })
+                .collect(),
+        }
     }
 }
 

@@ -1,5 +1,6 @@
 use super::FileScanner as FileWorkflowScanner;
 use crate::domain::action::identity::ActionId;
+use crate::domain::file::parsed::{FileKind, Parsed};
 use crate::domain::file::scan::Scanner as _;
 use crate::domain::file::site::StepIndex;
 use std::fs;
@@ -90,7 +91,9 @@ jobs:
     let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
     let parser = FileWorkflowScanner::new(temp_dir.path());
-    let action_set = parser.scan_file(&workflow_path).unwrap();
+    let action_set = parser
+        .scan_file(&workflow_path, FileKind::Workflow)
+        .unwrap();
 
     let ids: Vec<_> = action_set.action_ids().collect();
     assert_eq!(ids.len(), 3);
@@ -113,7 +116,9 @@ jobs:
     let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
     let parser = FileWorkflowScanner::new(temp_dir.path());
-    let action_set = parser.scan_file(&workflow_path).unwrap();
+    let action_set = parser
+        .scan_file(&workflow_path, FileKind::Workflow)
+        .unwrap();
 
     let ids: Vec<_> = action_set.action_ids().collect();
     assert_eq!(ids.len(), 1);
@@ -136,7 +141,9 @@ jobs:
     let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
     let parser = FileWorkflowScanner::new(temp_dir.path());
-    let action_set = parser.scan_file(&workflow_path).unwrap();
+    let action_set = parser
+        .scan_file(&workflow_path, FileKind::Workflow)
+        .unwrap();
 
     // Two unique actions (checkout appears in both jobs with different versions)
     assert_eq!(action_set.action_ids().count(), 2);
@@ -183,7 +190,9 @@ jobs:
     let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
     let parser = FileWorkflowScanner::new(temp_dir.path());
-    let action_set = parser.scan_file(&workflow_path).unwrap();
+    let action_set = parser
+        .scan_file(&workflow_path, FileKind::Workflow)
+        .unwrap();
 
     let checkout_version = action_set
         .versions_for(&ActionId::from("actions/checkout"))
@@ -210,7 +219,9 @@ jobs:
     let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
     let parser = FileWorkflowScanner::new(temp_dir.path());
-    let action_set = parser.scan_file(&workflow_path).unwrap();
+    let action_set = parser
+        .scan_file(&workflow_path, FileKind::Workflow)
+        .unwrap();
 
     let version = action_set
         .versions_for(&ActionId::from("actions/checkout"))
@@ -232,7 +243,9 @@ jobs:
     let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
     let parser = FileWorkflowScanner::new(temp_dir.path());
-    let action_set = parser.scan_file(&workflow_path).unwrap();
+    let action_set = parser
+        .scan_file(&workflow_path, FileKind::Workflow)
+        .unwrap();
 
     let version = action_set
         .versions_for(&ActionId::from("actions/checkout"))
@@ -253,7 +266,9 @@ jobs:
     let workflow_path = create_test_workflow(temp_dir.path(), "ci.yml", content);
 
     let parser = FileWorkflowScanner::new(temp_dir.path());
-    let action_set = parser.scan_file(&workflow_path).unwrap();
+    let action_set = parser
+        .scan_file(&workflow_path, FileKind::Workflow)
+        .unwrap();
 
     let version = action_set
         .versions_for(&ActionId::from("actions/checkout"))
@@ -282,7 +297,9 @@ jobs:
     let workflow_path = create_test_workflow(temp_dir.path(), "test.yml", content);
 
     let parser = FileWorkflowScanner::new(temp_dir.path());
-    let action_set = parser.scan_file(&workflow_path).unwrap();
+    let action_set = parser
+        .scan_file(&workflow_path, FileKind::Workflow)
+        .unwrap();
 
     let checkout_id = ActionId::from("actions/checkout");
     let checkout_action_version = action_set.versions_for(&checkout_id).next().unwrap();
@@ -380,7 +397,8 @@ jobs:
     assert_eq!(parsed.len(), 2);
     let ci = parsed
         .iter()
-        .find(|p| p.path.as_str().ends_with("ci.yml"))
+        .filter_map(Parsed::as_workflow)
+        .find(|w| w.path.as_str().ends_with("ci.yml"))
         .unwrap();
     assert!(ci.permissions.is_some());
     assert!(
@@ -390,7 +408,8 @@ jobs:
     );
     let deploy = parsed
         .iter()
-        .find(|p| p.path.as_str().ends_with("deploy.yml"))
+        .filter_map(Parsed::as_workflow)
+        .find(|w| w.path.as_str().ends_with("deploy.yml"))
         .unwrap();
     assert!(deploy.permissions.is_none());
     assert!(

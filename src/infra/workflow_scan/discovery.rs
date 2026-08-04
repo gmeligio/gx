@@ -1,7 +1,11 @@
-//! The single source of truth for which files gx manages.
+//! The single source of truth for which files gx manages, and for the schema each follows.
 //!
 //! Scanner and writer both discover files here. Two implementations could drift, leaving
 //! gx aware of a reference it never rewrites.
+//!
+//! Kind is decided here and carried on [`ManagedFile`]; nothing downstream recomputes it
+//! from a path. That is what lets an action definition outside `.github/actions` be read
+//! as one — a path says where a file sits, not which schema it follows.
 
 use crate::domain::file::parsed::FileKind;
 use crate::domain::file::scan::Error as WorkflowError;
@@ -13,14 +17,14 @@ use std::path::{Path, PathBuf};
 pub struct ManagedFile {
     /// Absolute path to the file.
     pub path: PathBuf,
-    /// Which schema the file follows, decided by its location.
+    /// Which schema the file follows, decided by the root that matched it.
     pub kind: FileKind,
 }
 
 /// Where one kind of managed file lives, relative to `.github`.
 ///
-/// Pairing the glob with the kind it yields is what keeps discovery and
-/// [`FileKind::of_path`] from drifting; `discovery_kind_agrees_with_of_path` pins them.
+/// Pairing each glob with the kind it yields is what keeps the decision in one place;
+/// `discovery_assigns_kind_by_root` pins the assignment.
 struct Root {
     /// Directory under `.github`.
     dir: &'static str,

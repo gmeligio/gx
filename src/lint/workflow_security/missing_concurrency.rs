@@ -1,5 +1,5 @@
 use crate::config::Level;
-use crate::domain::file::parsed::{Parsed, Trigger};
+use crate::domain::file::parsed::{ParsedWorkflow, Trigger};
 use crate::lint::{Context, Diagnostic, Rule, RuleName};
 
 /// `missing-concurrency` rule: warns when a workflow triggered by `push:` or `schedule:`
@@ -9,7 +9,7 @@ pub struct MissingConcurrencyRule;
 
 impl MissingConcurrencyRule {
     /// Returns a diagnostic when a push/schedule workflow lacks a `concurrency:` block.
-    pub fn check_workflow(workflow: &Parsed) -> Option<Diagnostic> {
+    pub fn check_workflow(workflow: &ParsedWorkflow) -> Option<Diagnostic> {
         let race_trigger = workflow.on.iter().find_map(|t| match t {
             Trigger::Push => Some("push"),
             Trigger::Schedule => Some("schedule"),
@@ -56,9 +56,10 @@ impl Rule for MissingConcurrencyRule {
 #[expect(clippy::unwrap_used, reason = "tests use unwrap freely")]
 mod tests {
     use super::*;
+    use crate::domain::file::parsed::Parsed;
     use crate::domain::file::site::WorkflowPath;
 
-    fn parse(content: &str) -> Parsed {
+    fn parse(content: &str) -> ParsedWorkflow {
         Parsed::from_yaml(WorkflowPath::new(".github/workflows/x.yml"), content).unwrap()
     }
 

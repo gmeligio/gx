@@ -22,7 +22,8 @@ pub struct ActionOverride {
 /// default is the fallback, returned as `None` for the caller to apply.
 ///
 /// [`Scope::precedence`] orders the tiers, so this is one pass rather than a scan per
-/// tier. Ties keep the earliest entry, matching the previous first-match-wins behaviour.
+/// tier. Two overrides on one file cannot share a tier — the manifest reader rejects
+/// duplicate scopes — so no tie is reachable here.
 #[must_use]
 pub fn resolve_version<'ovr>(
     overrides: &'ovr [ActionOverride],
@@ -60,7 +61,6 @@ fn scope_of(slot: &Slot) -> Scope {
             job: job.clone(),
             step: *step,
         },
-        Slot::WorkflowJob { job } => Scope::Job { job: job.clone() },
         Slot::CompositeStep { step } => Scope::CompositeStep { step: *step },
     }
 }

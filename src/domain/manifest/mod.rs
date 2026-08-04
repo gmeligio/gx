@@ -219,30 +219,14 @@ mod tests {
     use super::{ActionId, ActionOverride, Manifest, Specifier};
     use crate::domain::file::site::{Id, JobId, Scope, Slot, StepIndex, WorkflowPath};
 
-    /// Build a site from the `(job, step)` shape the manifest uses. `None`/`Some` here
-    /// mirrors how a test names a scope; the resulting `Slot` is the single address.
-    fn make_loc(workflow: &str, job: Option<&str>, step: Option<u16>) -> Id {
-        let slot = match (job, step) {
-            (Some(j), Some(s)) => Slot::WorkflowStep {
-                job: JobId::from(j),
-                step: StepIndex::from(s),
-            },
-            (Some(j), None) => Slot::WorkflowJob {
-                job: JobId::from(j),
-            },
-            (None, Some(s)) => Slot::CompositeStep {
-                step: StepIndex::from(s),
-            },
-            // Every site has a position; there is no "file-scoped" slot. Callers passing
-            // `(None, None)` want any site in the file — a file-scoped *override* still
-            // matches it, which is the tier being exercised.
-            (None, None) => Slot::CompositeStep {
-                step: StepIndex::from(0_u16),
-            },
-        };
+    /// A site naming one step of one job.
+    fn workflow_step(workflow: &str, job: &str, step: u16) -> Id {
         Id {
             file: WorkflowPath::new(workflow),
-            slot,
+            slot: Slot::WorkflowStep {
+                job: JobId::from(job),
+                step: StepIndex::from(step),
+            },
         }
     }
 
@@ -304,7 +288,7 @@ mod tests {
     fn resolve_version_returns_global_when_no_override() {
         let mut m = Manifest::default();
         m.set(ActionId::from("actions/checkout"), Specifier::parse("^4"));
-        let loc = make_loc(".github/workflows/ci.yml", Some("build"), Some(0));
+        let loc = workflow_step(".github/workflows/ci.yml", "build", 0);
         assert_eq!(
             m.resolve_version(&ActionId::from("actions/checkout"), &loc),
             Some(&Specifier::parse("^4"))
@@ -317,7 +301,7 @@ mod tests {
         assert_eq!(
             m.resolve_version(
                 &ActionId::from("actions/checkout"),
-                &make_loc(".github/workflows/ci.yml", None, None)
+                &workflow_step(".github/workflows/ci.yml", "build", 0)
             ),
             None
         );

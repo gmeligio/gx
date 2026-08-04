@@ -16,7 +16,7 @@ use super::workflow_validity::{DanglingReferenceRule, InvalidExpressionRule};
 use crate::command::Command;
 use crate::config::{Config, Level, Lint as LintConfig};
 use crate::domain::file::actions::ActionSet as WorkflowActionSet;
-use crate::domain::file::parsed::FileKind;
+use crate::domain::file::parsed::Parsed;
 use crate::domain::file::scan::{Error as WorkflowError, Scanner as WorkflowScanner};
 use crate::domain::file::site::{JobId, StepIndex, WorkflowPath};
 use crate::domain::lock::Lock;
@@ -64,11 +64,14 @@ pub fn collect_diagnostics(
     // structural Parsed view the workflow-security rules consume.
     let (located, parsed_files) = scanner.scan_all_with_parsed()?;
 
-    // Filtered once here rather than guarded for in each schema-only rule, so a rule
-    // reading `workflows_full` structurally cannot see a composite file.
+    // Narrowed once here rather than guarded for in each schema-only rule. This is a total
+    // function `Parsed -> Option<ParsedWorkflow>`, not a filter: the rules take
+    // `ParsedWorkflow`, so dropping this step is a compile error rather than a silent
+    // widening that would let every rule judge an action definition.
     let parsed_workflows: Vec<_> = parsed_files
-        .into_iter()
-        .filter(|p| p.kind == FileKind::Workflow)
+        .iter()
+        .filter_map(Parsed::as_workflow)
+        .cloned()
         .collect();
 
     // Phase 1: per-action rules

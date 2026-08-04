@@ -5,7 +5,7 @@
 use super::report::Report;
 use crate::config::{IgnoreTarget, Level, Lint as LintConfig};
 use crate::domain::file::actions::{ActionSet as WorkflowActionSet, Located as LocatedAction};
-use crate::domain::file::parsed::Parsed as ParsedWorkflow;
+use crate::domain::file::parsed::ParsedWorkflow;
 use crate::domain::file::site::{JobId, StepIndex, WorkflowPath};
 use crate::domain::lock::Lock;
 use crate::domain::manifest::Manifest;
@@ -149,10 +149,11 @@ pub struct Context<'ctx> {
     /// Structural per-workflow parses, consumed by the workflow-security and
     /// workflow-validity rules.
     ///
-    /// **Invariant: workflow files only.** Composite action definitions are filtered out
-    /// before this is built, because they have no `on:`, no top-level `permissions:`, and
-    /// no jobs — every rule reading this field would misjudge them. Their `uses:`
-    /// references still reach the action-hygiene rules (sha-mismatch, unpinned,
+    /// Workflow files only — enforced by the type, not by a filter. [`ParsedWorkflow`] is
+    /// the workflow variant of [`Parsed`](crate::domain::file::parsed::Parsed), so an
+    /// action definition cannot reach this field: it has no `on:`, no top-level
+    /// `permissions:`, and no jobs, and every rule reading this would misjudge it. Their
+    /// `uses:` references still reach the action-hygiene rules (sha-mismatch, unpinned,
     /// stale-comment, unsynced-manifest) through `workflows` and `action_set`.
     ///
     /// Empty when no workflows were scanned.

@@ -1,5 +1,5 @@
 use crate::config::Level;
-use crate::domain::file::parsed::{Job, Parsed, Step};
+use crate::domain::file::parsed::{Job, ParsedWorkflow, Step};
 use crate::domain::file::site::{JobId, StepIndex};
 use crate::lint::{Context, Diagnostic, Rule, RuleName};
 
@@ -21,7 +21,7 @@ pub struct PrHeadCheckoutRule;
 
 impl PrHeadCheckoutRule {
     /// Returns a diagnostic for each PR-HEAD checkout step in a privileged workflow.
-    pub fn check_workflow(workflow: &Parsed) -> Vec<Diagnostic> {
+    pub fn check_workflow(workflow: &ParsedWorkflow) -> Vec<Diagnostic> {
         if !is_privileged(workflow) {
             return Vec::new();
         }
@@ -48,7 +48,7 @@ impl PrHeadCheckoutRule {
 }
 
 /// Reports whether any job has write permissions or any step references secrets.
-fn is_privileged(workflow: &Parsed) -> bool {
+fn is_privileged(workflow: &ParsedWorkflow) -> bool {
     workflow.jobs.iter().any(job_has_write_perms)
         || workflow
             .jobs
@@ -115,9 +115,10 @@ impl Rule for PrHeadCheckoutRule {
 )]
 mod tests {
     use super::*;
+    use crate::domain::file::parsed::Parsed;
     use crate::domain::file::site::WorkflowPath;
 
-    fn parse(content: &str) -> Parsed {
+    fn parse(content: &str) -> ParsedWorkflow {
         Parsed::from_yaml(WorkflowPath::new(".github/workflows/x.yml"), content).unwrap()
     }
 

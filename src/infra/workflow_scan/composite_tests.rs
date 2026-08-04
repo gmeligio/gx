@@ -3,6 +3,7 @@
 
 use super::FileScanner as FileWorkflowScanner;
 use crate::domain::action::identity::ActionId;
+use crate::domain::file::parsed::FileKind;
 use crate::domain::file::scan::Scanner as _;
 use crate::domain::file::site::StepIndex;
 use std::fs;
@@ -289,17 +290,20 @@ fn scan_file_reads_a_composite_under_the_right_schema() {
     );
 
     let scanner = FileWorkflowScanner::new(temp_dir.path());
-    let action_set = scanner.scan_file(&path).unwrap();
+    let action_set = scanner
+        .scan_file(&path, FileKind::ActionDefinition)
+        .unwrap();
 
     let ids: Vec<_> = action_set.action_ids().collect();
     assert_eq!(ids.len(), 1);
     assert!(ids.contains(&&ActionId::from("actions/checkout")));
 }
 
+/// Discovery is the only thing that decides kind, so this asserts what it assigns rather
+/// than cross-checking it against a second derivation. The `action.yml` under
+/// `.github/workflows` is the case that separates "kind by root" from "kind by file name".
 #[test]
-fn discovery_kind_agrees_with_of_path() {
-    use crate::domain::file::parsed::FileKind;
-
+fn discovery_assigns_kind_by_root() {
     let temp_dir = TempDir::new().unwrap();
     create_test_workflow(temp_dir.path(), "ci.yml", "name: CI");
     // A workflow named action.yml — the case where a file-name rule would disagree.
@@ -308,16 +312,21 @@ fn discovery_kind_agrees_with_of_path() {
     create_test_action_file(temp_dir.path(), "a/b/action.yaml", "name: Nested");
 
     let files = super::discovery::managed_files(temp_dir.path()).unwrap();
-    assert_eq!(files.len(), 4);
 
-    // Discovery tags kind by root; `of_path` derives it from the path. Disagreement
-    // means some layer re-derives the kind with a different rule.
-    for file in &files {
-        assert_eq!(
-            file.kind,
-            FileKind::of_path(&file.path),
-            "discovery and FileKind::of_path disagree for {}",
-            file.path.display()
-        );
-    }
+    let kinds: Vec<_> = files
+        .iter()
+        .map(|f| (f.path.file_name().unwrap().to_str().unwrap(), f.kind))
+        .collect();
+
+    // Workflows first, then action definitions, each group sorted by full path — so the
+    // nested `a/b/action.yaml` precedes `setup/action.yml`.
+    assert_eq!(
+        kinds,
+        vec![
+            ("action.yml", FileKind::Workflow),
+            ("ci.yml", FileKind::Workflow),
+            ("action.yaml", FileKind::ActionDefinition),
+            ("action.yml", FileKind::ActionDefinition),
+        ]
+    );
 }

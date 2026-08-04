@@ -6,15 +6,15 @@
 
 use super::{Store, parse};
 use crate::domain::action::identity::ActionId;
-use crate::domain::file::site::{JobId, Scope, StepIndex};
+use crate::domain::file::site::{JobId, Scope, Slot, StepIndex};
 use std::io::Write as _;
 use tempfile::NamedTempFile;
 
-/// A step index with no job names a composite action's step, which only exists in a file
-/// that has no jobs. On a workflow it addresses nothing, so it is rejected at parse time
-/// rather than silently producing an override that can never match.
+/// Parses rather than erroring because the manifest is read before any scan, so parse time
+/// cannot know whether the named file has jobs. Reporting an override that selects nothing
+/// belongs after the scan, with `prune_stale`.
 #[test]
-fn step_without_job_on_a_workflow_is_rejected() {
+fn step_without_job_on_a_workflow_parses_and_selects_nothing() {
     let content = concat!(
         "[actions]\n",
         "\"actions/checkout\" = \"^4\"\n",
@@ -27,11 +27,28 @@ fn step_without_job_on_a_workflow_is_rejected() {
     let mut file = NamedTempFile::new().unwrap();
     file.write_all(content.as_bytes()).unwrap();
 
-    let err = parse(file.path()).unwrap_err();
+    let loaded = parse(file.path()).unwrap();
+    let overrides = loaded
+        .value
+        .overrides_for(&ActionId::from("actions/checkout"));
+
+    assert_eq!(
+        overrides
+            .iter()
+            .map(|o| o.scope.clone())
+            .collect::<Vec<_>>(),
+        vec![Scope::CompositeStep {
+            step: StepIndex::from(0_u16)
+        }],
+        "the override parses to a composite-step scope whatever the path"
+    );
 
     assert!(
-        err.to_string().contains("has a step but no job"),
-        "expected the step-without-job rejection, got: {err}"
+        !overrides[0].scope.selects(&Slot::WorkflowStep {
+            job: JobId::from("build"),
+            step: StepIndex::from(0_u16),
+        }),
+        "a composite-step override must not select a workflow step"
     );
 }
 
