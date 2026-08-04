@@ -55,7 +55,7 @@
 
 ## 8. Verify
 
-- [ ] 8.1 `mise run test` — full suite green
-- [ ] 8.2 `mise run lint` — clippy pedantic clean, including private-item and field docs on the new types
-- [ ] 8.3 Confirm no `gx.toml` or `gx.lock` format change: run `gx tidy` on a fixture repo before and after, diff the outputs
-- [ ] 8.4 Update `README.md` / `docs/demo.tape` only if user-facing output changed — expected to be no-ops here, since only #161's pairing changes and it produces no new output
+- [x] 8.1 `mise run test` — full suite green
+- [x] 8.2 `mise run lint` — clippy pedantic clean, including private-item and field docs on the new types
+- [x] 8.3 Confirmed against a binary built from the base commit (d6af70b) in a scratch worktree, not just self-consistency: a fixture with file-, job-, and composite-step-scoped overrides produces byte-identical `gx.toml`, `gx.lock`, `ci.yml`, and `action.yml` under both binaries
+- [x] 8.4 Update `README.md` / `docs/demo.tape` only if user-facing output changed — confirmed a no-op: `README.md` and `docs/` reference no internal type names, and #161's pairing fix produces no new output
