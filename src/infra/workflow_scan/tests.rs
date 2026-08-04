@@ -1,7 +1,7 @@
 use super::FileScanner as FileWorkflowScanner;
 use crate::domain::action::identity::ActionId;
-use crate::domain::workflow::Scanner as _;
-use crate::domain::workflow_actions::StepIndex;
+use crate::domain::file::scan::Scanner as _;
+use crate::domain::file::site::StepIndex;
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -39,23 +39,23 @@ jobs:
     // Find the build-job checkout entry
     let build_checkout = located.iter().find(|a| {
         a.action.id == ActionId::from("actions/checkout")
-            && a.location
-                .job
-                .as_ref()
-                .map(crate::domain::workflow_actions::JobId::as_str)
+            && a.site
+                .slot
+                .job()
+                .map(crate::domain::file::site::JobId::as_str)
                 == Some("build")
     });
     assert!(build_checkout.is_some());
     let bc = build_checkout.unwrap();
     assert_eq!(bc.action.reference.label(), "v4");
-    assert_eq!(bc.location.step, Some(StepIndex::from(0_u16)));
+    assert_eq!(bc.site.slot.step(), Some(StepIndex::from(0_u16)));
 
     let test_checkout = located.iter().find(|a| {
         a.action.id == ActionId::from("actions/checkout")
-            && a.location
-                .job
-                .as_ref()
-                .map(crate::domain::workflow_actions::JobId::as_str)
+            && a.site
+                .slot
+                .job()
+                .map(crate::domain::file::site::JobId::as_str)
                 == Some("test")
     });
     assert!(test_checkout.is_some());
@@ -165,7 +165,7 @@ fn scan_all_located_derives_action_set() {
 
     let parser = FileWorkflowScanner::new(temp_dir.path());
     let located = parser.scan_all_located().unwrap();
-    let action_set = crate::domain::workflow_actions::ActionSet::from_located(&located);
+    let action_set = crate::domain::file::actions::ActionSet::from_located(&located);
 
     assert_eq!(action_set.action_ids().count(), 2);
 }
@@ -386,7 +386,7 @@ jobs:
     assert!(
         ci.on
             .iter()
-            .any(|t| matches!(t, crate::domain::workflow_parsed::Trigger::PullRequest))
+            .any(|t| matches!(t, crate::domain::file::parsed::Trigger::PullRequest))
     );
     let deploy = parsed
         .iter()
@@ -397,7 +397,7 @@ jobs:
         deploy
             .on
             .iter()
-            .any(|t| matches!(t, crate::domain::workflow_parsed::Trigger::Push))
+            .any(|t| matches!(t, crate::domain::file::parsed::Trigger::Push))
     );
 }
 
@@ -425,10 +425,10 @@ jobs:
             .iter()
             .find(|a| {
                 a.action.id == ActionId::from("actions/checkout")
-                    && a.location
-                        .job
-                        .as_ref()
-                        .map(crate::domain::workflow_actions::JobId::as_str)
+                    && a.site
+                        .slot
+                        .job()
+                        .map(crate::domain::file::site::JobId::as_str)
                         == Some(job)
             })
             .unwrap()
@@ -469,5 +469,41 @@ fn scan_iterator_yields_error_for_malformed_file_without_aborting() {
     assert!(
         err_count >= 1,
         "Expected at least one Err result from bad.yml"
+    );
+}
+
+/// `repo_rel` is what makes the tidy file-to-pins lookup an exact key.
+///
+/// Nested composite action directories can produce two managed files where one's
+/// repo-relative path is a suffix of the other's absolute path. The lookup used to bridge
+/// absolute and relative forms with `ends_with` inside a `find()` over a `HashMap`, so
+/// both keys matched and the winner depended on hash order. These paths are that case:
+/// asserting the exact relative form pins the property the suffix match could not give.
+#[test]
+fn repo_rel_distinguishes_paths_that_share_a_suffix() {
+    use crate::domain::file::scan::Scanner as _;
+
+    let root = Path::new("/repo");
+    let scanner = FileWorkflowScanner::new(root);
+
+    let outer = scanner.repo_rel(&root.join(".github/actions/build/action.yml"));
+    let nested = scanner.repo_rel(&root.join(".github/actions/x/.github/actions/build/action.yml"));
+
+    assert_eq!(outer.as_str(), ".github/actions/build/action.yml");
+    assert_eq!(
+        nested.as_str(),
+        ".github/actions/x/.github/actions/build/action.yml"
+    );
+    assert_ne!(outer, nested);
+
+    // The ambiguity the old lookup had: the nested absolute path ends with the outer
+    // file's key, so a suffix match would have accepted either.
+    let nested_abs = root
+        .join(".github/actions/x/.github/actions/build/action.yml")
+        .to_string_lossy()
+        .replace('\\', "/");
+    assert!(
+        nested_abs.ends_with(outer.as_str()),
+        "these paths must actually collide under suffix matching, or this test proves nothing"
     );
 }

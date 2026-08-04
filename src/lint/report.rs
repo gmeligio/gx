@@ -87,7 +87,7 @@ impl CommandReport for Report {
 )]
 mod tests {
     use super::*;
-    use crate::domain::workflow_actions::WorkflowPath;
+    use crate::domain::file::site::WorkflowPath;
     use crate::lint::RuleName;
 
     #[test]

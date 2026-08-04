@@ -15,13 +15,12 @@ use super::workflow_security::{
 use super::workflow_validity::{DanglingReferenceRule, InvalidExpressionRule};
 use crate::command::Command;
 use crate::config::{Config, Level, Lint as LintConfig};
+use crate::domain::file::actions::ActionSet as WorkflowActionSet;
+use crate::domain::file::parsed::FileKind;
+use crate::domain::file::scan::{Error as WorkflowError, Scanner as WorkflowScanner};
+use crate::domain::file::site::{JobId, StepIndex, WorkflowPath};
 use crate::domain::lock::Lock;
 use crate::domain::manifest::Manifest;
-use crate::domain::workflow::{Error as WorkflowError, Scanner as WorkflowScanner};
-use crate::domain::workflow_actions::{
-    ActionSet as WorkflowActionSet, JobId, StepIndex, WorkflowPath,
-};
-use crate::domain::workflow_parsed::FileKind;
 use crate::infra::workflow_scan::FileScanner as FileWorkflowScanner;
 use std::path::Path;
 use thiserror::Error;

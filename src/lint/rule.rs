@@ -4,12 +4,11 @@
 
 use super::report::Report;
 use crate::config::{IgnoreTarget, Level, Lint as LintConfig};
+use crate::domain::file::actions::{ActionSet as WorkflowActionSet, Located as LocatedAction};
+use crate::domain::file::parsed::Parsed as ParsedWorkflow;
+use crate::domain::file::site::{JobId, StepIndex, WorkflowPath};
 use crate::domain::lock::Lock;
 use crate::domain::manifest::Manifest;
-use crate::domain::workflow_actions::{
-    ActionSet as WorkflowActionSet, JobId, Located as LocatedAction, StepIndex, WorkflowPath,
-};
-use crate::domain::workflow_parsed::Parsed as ParsedWorkflow;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
@@ -291,7 +290,7 @@ pub(super) fn matches_ignore(
 
     let diag_action = located_actions
         .iter()
-        .find(|loc| loc.location.workflow == *diag_workflow)
+        .find(|loc| loc.site.file == *diag_workflow)
         .map(|loc| &loc.action.id);
 
     if let Some(target_action) = &target.action {

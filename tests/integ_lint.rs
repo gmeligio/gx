@@ -896,7 +896,7 @@ jobs:
                     .map(|j| j.as_str().to_owned())
                     .unwrap_or_default(),
                 d.step
-                    .map_or(u16::MAX, gx::domain::workflow_actions::StepIndex::as_u16),
+                    .map_or(u16::MAX, gx::domain::file::site::StepIndex::as_u16),
                 d.rule,
             )
         })
@@ -1006,7 +1006,7 @@ fn lint_unpinned_fires_on_composite_step() {
     assert_eq!(
         diag.workflow
             .as_ref()
-            .map(gx::domain::workflow_actions::WorkflowPath::as_str),
+            .map(gx::domain::file::site::WorkflowPath::as_str),
         Some(".github/actions/setup/action.yml")
     );
     assert!(diag.line.is_some(), "diagnostic should carry a source line");

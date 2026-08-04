@@ -6,8 +6,8 @@
 
 use super::{Context, Diagnostic, Rule, RuleName};
 use crate::config::Level;
-use crate::domain::workflow_actions::{JobId, StepIndex};
-use crate::domain::workflow_parsed::{Defaults, Parsed, effective_shell};
+use crate::domain::file::parsed::{Defaults, Parsed, effective_shell};
+use crate::domain::file::site::{JobId, StepIndex};
 use crate::infra::shellcheck::{
     Availability, Finding, Severity, Sh, ShellChecker, sanitize_expressions,
 };

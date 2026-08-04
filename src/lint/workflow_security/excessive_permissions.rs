@@ -1,5 +1,5 @@
 use crate::config::Level;
-use crate::domain::workflow_parsed::{Parsed, Permissions};
+use crate::domain::file::parsed::{Parsed, Permissions};
 use crate::lint::{Context, Diagnostic, Rule, RuleName};
 
 /// `excessive-permissions` rule: flags when top-level `permissions:` declares anything
@@ -51,7 +51,7 @@ impl Rule for ExcessivePermissionsRule {
 #[expect(clippy::unwrap_used, reason = "tests use unwrap freely")]
 mod tests {
     use super::*;
-    use crate::domain::workflow_actions::WorkflowPath;
+    use crate::domain::file::site::WorkflowPath;
 
     fn parse(content: &str) -> Parsed {
         Parsed::from_yaml(WorkflowPath::new(".github/workflows/ci.yml"), content).unwrap()

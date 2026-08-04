@@ -3,8 +3,8 @@
 
 use super::FileScanner as FileWorkflowScanner;
 use crate::domain::action::identity::ActionId;
-use crate::domain::workflow::Scanner as _;
-use crate::domain::workflow_actions::StepIndex;
+use crate::domain::file::scan::Scanner as _;
+use crate::domain::file::site::StepIndex;
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -50,7 +50,7 @@ fn scan_finds_composite_action() {
     assert_eq!(located.len(), 1);
     assert_eq!(located[0].action.id, ActionId::from("actions/setup-node"));
     assert_eq!(
-        located[0].location.workflow.as_str(),
+        located[0].site.file.as_str(),
         ".github/actions/setup/action.yml"
     );
 }
@@ -69,7 +69,7 @@ fn scan_finds_nested_composite_action() {
 
     assert_eq!(located.len(), 1);
     assert_eq!(
-        located[0].location.workflow.as_str(),
+        located[0].site.file.as_str(),
         ".github/actions/ci/setup/action.yml"
     );
 }
@@ -88,7 +88,7 @@ fn scan_finds_composite_action_yaml_extension() {
 
     assert_eq!(located.len(), 1);
     assert_eq!(
-        located[0].location.workflow.as_str(),
+        located[0].site.file.as_str(),
         ".github/actions/setup/action.yaml"
     );
 }
@@ -185,16 +185,16 @@ fn composite_step_has_no_job_and_carries_step_and_line() {
     assert_eq!(located.len(), 2);
     for action in &located {
         assert!(
-            action.location.job.is_none(),
+            action.site.slot.job().is_none(),
             "composite steps belong to no job"
         );
-        assert!(action.location.line.is_some(), "line should be recorded");
+        assert!(action.origin.line.is_some(), "line should be recorded");
     }
     let node = located
         .iter()
         .find(|a| a.action.id == ActionId::from("actions/setup-node"))
         .unwrap();
-    assert_eq!(node.location.step, Some(StepIndex::from(1_u16)));
+    assert_eq!(node.site.slot.step(), Some(StepIndex::from(1_u16)));
 }
 
 #[test]
@@ -234,7 +234,7 @@ fn composite_keeps_per_step_comment() {
     let label_at = |step: u16| {
         located
             .iter()
-            .find(|a| a.location.step == Some(StepIndex::from(step)))
+            .find(|a| a.site.slot.step() == Some(StepIndex::from(step)))
             .unwrap()
             .action
             .reference
@@ -298,7 +298,7 @@ fn scan_file_reads_a_composite_under_the_right_schema() {
 
 #[test]
 fn discovery_kind_agrees_with_of_path() {
-    use crate::domain::workflow_parsed::FileKind;
+    use crate::domain::file::parsed::FileKind;
 
     let temp_dir = TempDir::new().unwrap();
     create_test_workflow(temp_dir.path(), "ci.yml", "name: CI");

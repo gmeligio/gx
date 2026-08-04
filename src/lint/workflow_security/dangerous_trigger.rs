@@ -1,5 +1,5 @@
 use crate::config::Level;
-use crate::domain::workflow_parsed::{Parsed, Trigger};
+use crate::domain::file::parsed::{Parsed, Trigger};
 use crate::lint::{Context, Diagnostic, Rule, RuleName};
 
 /// `dangerous-trigger` rule: emits an error per `pull_request_target` or `workflow_run`
@@ -69,7 +69,7 @@ impl Rule for DangerousTriggerRule {
 )]
 mod tests {
     use super::*;
-    use crate::domain::workflow_actions::WorkflowPath;
+    use crate::domain::file::site::WorkflowPath;
 
     fn parse(content: &str) -> Parsed {
         Parsed::from_yaml(WorkflowPath::new(".github/workflows/x.yml"), content).unwrap()

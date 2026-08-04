@@ -3,8 +3,8 @@
 //! Scanner and writer both discover files here. Two implementations could drift, leaving
 //! gx aware of a reference it never rewrites.
 
-use crate::domain::workflow::Error as WorkflowError;
-use crate::domain::workflow_parsed::FileKind;
+use crate::domain::file::parsed::FileKind;
+use crate::domain::file::scan::Error as WorkflowError;
 use glob::glob;
 use std::path::{Path, PathBuf};
 

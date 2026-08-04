@@ -196,3 +196,12 @@ pub fn create(path: &Path, diff: &ManifestDiff) -> Result<(), Error> {
 )]
 #[path = "tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[expect(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
+#[path = "override_scope_tests.rs"]
+mod override_scope_tests;

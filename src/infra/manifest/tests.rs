@@ -2,8 +2,8 @@ use super::{Manifest, Store, create, parse, parse_lint_config};
 use crate::domain::action::identity::ActionId;
 use crate::domain::action::specifier::Specifier;
 use crate::domain::diff::ManifestDiff;
+use crate::domain::file::site::{JobId, Scope, StepIndex, WorkflowPath};
 use crate::domain::manifest::overrides::ActionOverride;
-use crate::domain::workflow_actions::{JobId, StepIndex, WorkflowPath};
 use crate::lint::RuleName;
 use std::fs;
 use std::io::Write as _;
@@ -62,10 +62,7 @@ fn load_manifest_with_overrides() {
         WorkflowPath::new(".github/workflows/deploy.yml")
     );
     assert_eq!(overrides[0].version.as_str(), "^3");
-    assert_eq!(
-        overrides[1].job.as_ref(),
-        Some(&JobId::from("legacy-build"))
-    );
+    assert_eq!(overrides[1].scope.job(), Some(&JobId::from("legacy-build")));
     assert_eq!(overrides[1].version.as_str(), "^2");
 }
 
@@ -80,8 +77,7 @@ fn save_and_load_roundtrip_with_overrides() {
         ActionId::from("actions/checkout"),
         ActionOverride {
             workflow: WorkflowPath::new(".github/workflows/deploy.yml"),
-            job: None,
-            step: None,
+            scope: Scope::File,
             version: Specifier::parse("^3"),
         },
     );
@@ -139,8 +135,9 @@ fn composite_step_override_without_job_roundtrips() {
         ActionId::from("actions/checkout"),
         ActionOverride {
             workflow: WorkflowPath::new(".github/actions/setup/action.yml"),
-            job: None,
-            step: Some(StepIndex::from(0_u16)),
+            scope: Scope::CompositeStep {
+                step: StepIndex::from(0_u16),
+            },
             version: Specifier::parse("^3"),
         },
     );
@@ -156,8 +153,8 @@ fn composite_step_override_without_job_roundtrips() {
         overrides[0].workflow,
         WorkflowPath::new(".github/actions/setup/action.yml")
     );
-    assert_eq!(overrides[0].step, Some(StepIndex::from(0_u16)));
-    assert_eq!(overrides[0].job, None);
+    assert_eq!(overrides[0].scope.step(), Some(StepIndex::from(0_u16)));
+    assert_eq!(overrides[0].scope.job(), None);
 }
 
 #[test]
@@ -240,8 +237,10 @@ fn save_and_load_roundtrip_generates_correct_toml_format() {
         ActionId::from("actions/checkout"),
         ActionOverride {
             workflow: WorkflowPath::new(".github/workflows/windows.yml"),
-            job: Some(JobId::from("test_windows")),
-            step: Some(StepIndex::from(0_u16)),
+            scope: Scope::JobStep {
+                job: JobId::from("test_windows"),
+                step: StepIndex::from(0_u16),
+            },
             version: Specifier::parse("^5"),
         },
     );
@@ -279,11 +278,8 @@ fn save_and_load_roundtrip_generates_correct_toml_format() {
         overrides[0].workflow,
         WorkflowPath::new(".github/workflows/windows.yml")
     );
-    assert_eq!(
-        overrides[0].job.as_ref(),
-        Some(&JobId::from("test_windows"))
-    );
-    assert_eq!(overrides[0].step, Some(StepIndex::from(0_u16)));
+    assert_eq!(overrides[0].scope.job(), Some(&JobId::from("test_windows")));
+    assert_eq!(overrides[0].scope.step(), Some(StepIndex::from(0_u16)));
     assert_eq!(overrides[0].version.as_str(), "^5");
 }
 
@@ -410,8 +406,7 @@ fn create_with_overrides() {
             ActionId::from("actions/checkout"),
             ActionOverride {
                 workflow: WorkflowPath::new(".github/workflows/windows.yml"),
-                job: None,
-                step: None,
+                scope: Scope::File,
                 version: Specifier::parse("^3"),
             },
         )],
