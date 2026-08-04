@@ -75,7 +75,7 @@ mod tests {
     use crate::domain::action::specifier::Specifier;
     use crate::domain::action::uses_ref::RefType;
     use crate::domain::file::actions::{ActionSet, Located};
-    use crate::domain::file::site::{Id, Origin, Slot, StepIndex, WorkflowPath};
+    use crate::domain::file::site::{Id, JobId, Origin, Slot, StepIndex, WorkflowPath};
     use crate::domain::lock::Lock;
     use crate::domain::manifest::Manifest;
 
@@ -114,7 +114,8 @@ mod tests {
             },
             site: Id {
                 file: WorkflowPath::new(workflow),
-                slot: Slot::CompositeStep {
+                slot: Slot::WorkflowStep {
+                    job: JobId::from("build"),
                     step: StepIndex::from(0_u16),
                 },
             },

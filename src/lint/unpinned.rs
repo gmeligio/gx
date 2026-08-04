@@ -52,7 +52,7 @@ mod tests {
     use crate::domain::action::identity::{ActionId, CommitSha, Version};
     use crate::domain::action::uses_ref::ParsedRef;
     use crate::domain::file::actions::{Located, WorkflowAction};
-    use crate::domain::file::site::{Id, Origin, Slot, StepIndex, WorkflowPath};
+    use crate::domain::file::site::{Id, JobId, Origin, Slot, StepIndex, WorkflowPath};
 
     const VALID_SHA: &str = "8e8c483db84b4bee98b60c0593521ed34d9990e8";
 
@@ -78,7 +78,8 @@ mod tests {
             },
             site: Id {
                 file: WorkflowPath::new(".github/workflows/ci.yml"),
-                slot: Slot::CompositeStep {
+                slot: Slot::WorkflowStep {
+                    job: JobId::from("build"),
                     step: StepIndex::from(0_u16),
                 },
             },

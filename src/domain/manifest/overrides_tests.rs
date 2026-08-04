@@ -20,24 +20,15 @@ use crate::domain::file::actions::ActionSet as WorkflowActionSet;
 use crate::domain::file::site::{Id, JobId, Origin, Scope, Slot, StepIndex, WorkflowPath};
 
 use std::collections::HashMap;
-fn make_loc(workflow: &str, job: Option<&str>, step: Option<u16>) -> Id {
-    let slot = match (job, step) {
-        (Some(j), Some(s)) => Slot::WorkflowStep {
-            job: JobId::from(j),
-            step: StepIndex::from(s),
-        },
-        (Some(j), None) => Slot::WorkflowJob {
-            job: JobId::from(j),
-        },
-        // No job: a composite step. `(None, None)` has no address of its own —
-        // step 0 stands in, and a file-scoped override still matches it.
-        (None, s) => Slot::CompositeStep {
-            step: StepIndex::from(s.unwrap_or(0)),
-        },
-    };
+
+/// A site naming one step of one job.
+fn workflow_step(workflow: &str, job: &str, step: u16) -> Id {
     Id {
         file: WorkflowPath::new(workflow),
-        slot,
+        slot: Slot::WorkflowStep {
+            job: JobId::from(job),
+            step: StepIndex::from(step),
+        },
     }
 }
 
@@ -49,7 +40,7 @@ fn make_located(workflow: &str, action: &str, version: &str) -> LocatedAction {
             id: ActionId::from(action),
             reference: ParsedRef::Ref(Version::from(version)),
         },
-        site: make_loc(workflow, None, None),
+        site: workflow_step(workflow, "build", 0),
         origin: Origin::default(),
     }
 }
@@ -57,7 +48,7 @@ fn make_located(workflow: &str, action: &str, version: &str) -> LocatedAction {
 #[test]
 fn resolve_version_returns_none_when_no_overrides() {
     let overrides: Vec<ActionOverride> = vec![];
-    let loc = make_loc(".github/workflows/ci.yml", Some("build"), Some(0));
+    let loc = workflow_step(".github/workflows/ci.yml", "build", 0);
     assert_eq!(resolve_version(&overrides, &loc), None);
 }
 
@@ -68,7 +59,7 @@ fn resolve_version_workflow_level() {
         scope: Scope::File,
         version: Specifier::parse("^3"),
     }];
-    let loc = make_loc(".github/workflows/ci.yml", Some("build"), Some(0));
+    let loc = workflow_step(".github/workflows/ci.yml", "build", 0);
     assert_eq!(
         resolve_version(&overrides, &loc),
         Some(&Specifier::parse("^3"))
@@ -92,7 +83,7 @@ fn resolve_version_step_level_wins_over_workflow() {
             version: Specifier::parse("^2"),
         },
     ];
-    let loc = make_loc(".github/workflows/ci.yml", Some("build"), Some(0));
+    let loc = workflow_step(".github/workflows/ci.yml", "build", 0);
     assert_eq!(
         resolve_version(&overrides, &loc),
         Some(&Specifier::parse("^2"))
@@ -309,7 +300,7 @@ fn prune_stale_removes_job_override_when_job_is_gone() {
     );
 
     let mut live = make_located(".github/workflows/ci.yml", "actions/checkout", "v4");
-    live.site = make_loc(".github/workflows/ci.yml", Some("build"), Some(0));
+    live.site = workflow_step(".github/workflows/ci.yml", "build", 0);
     prune_stale(&mut actions_overrides, &[live]);
 
     assert!(
@@ -335,7 +326,7 @@ fn prune_stale_keeps_job_override_while_job_exists() {
     );
 
     let mut live = make_located(".github/workflows/ci.yml", "actions/checkout", "v4");
-    live.site = make_loc(".github/workflows/ci.yml", Some("build"), Some(0));
+    live.site = workflow_step(".github/workflows/ci.yml", "build", 0);
     prune_stale(&mut actions_overrides, &[live]);
 
     assert_eq!(

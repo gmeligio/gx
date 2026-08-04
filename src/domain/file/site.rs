@@ -130,11 +130,6 @@ pub enum Slot {
         /// 0-based index within `runs.steps`.
         step: StepIndex,
     },
-    /// A job-level `uses:` — a reusable-workflow call, which has no step index.
-    WorkflowJob {
-        /// The job holding the `uses:`.
-        job: JobId,
-    },
 }
 
 impl Slot {
@@ -142,17 +137,17 @@ impl Slot {
     #[must_use]
     pub fn job(&self) -> Option<&JobId> {
         match self {
-            Self::WorkflowStep { job, .. } | Self::WorkflowJob { job } => Some(job),
+            Self::WorkflowStep { job, .. } => Some(job),
             Self::CompositeStep { .. } => None,
         }
     }
 
-    /// The step index within its list, if this site is a step.
+    /// The step index within its list. Every slot gx records is a step; the accessor
+    /// stays `Option` for callers that pair it with [`Scope::step`], which is not.
     #[must_use]
     pub fn step(&self) -> Option<StepIndex> {
         match self {
             Self::WorkflowStep { step, .. } | Self::CompositeStep { step } => Some(*step),
-            Self::WorkflowJob { .. } => None,
         }
     }
 }
@@ -214,10 +209,7 @@ impl Scope {
     pub fn selects(&self, slot: &Slot) -> bool {
         match (self, slot) {
             (Self::File, _) => true,
-            (
-                Self::Job { job },
-                Slot::WorkflowStep { job: j, .. } | Slot::WorkflowJob { job: j },
-            ) => job == j,
+            (Self::Job { job }, Slot::WorkflowStep { job: j, .. }) => job == j,
             (Self::JobStep { job, step }, Slot::WorkflowStep { job: j, step: s }) => {
                 job == j && step == s
             }
@@ -333,18 +325,19 @@ mod tests {
         assert_ne!(composite, workflow);
     }
 
+    /// A workflow slot carries a job, a composite slot does not. This is what lets
+    /// override resolution tell the two tiers apart without classifying the path.
     #[test]
-    fn job_level_uses_has_no_step() {
-        let job_level = Slot::WorkflowJob {
+    fn only_a_workflow_slot_names_a_job() {
+        let workflow = Slot::WorkflowStep {
             job: JobId::from("release"),
+            step: StepIndex::from(0),
         };
-        assert_ne!(
-            job_level,
-            Slot::WorkflowStep {
-                job: JobId::from("release"),
-                step: StepIndex::from(0),
-            }
-        );
+        let composite = Slot::CompositeStep {
+            step: StepIndex::from(0),
+        };
+        assert_eq!(workflow.job().map(JobId::as_str), Some("release"));
+        assert_eq!(composite.job(), None);
     }
 
     #[test]

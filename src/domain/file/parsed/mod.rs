@@ -325,12 +325,16 @@ struct Runs {
 }
 
 impl Parsed {
-    /// Parse a workflow YAML string into structural data. The `path` is supplied by the
-    /// caller because it is not present in the YAML itself.
+    /// Parse a workflow YAML string, skipping the kind dispatch [`Parsed::parse`] does.
+    ///
+    /// Test-only: production always knows the kind discovery assigned, so it goes through
+    /// `parse`. This exists so a rule test can write a workflow body and get a
+    /// [`ParsedWorkflow`] without naming a kind the test has no say in.
     ///
     /// # Errors
     ///
     /// Returns the underlying `serde_saphyr` error if the YAML cannot be deserialized.
+    #[cfg(test)]
     pub fn from_yaml(
         path: WorkflowPath,
         content: &str,

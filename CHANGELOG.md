@@ -24,14 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The human-readable summary counter reads "files" instead of "workflows"; the `--json`
     field name is unchanged.
 
-- *(manifest)* A `[actions.overrides]` entry with a `step` but no `job` naming a workflow
-  file is no longer rejected when the manifest is read
-  ([#154](https://github.com/gmeligio/gx/issues/154)). Such an entry addresses a composite
-  action's step, so it never applied to a workflow; it now parses and selects nothing
-  instead of erroring. Whether an override's address resolves to anything is only knowable
-  after a scan, so reporting one that matches no file is tracked separately in
-  [#163](https://github.com/gmeligio/gx/issues/163). No action is needed: an entry that
-  errored before did nothing either way.
+- *(manifest)* An `[actions.overrides]` entry with `step` but no `job` on a workflow file
+  no longer errors when the manifest is read
+  ([#154](https://github.com/gmeligio/gx/issues/154)). It addresses a composite action's
+  step, so it never applied to a workflow — it now parses and selects nothing. Reporting
+  overrides that match no file needs a scan; tracked in
+  [#163](https://github.com/gmeligio/gx/issues/163).
 
 ## [0.8.3](https://github.com/gmeligio/gx/compare/v0.8.2...v0.8.3) - 2026-07-13
 
