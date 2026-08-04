@@ -879,3 +879,69 @@ runs:
         "two workflows plus one composite action were rewritten"
     );
 }
+
+/// A file is pinned from its own references, not another file's.
+///
+/// `.github/actions/x/.github/actions/build/action.yml` ends with
+/// `.github/actions/build/action.yml`. The file-to-references lookup used to match by
+/// path suffix and take the first hit from an unordered map, so the outer and nested
+/// files could be paired with each other's pins — and which way round varied between
+/// runs. Each file must be rewritten with the action it actually references.
+#[test]
+fn gx_tidy_pins_each_file_from_its_own_references() {
+    let temp_dir = TempDir::new().unwrap();
+    let root = create_test_repo(&temp_dir);
+    create_empty_manifest(&root);
+
+    let outer = write_composite_action(
+        &root,
+        "build",
+        "name: Build
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v4
+",
+    );
+    let nested = write_composite_action(
+        &root,
+        "x/.github/actions/build",
+        "name: Nested build
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v3
+",
+    );
+
+    let registry = FakeRegistry::new()
+        .with_all_tags("actions/checkout", vec!["v4"])
+        .with_all_tags("actions/setup-node", vec!["v3"]);
+    let scanner = FileWorkflowScanner::new(&root);
+    let updater = WorkflowWriter::new(&root);
+    let manifest = manifest::parse(&root.join(".github").join("gx.toml"))
+        .unwrap()
+        .value;
+    let lock = LockStore::new(&root.join(".github").join("gx.lock"))
+        .load()
+        .unwrap();
+
+    let plan = tidy::plan(&manifest, &lock, &registry, &scanner, |_| {}).unwrap();
+    tidy::apply_workflow_patches(&updater, &plan.workflows).unwrap();
+
+    let outer_text = fs::read_to_string(&outer).unwrap();
+    let nested_text = fs::read_to_string(&nested).unwrap();
+
+    assert!(
+        outer_text.contains("actions/checkout@") && !outer_text.contains("actions/setup-node"),
+        "the outer file must keep only its own reference, got:\n{outer_text}"
+    );
+    assert!(
+        nested_text.contains("actions/setup-node@") && !nested_text.contains("actions/checkout"),
+        "the nested file must keep only its own reference, got:\n{nested_text}"
+    );
+    assert!(
+        !outer_text.contains("@v4\n"),
+        "the outer file's reference should have been pinned to a SHA, got:\n{outer_text}"
+    );
+}

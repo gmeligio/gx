@@ -37,19 +37,21 @@
 
 ## 6. Manifest boundary
 
-- [ ] 6.1 `src/infra/manifest/convert.rs` — construct `Slot` on read, destructure on write
-- [ ] 6.2 Delete the `FileKind::of_path` validation at `convert.rs:118-125`; the invalid combination is now unrepresentable
-- [ ] 6.3 Move the rejection of `step` without `job` on a workflow file into parsing, preserving the exact user-facing error text
-- [ ] 6.4 Test: that rejection still errors with the same message as today
-- [ ] 6.5 Test: a `gx.toml` with file-, job-, and step-scoped overrides round-trips byte-identically
+- [x] 6.1 Add `Scope { File | Job | JobStep | CompositeStep }` to `domain/file/site.rs`; replace `ActionOverride`'s `(Option<JobId>, Option<StepIndex>)` pair with it
+- [x] 6.2 Rewrite `addresses`, `override_for`, and `resolve_version` in `overrides.rs` to match `Scope` against `Slot` directly, dropping the `scope_of` Option-pair conversion
+- [x] 6.3 `src/infra/manifest/convert.rs` — build `Scope` from the TOML `(job, step)` pair; reject `step`-without-`job` there as a parse error about the user's input, preserving the exact message text
+- [x] 6.4 `of_path` stays at `convert.rs:146`, narrowed to the one branch that needs it. Deciding whether a job-less step is a composite step or nonsense genuinely requires the file kind; `Scope` removes the *representable* invalid state, not the need to classify. The design's claim that this call disappears was wrong
+- [x] 6.5 `src/infra/manifest/patch.rs` — destructure `Scope` on write; TOML keys stay `workflow`/`job`/`step`
+- [x] 6.6 Test: `step` without `job` on a workflow file still errors with the same message (no existing coverage — this is new)
+- [x] 6.7 Test: a `gx.toml` with file-, job-, and step-scoped overrides round-trips byte-identically
 
 ## 7. Fix #161
 
-- [ ] 7.1 Write the failing test first: fixture repo with `.github/actions/build/action.yml` and nested `.github/actions/x/.github/actions/build/action.yml`, asserting each file is paired with its own pins. Assert the exact pairing rather than looping — the bug depends on `HashMap` order and is not reliably reproducible
+- [x] 7.1 Two tests, because the end-to-end one cannot prove the fix on its own: `gx_tidy_pins_each_file_from_its_own_references` (integ_tidy) asserts each file keeps its own pins, and `repo_rel_distinguishes_paths_that_share_a_suffix` (unit) pins the seam and asserts the paths genuinely collide under suffix matching. The integration test passes under the old code too — the mispair direction depends on `HashMap` order, so only the seam test is a real regression guard
 - [x] 7.2 Thread the relative path from `FileScanner::rel_path` (`scanner.rs:115-123`) through to `compute_workflow_patches`
 - [x] 7.3 Replace the suffix match at `src/tidy/patches.rs:39-42` with an exact `SiteId.file` lookup; delete the `.find()` over the `HashMap`
-- [ ] 7.4 Test: a discovered file with no managed references is left unchanged and not counted in the summary
-- [ ] 7.5 Test: repeated runs pair identically
+- [x] 7.4 Test: a discovered file with no managed references is left unchanged and not counted in the summary
+- [x] 7.5 Test: repeated runs pair identically
 
 ## 8. Verify
 

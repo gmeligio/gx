@@ -17,7 +17,7 @@ use crate::domain::action::identity::{ActionId, Version};
 use crate::domain::action::spec::Spec;
 use crate::domain::action::specifier::Specifier;
 use crate::domain::file::actions::ActionSet as WorkflowActionSet;
-use crate::domain::file::site::{Id, JobId, Origin, Slot, StepIndex, WorkflowPath};
+use crate::domain::file::site::{Id, JobId, Origin, Scope, Slot, StepIndex, WorkflowPath};
 
 use std::collections::HashMap;
 fn make_loc(workflow: &str, job: Option<&str>, step: Option<u16>) -> Id {
@@ -65,8 +65,7 @@ fn resolve_version_returns_none_when_no_overrides() {
 fn resolve_version_workflow_level() {
     let overrides = vec![ActionOverride {
         workflow: WorkflowPath::new(".github/workflows/ci.yml"),
-        job: None,
-        step: None,
+        scope: Scope::File,
         version: Specifier::parse("^3"),
     }];
     let loc = make_loc(".github/workflows/ci.yml", Some("build"), Some(0));
@@ -81,14 +80,15 @@ fn resolve_version_step_level_wins_over_workflow() {
     let overrides = vec![
         ActionOverride {
             workflow: WorkflowPath::new(".github/workflows/ci.yml"),
-            job: None,
-            step: None,
+            scope: Scope::File,
             version: Specifier::parse("^3"),
         },
         ActionOverride {
             workflow: WorkflowPath::new(".github/workflows/ci.yml"),
-            job: Some(JobId::from("build")),
-            step: Some(StepIndex::from(0_u16)),
+            scope: Scope::JobStep {
+                job: JobId::from("build"),
+                step: StepIndex::from(0_u16),
+            },
             version: Specifier::parse("^2"),
         },
     ];
@@ -174,8 +174,7 @@ fn prune_stale_removes_override_for_missing_workflow() {
         ActionId::from("actions/checkout"),
         vec![ActionOverride {
             workflow: WorkflowPath::new(".github/workflows/deploy.yml"),
-            job: None,
-            step: None,
+            scope: Scope::File,
             version: Specifier::parse("v3"),
         }],
     );
@@ -201,8 +200,7 @@ fn prune_stale_keeps_live_overrides() {
         ActionId::from("actions/checkout"),
         vec![ActionOverride {
             workflow: WorkflowPath::new(".github/workflows/ci.yml"),
-            job: None,
-            step: None,
+            scope: Scope::File,
             version: Specifier::parse("v3"),
         }],
     );
@@ -275,8 +273,7 @@ fn prune_stale_removes_deploy_yml_when_only_ci_exists() {
         ActionId::from("actions/checkout"),
         vec![ActionOverride {
             workflow: WorkflowPath::new(".github/workflows/deploy.yml"),
-            job: None,
-            step: None,
+            scope: Scope::File,
             version: Specifier::from_v1("v3"),
         }],
     );
@@ -304,8 +301,9 @@ fn prune_stale_removes_job_override_when_job_is_gone() {
         ActionId::from("actions/checkout"),
         vec![ActionOverride {
             workflow: WorkflowPath::new(".github/workflows/ci.yml"),
-            job: Some(JobId::from("deleted")),
-            step: None,
+            scope: Scope::Job {
+                job: JobId::from("deleted"),
+            },
             version: Specifier::from_v1("v3"),
         }],
     );
@@ -329,8 +327,9 @@ fn prune_stale_keeps_job_override_while_job_exists() {
         ActionId::from("actions/checkout"),
         vec![ActionOverride {
             workflow: WorkflowPath::new(".github/workflows/ci.yml"),
-            job: Some(JobId::from("build")),
-            step: None,
+            scope: Scope::Job {
+                job: JobId::from("build"),
+            },
             version: Specifier::from_v1("v3"),
         }],
     );

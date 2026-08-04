@@ -28,6 +28,16 @@ set to a correct model instead of overloading a field further.
   `src/infra/manifest/convert.rs:118-125`.
 - Addressing is unchanged: `Slot` carries `StepIndex`, the same zero-based
   position gx uses today.
+- `Scope` replaces `ActionOverride`'s `(Option<JobId>, Option<StepIndex>)` pair
+  with `File | Job | JobStep | CompositeStep`. An override is a *selector* — a
+  job-scoped one matches every step in that job — so it is set-valued where
+  `Slot` is a point. But the `Option` pair can represent four combinations when
+  only three are meaningful: `(None, Some)` means "a composite step" on an
+  action file and nothing coherent on a workflow file. Resolving that ambiguity
+  is what forces `convert.rs:118-125` to call `FileKind::of_path` — a
+  path-classification rule — to validate a *scope*. With `Scope`, the invalid
+  combination is unrepresentable and the rejection becomes a parse error about
+  the user's input.
 - `Origin { line }` carries provenance, separate from identity.
 - `WorkflowPath`, `JobId`, `StepIndex` (`workflow_actions.rs:99-200`) move to
   `site.rs` unchanged — they are self-contained newtypes with no `action::`

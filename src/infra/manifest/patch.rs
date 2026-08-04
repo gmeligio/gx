@@ -86,10 +86,10 @@ fn override_entry_matches(
     workflow == Some(ovr.workflow.as_str())
         && job
             == ovr
-                .job
-                .as_ref()
+                .scope
+                .job()
                 .map(crate::domain::file::site::JobId::as_str)
-        && step.and_then(|s| StepIndex::try_from(s).ok()) == ovr.step
+        && step.and_then(|s| StepIndex::try_from(s).ok()) == ovr.scope.step()
 }
 
 /// Remove matching overrides from the `[actions.overrides]` table.
@@ -207,10 +207,10 @@ fn apply_override_additions(
         // Build the inline table for this override entry
         let mut inline = toml_edit::InlineTable::new();
         inline.insert("workflow", ovr.workflow.as_str().into());
-        if let Some(job) = &ovr.job {
+        if let Some(job) = ovr.scope.job() {
             inline.insert("job", toml_edit::Value::from(job.as_str()));
         }
-        if let Some(step) = ovr.step {
+        if let Some(step) = ovr.scope.step() {
             inline.insert("step", i64::from(step).into());
         }
         inline.insert("version", ovr.version.as_str().into());
@@ -232,7 +232,7 @@ mod tests {
     use crate::domain::action::identity::ActionId;
     use crate::domain::action::specifier::Specifier;
     use crate::domain::diff::ManifestDiff;
-    use crate::domain::file::site::{JobId, WorkflowPath};
+    use crate::domain::file::site::{JobId, Scope, WorkflowPath};
     use crate::domain::manifest::overrides::ActionOverride;
     use std::fs;
     use std::io::Write as _;
@@ -321,8 +321,7 @@ mod tests {
                 ActionId::from("actions/checkout"),
                 ActionOverride {
                     workflow: WorkflowPath::new(".github/workflows/deploy.yml"),
-                    job: None,
-                    step: None,
+                    scope: Scope::File,
                     version: Specifier::parse("^3"),
                 },
             )],
@@ -361,8 +360,9 @@ mod tests {
                 ActionId::from("actions/checkout"),
                 ActionOverride {
                     workflow: WorkflowPath::new(".github/workflows/ci.yml"),
-                    job: Some(JobId::from("legacy")),
-                    step: None,
+                    scope: Scope::Job {
+                        job: JobId::from("legacy"),
+                    },
                     version: Specifier::parse("^2"),
                 },
             )],
@@ -395,8 +395,7 @@ mod tests {
                 ActionId::from("actions/checkout"),
                 vec![ActionOverride {
                     workflow: WorkflowPath::new(".github/workflows/deploy.yml"),
-                    job: None,
-                    step: None,
+                    scope: Scope::File,
                     version: Specifier::parse("^3"),
                 }],
             )],
@@ -431,8 +430,7 @@ mod tests {
                 ActionId::from("actions/checkout"),
                 vec![ActionOverride {
                     workflow: WorkflowPath::new(".github/workflows/deploy.yml"),
-                    job: None,
-                    step: None,
+                    scope: Scope::File,
                     version: Specifier::parse("^3"),
                 }],
             )],
@@ -463,8 +461,7 @@ mod tests {
                 ActionId::from("actions/checkout"),
                 ActionOverride {
                     workflow: WorkflowPath::new(".github/workflows/windows.yml"),
-                    job: None,
-                    step: None,
+                    scope: Scope::File,
                     version: Specifier::parse("^3"),
                 },
             )],

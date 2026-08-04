@@ -2,121 +2,66 @@ use crate::domain::action::identity::ActionId;
 use crate::domain::action::spec::Spec;
 use crate::domain::action::specifier::Specifier;
 use crate::domain::file::actions::{ActionSet as WorkflowActionSet, Located as LocatedAction};
-use crate::domain::file::site::{Id, JobId, Slot, StepIndex, WorkflowPath};
+use crate::domain::file::site::{Id, Scope, Slot, WorkflowPath};
 use std::collections::HashSet;
 
-/// A version override for a specific file location.
+/// A version override for a set of sites.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActionOverride {
     /// Relative path from repo root, e.g. ".github/workflows/deploy.yml".
     pub workflow: WorkflowPath,
-    /// Job id, if scoped to a job. Always `None` for a composite action's step.
-    pub job: Option<JobId>,
-    /// 0-based step index, if scoped to a step. Requires a job in a workflow;
-    /// stands alone in a composite action, which has none.
-    pub step: Option<StepIndex>,
-    /// The specifier to use at this location.
+    /// Which sites within that file this override applies to.
+    pub scope: Scope,
+    /// The specifier to use at those sites.
     pub version: Specifier,
 }
 
 /// Resolve the effective specifier for an action at a given site.
 ///
-/// Resolution order, most specific first: job-step, job, file-step, file, then the global
-/// default (returned as `None` — the caller falls back to it). File-step addresses a
-/// composite action's step, which belongs to no job.
+/// The most specific selecting override wins — step over job over file — and the global
+/// default is the fallback, returned as `None` for the caller to apply.
 ///
-/// The tiers are disjoint by construction: [`Slot`] gives a site exactly one shape, so a
-/// composite step can never be tested against a job-bearing tier.
+/// [`Scope::precedence`] orders the tiers, so this is one pass rather than a scan per
+/// tier. Ties keep the earliest entry, matching the previous first-match-wins behaviour.
 #[must_use]
 pub fn resolve_version<'ovr>(
     overrides: &'ovr [ActionOverride],
     site: &Id,
 ) -> Option<&'ovr Specifier> {
-    let in_file = |exc: &&ActionOverride| exc.workflow == site.file;
-
-    match &site.slot {
-        Slot::WorkflowStep { job, step } => {
-            if let Some(exc) = overrides
-                .iter()
-                .filter(in_file)
-                .find(|exc| exc.job.as_ref() == Some(job) && exc.step == Some(*step))
-            {
-                return Some(&exc.version);
-            }
-            if let Some(exc) = overrides
-                .iter()
-                .filter(in_file)
-                .find(|exc| exc.job.as_ref() == Some(job) && exc.step.is_none())
-            {
-                return Some(&exc.version);
-            }
-        }
-        Slot::WorkflowJob { job } => {
-            if let Some(exc) = overrides
-                .iter()
-                .filter(in_file)
-                .find(|exc| exc.job.as_ref() == Some(job) && exc.step.is_none())
-            {
-                return Some(&exc.version);
-            }
-        }
-        Slot::CompositeStep { step } => {
-            if let Some(exc) = overrides
-                .iter()
-                .filter(in_file)
-                .find(|exc| exc.job.is_none() && exc.step == Some(*step))
-            {
-                return Some(&exc.version);
-            }
-        }
-    }
-
     overrides
         .iter()
-        .filter(in_file)
-        .find(|exc| exc.job.is_none() && exc.step.is_none())
+        .filter(|exc| exc.workflow == site.file && exc.scope.selects(&site.slot))
+        .max_by_key(|exc| exc.scope.precedence())
         .map(|exc| &exc.version)
 }
 
-/// The override that addresses exactly this site, if one exists.
+/// Whether an override names exactly this site, rather than merely selecting it.
 ///
-/// Unlike [`resolve_version`], this does not walk the precedence tiers — it asks whether
-/// an override names this precise site, which is what `sync` needs to avoid writing a
-/// duplicate and what `prune_stale` needs to know an override still has a target.
+/// `sync` uses this to avoid writing a duplicate and `prune_stale` to tell whether an
+/// override still has a target. A job-scoped override *selects* a step but does not
+/// *name* it, so the two questions have different answers.
 fn addresses(exc: &ActionOverride, site: &Id) -> bool {
-    if exc.workflow != site.file {
-        return false;
-    }
-    match &site.slot {
-        Slot::WorkflowStep { job, step } => {
-            exc.job.as_ref() == Some(job) && exc.step == Some(*step)
-        }
-        Slot::WorkflowJob { job } => exc.job.as_ref() == Some(job) && exc.step.is_none(),
-        Slot::CompositeStep { step } => exc.job.is_none() && exc.step == Some(*step),
-    }
+    exc.workflow == site.file && exc.scope == scope_of(&site.slot)
 }
 
 /// Build the override that names exactly this site.
 fn override_for(site: &Id, version: Specifier) -> ActionOverride {
-    let (job, step) = scope_of(site);
     ActionOverride {
         workflow: site.file.clone(),
-        job,
-        step,
+        scope: scope_of(&site.slot),
         version,
     }
 }
 
-/// A site's scope in the `(job, step)` shape `ActionOverride` and the manifest use.
-///
-/// `ActionOverride` stays an `Option` pair because it is a *selector*: a job-scoped
-/// override names every step in that job. [`Id`] is a single address. The two are
-/// deliberately different shapes; this converts one to the other.
-fn scope_of(site: &Id) -> (Option<JobId>, Option<StepIndex>) {
-    match &site.slot {
-        Slot::WorkflowStep { job, step } => (Some(job.clone()), Some(*step)),
-        Slot::WorkflowJob { job } => (Some(job.clone()), None),
-        Slot::CompositeStep { step } => (None, Some(*step)),
+/// The narrowest scope naming exactly this slot.
+fn scope_of(slot: &Slot) -> Scope {
+    match slot {
+        Slot::WorkflowStep { job, step } => Scope::JobStep {
+            job: job.clone(),
+            step: *step,
+        },
+        Slot::WorkflowJob { job } => Scope::Job { job: job.clone() },
+        Slot::CompositeStep { step } => Scope::CompositeStep { step: *step },
     }
 }
 
@@ -190,22 +135,24 @@ pub fn prune_stale(
         .map(|(id, overrides)| {
             let pruned: Vec<ActionOverride> = overrides
                 .iter()
-                // An override lives while one scanned location matches every field it
-                // names. Job and step must match the *same* location, so a composite
-                // override — step, no job — is checked against job-less locations.
+                // An override lives while it still selects a scanned site. A file-scoped
+                // one lives as long as the file does — it names no position that could go
+                // away.
+                //
+                // Note this asks only whether *some* site is selected, not whether that
+                // site still holds the action the override is keyed on: an override can
+                // survive here and yet apply to a different action than the user wrote it
+                // for. See #163.
                 .filter(|exc| {
                     if !live_workflows.contains(exc.workflow.as_str()) {
                         return false;
                     }
-                    if exc.job.is_none() && exc.step.is_none() {
+                    if exc.scope == Scope::File {
                         return true;
                     }
-                    located.iter().any(|a| {
-                        let (job, step) = scope_of(&a.site);
-                        a.site.file == exc.workflow
-                            && job == exc.job
-                            && (exc.step.is_none() || step == exc.step)
-                    })
+                    located
+                        .iter()
+                        .any(|a| a.site.file == exc.workflow && exc.scope.selects(&a.site.slot))
                 })
                 .cloned()
                 .collect();

@@ -4,7 +4,7 @@
 use super::*;
 use crate::domain::action::identity::{ActionId, Version};
 use crate::domain::file::actions::Located as LocatedAction;
-use crate::domain::file::site::{Id, JobId, Origin, Slot, StepIndex, WorkflowPath};
+use crate::domain::file::site::{Id, JobId, Origin, Scope, Slot, StepIndex, WorkflowPath};
 use std::collections::HashMap;
 
 const ACTION_FILE: &str = ".github/actions/setup/action.yml";
@@ -35,8 +35,9 @@ fn located_at(loc: Id) -> LocatedAction {
 fn composite_step_override_applies() {
     let overrides = vec![ActionOverride {
         workflow: WorkflowPath::new(ACTION_FILE),
-        job: None,
-        step: Some(StepIndex::from(0_u16)),
+        scope: Scope::CompositeStep {
+            step: StepIndex::from(0_u16),
+        },
         version: Specifier::parse("^3"),
     }];
 
@@ -51,14 +52,14 @@ fn composite_step_override_wins_over_file_level() {
     let overrides = vec![
         ActionOverride {
             workflow: WorkflowPath::new(ACTION_FILE),
-            job: None,
-            step: None,
+            scope: Scope::File,
             version: Specifier::parse("^2"),
         },
         ActionOverride {
             workflow: WorkflowPath::new(ACTION_FILE),
-            job: None,
-            step: Some(StepIndex::from(1_u16)),
+            scope: Scope::CompositeStep {
+                step: StepIndex::from(1_u16),
+            },
             version: Specifier::parse("^3"),
         },
     ];
@@ -78,8 +79,10 @@ fn composite_step_override_wins_over_file_level() {
 fn job_bearing_override_is_unaffected_by_the_file_step_tier() {
     let overrides = vec![ActionOverride {
         workflow: WorkflowPath::new(".github/workflows/ci.yml"),
-        job: Some(JobId::from("build")),
-        step: Some(StepIndex::from(0_u16)),
+        scope: Scope::JobStep {
+            job: JobId::from("build"),
+            step: StepIndex::from(0_u16),
+        },
         version: Specifier::parse("^3"),
     }];
 
@@ -103,8 +106,9 @@ fn composite_step_override_survives_while_its_step_exists() {
         ActionId::from("actions/checkout"),
         vec![ActionOverride {
             workflow: WorkflowPath::new(ACTION_FILE),
-            job: None,
-            step: Some(StepIndex::from(0_u16)),
+            scope: Scope::CompositeStep {
+                step: StepIndex::from(0_u16),
+            },
             version: Specifier::parse("^3"),
         }],
     );
@@ -124,8 +128,9 @@ fn composite_step_override_is_pruned_when_its_step_is_gone() {
         ActionId::from("actions/checkout"),
         vec![ActionOverride {
             workflow: WorkflowPath::new(ACTION_FILE),
-            job: None,
-            step: Some(StepIndex::from(5_u16)),
+            scope: Scope::CompositeStep {
+                step: StepIndex::from(5_u16),
+            },
             version: Specifier::parse("^3"),
         }],
     );

@@ -170,6 +170,91 @@ pub struct Id {
     pub slot: Slot,
 }
 
+/// Which sites a piece of user configuration applies to.
+///
+/// [`Slot`]'s set-valued twin: a `Slot` names one site, a `Scope` selects any number of
+/// them. A job-scoped override covers every step in that job, and a file-scoped one
+/// covers every site in the file.
+///
+/// The variants are exactly the combinations a user can express. The
+/// `(Option<JobId>, Option<StepIndex>)` pair this replaces admitted a fourth —
+/// job-absent-but-step-present — which means a composite step on an action file and
+/// nothing coherent on a workflow file. Telling those apart required classifying the
+/// path; as a sum type the invalid case cannot be built, so the check belongs where the
+/// user's input is parsed.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Scope {
+    /// Every site in the file.
+    File,
+    /// Every step of one job.
+    Job {
+        /// The job selected.
+        job: JobId,
+    },
+    /// One step of one job.
+    JobStep {
+        /// The job holding the step.
+        job: JobId,
+        /// 0-based index within that job's steps.
+        step: StepIndex,
+    },
+    /// One step of a composite action, which has no jobs.
+    CompositeStep {
+        /// 0-based index within `runs.steps`.
+        step: StepIndex,
+    },
+}
+
+impl Scope {
+    /// Whether this scope selects `slot`.
+    ///
+    /// [`Scope::File`] selects every slot, so it is not tested here — callers match the
+    /// file path first, and a file-scoped override applies to whatever is in it.
+    #[must_use]
+    pub fn selects(&self, slot: &Slot) -> bool {
+        match (self, slot) {
+            (Self::File, _) => true,
+            (
+                Self::Job { job },
+                Slot::WorkflowStep { job: j, .. } | Slot::WorkflowJob { job: j },
+            ) => job == j,
+            (Self::JobStep { job, step }, Slot::WorkflowStep { job: j, step: s }) => {
+                job == j && step == s
+            }
+            (Self::CompositeStep { step }, Slot::CompositeStep { step: s }) => step == s,
+            _ => false,
+        }
+    }
+
+    /// The job this scope names, if any. For the `gx.toml` `job = ` key.
+    #[must_use]
+    pub fn job(&self) -> Option<&JobId> {
+        match self {
+            Self::Job { job } | Self::JobStep { job, .. } => Some(job),
+            Self::File | Self::CompositeStep { .. } => None,
+        }
+    }
+
+    /// The step this scope names, if any. For the `gx.toml` `step = ` key.
+    #[must_use]
+    pub fn step(&self) -> Option<StepIndex> {
+        match self {
+            Self::JobStep { step, .. } | Self::CompositeStep { step } => Some(*step),
+            Self::File | Self::Job { .. } => None,
+        }
+    }
+
+    /// How specific this scope is. Higher wins when several select the same slot.
+    #[must_use]
+    pub fn precedence(&self) -> u8 {
+        match self {
+            Self::File => 0,
+            Self::Job { .. } => 1,
+            Self::JobStep { .. } | Self::CompositeStep { .. } => 2,
+        }
+    }
+}
+
 /// Where a reference was read from, for reporting.
 ///
 /// Separate from [`Id`] because provenance must never participate in matching: an

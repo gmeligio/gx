@@ -42,9 +42,11 @@ encoded as an `Option` shape: `job.is_none() && step.is_some()`, read that way a
 
 **Goals:**
 
-- Identity (`SiteId`) is `Hash + Eq` and usable as a map key.
+- Identity (`site::Id`) is `Hash + Eq` and usable as a map key.
 - Provenance (`Origin`) is separate and never participates in matching.
 - `Slot` makes the schema-shape invariant type-enforced rather than prose.
+- `Scope` makes an override's addressable combinations exact, so the invalid
+  `(job absent, step present)` pair cannot exist past the manifest boundary.
 - #161 fixed: file-to-pins pairing becomes an exact key lookup.
 - Zero user-visible behavior change apart from #161's determinism.
 
@@ -109,8 +111,36 @@ pub enum Slot {
 This replaces `(Option<JobId>, Option<StepIndex>)`, whose four representable
 combinations include two the scanner never produces. It makes the invariant
 asserted in prose at `overrides.rs:30-31` — "job-bearing tiers and file-step
-cannot collide" — hold by construction, and removes the re-derivation at
-`convert.rs:118-125`.
+cannot collide" — hold by construction.
+
+**`Scope` is `Slot`'s set-valued twin.** An override selects sites rather than naming one, so it
+keeps a distinct type — but the `(Option<JobId>, Option<StepIndex>)` pair it used
+could represent four combinations where only three are meaningful:
+
+| job | step | means |
+|---|---|---|
+| `Some` | `Some` | that workflow step |
+| `Some` | `None` | every step in that job |
+| `None` | `None` | every site in that file |
+| `None` | `Some` | a composite step — **or nothing coherent**, on a workflow file |
+
+Disambiguating that last row is the *only* reason `convert.rs:118-125` calls
+`FileKind::of_path`: a path-classification rule pressed into validating a scope.
+`Scope { File | Job | JobStep | CompositeStep }` makes the invalid combination
+unrepresentable in the domain, so nothing downstream of the manifest boundary can
+hold it.
+
+**Corrected during implementation.** The call to `of_path` does *not* disappear.
+Deciding whether a job-less step is a composite step or nonsense genuinely
+requires knowing the file kind, and only the path carries that. What changes is
+its scope: it moves from validating every override to the single `(None, Some)`
+branch that needs it, and its result is used to *construct* the right variant
+rather than to reject a shape the type now forbids. `of_path`'s inability to
+classify `.gitlab-ci.yml` (#144) — a filename at repo root, not a directory
+ancestor — remains a real problem for that work, and is not solved here.
+
+The `gx.toml` format does not change: the TOML keys stay `workflow`, `job`,
+`step`. Only the in-memory shape they parse into changes.
 
 `Slot` and `FileKind` stay distinct. `FileKind` is a **parser** concern (which
 YAML schema, where the steps are — `workflow_parsed/mod.rs:278-288`, dispatched
