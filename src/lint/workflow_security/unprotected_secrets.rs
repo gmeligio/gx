@@ -1,5 +1,5 @@
 use crate::config::Level;
-use crate::domain::file::parsed::{Job, Parsed, Step, Trigger};
+use crate::domain::file::parsed::{Job, ParsedWorkflow, Step, Trigger};
 use crate::domain::file::site::{JobId, StepIndex};
 use crate::lint::{Context, Diagnostic, Rule, RuleName};
 use crate::regex::static_regex;
@@ -26,7 +26,7 @@ static_regex!(SECRET_RE, r"secrets\.([A-Za-z_][A-Za-z0-9_]*)");
 
 impl UnprotectedSecretsRule {
     /// Diagnoses each step in a PR-triggered workflow that references an ungated user secret.
-    pub fn check_workflow(workflow: &Parsed) -> Vec<Diagnostic> {
+    pub fn check_workflow(workflow: &ParsedWorkflow) -> Vec<Diagnostic> {
         // Only PR-triggered workflows are in scope. pull_request_target and workflow_run
         // get a single dangerous-trigger diagnostic instead.
         if !workflow.has_trigger(&Trigger::PullRequest) {
@@ -155,9 +155,10 @@ impl Rule for UnprotectedSecretsRule {
 )]
 mod tests {
     use super::*;
+    use crate::domain::file::parsed::Parsed;
     use crate::domain::file::site::WorkflowPath;
 
-    fn parse(content: &str) -> Parsed {
+    fn parse(content: &str) -> ParsedWorkflow {
         Parsed::from_yaml(WorkflowPath::new(".github/workflows/x.yml"), content).unwrap()
     }
 

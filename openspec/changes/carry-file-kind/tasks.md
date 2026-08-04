@@ -6,9 +6,9 @@
 ## 2. Split `Parsed` into a real sum type
 
 - [x] 2.1 Create the new module (D6) and move `FileKind` into it, leaving `parsed/mod.rs` re-exporting so existing imports keep working. Confirm `mise run lint:size` still passes before adding anything — `parsed/mod.rs` is at 431 lines against a 440 logic-line budget.
-- [ ] 2.2 In the new module, define `ParsedWorkflow { path, on, permissions, concurrency, defaults, jobs }` and `ParsedAction { path, steps }` as structs, and `Parsed` as the enum over them with `path()` reachable from either variant. Every field needs a `///` — `missing_docs_in_private_items` is on.
-- [ ] 2.3 Rewrite `Parsed::parse` to build the variant from the caller-supplied `kind`, absorbing the existing `match kind { Workflow => …jobs, ActionDefinition => …steps }` at `scanner.rs:185-208`. Keep the non-composite `runs.using` case yielding an action with no steps — not an error.
-- [ ] 2.4 Keep `Parsed::from_yaml` (`parsed/mod.rs:378-380`) as a workflow-only constructor so the parse test surface does not churn.
+- [x] 2.2 In the new module, define `ParsedWorkflow { path, on, permissions, concurrency, defaults, jobs }` and `ParsedAction { path, steps }` as structs, and `Parsed` as the enum over them with `path()` reachable from either variant. Every field needs a `///` — `missing_docs_in_private_items` is on.
+- [x] 2.3 Rewrite `Parsed::parse` to build the variant from the caller-supplied `kind`, absorbing the existing `match kind { Workflow => …jobs, ActionDefinition => …steps }` at `scanner.rs:185-208`. Keep the non-composite `runs.using` case yielding an action with no steps — not an error.
+- [x] 2.4 Keep `Parsed::from_yaml` (`parsed/mod.rs:378-380`) as a workflow-only constructor so the parse test surface does not churn.
 - [x] 2.5 Update `src/domain/file/parsed/tests.rs` for the new shape, including `parsed/tests.rs:458-461` which asserts `of_path` behavior that is about to be deleted.
 
 ## 3. Delete the second derivation
@@ -27,21 +27,21 @@
 
 ## 5. Make the `workflows_full` invariant structural
 
-- [ ] 5.1 In `src/lint/rule.rs`, retype `Context.workflows_full` to the real `ParsedWorkflow` struct, removing the `Parsed` type alias at `rule.rs:8`. Replace the prose invariant comment at `rule.rs:152` with a note that it is now a compile error to violate.
-- [ ] 5.2 In `src/lint/command.rs:69-72`, replace the `.filter(|p| p.kind == FileKind::Workflow)` with a partition producing `Vec<ParsedWorkflow>`, so deleting it stops compiling.
-- [ ] 5.3 Update the eight workflow-schema rules the compiler now flags — `dangerous_trigger`, `excessive_permissions`, `missing_concurrency`, `missing_permissions`, `pr_head_checkout`, `unprotected_secrets`, `dangling_reference`, `invalid_expression` — signature only, no body changes.
-- [ ] 5.4 Update `src/lint/run_shellcheck/mod.rs:51`. Do not extend it to composite `run:` bodies — that stays deferred to #160; the narrower type makes the gap explicit.
-- [ ] 5.5 Confirm the three `workflows_full: &[]` sites in `src/lint/stale_comment.rs` (149, 178, 210) and `src/lint/run_shellcheck/tests.rs:146` still compile.
+- [x] 5.1 In `src/lint/rule.rs`, retype `Context.workflows_full` to the real `ParsedWorkflow` struct, removing the `Parsed` type alias at `rule.rs:8`. Replace the prose invariant comment at `rule.rs:152` with a note that it is now a compile error to violate.
+- [x] 5.2 In `src/lint/command.rs:69-72`, replace the `.filter(|p| p.kind == FileKind::Workflow)` with a partition producing `Vec<ParsedWorkflow>`, so deleting it stops compiling.
+- [x] 5.3 Update the eight workflow-schema rules the compiler now flags — `dangerous_trigger`, `excessive_permissions`, `missing_concurrency`, `missing_permissions`, `pr_head_checkout`, `unprotected_secrets`, `dangling_reference`, `invalid_expression` — signature only, no body changes.
+- [x] 5.4 Update `src/lint/run_shellcheck/mod.rs:51`. Do not extend it to composite `run:` bodies — that stays deferred to #160; the narrower type makes the gap explicit.
+- [x] 5.5 Confirm the three `workflows_full: &[]` sites in `src/lint/stale_comment.rs` (149, 178, 210) and `src/lint/run_shellcheck/tests.rs:146` still compile.
 
 ## 6. Cover the #124 precondition
 
 - [x] 6.1 Add a test that a file classified `ActionDefinition` whose path is outside `.github/actions` parses under the action schema and yields its `runs.steps` references. Drive it by constructing the kind directly — kind comes from the caller, not the path, which is the point.
-- [ ] 6.2 Add a test that such a file is absent from `workflows_full` and produces no workflow-schema diagnostics, matching the new `lint-command` scenario.
+- [x] 6.2 Add a test that such a file is absent from `workflows_full` and produces no workflow-schema diagnostics, matching the new `lint-command` scenario.
 - [x] 6.3 Add a test that `.github/workflows/action.yml` is still read as a workflow (kind follows discovery, not file name).
 
 ## 7. Gate and document
 
-- [ ] 7.1 Run `mise run format`, then `mise run test` — budget for the strict wall: `missing_docs_in_private_items` on every new private struct and its fields, `too_many_lines`, and fulfilled `#[expect(...)]`. Keep any `#[cfg(test)] mod tests` at the very bottom of its file.
-- [ ] 7.2 Run `mise run test:all` and confirm 1.1's no-op assertion still holds — `gx lint`, `gx tidy`, `gx upgrade` output unchanged on a conventional repo.
+- [x] 7.1 Run `mise run format`, then `mise run test` — budget for the strict wall: `missing_docs_in_private_items` on every new private struct and its fields, `too_many_lines`, and fulfilled `#[expect(...)]`. Keep any `#[cfg(test)] mod tests` at the very bottom of its file.
+- [x] 7.2 Run `mise run test:all` and confirm 1.1's no-op assertion still holds — `gx lint`, `gx tidy`, `gx upgrade` output unchanged on a conventional repo.
 - [ ] 7.3 Add a CHANGELOG entry under Changed for the D4 validation change, so the vanished parse-time message is not read as a regression. Note that the case it covered is picked up by #163.
 - [ ] 7.4 Comment on #154 that this landed, and on #124 that its blocker is clear.

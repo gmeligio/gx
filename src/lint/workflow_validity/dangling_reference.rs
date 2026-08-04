@@ -1,5 +1,5 @@
 use crate::config::Level;
-use crate::domain::file::parsed::Parsed;
+use crate::domain::file::parsed::ParsedWorkflow;
 use crate::domain::file::site::JobId;
 use crate::lint::{Context, Diagnostic, Rule, RuleName};
 use std::collections::BTreeSet;
@@ -12,7 +12,7 @@ pub struct DanglingReferenceRule;
 
 impl DanglingReferenceRule {
     /// Returns one diagnostic per dangling `needs:` entry across all jobs in the workflow.
-    pub fn check_workflow(workflow: &Parsed) -> Vec<Diagnostic> {
+    pub fn check_workflow(workflow: &ParsedWorkflow) -> Vec<Diagnostic> {
         let job_ids: BTreeSet<&str> = workflow.jobs.iter().map(|j| j.id.as_str()).collect();
         let mut out = Vec::new();
         for job in &workflow.jobs {
@@ -59,9 +59,10 @@ impl Rule for DanglingReferenceRule {
 )]
 mod tests {
     use super::*;
+    use crate::domain::file::parsed::Parsed;
     use crate::domain::file::site::WorkflowPath;
 
-    fn parse(content: &str) -> Parsed {
+    fn parse(content: &str) -> ParsedWorkflow {
         Parsed::from_yaml(WorkflowPath::new(".github/workflows/ci.yml"), content).unwrap()
     }
 

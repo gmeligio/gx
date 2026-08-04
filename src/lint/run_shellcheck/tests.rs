@@ -1,8 +1,9 @@
 use super::*;
+use crate::domain::file::parsed::Parsed;
 use crate::domain::file::site::WorkflowPath;
 use crate::infra::shellcheck::FakeChecker;
 
-fn parse(content: &str) -> Parsed {
+fn parse(content: &str) -> ParsedWorkflow {
     Parsed::from_yaml(WorkflowPath::new(".github/workflows/ci.yml"), content).unwrap()
 }
 
@@ -17,7 +18,7 @@ fn finding(code: u16, severity: Severity) -> Finding {
 }
 
 /// A workflow with a single bash `run:` step.
-fn one_bash_step(body: &str) -> Parsed {
+fn one_bash_step(body: &str) -> ParsedWorkflow {
     parse(&format!(
         "on: push
 jobs:

@@ -1,6 +1,6 @@
 use super::FileScanner as FileWorkflowScanner;
 use crate::domain::action::identity::ActionId;
-use crate::domain::file::parsed::FileKind;
+use crate::domain::file::parsed::{FileKind, Parsed};
 use crate::domain::file::scan::Scanner as _;
 use crate::domain::file::site::StepIndex;
 use std::fs;
@@ -397,7 +397,8 @@ jobs:
     assert_eq!(parsed.len(), 2);
     let ci = parsed
         .iter()
-        .find(|p| p.path.as_str().ends_with("ci.yml"))
+        .filter_map(Parsed::as_workflow)
+        .find(|w| w.path.as_str().ends_with("ci.yml"))
         .unwrap();
     assert!(ci.permissions.is_some());
     assert!(
@@ -407,7 +408,8 @@ jobs:
     );
     let deploy = parsed
         .iter()
-        .find(|p| p.path.as_str().ends_with("deploy.yml"))
+        .filter_map(Parsed::as_workflow)
+        .find(|w| w.path.as_str().ends_with("deploy.yml"))
         .unwrap();
     assert!(deploy.permissions.is_none());
     assert!(

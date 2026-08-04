@@ -1,5 +1,5 @@
 use crate::config::Level;
-use crate::domain::file::parsed::{Job, Parsed, Step};
+use crate::domain::file::parsed::{Job, ParsedWorkflow, Step};
 use crate::domain::file::site::{JobId, StepIndex};
 use crate::lint::{Context, Diagnostic, Rule, RuleName};
 use crate::regex::static_regex;
@@ -27,7 +27,7 @@ static_regex!(EXPR_SPAN_RE, r"\$\{\{(.*?)\}\}");
 
 impl InvalidExpressionRule {
     /// Flags every unresolvable `needs.*` / `steps.*` reference across all jobs.
-    pub fn check_workflow(workflow: &Parsed) -> Vec<Diagnostic> {
+    pub fn check_workflow(workflow: &ParsedWorkflow) -> Vec<Diagnostic> {
         let mut out = Vec::new();
         for job in &workflow.jobs {
             let needs: BTreeSet<&str> = job.needs.iter().map(String::as_str).collect();
@@ -57,7 +57,7 @@ impl InvalidExpressionRule {
 /// Resolves every `needs.*` / `steps.*` reference in a single step's scannable fields,
 /// returning a diagnostic message for each broken one.
 fn step_findings(
-    workflow: &Parsed,
+    workflow: &ParsedWorkflow,
     job: &Job,
     needs: &BTreeSet<&str>,
     declared_ids: &BTreeSet<&str>,
@@ -91,7 +91,7 @@ fn step_findings(
 
 /// Resolves a single captured reference. Returns a diagnostic message when it is broken.
 fn resolve_ref(
-    workflow: &Parsed,
+    workflow: &ParsedWorkflow,
     job: &Job,
     needs: &BTreeSet<&str>,
     declared_ids: &BTreeSet<&str>,
@@ -109,7 +109,7 @@ fn resolve_ref(
 
 /// Resolves `needs.<id>` and, when present, `needs.<id>.outputs.<key>`.
 fn resolve_needs(
-    workflow: &Parsed,
+    workflow: &ParsedWorkflow,
     job: &Job,
     needs: &BTreeSet<&str>,
     id: &str,
@@ -173,9 +173,10 @@ impl Rule for InvalidExpressionRule {
 )]
 mod tests {
     use super::*;
+    use crate::domain::file::parsed::Parsed;
     use crate::domain::file::site::WorkflowPath;
 
-    fn parse(content: &str) -> Parsed {
+    fn parse(content: &str) -> ParsedWorkflow {
         Parsed::from_yaml(WorkflowPath::new(".github/workflows/x.yml"), content).unwrap()
     }
 

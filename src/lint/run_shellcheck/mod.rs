@@ -6,7 +6,7 @@
 
 use super::{Context, Diagnostic, Rule, RuleName};
 use crate::config::Level;
-use crate::domain::file::parsed::{Defaults, Parsed, effective_shell};
+use crate::domain::file::parsed::{Defaults, ParsedWorkflow, effective_shell};
 use crate::domain::file::site::{JobId, StepIndex};
 use crate::infra::shellcheck::{
     Availability, Finding, Severity, Sh, ShellChecker, sanitize_expressions,
@@ -67,7 +67,7 @@ fn skip_diagnostic() -> Diagnostic {
 /// Core rule logic, factored out of the trait so tests can drive it with any
 /// [`ShellChecker`] (e.g. a `FakeChecker`) without a live binary. Returns one diagnostic
 /// per shellcheck finding across every analyzable `run:` step.
-fn check_workflows(checker: &dyn ShellChecker, workflows: &[Parsed]) -> Vec<Diagnostic> {
+fn check_workflows(checker: &dyn ShellChecker, workflows: &[ParsedWorkflow]) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     for wf in workflows {
         for job in &wf.jobs {
@@ -106,7 +106,7 @@ fn resolve_shell(
 /// in-script line + `SCxxxx` code go in the message as secondary context.
 fn finding_to_diagnostic(
     finding: &Finding,
-    workflow: &Parsed,
+    workflow: &ParsedWorkflow,
     job_id: &str,
     step_index: usize,
 ) -> Diagnostic {

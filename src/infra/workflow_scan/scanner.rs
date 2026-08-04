@@ -182,9 +182,9 @@ impl FileScanner {
         let mut actions = Vec::new();
 
         // Only the step lookup differs between the schemas; extraction below is shared.
-        match kind {
-            FileKind::Workflow => {
-                for job in &parsed.jobs {
+        match &parsed {
+            Parsed::Workflow(workflow) => {
+                for job in &workflow.jobs {
                     let job_id = JobId::from(job.id.clone());
                     extract_steps(
                         &job.steps,
@@ -197,9 +197,9 @@ impl FileScanner {
                     );
                 }
             }
-            FileKind::ActionDefinition => {
+            Parsed::Action(action) => {
                 extract_steps(
-                    &parsed.steps,
+                    &action.steps,
                     workflow_rel_path,
                     |step| Slot::CompositeStep { step },
                     &mut actions,

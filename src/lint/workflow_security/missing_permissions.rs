@@ -1,5 +1,5 @@
 use crate::config::Level;
-use crate::domain::file::parsed::Parsed;
+use crate::domain::file::parsed::ParsedWorkflow;
 use crate::lint::{Context, Diagnostic, Rule, RuleName};
 
 /// `missing-permissions` rule: flags workflows that omit a top-level `permissions:` block.
@@ -12,7 +12,7 @@ pub struct MissingPermissionsRule;
 
 impl MissingPermissionsRule {
     /// Check a single parsed workflow.
-    pub fn check_workflow(workflow: &Parsed) -> Option<Diagnostic> {
+    pub fn check_workflow(workflow: &ParsedWorkflow) -> Option<Diagnostic> {
         if workflow.permissions.is_some() {
             return None;
         }
@@ -45,9 +45,10 @@ impl Rule for MissingPermissionsRule {
 #[expect(clippy::unwrap_used, reason = "tests use unwrap freely")]
 mod tests {
     use super::*;
+    use crate::domain::file::parsed::Parsed;
     use crate::domain::file::site::WorkflowPath;
 
-    fn parse(content: &str) -> Parsed {
+    fn parse(content: &str) -> ParsedWorkflow {
         Parsed::from_yaml(WorkflowPath::new(".github/workflows/ci.yml"), content).unwrap()
     }
 
