@@ -2,15 +2,15 @@
 
 `gx` decides which schema a managed file follows **twice**: once at discovery
 (`discovery::ROOTS`, `src/infra/workflow_scan/discovery.rs:35-46`) and again by walking a
-path's ancestors (`FileKind::of_path`, `src/domain/file/parsed/mod.rs:295-309`). The two
-already disagree, and the disagreement is user-visible: a `gx.toml` override naming
-`.github/actions/setup/steps.yml` passes validation and then silently matches nothing.
+path's ancestors (`FileKind::of_path`, `src/domain/file/parsed/mod.rs:295-309`). A test
+exists solely to pin the two together (`composite_tests.rs:299-323`).
 
 The second derivation classifies **by directory location**, so it is wrong by construction
 for any action definition outside `.github/actions`. That makes it a hard blocker for #124
 (follow local `uses:` edges), whose entire remaining value is reaching composites outside
-that directory. A single unclassified file there produces a false-positive cascade across
-nine lint rules.
+that directory: a file gx misclassifies there parses under the wrong schema — finding none
+of its `uses:` references — and simultaneously draws a false positive from each of the nine
+workflow-schema lint rules.
 
 ## What Changes
 
@@ -32,7 +32,11 @@ nine lint rules.
   nothing fails to compile; nine rules begin flagging every `action.yml` for missing `on:`,
   `permissions:`, and `concurrency:`. The filter becomes a total function whose removal is
   a compile error.
-- **A user override naming a file gx does not scan is reported**, not silently inert.
+- **Bare-step override validation becomes shape-only.** `convert.rs:147-158` asks `of_path`
+  whether a `step`-without-`job` override names an action definition; with the second
+  derivation gone and no discovered file set reachable at parse time, that question moves
+  out of validation. No net change for users — such an override on a workflow path was
+  rejected before and selects nothing now. See design D4.
 - The drift-guard test `discovery_kind_agrees_with_of_path`
   (`src/infra/workflow_scan/composite_tests.rs:299-323`) is deleted along with the second
   derivation it guards.
@@ -46,22 +50,21 @@ by existing specs.
 
 ### Modified Capabilities
 
-- `file-discovery`: Two requirement changes. (1) A managed file's kind is established at
-  discovery and is not re-derived from its path afterwards — which is what makes kind
-  correct for a file outside `.github/actions`, and is the prerequisite #124 builds on.
-  (2) A `gx.toml` override or lint `ignore` entry naming a file gx does not scan is
-  reported to the user rather than silently matching nothing.
+- `file-discovery`: A managed file's kind is established at discovery and is not re-derived
+  from its path afterwards — which is what makes kind correct for a file outside
+  `.github/actions`, and is the prerequisite #124 builds on.
 - `lint-command`: The workflow-schema rules apply to workflow files only, as a property of
   the type they receive rather than a filter that can be removed without a compile error.
   No rule's *diagnostic* behavior changes on correctly-classified files — this closes a
   false-positive class rather than adding a check.
 
 **Relevance gate.** This passes despite reading as a refactor. The gate excludes "internal
-refactoring with no user-visible change"; two user-visible defects are fixed here — the
-silently-inert override (live today, independent of #124) and the false-positive cascade on
-composites outside `.github/actions` (latent today, certain the moment #124 lands). The
-`file-discovery` spec already asserts which files gx manages and how they are addressed;
-that contract is what the second derivation violates.
+refactoring with no user-visible change"; the user-visible change is that gx reads an action
+definition correctly wherever it lives, rather than only under `.github/actions`. Today that
+is unreachable and so unobservable; the moment #124 lands it is the difference between
+coverage and a wall of false positives on every traversed file. Establishing it as a
+spec'd guarantee **before** the change that depends on it is the point — it is a contract
+#124 builds on, not an implementation detail of #124.
 
 ## Impact
 
@@ -81,5 +84,10 @@ Affected code:
 | Tests | `composite_tests.rs:299-323` deleted; `parsed/tests.rs:458-461` updated |
 
 No CLI surface, config format, `gx.lock` format, or network behavior changes. No user
-migration required — a `gx.toml` that was silently inert begins reporting, which is the
-intended fix.
+migration required.
+
+Out of scope, same root, tracked on #163: an override naming a file gx does not scan is
+accepted and then **silently deleted** by the next `gx tidy` (`prune_stale`,
+`src/domain/manifest/overrides.rs:126-167`). Not fixable at parse time — `Config::load`
+(`src/config.rs:138-141`) parses the manifest before any scan, so no discovered file set
+exists there.

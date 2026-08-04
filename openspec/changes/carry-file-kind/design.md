@@ -24,17 +24,24 @@ schema" (`parsed/mod.rs:291`). It is not — `discovery::ROOTS` decides it too, 
 `discovery.rs:22-23` admits the drift risk in prose. `discovery_kind_agrees_with_of_path`
 (`composite_tests.rs:299-323`) exists solely to pin them together.
 
-Two consequences are live or imminent:
+The consequence this change exists to prevent is the **false-positive cascade on #124**.
+`of_path` classifies by directory, falling back to `Workflow` (`parsed/mod.rs:306-308`). A
+traversed composite at `tools/build/action.yml` parses under the workflow schema —
+`wire.runs` ignored, `steps` empty (`parsed/mod.rs:406-410`) — so gx finds zero actions
+**and** the file enters `workflows_full`, where eight workflow-schema rules plus
+`run-shellcheck` judge it.
 
-1. **Silently-inert override (today).** `of_path(".github/actions/setup/steps.yml")` returns
-   `ActionDefinition` (`parsed/tests.rs:458-461`), but `ROOTS` globs only
-   `**/action.{yml,yaml}`, so the file is never scanned. An override naming it passes
-   validation at `convert.rs:147-158` and matches nothing at runtime.
-2. **False-positive cascade (on #124).** `of_path` classifies by directory, falling back to
-   `Workflow` (`parsed/mod.rs:306-308`). A traversed composite at `tools/build/action.yml`
-   parses under the workflow schema — `wire.runs` ignored, `steps` empty
-   (`parsed/mod.rs:406-410`) — so gx finds zero actions **and** the file enters
-   `workflows_full`, where eight workflow-schema rules plus `run-shellcheck` judge it.
+A second defect traces to the same two-derivation split but is **out of scope here**: an
+override naming a file gx does not scan (e.g. `.github/actions/setup/steps.yml`, which
+`of_path` calls an `ActionDefinition` but `ROOTS` never globs) is accepted at validation and
+then **silently deleted from the user's `gx.toml` by the next `gx tidy`** — `prune_stale`
+(`src/domain/manifest/overrides.rs:126-167`) drops any override that selects no live site.
+Fixing it at validation time is not possible: `manifest::parse`
+(`src/infra/manifest/parse.rs:92`) takes only the manifest path, and `Config::load`
+(`src/config.rs:138-141`) parses the manifest **before** any scan, so no discovered file set
+exists at that point. Post-scan is the only coherent place, which is where `prune_stale`
+already sits. Tracked on #163, whose `ActionId` cross-check is the same predicate and whose
+prune-vs-report choice governs it.
 
 The `Parsed` type is a sum wearing a product's clothes: it carries `on`, `permissions`,
 `concurrency`, `defaults`, `jobs` **and** `steps`, one half always empty
@@ -50,7 +57,7 @@ at `rule.rs:152`.
 - Kind is established once, where a file is found, and carried thereafter.
 - `FileKind::of_path` is deleted — not merely bypassed.
 - The `workflows_full` invariant becomes a compile error to violate.
-- An override naming an unscanned file is reported, not silently inert.
+- No behavior change for any user whose repo gx classifies correctly today.
 - `gx lint`, `gx tidy`, `gx upgrade` produce byte-identical output on any repo whose files
   are all under `.github/workflows` or `.github/actions` (i.e. every repo today).
 
@@ -94,9 +101,8 @@ removes, in the type whose whole job is identity. Consumers that need kind eithe
 `Parsed` variant already or can be passed it.
 
 *Consequence for `convert.rs:147-158`.* Override validation currently asks `of_path` whether
-a bare-step override is legal. With kind off `Id`, it instead resolves the named path against
-the discovered file set — which is what fixes the silently-inert override (D4), so the two
-changes are one move.
+a bare-step override is legal. With kind off `Id` — and no discovered set reachable at parse
+time — that question moves out of validation entirely; see D4.
 
 ### D3 — `Context.workflows_full` takes the narrow type; the filter becomes a total function
 
@@ -114,20 +120,37 @@ that says "workflows only" rather than a filtered list that silently lost the co
 Note that on the tests side `stale_comment.rs` passes `workflows_full: &[]` three times —
 those keep compiling unchanged.
 
-### D4 — An override naming an unscanned file is reported
+### D4 — Bare-step override validation becomes shape-only, preserving today's outcome
 
-Validation moves from "does this path *look* like an action definition" to "is this path in
-the discovered set, and what kind is it there". A path gx does not scan produces a
-validation error naming the file.
+`convert.rs:147-158` currently asks `of_path` whether a bare-step override (`step` without
+`job`) names an action definition, rejecting it otherwise. With `of_path` deleted, that
+question cannot be answered at parse time — there is no discovered file set there (see
+Context). So the check becomes shape-only: a bare-step override parses to
+`Scope::CompositeStep` on any path.
 
-*Alternative rejected — warn instead of error.* An override that matches nothing is always a
-user mistake (typo, renamed directory, stale entry); there is no configuration where an
-inert override is intended. Erroring matches how `dangling-reference` treats a reference to
-something absent.
+This is a deliberate **no-net-change** for users. Today a bare-step override on a workflow
+path is rejected at parse time; afterwards it parses and then selects nothing, because a
+workflow's sites all carry a job. The user-visible difference is an error message moving to
+silence in a case that was already broken either way — and the silence is what #163 exists
+to fix, for both this case and the stale-address case, in the one place that can see the
+scanned set.
 
-*Risk accepted.* A repo with a stale override currently gets silence and will now get an
-error. That is the fix, and it is the only behavior change a user can observe on an existing
-repo. Called out in the changelog and in the migration plan below.
+*Alternative rejected — thread the scanner into `Config::load`.* Would let validation consult
+the discovered set and keep the error. But it inverts the config/scan ordering for every
+command (`config.rs:138-141` runs before any scan, in `lint`, `tidy`, `upgrade`, `init`), to
+recover one message for a config that `prune_stale` deletes anyway. Far past "carry the
+kind".
+
+*Alternative rejected — keep a path-shape heuristic inline.* Checking for an `actions`
+ancestor directly in `convert.rs` preserves the current message with a small diff. Rejected
+because it is `of_path` under another name, in the layer furthest from discovery — exactly
+the re-derivation this change removes. It would also be wrong for the #124 files this change
+exists to make safe.
+
+*Risk accepted.* The parse-time error for a bare-step override on a workflow path is lost.
+It is recovered, better placed, by #163 — which reports against the real scanned set rather
+than a path's spelling. Noted in the changelog rather than the migration plan, since no user
+action is possible or needed.
 
 ### D5 — Delete `of_path` in the same change, not after
 
@@ -140,9 +163,10 @@ guarantee hold.
 - **Wide diff across the lint layer (nine files) → mechanical and compiler-guided.** Each is
   a signature change with no body change. Sequenced in `tasks.md` so the type lands first
   and the compiler enumerates the rest.
-- **A user's stale override starts erroring → intended (D4); changelog entry + the error
-  names the file and the fact that it is not scanned.** Not silently degraded — the whole
-  point is to stop being silent.
+- **A bare-step override on a workflow path stops erroring at parse time → it now parses
+  and selects nothing, which is what it did after the error was removed anyway.** Recovered
+  properly by #163; changelog entry so the message's disappearance is not mistaken for a
+  regression.
 - **`Parsed` splitting touches every construction site → two sites, both already branching
   on kind** (`scanner.rs:266`, `:296`). The scanner's existing
   `match kind { Workflow => …jobs, ActionDefinition => …steps }` (`scanner.rs:185-190`) is
@@ -164,9 +188,11 @@ Critical path — the tests that must exist and fail before the change:
    (`composite_tests.rs:299-323`) is deleted, not ported: with one derivation there is
    nothing to agree with. Its replacement asserts kind is what discovery said, read back
    off the parsed file.
-2. **The live defect (D4).** An override naming `.github/actions/setup/steps.yml` — a file
-   `of_path` calls an `ActionDefinition` and `ROOTS` never globs — must produce a
-   validation error. This is the regression test for the silently-inert bug; it fails today.
+2. **The validation change (D4).** A bare-step override parses to `Scope::CompositeStep` on
+   any path, and one on a composite path still resolves and applies. The existing
+   `step_without_job_on_a_workflow_is_rejected`
+   (`src/infra/manifest/override_scope_tests.rs:16`) inverts: it must assert the override
+   parses and then selects no site, rather than asserting a parse error.
 3. **The #124 precondition.** A file classified `ActionDefinition` whose path is *outside*
    `.github/actions` parses under the action schema and is absent from `workflows_full`.
    Cannot be produced by discovery today, so it is driven by constructing the kind directly
@@ -182,9 +208,11 @@ invariant at `rule.rs:152`.
 
 Failures here are the silent kind, which is why the change exists. Three paths:
 
-- **Override names an unscanned file (D4)** — surfaced as a validation error naming the
-  path and stating it is not among the files gx scans. Must name the file; "invalid
-  override" alone reproduces the current unhelpfulness in louder form.
+- **Override names an unscanned file** — still silent after this change, and still
+  silently deleted by the next `gx tidy` via `prune_stale`
+  (`src/domain/manifest/overrides.rs:126-167`). Not fixed here, and deliberately not
+  half-fixed: parse time cannot see the scanned set, so any check placed there would be a
+  path-spelling heuristic that disagrees with `prune_stale`. Tracked on #163.
 - **Parse under the wrong schema** — after this change, unrepresentable: kind comes from
   discovery, and a `ParsedAction` has no `jobs` field to be empty. No runtime signal needed
   because there is no runtime failure mode left.
@@ -201,9 +229,10 @@ the scan (`scanner.rs:271`, `discovery.rs:80-81`).
 
 No data or config migration. `gx.toml`, `gx.lock`, and the CLI surface are untouched.
 
-Rollout: single PR, on by default, no flag. The one observable change on an existing repo
-is D4 — a stale override that silently matched nothing now errors. Changelog entry under
-Fixed, naming the symptom users would have seen (an override that appeared to do nothing).
+Rollout: single PR, on by default, no flag. The one observable change on an existing repo is
+D4 — a bare-step override on a workflow path no longer errors at parse time. It selected
+nothing before and selects nothing now, so no user action is needed. Changelog entry under
+Changed so the vanished message is not read as a regression.
 
 Rollback is a straight revert; nothing persists state across the change.
 

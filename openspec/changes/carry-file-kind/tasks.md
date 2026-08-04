@@ -1,8 +1,7 @@
 ## 1. Pin current behavior before changing it
 
-- [ ] 1.1 Add a failing test asserting a `gx.toml` override naming `.github/actions/setup/steps.yml` is rejected with an error naming the path (the live silently-inert bug, D4). Place it beside the existing override-scope tests in `src/infra/manifest/override_scope_tests.rs`.
-- [ ] 1.2 Add an integration assertion that `gx lint` output is unchanged for a fixture repo containing both workflows and `.github/actions` composites — the no-op guarantee for every repo today.
-- [ ] 1.3 Run `mise run test:all` and confirm 1.1 fails for the stated reason (accepted, then matches nothing) and 1.2 passes.
+- [ ] 1.1 Add an integration assertion that `gx lint` output is unchanged for a fixture repo containing both workflows and `.github/actions` composites — the no-op guarantee for every repo today. This is the safety net for groups 2–5.
+- [ ] 1.2 Run `mise run test:all` and confirm 1.1 passes against unmodified code, so a later failure means the change broke something rather than the test being wrong.
 
 ## 2. Split `Parsed` into a real sum type
 
@@ -18,12 +17,12 @@
 - [ ] 3.3 Delete the drift-guard test `discovery_kind_agrees_with_of_path` (`src/infra/workflow_scan/composite_tests.rs:299-323`) — with one derivation there is nothing to agree with. Replace it with a test asserting kind is what discovery said, read back off the parsed file.
 - [ ] 3.4 Update the `discovery.rs:22-23` doc comment, which currently explains the drift risk between the two derivations, and `discovery.rs:1`'s "single source of truth" claim — now literally true.
 
-## 4. Make override validation consult the discovered set
+## 4. Make bare-step override validation shape-only
 
-- [ ] 4.1 Change `src/infra/manifest/convert.rs:147-158` to validate a bare-step override by resolving the named path against the discovered file set and its kind, rather than inspecting the path's shape.
-- [ ] 4.2 Emit an error naming the path and stating gx does not scan it when the path is absent from the discovered set. Message must name the file — "invalid override" alone reproduces the current unhelpfulness (see design Observability).
-- [ ] 4.3 Confirm task 1.1 now passes, and that an override naming a scanned `action.yml` still applies with no `job` key.
-- [ ] 4.4 Apply the same treatment to lint `ignore` targets if they share the validation path; if they do not, note it for #162 rather than widening this change.
+- [ ] 4.1 Change `src/infra/manifest/convert.rs:147-158` to map a `step`-without-`job` override to `Scope::CompositeStep` on any path, dropping the `of_path` question. Do not substitute an inline path-shape heuristic — that is `of_path` under another name (design D4).
+- [ ] 4.2 Invert `step_without_job_on_a_workflow_is_rejected` (`src/infra/manifest/override_scope_tests.rs:16`): it must now assert the override parses and then selects no site on a workflow, rather than asserting a parse error. Update its doc comment, which states the old rationale.
+- [ ] 4.3 Confirm `step_without_job_on_a_composite_action_is_accepted` (`override_scope_tests.rs:39`) still passes unchanged, and that the write/read round-trip test at `override_scope_tests.rs:95-124` still holds.
+- [ ] 4.4 Do not touch lint `ignore` targets (#162) or `prune_stale` reporting (#163) — both are out of scope; see design D4's rejected alternatives.
 
 ## 5. Make the `workflows_full` invariant structural
 
@@ -42,6 +41,6 @@
 ## 7. Gate and document
 
 - [ ] 7.1 Run `mise run format`, then `mise run test` — budget for the strict wall: `missing_docs_in_private_items` on every new private struct and its fields, `too_many_lines`, and fulfilled `#[expect(...)]`. Keep any `#[cfg(test)] mod tests` at the very bottom of its file.
-- [ ] 7.2 Run `mise run test:all` and confirm 1.2's no-op assertion still holds — `gx lint`, `gx tidy`, `gx upgrade` output unchanged on a conventional repo.
-- [ ] 7.3 Add a CHANGELOG entry under Fixed for the override behavior change (D4), naming the symptom users would have seen: an override that appeared to do nothing.
+- [ ] 7.2 Run `mise run test:all` and confirm 1.1's no-op assertion still holds — `gx lint`, `gx tidy`, `gx upgrade` output unchanged on a conventional repo.
+- [ ] 7.3 Add a CHANGELOG entry under Changed for the D4 validation change, so the vanished parse-time message is not read as a regression. Note that the case it covered is picked up by #163.
 - [ ] 7.4 Comment on #154 that this landed, and on #124 that its blocker is clear.

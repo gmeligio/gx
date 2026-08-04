@@ -37,37 +37,6 @@ This requirement is what makes reaching those files safe; reaching them is separ
 - **WHEN** gx parses, lints, and rewrites that file in one run
 - **THEN** every stage treats it as the same kind discovery assigned
 
----
-
-### Requirement: An override or ignore entry naming an unscanned file is reported
-
-gx SHALL report an error when a `gx.toml` override or a lint `ignore` entry names a file
-path that gx does not scan. The error SHALL name the offending path and state that gx does
-not scan it.
-
-**User value:** a user who renames a directory, deletes a composite action, or mistypes a
-path in `gx.toml` is told. Before this, an entry naming an unscanned file was accepted at
-validation and then matched nothing at runtime — the user saw a config they had written,
-believed it was in effect, and got silence. The specific trap was a path that *looked* like
-an action definition but was never scanned, such as a non-`action.yml` file under
-`.github/actions`: validation inspected the path's shape rather than the set of files gx
-actually reads. What the user notices is that a stale entry fails loudly instead of doing
-nothing.
-
-#### Scenario: Override naming a file gx does not scan is rejected
-- **GIVEN** `gx.toml` has an override naming `.github/actions/setup/steps.yml`
-- **AND** gx does not scan that file, because only `action.yml` and `action.yaml` are
-  action definitions
-- **WHEN** the user runs a command that reads the manifest
-- **THEN** an error naming `.github/actions/setup/steps.yml` is reported
-- **AND** the error states that gx does not scan that file
-
-#### Scenario: Override naming a scanned file is accepted
-- **GIVEN** `gx.toml` has an override naming `.github/actions/setup/action.yml`
-- **AND** gx scans that file
-- **WHEN** the user runs a command that reads the manifest
-- **THEN** the override is accepted and applies
-
 #### Scenario: A composite step override remains valid without a job
 - **GIVEN** `gx.toml` has an override
   `{ workflow = ".github/actions/setup/action.yml", step = 0, version = "^3" }`
