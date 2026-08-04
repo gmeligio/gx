@@ -5,8 +5,7 @@ on:
         branches:
             - main
 
-# Written by `mise run mise-version`. Change min_version in .config/mise.toml
-# instead; edits here are overwritten.
+# Generated from min_version in .config/mise.toml; edit it there instead.
 env:
     MISE_VERSION: 2026.7.13
 

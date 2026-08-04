@@ -3,19 +3,22 @@
 set -euo pipefail
 cd "$MISE_PROJECT_ROOT"
 
+source_of_truth=.config/mise.toml
+version_env_line='^    MISE_VERSION:'
+
 # Read with sed rather than `mise config get`: this value decides which mise CI
 # installs, so reading it must not itself need a working mise.
-min_version=$(sed -n 's/^min_version = "\(.*\)"$/\1/p' .config/mise.toml)
+min_version=$(sed -n 's/^min_version = "\(.*\)"$/\1/p' "$source_of_truth")
 if [ -z "$min_version" ]; then
-    echo "no min_version in .config/mise.toml — it is the source of truth for MISE_VERSION" >&2
+    echo "no min_version in $source_of_truth — it is the source of truth for MISE_VERSION" >&2
     exit 1
 fi
 
 for workflow in .github/workflows/*.yml; do
     grep -q 'jdx/mise-action' "$workflow" || continue
-    if ! grep -q '^    MISE_VERSION:' "$workflow"; then
+    if ! grep -q "$version_env_line" "$workflow"; then
         echo "$workflow uses mise-action but has no MISE_VERSION in its top-level env block" >&2
         exit 1
     fi
-    sed -i "s|^    MISE_VERSION: .*|    MISE_VERSION: $min_version|" "$workflow"
+    sed -i "s|$version_env_line .*|    MISE_VERSION: $min_version|" "$workflow"
 done

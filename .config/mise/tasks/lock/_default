@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 #MISE description="Sync .config/mise.lock with the installed tools"
 # Don't rename: the `_default` filename is what gives this the bare `lock` name.
-#
-# `mise lock`, not `mise install`: install writes entries only for tools it
-# actually installs, so it leaves a wrong checksum in place once a tool is
-# present. `mise lock` rewrites every locked platform, so the result is correct
-# no matter what the file held before.
+# `mise install` only writes entries for the tools it installs, so it leaves
+# stale ones untouched. `mise lock` rewrites every platform.
 mise lock

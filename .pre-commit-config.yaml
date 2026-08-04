@@ -42,7 +42,7 @@ repos:
             language: system
           - id: mise-lockfile
             name: mise Lockfile
-            description: Regenerate .config/mise.lock via the mise lock task and re-stage, so a mise upgrade cannot leave a stale lockfile behind.
+            description: Regenerate .config/mise.lock via the mise lock task and re-stage.
             entry: bash -c 'mise run lock && git add -u'
             pass_filenames: false
             always_run: true

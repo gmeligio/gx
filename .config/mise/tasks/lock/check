@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
 #MISE description="Verify .config/mise.lock is not dirty (CI)"
-# Deliberately no `depends=["lock"]`: `mise lock` would rewrite the file
-# correctly and leave nothing to find. What this task inspects is whatever the
-# preceding `mise install` already wrote — on a cold tool cache that install
-# resolves entries a warm cache skips, and those extra entries are the drift
-# that fails a release mid-flight.
+# Reads what installing the tools already wrote, so it must not depend on
+# `lock` — regenerating the file first would erase the drift it looks for.
 git diff --exit-code -- .config/mise.lock

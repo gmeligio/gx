@@ -1,10 +1,9 @@
 # Local-only demo tools (ttyd, vhs) live in the gitignored .config/mise.local.toml
 # so CI never installs them and cannot dirty .config/mise.lock.
 
-# Source of truth for mise's own version, since each mise version writes
-# .config/mise.lock slightly differently and CI rejects a lockfile it did not
-# expect. This bound rules out older mise locally; `mise run mise-version` copies
-# it into every workflow's MISE_VERSION to rule out newer mise in CI.
+# Every mise version writes .config/mise.lock slightly differently, so local and
+# CI runs have to agree on one. This is where that version is chosen; `mise run
+# mise-version` pins CI to it.
 min_version = "2026.7.13"
 
 [tools]
