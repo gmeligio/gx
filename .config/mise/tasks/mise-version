@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+#MISE description="Sync each workflow's MISE_VERSION with min_version in .config/mise.toml"
+set -euo pipefail
+cd "$MISE_PROJECT_ROOT"
+
+# `min_version` in .config/mise.toml is the single source; every workflow's
+# top-level `env.MISE_VERSION` is derived from it. Read with sed, not
+# `mise config get`: this value decides which mise CI installs, so depending on
+# a working mise to read it would be circular.
+floor=$(sed -n 's/^min_version = "\(.*\)"$/\1/p' .config/mise.toml)
+if [ -z "$floor" ]; then
+    echo "no min_version in .config/mise.toml — it is the source of truth for MISE_VERSION" >&2
+    exit 1
+fi
+
+for workflow in .github/workflows/*.yml; do
+    grep -q 'jdx/mise-action' "$workflow" || continue
+    if ! grep -q '^    MISE_VERSION:' "$workflow"; then
+        echo "$workflow uses mise-action but has no MISE_VERSION in its top-level env block" >&2
+        exit 1
+    fi
+    sed -i "s|^    MISE_VERSION: .*|    MISE_VERSION: $floor|" "$workflow"
+done

@@ -1,5 +1,16 @@
 # Local-only demo tools (ttyd, vhs) live in the gitignored .config/mise.local.toml
 # so CI never installs them and cannot dirty .config/mise.lock.
+
+# Single source of truth for mise's own version. `mise run mise-version` copies
+# this into every workflow's MISE_VERSION, which pins the binary mise-action
+# installs; the pre-commit hook re-runs that sync so the two cannot drift.
+#
+# Hard (not soft): a mise below this floor writes a different .config/mise.lock,
+# so proceeding would silently produce a lockfile CI then rejects. Note the floor
+# only excludes *older* mise — pinning CI is what excludes newer, and both are
+# needed (mise-action never reads min_version; it installs, then mise reads this).
+min_version = "2026.7.13"
+
 [tools]
 "github:axodotdev/cargo-dist" = "0.31.0"
 "github:EmbarkStudios/cargo-deny" = "0.19.0"

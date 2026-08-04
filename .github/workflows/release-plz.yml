@@ -5,6 +5,11 @@ on:
         branches:
             - main
 
+# Synced from min_version in .config/mise.toml by `mise run mise-version`.
+# Don't edit by hand — change min_version instead and re-run that task.
+env:
+    MISE_VERSION: 2026.7.13
+
 jobs:
     release-plz-release:
         name: Release-plz release
@@ -17,6 +22,8 @@ jobs:
                   fetch-depth: 0
                   persist-credentials: false
             - uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
+              with:
+                  version: ${{ env.MISE_VERSION }}
             - name: Generate authentication token with GitHub App to trigger Actions
               uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
               id: app-token
@@ -46,6 +53,8 @@ jobs:
                   fetch-depth: 0
                   persist-credentials: false
             - uses: jdx/mise-action@6d1e696aa24c1aa1bcc1adea0212707c71ab78a8 # v3.6.1
+              with:
+                  version: ${{ env.MISE_VERSION }}
             - name: Generate authentication token with GitHub App to trigger Actions
               uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
               id: app-token
