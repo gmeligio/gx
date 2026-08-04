@@ -57,9 +57,9 @@ at `rule.rs:152`.
 - Kind is established once, where a file is found, and carried thereafter.
 - `FileKind::of_path` is deleted — not merely bypassed.
 - The `workflows_full` invariant becomes a compile error to violate.
-- No behavior change for any user whose repo gx classifies correctly today.
 - `gx lint`, `gx tidy`, `gx upgrade` produce byte-identical output on any repo whose files
-  are all under `.github/workflows` or `.github/actions` (i.e. every repo today).
+  are all under `.github/workflows` or `.github/actions` (i.e. every repo today). The one
+  deliberate exception is D4's parse-time error, which is not command output.
 
 **Non-Goals:**
 
@@ -94,11 +94,11 @@ sum has to exist somewhere; better in the domain than hand-rolled at the boundar
 The kind rides with `ManagedFile` (`discovery.rs:11-18`) and, after parsing, is implied by
 the `Parsed` variant. `site::Id` is **not** given a kind field.
 
-*Rationale.* `Id` is an identity used as a `HashMap` key (`site.rs:165-171`, with the
-hashable/provenance split from `f550f60`). Adding a derived field to a key invites two `Id`s
-that name the same place but differ in kind — reintroducing exactly the drift this change
-removes, in the type whose whole job is identity. Consumers that need kind either hold the
-`Parsed` variant already or can be passed it.
+*Rationale.* No consumer of `Id` needs kind — every caller that branches on schema holds a
+`Parsed` (or its variant) already. Adding the field would also weaken the type: `Id` is a
+`HashMap` key (`site.rs:165-171`, with the hashable/provenance split from `f550f60`), and a
+derived field on a key admits two `Id`s that name the same place but disagree on kind —
+the drift this change removes, reintroduced in the type whose whole job is identity.
 
 *Consequence for `convert.rs:147-158`.* Override validation currently asks `of_path` whether
 a bare-step override is legal. With kind off `Id` — and no discovered set reachable at parse
@@ -158,6 +158,32 @@ Leaving it deprecated would let any new call site silently reintroduce the defec
 adds call sites in exactly the code path where it is wrong. Deletion is what makes the
 guarantee hold.
 
+### D6 — `FileKind` and the parsed variants move to their own module
+
+`FileKind`, `ParsedWorkflow`, `ParsedAction`, and the `Parsed` sum move out of
+`src/domain/file/parsed/mod.rs` into a sibling module. `Parsed::from_yaml` stays as a
+workflow-only constructor so the parse tests do not churn.
+
+*This is forced, not stylistic.* `tests/code_health.rs` enforces a **440 logic-line budget**
+(`code_health.rs:646`) and a 550-line file budget (`:478`). `parsed/mod.rs` is at **431
+lines** — nine lines of headroom. D1 adds two structs, an enum, a `path()` accessor, and,
+under `missing_docs_in_private_items`, a `///` on every new field. It does not fit, and the
+gate fails before the change is reviewable.
+
+Directory budget allows it: `src/domain/file/parsed/` holds 5 files against a max of 8
+(`code_health.rs:618`).
+
+*Alternative rejected — raise the budget.* The budgets are a deliberate project invariant
+with a stated target *below* the current value ("Target: 300 once large files are split",
+`code_health.rs:648`). Raising one to fit a change whose purpose is to make the model
+smaller is the wrong direction, and it would hide that `parsed/mod.rs` is already the
+second-largest file in the crate.
+
+*Alternative rejected — split `mod.rs` by wire-format vs. domain instead.* A defensible
+split, but it cuts across the change rather than along it: `WireWorkflow` and `Runs` would
+move while `FileKind` stays, leaving the type this change is about in the file that has no
+room for it. #154 itself asks for `FileKind` to be lifted out; D6 is that lift.
+
 ## Risks / Trade-offs
 
 - **Wide diff across the lint layer (nine files) → mechanical and compiler-guided.** Each is
@@ -167,10 +193,13 @@ guarantee hold.
   and selects nothing, which is what it did after the error was removed anyway.** Recovered
   properly by #163; changelog entry so the message's disappearance is not mistaken for a
   regression.
-- **`Parsed` splitting touches every construction site → two sites, both already branching
-  on kind** (`scanner.rs:266`, `:296`). The scanner's existing
-  `match kind { Workflow => …jobs, ActionDefinition => …steps }` (`scanner.rs:185-190`) is
-  the enum being hand-written; the split absorbs it rather than adding work.
+- **`Parsed` construction is narrower than the call sites suggest → one struct literal
+  (`parsed/mod.rs:411-419`) reached from two scanner paths (`scanner.rs:266`, `:296`), plus
+  `from_yaml` (`:378-380`), which hardcodes `FileKind::Workflow`.** The scanner's existing
+  `match kind { Workflow => …jobs, ActionDefinition => …steps }` (`scanner.rs:185-208`) is
+  the enum being hand-written; the split absorbs it. `from_yaml` is the wider surface — it
+  is the entry point the parse tests use, so its callers are what the split actually
+  touches. Keeping it as a workflow-only constructor (D6) confines that churn.
 - **Merge conflict with #124 if both are in flight → sequence, do not parallelize.** This
   change touches the exact lines #124 modifies (`scanner.rs:88`, `:265-266`).
 - **`from_yaml` defaults to `FileKind::Workflow`** (`parsed/mod.rs:378-380`) and is used by

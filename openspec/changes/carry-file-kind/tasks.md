@@ -5,10 +5,11 @@
 
 ## 2. Split `Parsed` into a real sum type
 
-- [ ] 2.1 In `src/domain/file/parsed/mod.rs`, define `ParsedWorkflow { path, on, permissions, concurrency, defaults, jobs }` and `ParsedAction { path, steps }` as structs, and `Parsed` as the enum over them with `path()` reachable from either variant.
-- [ ] 2.2 Rewrite `Parsed::parse` to build the variant from the caller-supplied `kind`, absorbing the existing `match kind { Workflow => …jobs, ActionDefinition => …steps }` at `scanner.rs:185-190`. Keep the non-composite `runs.using` case yielding an action with no steps — not an error.
-- [ ] 2.3 Keep a workflow-only entry point equivalent to `Parsed::from_yaml` (`parsed/mod.rs:378-380`) so the existing test surface does not churn.
-- [ ] 2.4 Update `src/domain/file/parsed/tests.rs` for the new shape, including `parsed/tests.rs:458-461` which asserts `of_path` behavior that is about to be deleted.
+- [ ] 2.1 Create the new module (D6) and move `FileKind` into it, leaving `parsed/mod.rs` re-exporting so existing imports keep working. Confirm `mise run lint:size` still passes before adding anything — `parsed/mod.rs` is at 431 lines against a 440 logic-line budget.
+- [ ] 2.2 In the new module, define `ParsedWorkflow { path, on, permissions, concurrency, defaults, jobs }` and `ParsedAction { path, steps }` as structs, and `Parsed` as the enum over them with `path()` reachable from either variant. Every field needs a `///` — `missing_docs_in_private_items` is on.
+- [ ] 2.3 Rewrite `Parsed::parse` to build the variant from the caller-supplied `kind`, absorbing the existing `match kind { Workflow => …jobs, ActionDefinition => …steps }` at `scanner.rs:185-208`. Keep the non-composite `runs.using` case yielding an action with no steps — not an error.
+- [ ] 2.4 Keep `Parsed::from_yaml` (`parsed/mod.rs:378-380`) as a workflow-only constructor so the parse test surface does not churn.
+- [ ] 2.5 Update `src/domain/file/parsed/tests.rs` for the new shape, including `parsed/tests.rs:458-461` which asserts `of_path` behavior that is about to be deleted.
 
 ## 3. Delete the second derivation
 
