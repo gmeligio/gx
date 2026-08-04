@@ -77,7 +77,6 @@ pub fn manifest_from_data(
     _path: &Path,
     is_v2: bool,
 ) -> Result<Manifest, ManifestError> {
-    // Build global actions map
     let actions: HashMap<ActionId, ActionSpec> = data
         .actions
         .versions
@@ -94,13 +93,11 @@ pub fn manifest_from_data(
         })
         .collect();
 
-    // Validate and convert overrides
     let mut overrides: HashMap<ActionId, Vec<ActionOverride>> = HashMap::new();
 
     for (action_str, toml_overrides) in data.actions.overrides {
         let id = ActionId::from(action_str.clone());
 
-        // Validation: override without global default is an error
         if !actions.contains_key(&id) {
             return Err(ManifestError::Validation(format!(
                 "\"{action_str}\" has overrides but no global version — run 'gx tidy' to fix"
@@ -137,14 +134,10 @@ pub fn manifest_from_data(
                 .transpose()
                 .map_err(ManifestError::Validation)?;
 
-            // The four `(job, step)` combinations the TOML admits map onto three scopes.
-            // A step without a job is a composite action's step. Whether the named file is
-            // in fact an action definition is not knowable here: the manifest is parsed
-            // before any scan (`Config::load`), so there is no discovered file set to ask.
-            // Such an override on a workflow parses and then selects nothing, because a
-            // workflow's sites all carry a job. Reporting an override that resolves to no
-            // site belongs with `overrides::prune_stale`, which runs after the scan and can
-            // see what the address actually names.
+            // A step without a job names a composite step. Whether the file really is an
+            // action definition is unknowable here — the manifest is read before any scan —
+            // so such an entry on a workflow parses and then selects nothing. Reporting
+            // overrides that name no site belongs with `overrides::prune_stale`.
             let scope = match (exc.job.map(JobId::from), step_index) {
                 (Some(job), Some(step)) => Scope::JobStep { job, step },
                 (Some(job), None) => Scope::Job { job },
@@ -172,7 +165,6 @@ pub fn manifest_from_data(
 pub fn build_manifest_document(manifest: &Manifest) -> DocumentMut {
     let mut doc = DocumentMut::new();
 
-    // Build [actions] table with sorted key-value pairs
     let mut actions = toml_edit::Table::new();
     let mut specs: Vec<_> = manifest.specs().collect();
     specs.sort_by_key(|s| s.id.as_str().to_owned());
@@ -181,7 +173,6 @@ pub fn build_manifest_document(manifest: &Manifest) -> DocumentMut {
         actions.insert(spec.id.as_str(), toml_edit::value(spec.specifier.as_str()));
     }
 
-    // Build [actions.overrides] if any overrides exist
     let mut all_overrides: Vec<(&ActionId, &Vec<ActionOverride>)> =
         manifest.all_overrides().iter().collect();
     all_overrides.sort_by_key(|(id, _)| id.as_str().to_owned());

@@ -157,13 +157,9 @@ fn composite_step_override_without_job_roundtrips() {
     assert_eq!(overrides[0].scope.job(), None);
 }
 
-/// A bare step parses to a composite-step scope regardless of the file it names — parse
-/// time cannot know which schema that file follows. On a workflow the scope selects
-/// nothing, so the override is inert rather than misapplied.
-///
-/// `.github/workflows/action.yml` is the sharpest case: a rule deciding by file name would
-/// call this an action definition, and a rule deciding by directory would not. Neither
-/// question is asked here.
+/// `.github/workflows/action.yml` is the sharpest fixture: a rule deciding by file name
+/// would call this an action definition, and a rule deciding by directory would not.
+/// Neither question is asked here.
 #[test]
 fn load_override_step_without_job_parses_whatever_the_file_is_named() {
     let content = r#"
@@ -178,7 +174,6 @@ fn load_override_step_without_job_parses_whatever_the_file_is_named() {
     let mut file = NamedTempFile::new().unwrap();
     file.write_all(content.as_bytes()).unwrap();
 
-    // A bare-step override is well-formed whatever the file it names.
     let loaded = parse(file.path()).unwrap();
     let overrides = loaded
         .value

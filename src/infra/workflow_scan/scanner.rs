@@ -212,9 +212,7 @@ impl FileScanner {
 
     /// Scan a single managed file and aggregate actions into a `WorkflowActionSet`.
     ///
-    /// `kind` is supplied by the caller rather than derived from the path: which schema a
-    /// file follows is decided where the file is found, and a path outside the conventional
-    /// directories would otherwise be misread.
+    /// `kind` comes from discovery, not from the path — see [`discovery`](super::discovery).
     ///
     /// # Errors
     ///

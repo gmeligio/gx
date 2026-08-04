@@ -10,14 +10,9 @@ use crate::domain::file::site::{JobId, Scope, Slot, StepIndex};
 use std::io::Write as _;
 use tempfile::NamedTempFile;
 
-/// A step index with no job names a composite action's step, which only exists in a file
-/// that has no jobs. On a workflow it addresses nothing.
-///
-/// It parses rather than erroring: whether the named file is an action definition is not
-/// knowable at parse time, because the manifest is read before any scan. The override is
-/// well-formed and simply selects no site — a workflow's sites all carry a job. Reporting
-/// an override that resolves to nothing belongs after the scan, with `prune_stale`, which
-/// can see what the address actually names.
+/// Parses rather than erroring because the manifest is read before any scan, so parse time
+/// cannot know whether the named file has jobs. Reporting an override that selects nothing
+/// belongs after the scan, with `prune_stale`.
 #[test]
 fn step_without_job_on_a_workflow_parses_and_selects_nothing() {
     let content = concat!(
@@ -32,7 +27,6 @@ fn step_without_job_on_a_workflow_parses_and_selects_nothing() {
     let mut file = NamedTempFile::new().unwrap();
     file.write_all(content.as_bytes()).unwrap();
 
-    // A bare-step override is well-formed whatever the file it names.
     let loaded = parse(file.path()).unwrap();
     let overrides = loaded
         .value
@@ -49,8 +43,6 @@ fn step_without_job_on_a_workflow_parses_and_selects_nothing() {
         "the override parses to a composite-step scope whatever the path"
     );
 
-    // The scope names a composite step, so it selects nothing on a workflow site, whose
-    // slots all carry a job.
     assert!(
         !overrides[0].scope.selects(&Slot::WorkflowStep {
             job: JobId::from("build"),

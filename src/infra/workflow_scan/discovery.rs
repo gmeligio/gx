@@ -17,15 +17,14 @@ use std::path::{Path, PathBuf};
 pub struct ManagedFile {
     /// Absolute path to the file.
     pub path: PathBuf,
-    /// Which schema the file follows, decided by the root that matched it and carried from
-    /// here — never recomputed downstream.
+    /// Which schema the file follows, decided by the root that matched it.
     pub kind: FileKind,
 }
 
 /// Where one kind of managed file lives, relative to `.github`.
 ///
-/// Pairing each glob with the kind it yields is what makes this the only place a kind is
-/// decided; `discovery_assigns_kind_by_root` pins the assignment.
+/// Pairing each glob with the kind it yields is what keeps the decision in one place;
+/// `discovery_assigns_kind_by_root` pins the assignment.
 struct Root {
     /// Directory under `.github`.
     dir: &'static str,

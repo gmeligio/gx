@@ -980,13 +980,10 @@ fn composite_repo(repo_root: &std::path::Path) {
     write_composite(repo_root, "setup", "    - uses: actions/checkout@v4\n");
 }
 
-/// Safety net for the `carry-file-kind` change: the full diagnostic set for a repo holding
-/// both file kinds must not move. Kind stops being re-derived from each file's path and is
-/// carried from discovery instead; on a repo laid out the way every repo is today the two
-/// answers agree, so every rule must reach the same verdict on the same file as before.
+/// Pins the full diagnostic set for a repo holding both file kinds.
 ///
 /// Asserts the whole set rather than one rule: a change that silently reclassified a file
-/// would show up as a rule appearing or vanishing, which a single-rule assertion misses.
+/// shows up as a rule appearing or vanishing, which a single-rule assertion misses.
 #[test]
 fn lint_verdicts_are_stable_across_both_file_kinds() {
     let temp_dir = tempfile::tempdir().unwrap();
@@ -1018,9 +1015,7 @@ fn lint_verdicts_are_stable_across_both_file_kinds() {
     actual.sort();
 
     // Note what is absent: `MissingConcurrency` fires on the workflow but NOT on the
-    // composite, which has no `concurrency:` block and cannot have one. That asymmetry is
-    // the property this change must preserve — it is today enforced by a filter that can
-    // be deleted without a compile error.
+    // composite, which has no `concurrency:` block and cannot have one.
     assert_eq!(
         actual,
         vec![
