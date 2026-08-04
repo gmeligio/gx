@@ -43,5 +43,5 @@
 
 - [x] 7.1 Run `mise run format`, then `mise run test` — budget for the strict wall: `missing_docs_in_private_items` on every new private struct and its fields, `too_many_lines`, and fulfilled `#[expect(...)]`. Keep any `#[cfg(test)] mod tests` at the very bottom of its file.
 - [x] 7.2 Run `mise run test:all` and confirm 1.1's no-op assertion still holds — `gx lint`, `gx tidy`, `gx upgrade` output unchanged on a conventional repo.
-- [ ] 7.3 Add a CHANGELOG entry under Changed for the D4 validation change, so the vanished parse-time message is not read as a regression. Note that the case it covered is picked up by #163.
-- [ ] 7.4 Comment on #154 that this landed, and on #124 that its blocker is clear.
+- [x] 7.3 Add a CHANGELOG entry under Changed for the D4 validation change, so the vanished parse-time message is not read as a regression. Note that the case it covered is picked up by #163.
+- [x] 7.4 Comment on #154 that this landed, and on #124 that its blocker is clear.
