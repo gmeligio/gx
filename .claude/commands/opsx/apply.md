@@ -85,7 +85,26 @@ Implement tasks from an OpenSpec change.
    - Remaining tasks overview
    - Dynamic instruction from CLI
 
-6. **Implement tasks (loop until done or blocked)**
+
+<!-- opsx-review-gate-patch -->
+
+6. **Review the plan**
+
+   Check for a `.review-passed` marker at `<changeRoot>/.review-passed`, taking
+   `changeRoot` from the status JSON in step 2. A change living in a store sits
+   outside `openspec/changes/<n>/`.
+
+   **If marker does NOT exist:**
+   - Invoke Skill tool: `openspec-review-proposal` for change `<n>`
+   - Wait for the verdict:
+     - **BLOCKED** → block implementation, list CRITICAL issues
+     - **APPROVED_WITH_WARNINGS** → show warnings, ask user to confirm
+     - **APPROVED** → write marker: `echo "reviewed" > "<changeRoot>/.review-passed"`, continue
+   - Max 3 retry cycles: fix → re-review → check verdict
+
+   **If marker EXISTS:** show "✓ Reviewed" and continue.
+
+7. **Implement tasks (loop until done or blocked)**
 
    For each pending task:
    - Show which task is being worked on
@@ -122,7 +141,7 @@ Implement tasks from an OpenSpec change.
    - Error or blocker encountered → report and wait for guidance
    - User interrupts
 
-7. **On completion or pause, show status**
+8. **On completion or pause, show status**
 
    Display:
    - Tasks completed this session
