@@ -22,10 +22,16 @@ background rather than as the rule it is.
 - Drop the GIVEN/WHEN/THEN line from `rules.specs`.
 - Move the relevance gate out of `context:` into `rules.proposal` as quoted
   gate/skip items.
-- Add two rules the config lacks: update the spec on archive to match what
-  shipped, and point to a rule that already lives upstream instead of restating it.
+- Add two rules the config lacks. "When archiving, update the spec to match what
+  actually shipped" closes a gap nothing else covers — no schema or skill checks
+  that an archived spec still describes the code. "When a rule already lives
+  upstream, point to it instead of restating it" is the rule whose absence
+  produced the two defects above; writing it down is what stops them recurring.
+- Scope the `rules.design` "must be present" clause to designs that exist. As
+  written it demands sections unconditionally while the schema makes `design.md`
+  itself conditional — the same restate-and-contradict defect this change removes.
 - Keep unchanged: the `context` paragraph, the persona wording, the
-  error-classification rule, and the `rules.design` block.
+  error-classification rule, and both `rules.design` section requirements.
 
 ## Capabilities
 
@@ -43,8 +49,11 @@ so the change declares `skip_specs: true`.
 
 ## Impact
 
-- `openspec/config.yaml` — roughly 37 lines down to about 27, plus the retained
-  design block.
+- `openspec/config.yaml` is the only file touched.
 - No Rust code, no CLI behavior, no build or CI configuration is touched.
 - Affects how future changes are planned and reviewed, not how any existing spec
   is interpreted.
+- Severity for the dropped checks now lives solely in the review skill at user
+  scope, which this project does not version. That is the point — one owner
+  instead of two — but it does mean a future edit to those checks happens
+  outside this repo.
