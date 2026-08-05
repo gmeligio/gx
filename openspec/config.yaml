@@ -4,6 +4,7 @@ context: |
     gx is a Rust CLI tool for managing GitHub Actions versions.
     Tech stack: Rust, clap, tokio, reqwest. Built with mise tasks.
     Specs should only cover user-facing behavior and high-level project direction.
+    What tends to go wrong here: version-resolution edge cases and network/API failure handling.
 
     Relevance gate — requires spec:
     - Adds, removes, or changes user-facing behavior
@@ -29,3 +30,7 @@ rules:
         - "WARNING: Guardrail not justified as load-bearing"
         - "WARNING: Missing GIVEN/WHEN/THEN for claimed behaviors"
         - "WARNING: Scope too broad — multiple unrelated user capabilities"
+    design:
+        - Include an "Automated Test Strategy" section — what level of testing, what's the critical path, any new test infrastructure
+        - Include an "Observability" section — how failures surface, what error paths exist, whether a failure can be silent
+        - Both sections can be brief for a simple change, but must be present
