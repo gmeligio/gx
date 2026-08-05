@@ -2,10 +2,16 @@
 
 This project carries its own copy of the `openspec-review-proposal` skill and the
 `/opsx:review` command, both of which are already provided at user scope in
-`~/.claude/`. Two copies means two behaviors, and the local one has drifted: it
-reads config keys that do not exist, restates philosophy checks that also live in
+`~/.claude/`. Those user-scope paths are maintained outside this project and were
+never generated from these local files, so removing the local copies orphans
+nothing.
+
+Two copies means two behaviors, and the local one has drifted: it reads config
+keys that do not exist, restates philosophy checks that also live in
 `openspec/config.yaml` (making the config copy inert), and writes a `.review-passed`
-marker that nothing in this repo reads.
+marker that nothing in this repo reads. Deleting beats repairing, because the
+user-scope copy already supersedes it and fixing the local one would only
+recreate the divergence.
 
 ## What Changes
 
