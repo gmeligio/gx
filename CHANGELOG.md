@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.4](https://github.com/gmeligio/gx/compare/v0.8.3...v0.8.4) - 2026-08-05
+
+### Added
+
+- *(scan)* pin actions used inside composite actions ([#151](https://github.com/gmeligio/gx/pull/151))
+
+### Other
+
+- *(domain)* carry FileKind from discovery instead of re-deriving it ([#166](https://github.com/gmeligio/gx/pull/166))
+- *(domain)* split Location into site::Id and Origin ([#165](https://github.com/gmeligio/gx/pull/165))
+
 ### Changed
 
 - *(scan)* gx now manages `uses:` references inside composite actions
