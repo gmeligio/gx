@@ -2,11 +2,11 @@
 
 Isolated from the rest because it is the only work that can regress a shipped command.
 
-- [ ] 1.1 Add `Commands::json_mode(&self) -> bool` in `src/main.rs`, returning the `json`
+- [x] 1.1 Add `Commands::json_mode(&self) -> bool` in `src/main.rs`, returning the `json`
       field for each variant that has one and `false` otherwise
-- [ ] 1.2 Replace the `matches!(cli.command, Commands::Upgrade { json: true, .. })`
+- [x] 1.2 Replace the `matches!(cli.command, Commands::Upgrade { json: true, .. })`
       expression with a call to it
-- [ ] 1.3 Verify `upgrade` is unchanged by running `tests/integ_upgrade.rs` before and after
+- [x] 1.3 Verify `upgrade` is unchanged by running `tests/integ_upgrade.rs` before and after
       the refactor and confirming identical results; `--json` must still suppress the CI
       notice, the log file, and the spinner, and still emit the empty document when
       `.github` is missing

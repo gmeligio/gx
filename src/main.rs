@@ -95,6 +95,21 @@ enum Commands {
     Lint,
 }
 
+impl Commands {
+    /// Whether this invocation writes a machine-readable document to stdout.
+    ///
+    /// Owned here rather than tested at each use site because `--json` turns stdout
+    /// into a single document, and every human-facing line — spinner, CI notice, log
+    /// path — must be suppressed consistently. Three call sites testing the same
+    /// condition separately is how one of them gets missed when a command gains the flag.
+    const fn json_mode(&self) -> bool {
+        match self {
+            Self::Upgrade { json, .. } => *json,
+            Self::Tidy | Self::Init | Self::Lint => false,
+        }
+    }
+}
+
 /// Create a progress callback that updates the spinner, log file, and CI output.
 fn make_cb<'cb>(
     spinner: Option<&'cb ProgressBar>,
@@ -237,7 +252,7 @@ fn main() -> Result<(), GxError> {
     // `--json` turns stdout into a single machine-readable document, so every
     // human-facing line below (CI notice, log path, ".github not found") must be
     // suppressed for it.
-    let json_mode = matches!(cli.command, Commands::Upgrade { json: true, .. });
+    let json_mode = cli.command.json_mode();
 
     // Create log file for local runs (not CI)
     let mut log_file: Option<LogFile> = if is_ci || json_mode {
