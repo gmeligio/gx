@@ -38,15 +38,6 @@ impl crate::domain::resolution::VersionRegistry for NoopRegistry {
             forge: crate::domain::resolution::Forge::GitHub,
         })
     }
-    fn tags_for_sha(
-        &self,
-        _id: &ActionId,
-        _sha: &CommitSha,
-    ) -> Result<Vec<Version>, crate::domain::resolution::Error> {
-        Err(crate::domain::resolution::Error::AuthRequired {
-            forge: crate::domain::resolution::Forge::GitHub,
-        })
-    }
     fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, crate::domain::resolution::Error> {
         Err(crate::domain::resolution::Error::AuthRequired {
             forge: crate::domain::resolution::Forge::GitHub,

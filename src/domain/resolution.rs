@@ -52,9 +52,6 @@ pub enum Error {
     #[error("failed to resolve {spec}: {reason}")]
     ResolveFailed { spec: ActionSpec, reason: String },
 
-    #[error("no tags found for {action} at SHA {sha}")]
-    NoTagsForSha { action: ActionId, sha: CommitSha },
-
     /// The forge's request quota is exhausted.
     ///
     /// Deliberately does not state when the quota resets: that is not read from
@@ -119,13 +116,6 @@ pub trait VersionRegistry {
     ///
     /// Returns an error if the lookup fails.
     fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<Commit, Error>;
-
-    /// Get all tags that point to a specific SHA.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the lookup fails.
-    fn tags_for_sha(&self, id: &ActionId, sha: &CommitSha) -> Result<Vec<Version>, Error>;
 
     /// Get all available version tags for an action's repository.
     ///
@@ -236,10 +226,6 @@ mod tests {
     impl VersionRegistry for MockRegistry {
         fn lookup_sha(&self, _id: &ActionId, _version: &Version) -> Result<Commit, Error> {
             self.resolve_result.clone()
-        }
-
-        fn tags_for_sha(&self, _id: &ActionId, _sha: &CommitSha) -> Result<Vec<Version>, Error> {
-            self.tags_result.clone()
         }
 
         fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, Error> {
@@ -392,14 +378,6 @@ mod tests {
         }
     }
 
-    /// A `NoTagsForSha` to exercise the predicates against a strict variant.
-    fn no_tags_for_sha() -> Error {
-        Error::NoTagsForSha {
-            action: ActionId::from("actions/checkout"),
-            sha: CommitSha::from("abc123def456789012345678901234567890abcd"),
-        }
-    }
-
     #[test]
     fn rate_limited_is_skippable() {
         assert!(
@@ -425,7 +403,6 @@ mod tests {
     #[test]
     fn strict_errors_are_not_skippable() {
         assert!(!resolve_failed().is_skippable());
-        assert!(!no_tags_for_sha().is_skippable());
     }
 
     #[test]
@@ -453,7 +430,6 @@ mod tests {
     #[test]
     fn strict_errors_are_not_retryable() {
         assert!(!resolve_failed().is_retryable());
-        assert!(!no_tags_for_sha().is_retryable());
     }
 
     #[test]

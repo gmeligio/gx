@@ -72,22 +72,6 @@ impl VersionRegistry for FakeRegistry {
         })
     }
 
-    fn tags_for_sha(
-        &self,
-        id: &ActionId,
-        sha: &CommitSha,
-    ) -> Result<Vec<Version>, ResolutionError> {
-        let key = (id.as_str().to_owned(), sha.as_str().to_owned());
-        Ok(self
-            .sha_tags
-            .get(&key)
-            .cloned()
-            .unwrap_or_default()
-            .into_iter()
-            .map(Version::from)
-            .collect())
-    }
-
     fn all_tags(&self, id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
         Ok(self
             .tags
@@ -132,16 +116,6 @@ impl VersionRegistry for AuthRequiredRegistry {
         })
     }
 
-    fn tags_for_sha(
-        &self,
-        _id: &ActionId,
-        _sha: &CommitSha,
-    ) -> Result<Vec<Version>, ResolutionError> {
-        Err(ResolutionError::AuthRequired {
-            forge: Forge::GitHub,
-        })
-    }
-
     fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
         Err(ResolutionError::AuthRequired {
             forge: Forge::GitHub,
@@ -174,14 +148,6 @@ impl VersionRegistry for EmptyDateRegistry {
         })
     }
 
-    fn tags_for_sha(
-        &self,
-        _id: &ActionId,
-        _sha: &CommitSha,
-    ) -> Result<Vec<Version>, ResolutionError> {
-        Ok(vec![])
-    }
-
     fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
         Ok(vec![])
     }
@@ -212,14 +178,6 @@ impl VersionRegistry for FailingDescribeRegistry {
             ref_type: Some(RefType::Tag),
             date: CommitDate::from("2026-01-01T00:00:00Z"),
         })
-    }
-
-    fn tags_for_sha(
-        &self,
-        _id: &ActionId,
-        _sha: &CommitSha,
-    ) -> Result<Vec<Version>, ResolutionError> {
-        Ok(vec![])
     }
 
     fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, ResolutionError> {

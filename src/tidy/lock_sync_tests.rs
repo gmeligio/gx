@@ -37,15 +37,6 @@ impl VersionRegistry for MixedRegistry {
             })
         }
     }
-    fn tags_for_sha(
-        &self,
-        _id: &ActionId,
-        _sha: &CommitSha,
-    ) -> Result<Vec<Version>, ResolutionError> {
-        Err(ResolutionError::AuthRequired {
-            forge: Forge::GitHub,
-        })
-    }
     fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
         Err(ResolutionError::AuthRequired {
             forge: Forge::GitHub,
