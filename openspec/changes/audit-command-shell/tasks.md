@@ -72,23 +72,23 @@ Satisfies: "Audit the locked action set with gx audit",
       entries in `src/main.rs`
 - [x] 6.2 Add the dispatch arm running audit, printing JSON under `--json` and rendered
       lines otherwise, suppressing spinner and log file in JSON mode
-- [ ] 6.3 Add a named test in `tests/integ_audit.rs` asserting that with `--json` and no
+- [x] 6.3 Add a named test in `tests/integ_audit.rs` asserting that with `--json` and no
       token, stdout is empty — no JSON document at all, not an empty one and not one with
       an error field beside zero findings. This is the assertion behind the spec's
       strongest claim, so it gets a test, not a manual check
 
 ## 7. Tests and guardrails
 
-- [ ] 7.1 Create `tests/integ_audit.rs`: branch-entry lock (one warning, exit 0), tag-only
+- [x] 7.1 Create `tests/integ_audit.rs`: branch-entry lock (one warning, exit 0), tag-only
       lock (clean, exit 0), absent lock file, empty lock file, missing token
-- [ ] 7.2 Add the lock-is-the-only-source test. The unlocked action in the fixture MUST be a
+- [x] 7.2 Add the lock-is-the-only-source test. The unlocked action in the fixture MUST be a
       branch reference — one that *would* yield a `mutable-ref` finding if audit walked
       workflows — so the test actually fails if a later change reintroduces traversal
-- [ ] 7.3 Add `audit` to the two command-module lists in `tests/code_health.rs`
-- [ ] 7.4 Add the bidirectional code-health assertion: no `src/audit/` file imports the
+- [x] 7.3 Add `audit` to the two command-module lists in `tests/code_health.rs`
+- [x] 7.4 Add the bidirectional code-health assertion: no `src/audit/` file imports the
       workflow scanner or parsed-workflow types, and no `src/lint/` file imports `reqwest`
       or the GitHub API modules
-- [ ] 7.5 Confirm the new assertion actually fires — temporarily add a forbidden import,
+- [x] 7.5 Confirm the new assertion actually fires — temporarily add a forbidden import,
       see the test fail, then revert. A guardrail that cannot fail is not a guardrail
 
 ## 8. Documentation and verification

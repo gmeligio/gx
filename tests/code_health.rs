@@ -338,6 +338,7 @@ fn domain_does_not_import_upward() {
         "crate::upgrade",
         "crate::lint",
         "crate::init",
+        "crate::audit",
         "crate::infra",
     ];
 
@@ -371,6 +372,78 @@ fn domain_does_not_import_upward() {
 }
 
 // ---------------------------------------------------------------------------
+// The offline/networked command split
+// ---------------------------------------------------------------------------
+
+/// `gx lint` is offline and `gx audit` reads only the lock — both enforced, not assumed.
+///
+/// These are two halves of one invariant: a command is either offline or networked, and
+/// which one it is may not drift. Users rely on `gx lint` running in a pre-commit hook or a
+/// network-isolated runner, so the first rule that reaches for the API to "just check one
+/// thing" would silently turn a fast, deterministic gate into a flaky, credential-dependent
+/// one. In the other direction, audit deriving its own action set from workflow files would
+/// give it a second notion of "which actions exist" that drifts from the scanner's.
+///
+/// Enforced here because neither property is visible in a diff that violates it.
+#[test]
+fn offline_and_networked_command_layers_stay_separate() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let src_dir = manifest_dir.join("src");
+
+    // (directory, forbidden import substrings, why)
+    let rules: &[(&str, &[&str], &str)] = &[
+        (
+            "lint",
+            &["reqwest", "infra::github"],
+            "gx lint must stay offline — networked checks belong in gx audit",
+        ),
+        (
+            "audit",
+            &[
+                "workflow_scan",
+                "file::scan",
+                "file::parsed",
+                "WorkflowScanner",
+            ],
+            "gx audit must read gx.lock, never walk workflow files",
+        ),
+    ];
+
+    let mut violations: Vec<String> = Vec::new();
+
+    for &(dir, forbidden, why) in rules {
+        for file in collect_rs_files(&src_dir.join(dir)) {
+            let Ok(content) = fs::read_to_string(&file) else {
+                continue;
+            };
+            for (lineno, line) in content.lines().enumerate() {
+                let trimmed = line.trim();
+                // Only `use` statements count: prose in a doc comment naming the
+                // forbidden module (as this change's own files do) is not a dependency.
+                if !trimmed.starts_with("use ") {
+                    continue;
+                }
+                for &needle in forbidden {
+                    if trimmed.contains(needle) {
+                        violations.push(format!(
+                            "{}:{}: forbidden import `{needle}` — {why}: {trimmed}",
+                            file.display(),
+                            lineno + 1,
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "Offline/networked layer violations:\n  {}",
+        violations.join("\n  ")
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Task 1.2 — Duplicate private function detection across command modules
 // ---------------------------------------------------------------------------
 
@@ -384,7 +457,7 @@ fn no_duplicate_private_fns_across_command_modules() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let src_dir = manifest_dir.join("src");
 
-    let command_modules = &["tidy", "upgrade", "lint", "init"];
+    let command_modules = &["tidy", "upgrade", "lint", "init", "audit"];
 
     // Map: fn_name → list of (module_name, file_path)
     let mut fn_to_modules: HashMap<String, Vec<String>> = HashMap::new();
