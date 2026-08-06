@@ -106,6 +106,7 @@ checksum = "sha256:cd355dab0b4c02fb59038fef87655550021d07f45f1d82f947a34ef98560a
 url = "https://github.com/axodotdev/cargo-dist/releases/download/v0.31.0/cargo-dist-x86_64-unknown-linux-gnu.tar.xz"
 url_api = "https://api.github.com/repos/axodotdev/cargo-dist/releases/assets/360963397"
 provenance = "github-attestations"
+provenance_verified = true
 
 [tools."github:axodotdev/cargo-dist"."platforms.linux-x64-musl"]
 checksum = "sha256:1d46b93a785e8b666c0e7add581d747d53c3f29589cc3ef9aee60341ad899023"
