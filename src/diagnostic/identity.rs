@@ -1,12 +1,13 @@
 //! The `rule_ids!` macro: one list of `Variant => "kebab-name"` pairs generates the
 //! enum, `as_str`, `ALL`, `Display`, `FromStr`, `Serialize`, and `Deserialize`.
 //!
-//! Before this macro, a rule identity was four hand-synchronized lists — the enum,
-//! a `Display` match, a `FromStr` match, and a `#[serde(rename_all)]` derive. They
-//! agreed only by discipline, and that discipline had already failed: three rules
-//! reached the product while the specification's enumeration of valid names still
-//! listed ten. Adding a rule is now a one-line edit, so concurrent changes each
-//! adding one check touch one line and cannot conflict by construction.
+//! One list, because the name a rule is configured by in `[lint.rules]` and the name
+//! it prints in output must be the same string. Maintaining those as separate lists
+//! makes them agree only by discipline, and that is a user-visible failure when it
+//! slips: a rule gx names in output that `gx.toml` then refuses to configure.
+//!
+//! Adding a rule is a one-line edit here, so concurrent changes that each add one
+//! cannot conflict.
 
 /// Define a rule-identity enum from a single list of `Variant => "name"` pairs.
 ///
