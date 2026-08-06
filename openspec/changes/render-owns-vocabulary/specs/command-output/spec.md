@@ -1,17 +1,19 @@
 ## ADDED Requirements
 
-### Requirement: The render boundary owns user-facing vocabulary
+### Requirement: Diagnostic producers do not embed kind-nouns
 
 Upstream producers — lint rules and command reports — SHALL emit structured data
 (identifier, version, level, location) and SHALL NOT embed the noun naming the kind
-of thing being described into a diagnostic message. The rendering boundary composes
-the sentence the user reads.
+of thing being described into a diagnostic message. Choosing user-facing vocabulary
+is reserved to the rendering boundary; a producer that has already committed to a
+noun has taken that choice away from it.
 
 **User value:** the maintainer running `gx lint` reads one consistent voice across
 every rule, instead of `action actions/checkout uses tag reference…` from one rule
-and `actions/checkout SHA … not found` from the next. The same constraint is what
-lets gx describe a composite action file, or a future GitLab CI component, without
-a rule hardcoding the wrong word for the artifact it just flagged.
+and `actions/checkout SHA … not found` from the next. It also keeps gx from
+asserting the wrong word: the same rules now fire on composite action files, and
+are planned to fire on GitLab CI components, so a message that hardcodes "action"
+is a message that will eventually mislabel the artifact it just flagged.
 
 This guardrail is load-bearing for the same reason as "Commands do not print
 directly": a producer that composes its own sentence fragment reintroduces the
@@ -29,4 +31,6 @@ exists to prevent.
 #### Scenario: Every rule reports in the same voice
 - **GIVEN** `gx lint` produces diagnostics from more than one rule in a single run
 - **WHEN** the user reads the output
-- **THEN** no diagnostic message carries a kind-noun prefix that another omits
+- **THEN** no diagnostic message opens with a kind-noun, so all rules read alike
+- **AND** consistency is achieved by absence — a run in which every message carried
+  the same noun would be uniform but still violates this requirement

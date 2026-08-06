@@ -21,13 +21,15 @@ planned, so a hardcoded noun cannot follow the artifact it describes.
   `Changed`, `Skipped` to `id: String`. The field carries a coordinate
   (`actions/checkout`), not a noun; the name is what fixes vocabulary at the type
   level. Renderer output is unchanged — the field is interpolated positionally.
-- Drop the leading `action ` prefix from the four rule messages that carry it
-  (`unpinned`, `sha-mismatch`, `stale-comment`, `unsynced-manifest`), bringing them
-  in line with the majority convention already followed by the other eleven rules.
-  This is the one deliberate user-visible text change; see Impact.
-- Add `format_line_lint_diag_message_carries_no_noun` next to the existing
-  location-printed-once test, asserting a rule message does not open with a
-  vocabulary noun, so a future rule cannot reintroduce one.
+- Drop the leading `action ` prefix from the five messages that carry it, produced
+  by four rules (`unpinned`, `sha-mismatch`, `stale-comment`, and
+  `unsynced-manifest`, which emits two). That brings them in line with the
+  convention already followed by the other nine of gx's thirteen rules. This is the
+  one deliberate user-visible text change; see Impact.
+- Add a guard test at `src/lint/report.rs` — the chokepoint where every rule's
+  `Diagnostic` becomes a `Line::LintDiag` — that iterates real diagnostics and
+  asserts none opens with a vocabulary noun, so a future rule cannot reintroduce
+  one.
 - Leave summary text (`All actions up to date`, `N actions discovered`) exactly as
   it reads today. Those sentences are composed inside a `CommandReport::render`,
   which *is* the render boundary — the noun is already owned there, and no rename
@@ -55,8 +57,8 @@ None.
 
 ## Impact
 
-**User-visible text — one deliberate change.** Four `gx lint` messages lose a
-leading `action ` prefix:
+**User-visible text — one deliberate change.** Five `gx lint` messages, produced by
+four rules, lose a leading `action ` prefix:
 
 ```
 - action actions/checkout uses tag reference v4 instead of SHA pin
@@ -79,7 +81,11 @@ codes, `--json` — stays byte-for-byte identical.
   field name. `UpgradeEntry`'s serialized `action` field is untouched.
 - `src/lint/unpinned.rs`, `sha_mismatch.rs`, `stale_comment.rs`,
   `unsynced_manifest.rs` — drop the noun from message construction.
-- `src/init/report.rs`, `src/lint/report.rs` — unchanged.
+- `src/lint/report.rs` — new guard test only; render logic unchanged.
+- `src/init/report.rs` — unchanged.
+- `src/output/lines.rs` also carries a dead variant, `Line::Changed`, which no code
+  constructs. It is renamed for consistency rather than deleted; removing it is a
+  separate concern and is filed as follow-up, not folded in here.
 
 **Not touched.** `--json` output, exit codes, `Diagnostic`'s shape, the ignore-target
 config keys (`action = "..."` in `gx.toml` is a config surface, not output).
