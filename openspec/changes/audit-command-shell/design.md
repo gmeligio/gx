@@ -80,14 +80,18 @@ struct AuditTarget<'lock> {
     id: &'lock ActionId,
     version: &'lock str,      // LockEntry::version_label()
     sha: &'lock CommitSha,
-    repository: &'lock Repository,
     ref_type: Option<&'lock RefType>,
 }
 ```
 
-Checks take `&AuditTarget`. When `LockedAction` lands, only the adapter changes — the field
-list is a subset of `LockedAction`'s accessors (`id`, `version_label`, `sha`, `repository`),
-so it is a mechanical rewrite of one function, and no check is touched.
+Checks take `&AuditTarget`. When `LockedAction` lands, only the adapter changes — every
+field is a subset of `LockedAction`'s accessors (`id`, `version_label`, `sha`), so it is a
+mechanical rewrite of one function, and no check is touched.
+
+`repository` is deliberately absent: the only shipped check does not read it, and the
+project forbids speculative state. The advisory checks will need it as the `package` slug,
+so #130 adds one field to this struct and one line to the adapter — the seam is designed
+for exactly that.
 
 *Alternative considered:* have checks take `(&Spec, &LockEntry)` directly. Rejected — it
 spreads the P4 reconciliation across every check file instead of confining it to one adapter.

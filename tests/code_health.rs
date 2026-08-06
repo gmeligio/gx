@@ -416,22 +416,11 @@ fn offline_and_networked_command_layers_stay_separate() {
             let Ok(content) = fs::read_to_string(&file) else {
                 continue;
             };
-            for (lineno, line) in content.lines().enumerate() {
-                let trimmed = line.trim();
-                // Only `use` statements count: prose in a doc comment naming the
-                // forbidden module (as this change's own files do) is not a dependency.
-                if !trimmed.starts_with("use ") {
-                    continue;
-                }
-                for &needle in forbidden {
-                    if trimmed.contains(needle) {
-                        violations.push(format!(
-                            "{}:{}: forbidden import `{needle}` — {why}: {trimmed}",
-                            file.display(),
-                            lineno + 1,
-                        ));
-                    }
-                }
+            for (lineno, needle) in forbidden_imports_in(&content, forbidden) {
+                violations.push(format!(
+                    "{}:{lineno}: forbidden import `{needle}` — {why}",
+                    file.display(),
+                ));
             }
         }
     }
@@ -441,6 +430,91 @@ fn offline_and_networked_command_layers_stay_separate() {
         "Offline/networked layer violations:\n  {}",
         violations.join("\n  ")
     );
+}
+
+/// Find forbidden module references inside `use` statements in `content`.
+///
+/// Returns `(1-based line number, matched needle)` per violation.
+///
+/// Accumulates a whole `use` statement before matching, because rustfmt wraps a long
+/// import across lines and a line-at-a-time scan would miss the wrapped remainder — the
+/// exact shape a forbidden import is most likely to take. Only `use` statements count:
+/// prose in a doc comment naming a forbidden module (as these modules' own docs do) is
+/// not a dependency.
+///
+/// Extracted from the test so the matching logic can itself be tested. A guardrail whose
+/// own correctness is unverified provides no guarantee.
+fn forbidden_imports_in<'need>(
+    content: &str,
+    forbidden: &[&'need str],
+) -> Vec<(usize, &'need str)> {
+    let mut found = Vec::new();
+    let mut statement = String::new();
+    let mut start_line = 0;
+
+    for (index, line) in content.lines().enumerate() {
+        let trimmed = line.trim();
+        if statement.is_empty() {
+            if !trimmed.starts_with("use ") {
+                continue;
+            }
+            start_line = index + 1;
+        }
+        statement.push_str(trimmed);
+
+        // A `use` statement ends at the first `;`; until then it continues across lines.
+        if !trimmed.ends_with(';') {
+            continue;
+        }
+        // Drop the grouping braces before matching, so a needle spanning a brace
+        // (`use crate::infra::{` + `github::Registry`) still reads as one path.
+        let flattened = statement.replace(['{', '}'], "");
+        for &needle in forbidden {
+            if flattened.contains(needle) {
+                found.push((start_line, needle));
+            }
+        }
+        statement.clear();
+    }
+    found
+}
+
+/// The layer guardrail's matcher must actually catch what it claims to.
+///
+/// The guardrail reads the real `src/` tree, so it can only be made to fail by editing a
+/// source file — a manual check that leaves no trace. This tests the matcher against
+/// synthetic content instead, so the enforcement's own correctness is verified in CI.
+#[test]
+fn forbidden_import_matcher_catches_real_import_shapes() {
+    let forbidden = &["reqwest", "infra::github"];
+
+    // Plain import.
+    assert_eq!(
+        forbidden_imports_in("use reqwest::blocking::Client;\n", forbidden),
+        vec![(1, "reqwest")]
+    );
+
+    // rustfmt-wrapped import: the needle sits on a continuation line, which a
+    // line-at-a-time scan would miss entirely.
+    let wrapped = "use crate::\n    infra::github::Registry;\n";
+    assert_eq!(
+        forbidden_imports_in(wrapped, forbidden),
+        vec![(1, "infra::github")],
+        "a wrapped import must still be caught"
+    );
+
+    // Braced multi-line group.
+    let braced = "use crate::infra::{\n    github::Registry,\n    lock::Store,\n};\n";
+    assert_eq!(forbidden_imports_in(braced, forbidden).len(), 1);
+
+    // Prose naming the module is not a dependency.
+    assert!(
+        forbidden_imports_in("//! never import reqwest here\n", forbidden).is_empty(),
+        "a doc comment mentioning the module is not an import"
+    );
+
+    // An unrelated import is clean.
+    assert!(forbidden_imports_in("use std::path::Path;\n", forbidden).is_empty());
 }
 
 // ---------------------------------------------------------------------------

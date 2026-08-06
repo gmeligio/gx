@@ -201,6 +201,117 @@ fn json_output_on_a_clean_repo_is_still_one_document() {
     assert_eq!(value["findings"], serde_json::json!([]));
 }
 
+/// Run the real `gx` binary in `root` with the given `GITHUB_TOKEN`, returning
+/// `(stdout, stderr, exit code)`.
+///
+/// The stream-level `--json` guarantees cannot be observed in-process: they are about what
+/// reaches stdout, which only a spawned process shows. `CARGO_BIN_EXE_gx` is set by cargo
+/// for integration tests, so this needs no new dependency.
+fn run_gx(root: &Path, token: Option<&str>, args: &[&str]) -> (String, String, Option<i32>) {
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_gx"));
+    command.current_dir(root).args(args);
+    match token {
+        Some(value) => command.env("GITHUB_TOKEN", value),
+        None => command.env_remove("GITHUB_TOKEN"),
+    };
+    // Keep the run deterministic: CI mode changes which lines are printed.
+    command.env_remove("CI");
+    let output = command.output().expect("gx binary should run");
+    (
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+        output.status.code(),
+    )
+}
+
+/// Initialize a git repo so `repo::find_root` locates the fixture.
+fn git_init(root: &Path) {
+    let status = std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(root)
+        .status()
+        .expect("git should be available");
+    assert!(status.success(), "git init should succeed");
+}
+
+#[test]
+fn json_mode_without_a_token_writes_nothing_to_stdout() {
+    // The strongest claim the spec makes: a run that could not audit must not emit a
+    // document a consumer would read as "clean". Asserting on real stdout, because that
+    // is the surface the claim is about — an in-process check cannot see it.
+    let temp = TempDir::new().unwrap();
+    let root = repo_with_lock(&temp, Some(BRANCH_LOCK));
+    git_init(&root);
+
+    let (stdout, stderr, code) = run_gx(&root, None, &["audit", "--json"]);
+
+    assert_eq!(code, Some(1), "a token failure must exit non-zero");
+    assert!(
+        stdout.trim().is_empty(),
+        "stdout must carry no JSON document at all, got: {stdout}"
+    );
+    assert!(
+        stderr.contains("GITHUB_TOKEN"),
+        "the error must reach the user and name the variable, got: {stderr}"
+    );
+}
+
+#[test]
+fn json_mode_writes_one_document_and_no_progress_output() {
+    let temp = TempDir::new().unwrap();
+    let root = repo_with_lock(&temp, Some(BRANCH_LOCK));
+    git_init(&root);
+
+    let (stdout, _stderr, code) = run_gx(&root, Some("token"), &["audit", "--json"]);
+
+    assert_eq!(code, Some(0), "a warning-only run exits zero");
+    // Parses whole, so nothing was interleaved with it.
+    let value: serde_json::Value =
+        serde_json::from_str(&stdout).expect("stdout must be exactly one JSON document");
+    assert_eq!(value["findings"][0]["check"], "mutable-ref");
+    // The human-facing lines that would corrupt the document.
+    assert!(!stdout.contains("📋"), "log path must be suppressed");
+    assert!(!stdout.contains('✓'), "summary must be suppressed");
+}
+
+#[test]
+fn json_mode_writes_no_local_log_file() {
+    let temp = TempDir::new().unwrap();
+    let root = repo_with_lock(&temp, Some(TAG_LOCK));
+    git_init(&root);
+
+    let (stdout, _stderr, _code) = run_gx(&root, Some("token"), &["audit", "--json"]);
+
+    // The log path is printed as the last output line when a log file is written, so its
+    // absence from an otherwise-complete document is the observable signal.
+    assert!(
+        !stdout.contains(".log"),
+        "no log file path may appear in JSON mode, got: {stdout}"
+    );
+    serde_json::from_str::<serde_json::Value>(&stdout).expect("stdout must remain valid JSON");
+}
+
+#[test]
+fn human_mode_still_prints_a_summary() {
+    // The counterpart to the suppression tests: without --json the human lines DO appear,
+    // so the assertions above are detecting suppression rather than absence.
+    let temp = TempDir::new().unwrap();
+    let root = repo_with_lock(&temp, Some(BRANCH_LOCK));
+    git_init(&root);
+
+    let (stdout, _stderr, code) = run_gx(&root, Some("token"), &["audit"]);
+
+    assert_eq!(code, Some(0));
+    assert!(
+        stdout.contains("mutable-ref"),
+        "human output must name the check, got: {stdout}"
+    );
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&stdout).is_err(),
+        "human output is not JSON"
+    );
+}
+
 #[test]
 fn only_the_lock_decides_what_is_audited() {
     // The load-bearing design decision: audit reads gx.lock and never walks workflows.

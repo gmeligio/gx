@@ -201,4 +201,22 @@ mod tests {
             assert_eq!(CheckName::from_str(check.as_str()), Ok(check));
         }
     }
+
+    #[test]
+    fn no_audit_check_is_configurable_as_a_lint_rule() {
+        // Audit checks and lint rules occupy separate namespaces. `[lint.rules]` is keyed
+        // by `RuleName`, so this asserts no audit check name parses as one — which is what
+        // stops a user configuring a networked check as if it were an offline rule.
+        //
+        // Iterates ALL rather than naming `mutable-ref`, so a check added later is covered
+        // without editing this test. Merging the two enums (the alternative the design
+        // rejected) makes this fail.
+        for &check in CheckName::ALL {
+            let as_lint_rule = crate::diagnostic::RuleName::from_str(check.as_str());
+            assert!(
+                as_lint_rule.is_err(),
+                "audit check `{check}` must not be accepted as a lint rule name"
+            );
+        }
+    }
 }
