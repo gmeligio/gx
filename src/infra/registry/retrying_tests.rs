@@ -103,7 +103,7 @@ fn version() -> Version {
 fn retrying(
     script: Vec<Result<Commit, ResolutionError>>,
     waiter: &RecordingWaiter,
-) -> Retrying<ScriptedRegistry, &RecordingWaiter> {
+) -> Retrying<'static, ScriptedRegistry, &RecordingWaiter> {
     Retrying::new(ScriptedRegistry::new(script)).with_waiter(waiter)
 }
 

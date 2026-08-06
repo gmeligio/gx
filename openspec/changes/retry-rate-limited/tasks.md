@@ -31,14 +31,14 @@
 
 ## 4. Wire the decorator into the commands
 
-- [ ] 4.1 Wrap the registry in `src/tidy/command.rs` with `Retrying`, attaching a live `Fn(&str)` notifier that reaches `on_progress`. The notice must be emitted *before* the sleep, not drained afterward — a deferred drain leaves the spinner frozen for the whole wait, which is the "reads as a hang" failure the requirement exists to prevent, and it would still pass the decorator-level test in 3.9.
-- [ ] 4.2 Wrap the registry in `src/upgrade/command.rs` the same way. Confirm no notifier output reaches stdout in `--json` mode (progress is already suppressed there in `src/main.rs`).
-- [ ] 4.3 Wrap the registry in `src/init/command.rs` the same way.
-- [ ] 4.4 Confirm `tests/integ_tidy.rs` still passes unchanged — `gx tidy` must still succeed under the always-`AuthRequired` registry, proving retry did not leak into the auth path.
+- [x] 4.1 Wrap the registry in `src/tidy/command.rs` with `Retrying`, attaching a live `Fn(&str)` notifier that reaches `on_progress`. The notice must be emitted *before* the sleep, not drained afterward — a deferred drain leaves the spinner frozen for the whole wait, which is the "reads as a hang" failure the requirement exists to prevent, and it would still pass the decorator-level test in 3.9.
+- [x] 4.2 Wrap the registry in `src/upgrade/command.rs` the same way. Confirm no notifier output reaches stdout in `--json` mode (progress is already suppressed there in `src/main.rs`).
+- [x] 4.3 Wrap the registry in `src/init/command.rs` the same way.
+- [x] 4.4 Confirm `tests/integ_tidy.rs` still passes unchanged — `gx tidy` must still succeed under the always-`AuthRequired` registry, proving retry did not leak into the auth path.
 
 ## 5. Vacuity check and gates
 
 - [x] 5.1 Mutation-test: temporarily set `MAX_ATTEMPTS = 1` and run the suite. Tests 3.2, 3.3, 3.6, 3.7, 3.9, and 3.10 must all fail. Rewrite any that still pass, then restore the constant and re-run. (3.8 is expected to still pass under this mutation — it is pinned by its pairing with 3.7, not by this mutation.)
-- [ ] 5.2 Run `mise run test` — must pass. Do not raise any budget in `tests/code_health.rs`; restructure instead.
-- [ ] 5.3 Run `mise run integ` — must pass.
-- [ ] 5.4 Confirm clippy strict is clean: pedantic, private-item and field docs on every new item, `#[cfg(test)]` at file bottom, any `#[expect(...)]` actually fulfilled.
+- [x] 5.2 Run `mise run test` — must pass. Do not raise any budget in `tests/code_health.rs`; restructure instead.
+- [x] 5.3 Run `mise run integ` — must pass.
+- [x] 5.4 Confirm clippy strict is clean: pedantic, private-item and field docs on every new item, `#[cfg(test)]` at file bottom, any `#[expect(...)]` actually fulfilled.

@@ -40,7 +40,10 @@ impl Waiter for ThreadWaiter {
 }
 
 /// Announces a pending wait to the user. See [`Retrying::with_notifier`].
-type Notifier = Box<dyn Fn(&str)>;
+///
+/// Borrows for `'notify` rather than requiring `'static`, so a command can hand
+/// over a closure sharing the progress callback it already owns on the stack.
+type Notifier<'notify> = Box<dyn Fn(&str) + 'notify>;
 
 /// Retries rate-limited requests to an inner registry, with backoff.
 ///
@@ -51,16 +54,16 @@ type Notifier = Box<dyn Fn(&str)>;
 ///
 /// Designed as the *inner* layer of a decorator stack, so a caching layer
 /// wrapping this one short-circuits on a hit before any retry runs.
-pub struct Retrying<R: VersionRegistry, W: Waiter = ThreadWaiter> {
+pub struct Retrying<'notify, R: VersionRegistry, W: Waiter = ThreadWaiter> {
     /// The registry whose failures are retried.
     inner: R,
     /// How the retry pauses between attempts.
     waiter: W,
     /// Invoked immediately before each wait, if set.
-    notifier: Option<Notifier>,
+    notifier: Option<Notifier<'notify>>,
 }
 
-impl<R: VersionRegistry> Retrying<R> {
+impl<R: VersionRegistry> Retrying<'_, R> {
     /// Wrap a registry, sleeping for real and announcing nothing.
     pub fn new(inner: R) -> Self {
         Self {
@@ -71,21 +74,21 @@ impl<R: VersionRegistry> Retrying<R> {
     }
 }
 
-impl<R: VersionRegistry, W: Waiter> Retrying<R, W> {
+impl<'notify, R: VersionRegistry, W: Waiter> Retrying<'notify, R, W> {
     /// Announce each wait through `notifier` before sleeping.
     ///
     /// Without this a multi-second pause is indistinguishable from a hang. The
     /// callback is `Fn`, not `FnMut`, so it can be held alongside the `&mut`
     /// progress callback the commands already pass to their planners.
     #[must_use]
-    pub fn with_notifier(mut self, notifier: impl Fn(&str) + 'static) -> Self {
+    pub fn with_notifier<N: Fn(&str) + 'notify>(mut self, notifier: N) -> Self {
         self.notifier = Some(Box::new(notifier));
         self
     }
 
     /// Swap in a different [`Waiter`]. Used by tests to avoid real sleeping.
     #[cfg(test)]
-    fn with_waiter<W2: Waiter>(self, waiter: W2) -> Retrying<R, W2> {
+    fn with_waiter<W2: Waiter>(self, waiter: W2) -> Retrying<'notify, R, W2> {
         Retrying {
             inner: self.inner,
             waiter,
@@ -99,13 +102,15 @@ impl<R: VersionRegistry, W: Waiter> Retrying<R, W> {
     /// wait worth taking, so backing off would only delay the same failure while
     /// holding the user's terminal.
     fn wait_for(error: &ResolutionError, retry_index: usize) -> Option<Duration> {
-        match error {
-            ResolutionError::RateLimited { retry_after, .. } => match retry_after {
-                RetryAfter::After(duration) => Some(*duration),
-                RetryAfter::Unstated => BACKOFF.get(retry_index).copied(),
-                RetryAfter::TooDistant => None,
-            },
-            _ => None,
+        // Only `RateLimited` states a reset; every other variant reaches here
+        // solely because `is_retryable` let it through, which it does not.
+        let ResolutionError::RateLimited { retry_after, .. } = error else {
+            return None;
+        };
+        match retry_after {
+            RetryAfter::After(duration) => Some(*duration),
+            RetryAfter::Unstated => BACKOFF.get(retry_index).copied(),
+            RetryAfter::TooDistant => None,
         }
     }
 
@@ -140,7 +145,7 @@ impl<R: VersionRegistry, W: Waiter> Retrying<R, W> {
     }
 }
 
-impl<R: VersionRegistry, W: Waiter> VersionRegistry for Retrying<R, W> {
+impl<R: VersionRegistry, W: Waiter> VersionRegistry for Retrying<'_, R, W> {
     fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<Commit, ResolutionError> {
         self.retrying(|| self.inner.lookup_sha(id, version))
     }
@@ -159,5 +164,11 @@ impl<R: VersionRegistry, W: Waiter> VersionRegistry for Retrying<R, W> {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
 #[path = "retrying_tests.rs"]
 mod tests;

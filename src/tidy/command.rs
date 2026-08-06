@@ -13,7 +13,7 @@ use crate::infra::github::{Error as GithubError, Registry as GithubRegistry};
 use crate::infra::lock::{Error as LockFileError, Store as LockStore};
 use crate::infra::manifest::Error as ManifestError;
 use crate::infra::manifest::patch::apply_manifest_diff;
-use crate::infra::registry::Caching;
+use crate::infra::registry::caching_retrying;
 use crate::infra::workflow_scan::FileScanner as FileWorkflowScanner;
 use crate::infra::workflow_update::WorkflowWriter;
 use report::Report;
@@ -203,7 +203,12 @@ impl Command for Tidy {
                 "Warning: No GITHUB_TOKEN set — using unauthenticated GitHub API (60 requests/hour limit).",
             );
         }
-        let registry = Caching::new(GithubRegistry::new(config.settings.github_token)?);
+        let github = GithubRegistry::new(config.settings.github_token)?;
+        // Cache outside retry, so a repeated query never reaches the retry layer
+        // and a wait is only spent on a request that must reach GitHub. Each wait
+        // is announced through the progress channel so a pause is never an
+        // unexplained stall.
+        let (registry, progress) = caching_retrying(github, on_progress);
         let scanner = FileWorkflowScanner::new(repo_root);
         let updater = WorkflowWriter::new(repo_root);
 
@@ -214,7 +219,7 @@ impl Command for Tidy {
             &config.lock,
             &registry,
             &scanner,
-            on_progress,
+            progress,
         )?;
 
         if tidy_plan.is_empty() {
