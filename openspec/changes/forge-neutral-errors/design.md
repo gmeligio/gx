@@ -61,10 +61,11 @@ site. `Copy` keeps the four `map_err` arms free of clones.
 every caller, and `TidyError` with a type parameter to express something only the
 `Display` impl reads. Rejected as disproportionate.
 
-*Where it lives:* `src/domain/resolution.rs`, beside the error that uses it.
-`src/domain/` sits at 7/8 `.rs` files and `src/domain/action/` is full, so adding a
-`forge.rs` is not affordable; the type is ~15 lines and has exactly one consumer,
-so co-locating is also the simpler choice on its own merits.
+*Where it lives:* `src/domain/resolution.rs`, beside the error that uses it. The
+file-count budget does not force this — `src/domain/` holds 6 `.rs` files against a
+budget of 8 (`tests/code_health.rs`), so a `forge.rs` would fit. It is co-located
+because the type is ~15 lines and has exactly one consumer; a file per small type
+would fragment the error definition across two places for no reader benefit.
 
 ### Decision 2: Split `is_recoverable()` into `is_skippable()` and `is_retryable()`
 
@@ -92,6 +93,17 @@ and it is ~4 lines, fully tested, and impossible to get right later without
 re-deciding the classification. Adding it here is what prevents #137 from wiring
 retry to the wrong bit.
 
+*Why this is not the same "no consumer yet" that Decision 4 rejects.* Decision 4
+declines `retry_after` because it has no consumer; `is_retryable()` is added despite
+having none. The distinguishing test is not "does a caller exist" but "can this be
+got right later at the same cost". The predicate is a pure function of the variant
+set being decided in this very change — deferring it means #137 re-opens the
+classification with the enum already frozen, and the wrong-answer case
+(`AuthRequired`) is exactly the one a retry author is likely to get wrong. The
+`Duration` is the opposite: its correct value depends on clock and skew policy that
+belong with the retry loop, so writing it now would be guessing at a shape #137
+would change anyway.
+
 *Alternative considered — a `Classification` enum returned by one method*
 (`Skip | Retry | Fail`). Rejected: it models the two properties as mutually
 exclusive, but `RateLimited` is genuinely both, so the enum would need
@@ -109,9 +121,16 @@ Skipping actions/checkout@^4: GitHub API authorization required
 New:
 
 ```
-Skipping actions/checkout@^4: GitHub rate limit exhausted; the limit resets shortly, or set GITHUB_TOKEN to raise it
+Skipping actions/checkout@^4: GitHub rate limit exhausted; set GITHUB_TOKEN to raise the limit
 Skipping actions/checkout@^4: GitHub requires authorization; set GITHUB_TOKEN to a token with repository read access
 ```
+
+The rate-limit message deliberately does *not* say when the limit resets. Decision 4
+declines to parse `X-RateLimit-Reset`, so the code does not know — under the
+unauthenticated 60/hour limit the true answer can be most of an hour, and "resets
+shortly" would be a guess presented as fact. The message states only what is known
+and what the user controls. When #137 parses the reset into a real wait, the message
+can state it accurately.
 
 The vendor word survives — but as `{forge}` interpolated from the field, not as a
 literal in a vendor-specific variant. That is the distinction the issue draws:

@@ -68,6 +68,13 @@ None. This adds no capability a user can invoke.
      project rule "Error classification determines whether user sees warning or hard
      failure" points at exactly this table.
 
+  Deliberately **not** given a requirement: `#[non_exhaustive]` and the `Forge`
+  field's existence. Both are BREAKING at the Rust API level, but `gx` ships as a
+  CLI binary with no downstream matchers, so neither is observable to a user. They
+  fall under the "internal refactoring with no user-visible change" skip. What *is*
+  specified is the consequence a user can see — that adding a forge adds no failure
+  variants, and that messages name forge and remedy.
+
 ## Impact
 
 - `src/domain/resolution.rs` — `Error` enum, `Forge` type, predicate split, tests.
