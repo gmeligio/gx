@@ -1,4 +1,4 @@
-use super::{Error as ResolutionError, ShaDescription, VersionRegistry};
+use super::{Error as ResolutionError, Forge, ShaDescription, VersionRegistry};
 use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Version};
 use crate::domain::action::resolved::Commit;
 use crate::domain::action::uses_ref::RefType;
@@ -8,7 +8,9 @@ pub struct AuthRequiredRegistry;
 
 impl VersionRegistry for AuthRequiredRegistry {
     fn lookup_sha(&self, _id: &ActionId, _version: &Version) -> Result<Commit, ResolutionError> {
-        Err(ResolutionError::AuthRequired)
+        Err(ResolutionError::AuthRequired {
+            forge: Forge::GitHub,
+        })
     }
 
     fn tags_for_sha(
@@ -16,11 +18,15 @@ impl VersionRegistry for AuthRequiredRegistry {
         _id: &ActionId,
         _sha: &CommitSha,
     ) -> Result<Vec<Version>, ResolutionError> {
-        Err(ResolutionError::AuthRequired)
+        Err(ResolutionError::AuthRequired {
+            forge: Forge::GitHub,
+        })
     }
 
     fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
-        Err(ResolutionError::AuthRequired)
+        Err(ResolutionError::AuthRequired {
+            forge: Forge::GitHub,
+        })
     }
 
     fn describe_sha(
@@ -28,7 +34,9 @@ impl VersionRegistry for AuthRequiredRegistry {
         _id: &ActionId,
         _sha: &CommitSha,
     ) -> Result<ShaDescription, ResolutionError> {
-        Err(ResolutionError::AuthRequired)
+        Err(ResolutionError::AuthRequired {
+            forge: Forge::GitHub,
+        })
     }
 }
 
@@ -107,7 +115,9 @@ impl VersionRegistry for FakeRegistry {
         _sha: &CommitSha,
     ) -> Result<Vec<Version>, ResolutionError> {
         if self.fail_tags {
-            return Err(ResolutionError::AuthRequired);
+            return Err(ResolutionError::AuthRequired {
+                forge: Forge::GitHub,
+            });
         }
         Ok(self
             .tags
@@ -118,7 +128,9 @@ impl VersionRegistry for FakeRegistry {
 
     fn all_tags(&self, id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
         if self.fail_tags {
-            return Err(ResolutionError::AuthRequired);
+            return Err(ResolutionError::AuthRequired {
+                forge: Forge::GitHub,
+            });
         }
         Ok(self
             .tags

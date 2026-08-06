@@ -5,10 +5,49 @@ use super::action::specifier::Specifier;
 
 use super::action::tag_selection::{ShaIndex, select_most_specific_tag};
 use super::action::uses_ref::RefType;
+use std::fmt;
 use thiserror::Error;
 
+/// A code-hosting platform that a [`VersionRegistry`] resolves against.
+///
+/// Carried as data on the failure variants that are inherently platform-specific,
+/// so [`Error`] grows only with failure semantics and never gains a variant per
+/// platform.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Forge {
+    /// github.com.
+    GitHub,
+}
+
+impl Forge {
+    /// The environment variable holding this forge's API credential.
+    ///
+    /// Used to tell the user exactly what to set when a request is rejected or
+    /// throttled.
+    #[must_use]
+    pub fn token_env(self) -> &'static str {
+        match self {
+            Self::GitHub => "GITHUB_TOKEN",
+        }
+    }
+}
+
+impl fmt::Display for Forge {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::GitHub => f.write_str("GitHub"),
+        }
+    }
+}
+
 /// Errors that can occur during version resolution.
+///
+/// Variants describe *what went wrong*, never which backend produced it: the
+/// backend travels as a [`Forge`] field. Each message names both the forge and the
+/// remedy, because a skipped resolution is often the only output a user reads.
 #[derive(Debug, Clone, Error)]
+#[non_exhaustive]
 pub enum Error {
     #[error("failed to resolve {spec}: {reason}")]
     ResolveFailed { spec: ActionSpec, reason: String },
@@ -16,18 +55,51 @@ pub enum Error {
     #[error("no tags found for {action} at SHA {sha}")]
     NoTagsForSha { action: ActionId, sha: CommitSha },
 
-    #[error("GitHub API rate limit exceeded")]
-    RateLimited,
+    /// The forge's request quota is exhausted.
+    ///
+    /// Deliberately does not state when the quota resets: that is not read from
+    /// the response, and guessing would misinform an unauthenticated user whose
+    /// window can be nearly an hour.
+    #[error("{forge} rate limit exhausted; set {} to raise the limit", forge.token_env())]
+    RateLimited {
+        /// The forge whose quota was exhausted.
+        forge: Forge,
+    },
 
-    #[error("GitHub API authorization required")]
-    AuthRequired,
+    /// The forge rejected the request for lack of a usable credential.
+    #[error(
+        "{forge} requires authorization; set {} to a token with repository read access",
+        forge.token_env()
+    )]
+    AuthRequired {
+        /// The forge that rejected the request.
+        forge: Forge,
+    },
 }
 
 impl Error {
-    /// Returns `true` for errors that are transient and the caller can retry later.
+    /// Returns `true` when the run may continue without this action.
+    ///
+    /// A skippable failure is reported as a warning and the lock is written
+    /// without that entry; anything else fails the command. Authorization
+    /// failures are skippable so that a user without a token still gets a partial
+    /// lock and a warning rather than a hard failure.
+    ///
+    /// This is not the same question as [`Self::is_retryable`].
     #[must_use]
-    pub fn is_recoverable(&self) -> bool {
-        matches!(self, Self::RateLimited | Self::AuthRequired)
+    pub fn is_skippable(&self) -> bool {
+        matches!(self, Self::RateLimited { .. } | Self::AuthRequired { .. })
+    }
+
+    /// Returns `true` when repeating the identical request could plausibly succeed.
+    ///
+    /// Only rate limiting qualifies. [`Self::AuthRequired`] is excluded even though
+    /// it is skippable: re-issuing a request with the same absent or rejected
+    /// credential cannot produce a different outcome, so retrying it only delays
+    /// the failure.
+    #[must_use]
+    pub fn is_retryable(&self) -> bool {
+        matches!(self, Self::RateLimited { .. })
     }
 }
 
@@ -150,7 +222,7 @@ pub(crate) mod testutil;
 )]
 mod tests {
     use super::{
-        ActionId, ActionResolver, ActionSpec, Commit, CommitDate, CommitSha, Error, RefType,
+        ActionId, ActionResolver, ActionSpec, Commit, CommitDate, CommitSha, Error, Forge, RefType,
         Repository, ShaDescription, ShaIndex, Version, VersionRegistry,
     };
     use crate::domain::action::resolved::ResolvedRef;
@@ -290,7 +362,9 @@ mod tests {
     #[test]
     fn resolve_from_sha_describe_error_propagates() {
         let registry = MockRegistry {
-            resolve_result: Err(Error::AuthRequired),
+            resolve_result: Err(Error::AuthRequired {
+                forge: Forge::GitHub,
+            }),
             tags_result: Ok(vec![]),
         };
         let service = ActionResolver::new(&registry);
@@ -300,36 +374,117 @@ mod tests {
 
         let result = service.resolve_from_sha(&id, &sha, &mut sha_index);
         assert!(
-            matches!(result, Err(Error::AuthRequired)),
+            matches!(
+                result,
+                Err(Error::AuthRequired {
+                    forge: Forge::GitHub
+                })
+            ),
             "describe_sha error should propagate through resolve_from_sha"
         );
     }
 
-    #[test]
-    fn is_recoverable_rate_limited() {
-        assert!(Error::RateLimited.is_recoverable());
-    }
-
-    #[test]
-    fn is_recoverable_auth_required() {
-        assert!(Error::AuthRequired.is_recoverable());
-    }
-
-    #[test]
-    fn is_recoverable_resolve_failed_is_not_recoverable() {
-        let err = Error::ResolveFailed {
+    /// A `ResolveFailed` to exercise the predicates against a strict variant.
+    fn resolve_failed() -> Error {
+        Error::ResolveFailed {
             spec: ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4")),
             reason: "not found".to_owned(),
-        };
-        assert!(!err.is_recoverable());
+        }
+    }
+
+    /// A `NoTagsForSha` to exercise the predicates against a strict variant.
+    fn no_tags_for_sha() -> Error {
+        Error::NoTagsForSha {
+            action: ActionId::from("actions/checkout"),
+            sha: CommitSha::from("abc123def456789012345678901234567890abcd"),
+        }
     }
 
     #[test]
-    fn is_recoverable_no_tags_for_sha_is_not_recoverable() {
-        let err = Error::NoTagsForSha {
-            action: ActionId::from("actions/checkout"),
-            sha: CommitSha::from("abc123def456789012345678901234567890abcd"),
-        };
-        assert!(!err.is_recoverable());
+    fn rate_limited_is_skippable() {
+        assert!(
+            Error::RateLimited {
+                forge: Forge::GitHub
+            }
+            .is_skippable()
+        );
+    }
+
+    #[test]
+    fn auth_required_is_skippable() {
+        // A user with no token still gets a partial lock and a warning rather
+        // than a hard failure.
+        assert!(
+            Error::AuthRequired {
+                forge: Forge::GitHub
+            }
+            .is_skippable()
+        );
+    }
+
+    #[test]
+    fn strict_errors_are_not_skippable() {
+        assert!(!resolve_failed().is_skippable());
+        assert!(!no_tags_for_sha().is_skippable());
+    }
+
+    #[test]
+    fn rate_limited_is_retryable() {
+        assert!(
+            Error::RateLimited {
+                forge: Forge::GitHub
+            }
+            .is_retryable()
+        );
+    }
+
+    #[test]
+    fn auth_required_is_not_retryable() {
+        // Skippable but never retryable: repeating a request with the same
+        // absent credential cannot succeed, so a retrying caller must not.
+        assert!(
+            !Error::AuthRequired {
+                forge: Forge::GitHub
+            }
+            .is_retryable()
+        );
+    }
+
+    #[test]
+    fn strict_errors_are_not_retryable() {
+        assert!(!resolve_failed().is_retryable());
+        assert!(!no_tags_for_sha().is_retryable());
+    }
+
+    #[test]
+    fn rate_limited_message_names_forge_and_remedy() {
+        let message = Error::RateLimited {
+            forge: Forge::GitHub,
+        }
+        .to_string();
+
+        assert!(message.contains("GitHub"), "names the forge: {message}");
+        assert!(
+            message.contains("GITHUB_TOKEN"),
+            "names the remedy: {message}"
+        );
+        assert!(
+            !message.contains("resets"),
+            "must not claim a reset time it never read: {message}"
+        );
+    }
+
+    #[test]
+    fn auth_required_message_names_forge_and_remedy() {
+        let message = Error::AuthRequired {
+            forge: Forge::GitHub,
+        }
+        .to_string();
+
+        assert!(message.contains("GitHub"), "names the forge: {message}");
+        assert!(
+            message.contains("GITHUB_TOKEN"),
+            "names the remedy: {message}"
+        );
     }
 }
