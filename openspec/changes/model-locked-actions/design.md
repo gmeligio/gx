@@ -58,6 +58,8 @@ It is genuinely derived — always `id.base_repo()` at write time (`src/infra/gi
 
 Returning `impl Iterator<Item = LockedAction<'_>>` and updating the single production consumer is smaller than keeping two iterators alive and having to decide, at each future call site, which one to reach for. One way to iterate the lock.
 
+The blast radius is exactly one call site. A repo-wide search for `entries()` across `src/` and `tests/` returns four hits, three of which are test *function names* (`plan_one_new_action_produces_added_entries`, `plan_removed_action_produces_removed_entries`, `e2e_upgrade_preserves_unaffected_entries`) rather than calls. The only true caller is `src/infra/lock/format.rs:115`. There are no test consumers to migrate, so the signature change is fully bounded.
+
 ## Automated Test Strategy
 
 Unit level, in-crate — this is a domain type with no I/O.
@@ -71,7 +73,9 @@ No new test infrastructure.
 
 ## Observability
 
-No new runtime failure modes. `LockedAction` is a borrowed view with no fallible construction — it cannot fail, partially fail, or fail silently, because it performs no parsing, no I/O, and no allocation.
+No new runtime failure modes. `LockedAction` is a borrowed view with no fallible construction — it performs no parsing, no I/O, and no allocation, so constructing one cannot fail.
+
+**Construction cannot fail, but a row can still be incomplete.** `Lock::is_complete` exists because the loaded shape permits rows whose fields are empty, and this change deliberately leaves it unreworked. `entries()` therefore yields a `LockedAction` for incomplete rows too: `repository()` may return an empty string, and `reference()` may carry an empty label. Nothing in this change reads those — `build_lock_document` re-serializes whatever it was given, which is the existing behavior — but `gx audit` will, and an audit check comparing lock against reality is exactly the caller that hits an empty `repository()`. `LockedAction`'s accessors are documented as surfacing stored values verbatim, with no completeness guarantee; callers needing one must ask `Lock::is_complete`. Recording this here is the point of the change: the zip is now modeled, so the completeness caveat should not be rediscovered four times.
 
 The one behavior that could regress *silently* is lock-file serialization: a reordering or dedup bug in `build_lock_document` would produce a valid-but-different `gx.lock` that no error path would surface, showing up only as spurious churn in a user's diff. That is exactly what the byte-identity test guards, and it is why that test asserts against a literal string rather than a self-round-trip.
 

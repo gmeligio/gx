@@ -1,10 +1,12 @@
 ## 1. Pin the format baseline first
 
-- [ ] 1.1 Add a byte-identity test to `src/infra/lock/tests.rs`: parse a literal two-tier `gx.lock` string covering a tag pin, a branch pin, a bare-commit pin, and two specs sharing one commit; re-serialize; assert the output equals the literal input exactly. Confirm it passes on unmodified `main` before touching any domain code — a test that only passes after the refactor proves nothing.
+- [ ] 1.1 Add a byte-identity test to `src/infra/lock/tests.rs`: parse a literal two-tier `gx.lock` string covering a tag pin, a branch pin, a bare-commit pin, and two specs sharing one commit; re-serialize; assert the output equals the literal input exactly.
+- [ ] 1.2 Add a sort-order test alongside it whose *input* is deliberately unsorted (at least two action IDs, and two specifiers under one ID, in reverse lexicographic order) and whose *expected output* is a literal sorted string distinct from that input. Byte-identity alone cannot fail on sort order — a fixture that is already sorted serializes in read order whether the sort is correct, inverted, or dropped.
+- [ ] 1.3 Run both tests before touching any domain code and confirm they pass against the current implementation. A test that only passes after the refactor proves nothing.
 
 ## 2. Introduce the type
 
-- [ ] 2.1 Create `src/domain/locked_action.rs` with `LockedAction<'lock> { spec: &'lock Spec, reference: &'lock ResolvedRef, commit: &'lock Commit }`, a crate-visible constructor, and accessors `id()`, `specifier()`, `reference()`, `sha()`, `repository()`, `version_label()`. Doc-comment it as the read view over one lock row, naming `LockEntry` as the storage counterpart.
+- [ ] 2.1 Create `src/domain/locked_action.rs` with `LockedAction<'lock> { spec: &'lock Spec, reference: &'lock ResolvedRef, commit: &'lock Commit }`, a crate-visible constructor, and accessors `id()`, `specifier()`, `reference()`, `sha()`, `repository()`, `version_label()`. Doc-comment it as the read view over one lock row, naming `LockEntry` as the storage counterpart, and state on the type that accessors surface stored values verbatim with no completeness guarantee — an incomplete row yields an empty `repository()`; callers needing a guarantee ask `Lock::is_complete`.
 - [ ] 2.2 Register `pub mod locked_action;` in `src/domain/mod.rs`.
 - [ ] 2.3 Add unit tests at the bottom of `locked_action.rs`: accessors match the viewed row; `version_label()` is the SHA for a bare-commit pin and the tag string otherwise.
 
@@ -15,8 +17,8 @@
 
 ## 4. Update the one production consumer
 
-- [ ] 4.1 Rewrite `build_lock_document` in `src/infra/lock/format.rs` to iterate `LockedAction`: sort by `id()` then `specifier()`, write the `[resolutions]` tier from `version_label()`, and key the `[actions]` dedup map on `(id(), version_label())`. Preserve the existing sort and first-wins dedup semantics exactly.
-- [ ] 4.2 Confirm the 1.1 byte-identity test and the existing `format.rs` round-trip and sort-order tests still pass.
+- [ ] 4.1 Rewrite `build_lock_document` in `src/infra/lock/format.rs` to iterate `LockedAction`: sort by `id()` then `specifier()`, write the `[resolutions]` tier from `version_label()`, and key the `[actions]` dedup map on `(id(), version_label())`. Preserve the existing sort and first-wins dedup semantics exactly. `version_label()` is not a new expression: `format.rs:140` already writes `entry.version_label()` into the `version` slot and `:155` already keys dedup on it, so `LockedAction::version_label()` must forward to the identical `LockEntry::version_label()` — verify this rather than reimplementing the label logic.
+- [ ] 4.2 Confirm the 1.1 byte-identity test, the 1.2 sort-order test, and the existing `format.rs` round-trip and sort-order tests still pass.
 
 ## 5. Verify
 
