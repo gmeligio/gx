@@ -1,7 +1,6 @@
 #![expect(
     clippy::unwrap_used,
     clippy::expect_used,
-    clippy::string_slice,
     reason = "tests use unwrap, indexing, and other patterns freely"
 )]
 
@@ -12,11 +11,12 @@
 
 mod common;
 
-use common::registries::{EmptyDateRegistry, FailingDescribeRegistry, FakeRegistry};
 use common::setup::{create_test_repo, lock_path, run_init, write_workflow};
 use gx::domain::action::identity::ActionId;
 use gx::domain::action::spec::Spec;
 use gx::domain::action::specifier::Specifier;
+use gx::domain::resolution::Error as ResolutionError;
+use gx::domain::resolution::testutil::FakeRegistry;
 use gx::infra::lock::Store as LockStore;
 use tempfile::TempDir;
 
@@ -74,7 +74,7 @@ fn init_sha_first_describe_sha_empty_date() {
         ),
     );
 
-    run_init(&root, &EmptyDateRegistry);
+    run_init(&root, &FakeRegistry::new().with_empty_dates());
 
     let lock = LockStore::new(&lock_path(&root)).load().unwrap();
     let key = Spec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
@@ -111,7 +111,14 @@ fn init_sha_first_describe_sha_fails_falls_back_to_resolve() {
     );
 
     // describe_sha fails, but init must succeed by falling back to resolve(spec)
-    run_init(&root, &FailingDescribeRegistry);
+    let registry = FakeRegistry::new().failing_describe(ResolutionError::ResolveFailed {
+        spec: Spec::new(
+            ActionId::from("actions/checkout"),
+            Specifier::from_v1(&checkout_sha),
+        ),
+        reason: "Github API returned status 422 Unprocessable Entity".to_owned(),
+    });
+    run_init(&root, &registry);
 
     let lock = LockStore::new(&lock_path(&root)).load().unwrap();
     let key = Spec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
