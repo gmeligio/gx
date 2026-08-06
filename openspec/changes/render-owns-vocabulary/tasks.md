@@ -1,18 +1,18 @@
 ## 1. Baseline
 
-- [ ] 1.1 Run `mise run test` and `mise run integ` on the untouched tree and record that both are green, so any later failure is attributable to this change
+- [x] 1.1 Run `mise run test` and `mise run integ` on the untouched tree and record that both are green, so any later failure is attributable to this change
 
 ## 2. Rename the `Line` identifier field
 
-- [ ] 2.1 In `src/output/lines.rs`, rename `action: String` to `id: String` on `Line::Upgraded`, `Added`, `Removed`, `Changed`, `Skipped`, updating each variant's doc comment to describe the identifier rather than "an action"
-- [ ] 2.2 Update the matching `format_line` arms to bind `id`, leaving every format string and column width (`{id:<30}`) byte-for-byte as it renders today
-- [ ] 2.3 Update the `format_line_*` unit tests in `lines.rs` to the new field name without changing a single asserted string
+- [x] 2.1 In `src/output/lines.rs`, rename `action: String` to `id: String` on `Line::Upgraded`, `Added`, `Removed`, `Changed`, `Skipped`, updating each variant's doc comment to describe the identifier rather than "an action"
+- [x] 2.2 Update the matching `format_line` arms to bind `id`, leaving every format string and column width (`{id:<30}`) byte-for-byte as it renders today
+- [x] 2.3 Update the `format_line_*` unit tests in `lines.rs` to the new field name without changing a single asserted string
 
 ## 3. Update `Line` producers
 
-- [ ] 3.1 In `src/upgrade/report.rs`, construct `OutputLine::Upgraded`/`Skipped` with `id:`, leaving `UpgradeEntry.action` and `SkippedEntry.action` (the `Serialize` fields) untouched
-- [ ] 3.2 In `src/tidy/report.rs`, construct `OutputLine::Removed`/`Added`/`Upgraded` with `id:`
-- [ ] 3.3 Build, then confirm no remaining `Line { action: ... }` construction site exists anywhere in `src/` or `tests/`, and that `src/init/report.rs` and `src/lint/report.rs` needed no production change (neither constructs a renamed variant). Note that `Line::Changed` has no construction site at all — it is renamed for consistency, not deleted; file a follow-up issue rather than removing it here
+- [x] 3.1 In `src/upgrade/report.rs`, construct `OutputLine::Upgraded`/`Skipped` with `id:`, leaving `UpgradeEntry.action` and `SkippedEntry.action` (the `Serialize` fields) untouched
+- [x] 3.2 In `src/tidy/report.rs`, construct `OutputLine::Removed`/`Added`/`Upgraded` with `id:`
+- [x] 3.3 Build, then confirm no remaining `Line { action: ... }` construction site exists anywhere in `src/` or `tests/`, and that `src/init/report.rs` and `src/lint/report.rs` needed no production change (neither constructs a renamed variant). Note that `Line::Changed` has no construction site at all — it is renamed for consistency, not deleted; file a follow-up issue rather than removing it here
 
 ## 4. Empty the noun out of rule messages
 
