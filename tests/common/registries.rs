@@ -9,7 +9,7 @@ use gx::domain::action::resolved::Commit;
 use gx::domain::action::spec::Spec as ActionSpec;
 use gx::domain::action::specifier::Specifier;
 use gx::domain::action::uses_ref::RefType;
-use gx::domain::resolution::{Error as ResolutionError, ShaDescription, VersionRegistry};
+use gx::domain::resolution::{Error as ResolutionError, Forge, ShaDescription, VersionRegistry};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash as _, Hasher as _};
 
@@ -127,7 +127,9 @@ pub struct AuthRequiredRegistry;
 
 impl VersionRegistry for AuthRequiredRegistry {
     fn lookup_sha(&self, _id: &ActionId, _version: &Version) -> Result<Commit, ResolutionError> {
-        Err(ResolutionError::AuthRequired)
+        Err(ResolutionError::AuthRequired {
+            forge: Forge::GitHub,
+        })
     }
 
     fn tags_for_sha(
@@ -135,11 +137,15 @@ impl VersionRegistry for AuthRequiredRegistry {
         _id: &ActionId,
         _sha: &CommitSha,
     ) -> Result<Vec<Version>, ResolutionError> {
-        Err(ResolutionError::AuthRequired)
+        Err(ResolutionError::AuthRequired {
+            forge: Forge::GitHub,
+        })
     }
 
     fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
-        Err(ResolutionError::AuthRequired)
+        Err(ResolutionError::AuthRequired {
+            forge: Forge::GitHub,
+        })
     }
 
     fn describe_sha(
@@ -147,7 +153,9 @@ impl VersionRegistry for AuthRequiredRegistry {
         _id: &ActionId,
         _sha: &CommitSha,
     ) -> Result<ShaDescription, ResolutionError> {
-        Err(ResolutionError::AuthRequired)
+        Err(ResolutionError::AuthRequired {
+            forge: Forge::GitHub,
+        })
     }
 }
 
