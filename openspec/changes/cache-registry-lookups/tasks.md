@@ -14,19 +14,19 @@
 
 ## 3. Delete `ShaIndex`
 
-- [ ] 3.1 Remove `ShaIndex`, its `Default` impl, and the now-unused imports from `src/domain/action/tag_selection.rs`, keeping `select_most_specific_tag` and `parse_version_components` untouched
-- [ ] 3.2 Drop the `sha_index` parameter from `ActionResolver::resolve_from_sha` in `src/domain/resolution.rs` and call `self.registry.describe_sha(id, sha)` directly — keep the diff confined to that parameter and its import
-- [ ] 3.3 Drop the `sha_index` parameter from `update_lock` and `populate_lock_entry` in `src/tidy/lock_sync.rs`
-- [ ] 3.4 Drop the `sha_index` parameter from `upgrade_sha_versions_to_tags` in `src/tidy/manifest_sync.rs`, calling `resolver.registry().describe_sha(...)` instead of `sha_index.get_or_describe(...)`
-- [ ] 3.5 Remove the `ShaIndex::new()` construction and both argument sites in `src/tidy/command.rs`
-- [ ] 3.6 Update all test call sites — `src/domain/resolution.rs` tests, `src/tidy/lock_sync_tests.rs`, `src/tidy/manifest_sync.rs` tests — dropping the argument while keeping every assertion unchanged
+- [x] 3.1 Remove `ShaIndex`, its `Default` impl, and the now-unused imports from `src/domain/action/tag_selection.rs`, keeping `select_most_specific_tag` and `parse_version_components` untouched
+- [x] 3.2 Drop the `sha_index` parameter from `ActionResolver::resolve_from_sha` in `src/domain/resolution.rs` and call `self.registry.describe_sha(id, sha)` directly — keep the diff confined to that parameter and its import
+- [x] 3.3 Drop the `sha_index` parameter from `update_lock` and `populate_lock_entry` in `src/tidy/lock_sync.rs`
+- [x] 3.4 Drop the `sha_index` parameter from `upgrade_sha_versions_to_tags` in `src/tidy/manifest_sync.rs`, calling `resolver.registry().describe_sha(...)` instead of `sha_index.get_or_describe(...)`
+- [x] 3.5 Remove the `ShaIndex::new()` construction and both argument sites in `src/tidy/command.rs`
+- [x] 3.6 Update all test call sites — `src/domain/resolution.rs` tests, `src/tidy/lock_sync_tests.rs`, `src/tidy/manifest_sync.rs` tests — dropping the argument while keeping every assertion unchanged
 
 ## 4. Wire the composition roots
 
-- [ ] 4.1 Wrap the registry in `Caching::new(...)` at `src/init/command.rs`
-- [ ] 4.2 Wrap the registry in `Caching::new(...)` at `src/tidy/command.rs`
-- [ ] 4.3 Wrap the registry in `Caching::new(...)` at `src/upgrade/command.rs`
-- [ ] 4.4 Confirm `src/upgrade/plan.rs` is unchanged — `service.registry().all_tags(...)` at both call sites must be cached with no edit, since `registry()` already returns `&R`
+- [x] 4.1 Wrap the registry in `Caching::new(...)` at `src/init/command.rs`
+- [x] 4.2 Wrap the registry in `Caching::new(...)` at `src/tidy/command.rs`
+- [x] 4.3 Wrap the registry in `Caching::new(...)` at `src/upgrade/command.rs`
+- [x] 4.4 Confirm `src/upgrade/plan.rs` is unchanged — `service.registry().all_tags(...)` at both call sites must be cached with no edit, since `registry()` already returns `&R`
 
 ## 5. Tests
 
@@ -34,10 +34,10 @@
 - [x] 5.2 Four dedup tests — one per trait method: call twice with identical arguments, assert equal results and an inner call count of 1 (`tags_for_sha` has no production caller but is cached and tested for uniformity)
 - [x] 5.3 A key-discrimination test: call with different arguments, assert the inner call count is 2 and each result is its own
 - [x] 5.4 An error test: a fake that always errors, called twice, must show an inner call count of 2 (errors are not cached)
-- [ ] 5.5 Confirm `git diff --stat` shows no change to `src/domain/resolution_testutil.rs` or `tests/common/registries.rs` — the eight existing doubles stay unaware of caching
+- [x] 5.5 Confirm `git diff --stat` shows no change to `src/domain/resolution_testutil.rs` or `tests/common/registries.rs` — the eight existing doubles stay unaware of caching
 
 ## 6. Gate
 
-- [ ] 6.1 `mise run test` passes, with no budget number in `tests/code_health.rs` raised
-- [ ] 6.2 `mise run integ` passes
-- [ ] 6.3 Confirm `git diff --stat` against the base shows more lines deleted than added across `src/`
+- [x] 6.1 `mise run test` passes, with no budget number in `tests/code_health.rs` raised
+- [x] 6.2 `mise run integ` passes
+- [x] 6.3 Confirm `git diff --stat` against the base shows more lines deleted than added across `src/`

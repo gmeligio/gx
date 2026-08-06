@@ -5,6 +5,7 @@ use crate::domain::file::scan::Error as WorkflowError;
 use crate::infra::github::{Error as GithubError, Registry as GithubRegistry};
 use crate::infra::lock::Error as LockFileError;
 use crate::infra::manifest::Error as ManifestError;
+use crate::infra::registry::Caching;
 use crate::infra::workflow_scan::FileScanner as FileWorkflowScanner;
 use crate::infra::workflow_update::WorkflowWriter;
 use crate::tidy::Error as TidyError;
@@ -50,7 +51,7 @@ impl Command for Init {
                 "Warning: No GITHUB_TOKEN set — using unauthenticated GitHub API (60 requests/hour limit).",
             );
         }
-        let registry = GithubRegistry::new(config.settings.github_token)?;
+        let registry = Caching::new(GithubRegistry::new(config.settings.github_token)?);
         let scanner = FileWorkflowScanner::new(repo_root);
         let updater = WorkflowWriter::new(repo_root);
 

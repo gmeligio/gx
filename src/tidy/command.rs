@@ -2,7 +2,6 @@ use crate::command::Command;
 use crate::config::Config;
 use crate::domain::action::identity::CommitSha;
 use crate::domain::action::spec::Spec;
-use crate::domain::action::tag_selection::ShaIndex;
 use crate::domain::action::uses_ref::ParsedRef;
 use crate::domain::diff::{LockDiff, ManifestDiff, WorkflowPatch};
 use crate::domain::file::actions::ActionSet as WorkflowActionSet;
@@ -14,6 +13,7 @@ use crate::infra::github::{Error as GithubError, Registry as GithubRegistry};
 use crate::infra::lock::{Error as LockFileError, Store as LockStore};
 use crate::infra::manifest::Error as ManifestError;
 use crate::infra::manifest::patch::apply_manifest_diff;
+use crate::infra::registry::Caching;
 use crate::infra::workflow_scan::FileScanner as FileWorkflowScanner;
 use crate::infra::workflow_update::WorkflowWriter;
 use report::Report;
@@ -93,18 +93,14 @@ where
     let mut planned_lock = lock.clone();
 
     let resolver = ActionResolver::new(registry);
-    let mut sha_index = ShaIndex::new();
 
     // Phase 1: Sync manifest
     let sync_events = manifest_sync::sync_manifest_actions(&mut planned_manifest, &action_set);
     for event in &sync_events {
         on_progress(&event.to_string());
     }
-    let upgrade_events = manifest_sync::upgrade_sha_versions_to_tags(
-        &mut planned_manifest,
-        &resolver,
-        &mut sha_index,
-    );
+    let upgrade_events =
+        manifest_sync::upgrade_sha_versions_to_tags(&mut planned_manifest, &resolver);
     for event in &upgrade_events {
         on_progress(&event.to_string());
     }
@@ -136,7 +132,6 @@ where
         &mut planned_manifest,
         &resolver,
         &workflow_shas,
-        &mut sha_index,
     )?;
     for event in &lock_events {
         on_progress(&event.to_string());
@@ -208,7 +203,7 @@ impl Command for Tidy {
                 "Warning: No GITHUB_TOKEN set — using unauthenticated GitHub API (60 requests/hour limit).",
             );
         }
-        let registry = GithubRegistry::new(config.settings.github_token)?;
+        let registry = Caching::new(GithubRegistry::new(config.settings.github_token)?);
         let scanner = FileWorkflowScanner::new(repo_root);
         let updater = WorkflowWriter::new(repo_root);
 

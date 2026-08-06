@@ -1,7 +1,7 @@
 use crate::domain::action::identity::{ActionId, CommitSha, Version};
 use crate::domain::action::spec::Spec as ActionSpec;
 use crate::domain::action::specifier::Specifier;
-use crate::domain::action::tag_selection::{ShaIndex, select_most_specific_tag};
+use crate::domain::action::tag_selection::select_most_specific_tag;
 use crate::domain::event::Event as SyncEvent;
 use crate::domain::file::actions::ActionSet as WorkflowActionSet;
 use crate::domain::manifest::Manifest;
@@ -44,12 +44,11 @@ pub(super) fn sync_manifest_actions(
     events
 }
 
-/// Upgrade SHA versions in manifest to tags via `ShaIndex`.
+/// Upgrade SHA versions in manifest to tags.
 /// Returns events for each SHA that was upgraded.
 pub(super) fn upgrade_sha_versions_to_tags<R: VersionRegistry>(
     manifest: &mut Manifest,
     resolver: &ActionResolver<'_, R>,
-    sha_index: &mut ShaIndex,
 ) -> Vec<SyncEvent> {
     let mut events = Vec::new();
 
@@ -61,7 +60,7 @@ pub(super) fn upgrade_sha_versions_to_tags<R: VersionRegistry>(
         .collect();
 
     for (id, sha) in &sha_specs {
-        match sha_index.get_or_describe(resolver.registry(), id, sha) {
+        match resolver.registry().describe_sha(id, sha) {
             Ok(desc) => {
                 if let Some(best_tag) = select_most_specific_tag(&desc.tags) {
                     manifest.set(id.clone(), Specifier::from_v1(best_tag.as_str()));
@@ -105,7 +104,6 @@ mod tests {
     use super::{Version, select_version, upgrade_sha_versions_to_tags};
     use crate::domain::action::identity::ActionId;
     use crate::domain::action::specifier::Specifier;
-    use crate::domain::action::tag_selection::ShaIndex;
     use crate::domain::manifest::Manifest;
     use crate::domain::resolution::ActionResolver;
     use crate::domain::resolution::testutil::{AuthRequiredRegistry, FakeRegistry};
@@ -139,8 +137,7 @@ mod tests {
 
         let registry = FakeRegistry::new().with_all_tags("actions/checkout", vec!["v4", "v4.0.0"]);
         let resolver = ActionResolver::new(&registry);
-        let mut sha_index = ShaIndex::new();
-        upgrade_sha_versions_to_tags(&mut manifest, &resolver, &mut sha_index);
+        upgrade_sha_versions_to_tags(&mut manifest, &resolver);
 
         assert_eq!(
             manifest.get(&ActionId::from("actions/checkout")),
@@ -157,8 +154,7 @@ mod tests {
         manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1(sha));
 
         let resolver = ActionResolver::new(&AuthRequiredRegistry);
-        let mut sha_index = ShaIndex::new();
-        upgrade_sha_versions_to_tags(&mut manifest, &resolver, &mut sha_index);
+        upgrade_sha_versions_to_tags(&mut manifest, &resolver);
 
         // SHA must stay unchanged when no token available
         assert_eq!(

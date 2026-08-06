@@ -3,7 +3,7 @@ use super::action::resolved::{Commit, Resolved, ResolvedRef};
 use super::action::spec::Spec as ActionSpec;
 use super::action::specifier::Specifier;
 
-use super::action::tag_selection::{ShaIndex, select_most_specific_tag};
+use super::action::tag_selection::select_most_specific_tag;
 use super::action::uses_ref::RefType;
 use std::fmt;
 use thiserror::Error;
@@ -160,13 +160,8 @@ impl<'reg, R: VersionRegistry> ActionResolver<'reg, R> {
     /// # Errors
     ///
     /// Returns `Error` if the registry lookup fails.
-    pub fn resolve_from_sha(
-        &self,
-        id: &ActionId,
-        sha: &CommitSha,
-        sha_index: &mut ShaIndex,
-    ) -> Result<Resolved, Error> {
-        let desc = sha_index.get_or_describe(self.registry, id, sha)?;
+    pub fn resolve_from_sha(&self, id: &ActionId, sha: &CommitSha) -> Result<Resolved, Error> {
+        let desc = self.registry.describe_sha(id, sha)?;
         // Establish the kind once, at construction: a tag if one points at this
         // SHA, otherwise a bare commit pin with no version label. No SHA is ever
         // fabricated into a version slot.
@@ -178,9 +173,9 @@ impl<'reg, R: VersionRegistry> ActionResolver<'reg, R> {
             reference,
             commit: Commit {
                 sha: sha.clone(),
-                repository: desc.repository.clone(),
+                repository: desc.repository,
                 ref_type,
-                date: desc.date.clone(),
+                date: desc.date,
             },
         })
     }
@@ -199,7 +194,7 @@ pub(crate) mod testutil;
 mod tests {
     use super::{
         ActionId, ActionResolver, ActionSpec, Commit, CommitDate, CommitSha, Error, Forge, RefType,
-        Repository, ShaDescription, ShaIndex, Version, VersionRegistry,
+        Repository, ShaDescription, Version, VersionRegistry,
     };
     use crate::domain::action::resolved::ResolvedRef;
     use crate::domain::action::specifier::Specifier;
@@ -292,10 +287,9 @@ mod tests {
         };
         let service = ActionResolver::new(&registry);
         let id = ActionId::from("owner/repo");
-        let mut sha_index = ShaIndex::new();
 
         let result = service
-            .resolve_from_sha(&id, &sha, &mut sha_index)
+            .resolve_from_sha(&id, &sha)
             .expect("Expected Ok result");
 
         assert_eq!(result.reference, ResolvedRef::Tag(Version::from("v3.6.1")));
@@ -318,10 +312,9 @@ mod tests {
         };
         let service = ActionResolver::new(&registry);
         let id = ActionId::from("owner/repo");
-        let mut sha_index = ShaIndex::new();
 
         let result = service
-            .resolve_from_sha(&id, &sha, &mut sha_index)
+            .resolve_from_sha(&id, &sha)
             .expect("Expected Ok result");
 
         // No tag points at this SHA: the reference is a bare Commit, not a SHA
@@ -342,9 +335,8 @@ mod tests {
         let service = ActionResolver::new(&registry);
         let id = ActionId::from("owner/repo");
         let sha = CommitSha::from("abc123def456789012345678901234567890abcd");
-        let mut sha_index = ShaIndex::new();
 
-        let result = service.resolve_from_sha(&id, &sha, &mut sha_index);
+        let result = service.resolve_from_sha(&id, &sha);
         assert!(
             matches!(
                 result,
