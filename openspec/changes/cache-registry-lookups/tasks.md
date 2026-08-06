@@ -31,13 +31,13 @@
 ## 5. Tests
 
 - [ ] 5.1 Add a counting fake registry local to `caching.rs`'s test module, with a `Cell<usize>` per method
-- [ ] 5.2 Four dedup tests — one per method: call twice with identical arguments, assert equal results and an inner call count of 1
+- [ ] 5.2 Four dedup tests — one per trait method: call twice with identical arguments, assert equal results and an inner call count of 1 (`tags_for_sha` has no production caller but is cached and tested for uniformity)
 - [ ] 5.3 A key-discrimination test: call with different arguments, assert the inner call count is 2 and each result is its own
 - [ ] 5.4 An error test: a fake that always errors, called twice, must show an inner call count of 2 (errors are not cached)
-- [ ] 5.5 Verify the nine existing `VersionRegistry` doubles in `src/domain/resolution_testutil.rs` and elsewhere are untouched
+- [ ] 5.5 Confirm `git diff --stat` shows no change to `src/domain/resolution_testutil.rs` or `tests/common/registries.rs` — the eight existing doubles stay unaware of caching
 
 ## 6. Gate
 
 - [ ] 6.1 `mise run test` passes, with no budget number in `tests/code_health.rs` raised
 - [ ] 6.2 `mise run integ` passes
-- [ ] 6.3 Confirm the net line delta is a deletion and record it
+- [ ] 6.3 Confirm `git diff --stat` against the base shows more lines deleted than added across `src/`
