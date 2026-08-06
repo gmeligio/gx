@@ -20,6 +20,9 @@
       serde form == `as_str` == `Display` == `FromStr` round trip
 - [ ] 2.5 Replace the hand-written `rule_name_from_str_valid` 13-assert test with
       one driven by `ALL`, so adding a rule needs no test edit
+- [ ] 2.6 Confirm the map-key write path: round-trip a populated `[lint.rules]`
+      table through serialize→deserialize and assert the emitted keys are
+      unchanged (design D2 map-key note)
 
 ## 3. Extract the shared diagnostics home
 
@@ -30,15 +33,16 @@
 - [ ] 3.3 Move the three ignore matchers and `workflow_matches` into `record.rs`
 - [ ] 3.4 Move counting, `exit_code`, and summary pluralization into
       `diagnostic/report.rs` as `Report<Id>`
-- [ ] 3.5 Move `Level`, `IgnoreTarget`, `Rule` config types out of `src/config.rs`
-      into the shared home (or re-export) so `config.rs` no longer needs
-      `crate::lint::`
+- [ ] 3.5 Leave `Level`, `IgnoreTarget`, and `Rule` defined in `src/config.rs` —
+      they are already generic and `lint/` imports them, which is the correct
+      direction. The `config → lint` edge comes solely from `RuleName`
+      (`config.rs:69,76`) and is severed by 4.4, not by moving these.
 
 ## 4. Repoint the consumers
 
-- [ ] 4.1 Rename `src/lint/rule.rs` residue to `src/lint/identity.rs`, holding
-      `RuleName` (the `rule_ids!` call), the `Rule` trait, `Context`, and runner
-      wrappers; delete `src/lint/report.rs`
+- [ ] 4.1 Trim `src/lint/rule.rs` to its residue — `RuleName` (the `rule_ids!`
+      call), the `Rule` trait, `Context`, and runner wrappers — keeping the
+      filename; delete `src/lint/report.rs` (8 → 7 files)
 - [ ] 4.2 Add `lint::Diagnostic` / `lint::Report` type aliases over the generic
       types; keep `gx::lint::{Diagnostic, RuleName, Context, Rule}` re-exported so
       `tests/` compiles unchanged
@@ -52,9 +56,10 @@
       (replaces the drifted 10-name enumeration)
 - [ ] 5.2 Add the previously missing test for the unrecognized-rule-name scenario:
       a typo'd `[lint.rules]` key fails parsing and the error names the key
-- [ ] 5.3 Update `openspec/specs/lint-command/spec.md`'s "All valid rule names
-      accepted" scenario from 10 names to 13 at archive time (delta spec already
-      carries the corrected text)
+- [ ] 5.3 Add a test driven by `RuleName::ALL` asserting every implemented rule has
+      a `default_level`, covering the corrected 13-rule zero-config default set
+      (`dangling-reference` = error, `invalid-expression` = error,
+      `run-shellcheck` = warn were missing from the spec's list of 10)
 
 ## 6. Verify
 

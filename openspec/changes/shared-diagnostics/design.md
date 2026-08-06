@@ -101,6 +101,15 @@ The two lists agree today for all 13 variants, so collapsing them changes no
 name. This is verified by a test asserting each variant's serde form equals its
 `as_str`, and by the existing `gx.toml` fixtures in `tests/`.
 
+**Map-key round-trip**: `RuleName` is a `BTreeMap` key in
+`src/infra/manifest/convert.rs:69`, which is the manifest *write* path as well as
+the read path. Serializing as a map key is a distinct serde constraint from
+serializing as a value: the impl must emit a plain string (`serialize_str`), not a
+unit variant, or TOML key emission breaks. The macro's `Serialize` therefore
+delegates to `as_str` via `serialize_str`, and a test round-trips a populated
+`[lint.rules]` table through serialize→deserialize to confirm the write path is
+byte-stable.
+
 One deliberate behavior preservation: serde's derived error for an unknown map key
 (`unknown variant ...`) differs in wording from `FromStr`'s
 (`unrecognized rule name: ...`). Because the manual `Deserialize` now routes
@@ -155,11 +164,17 @@ be guessing. It stays in `lint/` and #129 moves it if and when it needs it.
 
 Before: 8 direct `.rs` files (at the 8-file budget, FULL).
 
-`rule.rs` and `report.rs` leave. `rule.rs`'s residue — the `Rule` trait, `RuleName`
-itself, `Context`, and the thin per-rule runner wrappers — lands in a new
-`identity.rs`; `lint/mod.rs` absorbs the re-exports.
+`rule.rs` and `report.rs` leave. `rule.rs`'s residue keeps the name `rule.rs`: what
+remains — the `RuleName` identity, the `Rule` trait, the rule-running `Context`,
+and the per-rule runner wrappers — is all *about a lint rule*, so the existing
+name still describes the file honestly and no call site churns. (An `identity.rs`
+holding a trait, a context, and runners would be a junk drawer wearing a specific
+name; `types.rs` is banned by the generic-filename rule.) `lint/mod.rs` absorbs
+the re-exports — it is 25 lines of pure re-export today, far from the 360-logic
+`mod.rs` budget, whose current max of 354 belongs to `lint/run_shellcheck/mod.rs`,
+a file this change does not touch.
 
-After: 7 direct `.rs` files (`command.rs`, `mod.rs`, `identity.rs`,
+After: 7 direct `.rs` files (`command.rs`, `mod.rs`, `rule.rs`,
 `sha_mismatch.rs`, `stale_comment.rs`, `unpinned.rs`, `unsynced_manifest.rs`)
 — **one free slot**, satisfying the hard requirement, with a second available by
 folding `unsynced_manifest.rs` into the aggregate phase later if #128 and #109

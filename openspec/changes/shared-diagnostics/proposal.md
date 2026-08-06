@@ -42,9 +42,10 @@ file they conflict by construction and cannot run in parallel.
 - Repoint `src/config.rs` and `src/infra/manifest/convert.rs` at the shared home,
   removing the config → command dependency inversion.
 - Free at least one file slot in `src/lint/`, unblocking #128 and #109.
-- Correct the drifted "All valid rule names accepted" scenario to cover all 13
-  rules, and make the corrected list enforced by a test rather than restated by
-  hand.
+- Correct **both** places the name drift occurred in the `lint-command` spec — the
+  "All valid rule names accepted" scenario (10 → 13 names) and the "Zero-config
+  runs all rules at defaults" default set (10 → 13 rules) — and make both enforced
+  by tests driven off the single definition rather than restated by hand.
 
 Not in scope: no `src/audit/` module and no audit check — #129 does that later.
 User-visible output is unchanged and byte-identical.
@@ -57,11 +58,18 @@ None. This introduces no new user-facing capability.
 
 ### Modified Capabilities
 
-- `lint-command`: the "Configure rule severity" requirement gains a guarantee that
-  the set of accepted rule names is derived from one definition rather than
-  maintained by hand, so a rule can never be accepted in one direction and
-  rejected in the other. Its "All valid rule names accepted" scenario is corrected
-  from the 10 names it drifted to, to the 13 that exist.
+- `lint-command`: two requirements change.
+  - "Configure rule severity" gains a guarantee that the set of accepted rule
+    names is derived from one definition rather than maintained by hand, so a rule
+    can never be accepted in one direction and rejected in the other. Its "All
+    valid rule names accepted" scenario is corrected from the 10 names it drifted
+    to, to the 13 that exist.
+  - "Zero-config runs all rules at defaults" gains a guarantee that every
+    implemented rule appears in the documented default set, and its list is
+    corrected from 10 to 13 (`dangling-reference` = error, `invalid-expression` =
+    error, `run-shellcheck` = warn were missing — the spec already contradicted
+    itself, since its own `run-shellcheck` requirement states "default level:
+    warn" inline).
 
 Per the relevance gate, the module move and file reshuffle on their own are
 "internal refactoring with no user-visible change" and are deliberately left
