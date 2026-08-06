@@ -16,18 +16,18 @@
 
 ## 4. Empty the noun out of rule messages
 
-- [ ] 4.1 `src/lint/unpinned.rs`: drop the leading `action ` from the message so it reads `{id} uses tag reference {ref} instead of SHA pin`
-- [ ] 4.2 `src/lint/sha_mismatch.rs`: drop the leading `action ` so it reads `{id} SHA {sha} not found in lock file`
-- [ ] 4.3 `src/lint/stale_comment.rs`: drop the leading `action ` so it reads `{id} version {v} has stale comment (...)`
-- [ ] 4.4 `src/lint/unsynced_manifest.rs`: drop the leading `action ` from both messages (used-not-declared and declared-not-used) — this rule accounts for two of the five changed strings
-- [ ] 4.5 Re-grep `src/lint/` for a kind-noun prefix in any remaining message to confirm these five (across four rules, of gx's thirteen) were the only ones
+- [x] 4.1 `src/lint/unpinned.rs`: drop the leading `action ` from the message so it reads `{id} uses tag reference {ref} instead of SHA pin`
+- [x] 4.2 `src/lint/sha_mismatch.rs`: drop the leading `action ` so it reads `{id} SHA {sha} not found in lock file`
+- [x] 4.3 `src/lint/stale_comment.rs`: drop the leading `action ` so it reads `{id} version {v} has stale comment (...)`
+- [x] 4.4 `src/lint/unsynced_manifest.rs`: drop the leading `action ` from both messages (used-not-declared and declared-not-used) — this rule accounts for two of the five changed strings
+- [x] 4.5 Re-grep `src/lint/` for a kind-noun prefix in any remaining message to confirm these five (across four rules, of gx's thirteen) were the only ones
 
 ## 5. Guard against reintroduction
 
-- [ ] 5.1 Add `rendered_diagnostics_carry_no_kind_noun` to `src/lint/report.rs` tests — the `Diagnostic` → `Line::LintDiag` chokepoint. Invoke at minimum the four previously-offending rules (`unpinned`, `sha-mismatch`, `stale-comment`, `unsynced-manifest`) over fixtures, render the `Report`, and assert no resulting message opens with a kind-noun (`action `, `workflow `, `component `). Every asserted string must come from the rule's own `format!`; never assert on a message literal the test wrote. Task 5.3 is what proves this property holds — do not treat 5.1 as self-checking
-- [ ] 5.2 Add a rule-side assertion to `unpinned.rs` mirroring its existing `message_does_not_embed_workflow_path`, so a failure names the offending rule
-- [ ] 5.3 Falsify the guard: temporarily restore the `action ` prefix in a rule and confirm 5.1 goes red. If it stays green the test is inert and must be rewritten before proceeding. Restore the fix afterward
-- [ ] 5.4 Keep the guard within `src/lint/`'s file budget — it is at 8/8 `.rs` files, so this test goes in the existing `report.rs`, never a new file
+- [x] 5.1 Add `rendered_diagnostics_carry_no_kind_noun` to `src/lint/report.rs` tests — the `Diagnostic` → `Line::LintDiag` chokepoint. Invoke at minimum the four previously-offending rules (`unpinned`, `sha-mismatch`, `stale-comment`, `unsynced-manifest`) over fixtures, render the `Report`, and assert no resulting message opens with a kind-noun (`action `, `workflow `, `component `). Every asserted string must come from the rule's own `format!`; never assert on a message literal the test wrote. Task 5.3 is what proves this property holds — do not treat 5.1 as self-checking
+- [x] 5.2 Add a rule-side assertion to `unpinned.rs` mirroring its existing `message_does_not_embed_workflow_path`, so a failure names the offending rule
+- [x] 5.3 Falsify the guard: temporarily restore the `action ` prefix in a rule and confirm 5.1 goes red. If it stays green the test is inert and must be rewritten before proceeding. Restore the fix afterward
+- [x] 5.4 Keep the guard within `src/lint/`'s file budget — it is at 8/8 `.rs` files, so this test goes in the existing `report.rs`, never a new file
 
 ## 6. Prove output is unchanged
 
