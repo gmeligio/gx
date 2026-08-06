@@ -93,11 +93,11 @@ Satisfies: "Audit the locked action set with gx audit",
 
 ## 8. Documentation and verification
 
-- [ ] 8.1 Add `gx audit` to the README command list, noting the `GITHUB_TOKEN` requirement
-- [ ] 8.2 Leave `docs/demo.tape` unchanged. Decision recorded here rather than deferred: the
+- [x] 8.1 Add `gx audit` to the README command list, noting the `GITHUB_TOKEN` requirement
+- [x] 8.2 Leave `docs/demo.tape` unchanged. Decision recorded here rather than deferred: the
       tape is a single scripted `gx tidy` walkthrough, not a command inventory, and `gx audit`
       cannot be recorded there without a live token in the recording environment. Done when
       the tape is confirmed untouched in the final diff
-- [ ] 8.3 Run `mise run test` and `mise run integ`; both must pass
-- [ ] 8.4 Verify directory budgets: `src/audit/` contains exactly 4 files (leaving 4 free,
+- [x] 8.3 Run `mise run test` and `mise run integ`; both must pass
+- [x] 8.4 Verify directory budgets: `src/audit/` contains exactly 4 files (leaving 4 free,
       one for each of #130–#133), and `src/infra/github/` stays within 8
