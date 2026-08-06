@@ -69,14 +69,34 @@ The fake lives next to the trait it implements and is reachable from both unit t
 unit tests. That is the whole point — one fake means one import path.
 
 **Constraint:** the module is currently `#[cfg(test)] pub(crate) mod testutil`, so it does
-not exist in the library that integration tests link against. It must become
-`#[cfg(any(test, feature = "testutil"))] pub mod testutil` — gated by a Cargo feature that
-`dev-dependencies` turns on for the integration-test build, so the fake never ships in a
-release binary.
+not exist in the library that integration tests link against. It becomes a plain
+`#[path = "resolution_testutil.rs"] pub mod testutil` — no `cfg`, no feature.
 
-*Alternative rejected:* keep two fakes, one per side, and only unify each side internally.
-That leaves two types named `FakeRegistry` with two contracts — the exact confusion this
-change exists to remove.
+*Mechanism verified empirically before committing to it.* Two alternatives were tried and
+rejected on evidence:
+
+- `#[cfg(any(test, feature = "testutil"))]` + `gx = { path = ".", features = ["testutil"] }`
+  in `[dev-dependencies]` (the usual self-dependency trick). **Fails:** the self-dependency
+  changes `Cargo.lock`, and both `mise run test` and `mise run integ` invoke
+  `cargo test --locked`, which refuses. Making it work would mean editing the shared mise
+  task files, which this change has no business doing.
+- Keeping two fakes, one per side, unified only within each side. **Rejected:** leaves two
+  types named `FakeRegistry` with two contracts — the exact confusion this change exists to
+  remove.
+
+**Consequences of the plain `pub mod`, both accepted:**
+
+1. The module is no longer `#[cfg(test)]`, so strict clippy now applies to it as production
+   code. A trial promotion surfaced exactly four lint classes, all mechanical: missing field
+   docs, `#[must_use]` on builder methods returning `Self`, `#[must_use]` on getters, and a
+   `Default` impl. The new fake is written to satisfy them from the start.
+2. `Cargo.toml` has `include = ["/src/", ...]`, so the fake ships in the published crate as
+   ~200 lines of public API. That is the honest cost of one fake shared by both test tiers.
+   It is accepted rather than worked around, because the alternatives above cost more: a
+   feature gate cannot be enabled under `--locked`, and duplicating the fake reintroduces the
+   defect. Note for a future change: if shipping it becomes unwanted, the fix is a
+   `testutil` feature *plus* adding `--features testutil` to the mise test tasks — a
+   coordinated edit to shared files that belongs in its own change, not this one.
 
 ### D2: `describe_sha` is keyed on `(action, sha)` — the faithful contract wins
 
@@ -89,8 +109,15 @@ would propagate a fake that contradicts production into every test that uses it.
 **Consequence:** the six `lock_sync_tests` above must be corrected. Each is re-pointed to
 configure its tags under the workflow SHA it actually feeds in
 (`6d1e696000000000000000000000000000000000`), so the test exercises the path its name
-describes. Their assertions are unchanged — only the fixture SHA is corrected, which is the
-minimal edit that makes each test true again.
+describes.
+
+The *intent* is that only the fixture SHA changes and every assertion stands as written —
+that is the minimal edit that makes each test true again. But that is an **expectation, not
+a settled fact**: re-pointing the SHA changes what `describe_sha` returns, which can change
+which branch of `resolve_from_sha` executes (`ResolvedRef::Tag` vs `ResolvedRef::Commit`).
+Which branch each test actually takes is knowable only by running it. Task 4.2 is the gate
+that confirms it, and it is not a formality — if a test lands on the `Commit` branch, it has
+been silently rewritten rather than corrected, and gets reported rather than accepted.
 
 *Alternative rejected:* keep a `describe_any_sha()` escape-hatch flag so those six tests
 need no edit. That preserves the lie behind a flag and invites the next author to reach for
@@ -145,13 +172,27 @@ approaches that, the fix is fewer knobs, not a second file.
   2. `out_of_range_pinned_sha_is_reresolved_within_range` — make `matches_version` always
      return `true`; the test must fail.
   3. `update_lock_recoverable_errors_are_skipped` — make `is_skippable` return `false`;
-     the test must fail. (Proves `failing_action` really fails only that action.)
-  4. An `EmptyDateRegistry` successor in `integ_pipeline` — make `with_empty_dates` a no-op;
      the test must fail.
-  5. A `FailingDescribeRegistry` successor in `integ_pipeline` — make `failing_describe`
+  4. **`update_lock_recoverable_errors_are_skipped` again, mutating the fake this time** —
+     make `failing_action` ignore its action filter (fail *every* action, then fail *none*).
+     The test must fail both ways. This is the one knob that models **partial** failure, and
+     it is the successor to `MixedRegistry`, so it sits directly on the
+     `action-resolution` spec's load-bearing error-classification guardrail ("Mix of
+     recoverable and strict errors"). A `failing_action` that quietly fails everything or
+     nothing is exactly the permissive-default failure this whole section exists to catch —
+     and unlike check 3, which mutates production, this one proves the *fake's* filter is
+     real. Task 3.4's "matches the old double" eyeball check is not a substitute.
+  5. An `EmptyDateRegistry` successor in `integ_pipeline` — make `with_empty_dates` a no-op;
+     the test must fail.
+  6. A `FailingDescribeRegistry` successor in `integ_pipeline` — make `failing_describe`
      return `Ok`; the test must fail.
-  6. An `all_tags`-driven upgrade test in `integ_upgrade` — make `with_all_tags` drop its
+  7. An `all_tags`-driven upgrade test in `integ_upgrade` — make `with_all_tags` drop its
      tags; the test must fail.
+
+  Two knobs are deliberately left unchecked: `with_fixed_sha` (one caller, and its
+  assertion compares against the exact SHA it configures, so a broken knob cannot pass) and
+  `with_tags_result`. Both are canned-result overrides whose assertions name the canned value
+  directly. Recorded here so the omission is a decision rather than an oversight.
 
   A migrated test that still passes under its mutation is not migrated — it is disabled, and
   gets fixed before this change lands.
@@ -177,9 +218,16 @@ Two design choices reduce it structurally:
   fixed]** → Mutation checks 1 and 2 target exactly these. If a corrected test cannot be made
   to fail by breaking the logic it names, it is reported as a pre-existing dead test rather
   than quietly kept.
-- **[Exporting `testutil` from the library could leak test code into release builds]** →
-  Gated behind `#[cfg(any(test, feature = "testutil"))]`; the feature is enabled only via
-  `dev-dependencies`, so a plain `cargo build --release` still compiles it out.
+- **[Exporting `testutil` from the library ships it in the published crate]** → Accepted
+  knowingly, not overlooked; see D1 for why both alternatives cost more under `--locked`.
+  The fake has no dependencies beyond `std` and the crate's own domain types, so it adds no
+  transitive weight — only public surface. **This is a known non-blocking problem and should
+  outlive this change as a tracked issue**, since a note in a document that gets archived is
+  not a durable record. Filing is left to the maintainer (this change is under instruction
+  not to open issues); it is surfaced in the completion report so it is not lost.
+- **[Promoting the module out of `#[cfg(test)]` subjects it to strict clippy]** → Confirmed
+  by trial promotion: four mechanical lint classes, no design change needed. Written to
+  comply from the start rather than fixed after the fact.
 - **[One fake with many knobs becomes a god-object]** → Six knobs, each with a current
   caller, in a file well under the 440-line budget. The budget check in `tests/code_health.rs`
   enforces the ceiling; no budget number is raised.

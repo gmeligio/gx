@@ -73,6 +73,11 @@ gates, `tasks.md` is written regardless.
   `src/tidy/command_tests.rs`, `src/tidy/manifest_sync.rs`, `src/upgrade/plan.rs`,
   `tests/common/registries.rs` (deleted), `tests/integ_pipeline.rs`, `tests/integ_tidy.rs`,
   `tests/integ_upgrade.rs`.
+- **One production-adjacent consequence:** to let integration tests share the same fake,
+  `domain::resolution::testutil` stops being `#[cfg(test)]` and becomes a plain `pub mod`.
+  No runtime behavior changes, but the fake becomes public API and ships in the published
+  crate. Design D1 records why the feature-gated alternative cannot work here (both mise
+  test tasks run `cargo test --locked`, which rejects the required self-dependency).
 - **Risk:** collapsing doubles can silently weaken a suite if the unified fake defaults
   permissively. Mitigated by mutation-checking a representative sample of migrated tests
   (see design.md).

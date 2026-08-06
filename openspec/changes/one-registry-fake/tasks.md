@@ -9,9 +9,9 @@
 
 ## 2. Export the fake to integration tests
 
-- [ ] 2.1 Change `src/domain/resolution.rs`'s testutil include from `#[cfg(test)] pub(crate) mod` to a `#[cfg(any(test, feature = "testutil"))] pub mod`, keeping the diff confined to that include and the test-double module
-- [ ] 2.2 Add the `testutil` feature to `Cargo.toml` and enable it for the integration-test build so the fake is reachable as `gx::domain::resolution::testutil::FakeRegistry`
-- [ ] 2.3 Confirm `cargo build --release` still compiles the fake out
+- [ ] 2.1 Change `src/domain/resolution.rs`'s testutil include from `#[cfg(test)] pub(crate) mod` to a plain `pub mod` (no cfg, no feature — see design D1 for why the feature-gate alternative fails under `--locked`), keeping the diff confined to that include and the test-double module
+- [ ] 2.2 Confirm the fake is reachable as `gx::domain::resolution::testutil::FakeRegistry` from integration tests
+- [ ] 2.3 Satisfy strict clippy on the promoted module: field docs, `#[must_use]` on builders and getters, and a `Default` impl
 
 ## 3. Migrate unit-test doubles
 
@@ -30,7 +30,8 @@
 
 - [ ] 5.1 Delete `tests/common/registries.rs` entirely; drop its `mod` declaration from `tests/common/mod.rs`
 - [ ] 5.2 Repoint `tests/integ_pipeline.rs`, `tests/integ_tidy.rs`, `tests/integ_upgrade.rs` to `gx::domain::resolution::testutil::FakeRegistry`
-- [ ] 5.3 Replace `EmptyDateRegistry` with `.with_empty_dates()` and `FailingDescribeRegistry` with `.failing_describe(...)`, preserving the exact `ResolveFailed` reason string the old double produced
+- [ ] 5.3 Replace `EmptyDateRegistry` with `.with_empty_dates()` and `FailingDescribeRegistry` with `.failing_describe(...)`, preserving the exact `ResolveFailed` reason string the old double produced (`"Github API returned status 422 Unprocessable Entity"`)
+- [ ] 5.3a Confirm at least one migrated test asserts on that reason string — it can reach user-facing output, so if nothing pins it the preservation is unenforced and can drift silently. If no assertion exists, report that rather than adding one (out of scope)
 - [ ] 5.4 Replace `AuthRequiredRegistry` in `tests/integ_tidy.rs` with `.failing(AuthRequired)`
 
 ## 6. Mutation-check the migration
@@ -38,14 +39,15 @@
 - [ ] 6.1 `sha_first_lock_uses_workflow_sha_and_most_specific_version` — break `select_most_specific_tag` to pick the least specific tag; confirm the test FAILS
 - [ ] 6.2 `out_of_range_pinned_sha_is_reresolved_within_range` — make `matches_version` always return `true`; confirm the test FAILS
 - [ ] 6.3 `update_lock_recoverable_errors_are_skipped` — make `is_skippable` return `false`; confirm the test FAILS
-- [ ] 6.4 The `with_empty_dates` test in `integ_pipeline` — make the flag a no-op; confirm the test FAILS
-- [ ] 6.5 The `failing_describe` test in `integ_pipeline` — make it return `Ok`; confirm the test FAILS
-- [ ] 6.6 An `all_tags`-driven test in `integ_upgrade` — make `with_all_tags` drop its tags; confirm the test FAILS
-- [ ] 6.7 Revert every mutation; record which checks were run and their results for the final report
+- [ ] 6.4 `update_lock_recoverable_errors_are_skipped` — mutate the FAKE this time: make `failing_action` ignore its action filter, first failing every action then failing none; confirm the test FAILS both ways. This is the `MixedRegistry` successor and the only knob modelling partial failure, so it sits on the load-bearing error-classification guardrail (design, Automated Test Strategy §4)
+- [ ] 6.5 The `with_empty_dates` test in `integ_pipeline` — make the flag a no-op; confirm the test FAILS
+- [ ] 6.6 The `failing_describe` test in `integ_pipeline` — make it return `Ok`; confirm the test FAILS
+- [ ] 6.7 An `all_tags`-driven test in `integ_upgrade` — make `with_all_tags` drop its tags; confirm the test FAILS
+- [ ] 6.8 Revert every mutation; confirm `mise run test` and `mise run integ` are green again; record which checks were run and their results for the final report
 
 ## 7. Verify the gates
 
 - [ ] 7.1 `mise run test` passes
 - [ ] 7.2 `mise run integ` passes
 - [ ] 7.3 Confirm no budget number in `tests/code_health.rs` was raised, no `#[ignore]` added, no test deleted, and `src/domain/` is still within the 8-file limit
-- [ ] 7.4 Confirm exactly one `impl VersionRegistry` remains outside `src/infra/` — `grep -rn "impl VersionRegistry" src/ tests/` should show the real `Registry` plus the single unified fake
+- [ ] 7.4 Confirm exactly one fake remains — use `grep -rn "VersionRegistry for" src/ tests/`, not `grep "impl VersionRegistry"`: the latter misses fully-qualified impls like `impl crate::domain::resolution::VersionRegistry for NoopRegistry` (which is how `command_tests.rs` writes it today). Expect exactly two hits: the real `Registry` in `src/infra/` and the unified fake
