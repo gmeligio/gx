@@ -86,6 +86,42 @@ impl Registry {
         }
     }
 
+    /// Send an authenticated GET and deserialize a successful JSON response.
+    ///
+    /// `operation` names the API call in [`Error::Request`] for diagnostics.
+    ///
+    /// The status is classified *before* the body is parsed, so a non-2xx
+    /// response yields the precise error (e.g. [`Error::NotFound`]) rather than
+    /// a [`Error::ParseResponse`] from parsing an error body. Callers such as
+    /// `resolve_ref` depend on this to distinguish a missing ref from a
+    /// malformed one.
+    ///
+    /// Not usable by callers that read response headers (the body parse
+    /// consumes the response) or that need failures to stay non-fatal.
+    pub(super) fn get_json<T: serde::de::DeserializeOwned>(
+        &self,
+        url: &str,
+        operation: &'static str,
+    ) -> Result<T, Error> {
+        let response = self
+            .authenticated_get(url)
+            .send()
+            .map_err(|source| Error::Request {
+                operation,
+                url: url.to_owned(),
+                source,
+            })?;
+
+        if !response.status().is_success() {
+            return Err(Self::check_status(&response, url));
+        }
+
+        response.json().map_err(|source| Error::ParseResponse {
+            url: url.to_owned(),
+            source,
+        })
+    }
+
     /// Classify a non-success HTTP response into the appropriate `Error` variant.
     pub(super) fn check_status(response: &reqwest::blocking::Response, url: &str) -> Error {
         let status = response.status();

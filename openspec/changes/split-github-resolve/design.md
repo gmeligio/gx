@@ -2,12 +2,18 @@
 
 `src/infra/github/` currently holds four files:
 
-| file | total | logic |
-| --- | ---: | ---: |
-| `mod.rs` | 10 | 10 |
-| `registry.rs` | 258 | 258 |
-| `resolve.rs` | 544 | 438 |
-| `responses.rs` | 86 | 86 |
+| file | total | logic | after (total) |
+| --- | ---: | ---: | ---: |
+| `mod.rs` | 10 | 10 | 14 |
+| `registry.rs` | 258 | 258 | 294 |
+| `resolve.rs` | 544 | 438 | 150 |
+| `responses.rs` | 86 | 86 | 86 |
+| `tags.rs` | — | — | 237 |
+| `dates.rs` | — | — | 55 |
+
+The "after" column is filled in at implementation time (task 5.5). The largest
+post-split file is `registry.rs` at 294 total, leaving ~250 lines of headroom
+against the 550 budget.
 
 `resolve.rs` is 2 lines under the 440 logic-line budget and 6 under the 550
 total-line budget. `tests/code_health.rs` also caps a directory at 8 `.rs` files,
