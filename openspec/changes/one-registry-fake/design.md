@@ -131,9 +131,17 @@ it. The six tests are wrong today; a flag would make them permanently wrong.
 | `EmptyDateRegistry` | `FakeRegistry::new().with_empty_dates()` |
 | `FailingDescribeRegistry` | `FakeRegistry::new().failing_describe(reason)` |
 | `MixedRegistry` | `FakeRegistry::new().failing_action("actions/checkout", err)` |
-| `MockRegistry` | `FakeRegistry::new().with_lookup_result(r).with_tags_result(r)` |
+| `MockRegistry` | `FakeRegistry::new().with_lookup_result(r)` |
 
 Every knob above has at least one current caller. Nothing speculative is added.
+
+**Verified after implementation.** A caller count over the finished code found
+`with_tags_result` (originally planned as `MockRegistry`'s second half) had **zero**
+callers — the migrated `MockRegistry` tests all drive `all_tags` through `with_all_tags`
+or an error knob instead. It was deleted rather than kept "for symmetry"; a knob with no
+caller is exactly the speculation the Non-Goals rule out. Final knob set and caller counts:
+`with_all_tags` 13, `with_sha_tags` 10, `failing_auth` 3, `failing_describe` 2,
+`with_lookup_result` 2, `failing_action` 1, `with_fixed_sha` 1, `with_empty_dates` 1.
 
 ### D4: `lookup_sha`'s default SHA is the deterministic hash
 

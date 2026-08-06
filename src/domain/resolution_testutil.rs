@@ -38,8 +38,6 @@ pub struct FakeRegistry {
     fixed_sha: Option<String>,
     /// When set, `lookup_sha` returns this canned result verbatim.
     lookup_result: Option<Result<Commit, ResolutionError>>,
-    /// When set, `all_tags` returns this canned result verbatim.
-    tags_result: Option<Result<Vec<String>, ResolutionError>>,
     /// When set, every method fails with this error.
     error: Option<ResolutionError>,
     /// Errors scoped to a single action, leaving other actions resolvable.
@@ -89,14 +87,6 @@ impl FakeRegistry {
     #[must_use]
     pub fn with_lookup_result(mut self, result: Result<Commit, ResolutionError>) -> Self {
         self.lookup_result = Some(result);
-        self
-    }
-
-    /// Make `all_tags` return `result` verbatim.
-    #[must_use]
-    pub fn with_tags_result(mut self, result: Result<Vec<Version>, ResolutionError>) -> Self {
-        self.tags_result =
-            Some(result.map(|tags| tags.iter().map(|v| v.as_str().to_owned()).collect()));
         self
     }
 
@@ -189,9 +179,6 @@ impl VersionRegistry for FakeRegistry {
     }
 
     fn all_tags(&self, id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
-        if let Some(result) = self.tags_result.clone() {
-            return result.map(|tags| tags.into_iter().map(Version::from).collect());
-        }
         if let Some(error) = self.error_for(id) {
             return Err(error);
         }

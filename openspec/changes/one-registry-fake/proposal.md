@@ -20,7 +20,8 @@ duplication is what let it hide.
 
 - Add ONE configurable in-memory `FakeRegistry` in `src/domain/resolution_testutil.rs`,
   exported from the library so both unit and integration tests use the same type.
-- Express every existing scenario as **configuration on that one fake**, not as a new type:
+- Express every existing scenario as **configuration on that one fake** (eight builder
+  knobs, each with at least one real caller), not as a new type:
   - canned tag lists per action (`all_tags`)
   - tags per `(action, sha)` pair (`describe_sha`), keyed on the SHA as production does
   - a fixed SHA for `lookup_sha`

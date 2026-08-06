@@ -3,7 +3,7 @@
 - [x] 1.1 Rewrite `src/domain/resolution_testutil.rs` as a single `FakeRegistry` with fields for: per-action tag lists (`all_tags`), per-`(action, sha)` tag lists (`describe_sha`), an optional fixed lookup SHA, an optional canned `lookup_sha` result, an optional canned `all_tags` result, a whole-registry error, a per-action error map, a `describe_sha` error, and an empty-dates flag
 - [x] 1.2 Implement `describe_sha` keyed on `(id, sha)` — an unconfigured SHA yields empty tags, never the action's full tag list (design D2)
 - [x] 1.3 Implement `lookup_sha` defaulting to the deterministic 40-hex `fake_sha(id, version)`, overridable by `with_fixed_sha` then by a canned result (design D4)
-- [x] 1.4 Add builder methods, each with a current caller: `with_all_tags`, `with_sha_tags`, `with_fixed_sha`, `with_lookup_result`, `with_tags_result`, `failing`, `failing_action`, `failing_describe`, `with_empty_dates`
+- [x] 1.4 Add builder methods, each with a current caller: `with_all_tags`, `with_sha_tags`, `with_fixed_sha`, `with_lookup_result`, `failing`/`failing_auth`, `failing_action`, `failing_describe`, `with_empty_dates`. **`with_tags_result` was planned but deleted**: a post-implementation caller count found it had zero callers, so it was speculative
 - [x] 1.5 Keep `fake_sha` a public associated function — ~30 existing call sites assert against it
 - [x] 1.6 Write private-item and field docs on every field and method (clippy strict requires them)
 
