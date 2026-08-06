@@ -108,12 +108,38 @@ existing:
 
 Tested in both directions: `46.0.1` and `v46.0.1` must reach the same verdict.
 
-### Unparseable patched version ⇒ `OutOfRange`, never `Upgradable`
+### Unparseable patched version ⇒ `NoFixAvailable`, never `Upgradable`
 
-If an advisory's identifier does not parse as semver, `parse_semver` yields
-`None` and `matches_version` is `false`. That lands in `OutOfRange` rather than
-`Upgradable` — the conservative direction. gx would rather withhold a working
-command than emit a broken one.
+An advisory identifier that does not parse as semver is treated exactly like an
+absent one: `NoFixAvailable`.
+
+The alternative — letting it fall through to `OutOfRange`, since
+`matches_version` would return `false` anyway — is rejected. It is conservative
+in the right direction (no command is emitted either way), but it makes gx say
+something false: `OutOfRange` means "the fix exists, your specifier just won't
+reach it", and #130 renders that as "fixed in X, outside your ^2 range —
+requires a major bump". For an unintelligible identifier there is no coherent X
+and a major bump would not help. Telling a user under incident pressure to widen
+a specifier toward a version that does not exist is the same trust failure the
+proposal is about, just one step removed.
+
+Collapsing it into `NoFixAvailable` keeps both messages true: gx has no usable
+patched version, so migration is the honest advice. It also keeps the enum
+three-way — a fourth `Unintelligible` variant would push a data-quality detail
+of the advisory feed into every caller's match, for no different user action.
+
+Concretely: parse the identifier with `parse_semver` before classifying, and
+treat an unparseable identifier the same as an absent one. This means
+`Remediation` never carries a `fixed` value it could not parse, which also makes
+`Version::normalized`'s digit-leading guard a non-issue — every string reaching
+it is known-parseable and therefore digit-leading once its `v` is stripped.
+
+`parse_semver` is currently `pub(super)` inside `src/domain/action/`, so it must
+widen to `pub(crate)` for `src/domain/remediation.rs` to call it. That one-word
+change is preferred over reimplementing the `v`-stripping and
+`4` → `4.0.0` padding locally: a second parser would be exactly the drifting
+duplicate this design set out to avoid, and it would be the copy that silently
+disagrees at a boundary. The function stays crate-private; no public API grows.
 
 ## Automated Test Strategy
 
@@ -136,7 +162,8 @@ advisory cases from #133, using their actual specifiers and versions:
 Plus: the `v`-prefixed advisory form reaching the same verdict as the bare form;
 a branch specifier and a bare-SHA specifier both refusing to suggest an upgrade
 (the inverted-polarity case, which is the easiest thing for a later change to
-get wrong); and an unparseable identifier landing in `OutOfRange`.
+get wrong); and an unparseable identifier landing in `NoFixAvailable`, not
+`OutOfRange`.
 
 No new test infrastructure. No fixtures, no network, no fakes — the function is
 pure.

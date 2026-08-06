@@ -19,6 +19,12 @@ Classification SHALL be tolerant of the `v` prefix in either direction: advisory
 identifiers commonly omit it (`3.0.0`) while gx tags carry it (`v3.0.0`), and
 the verdict MUST NOT depend on which form the advisory used.
 
+The decision rests on the manifest specifier and the advisory's patched version
+alone. Whether the currently locked version is itself already patched is a
+separate question — determining that an action is vulnerable at all is the
+caller's job, and this decision assumes it has been answered. Scenarios below
+name a locked version only to identify the real-world case; it is not an input.
+
 #### Scenario: Patched version is inside the specifier's range
 
 - **WHEN** the manifest pins `tj-actions/changed-files` at `^46`, the locked
@@ -63,6 +69,22 @@ the verdict MUST NOT depend on which form the advisory used.
 - **WHEN** the manifest pins an action at `^46` and the advisory's first patched
   version is given as `v46.0.1` rather than `46.0.1`
 - **THEN** gx reaches the same verdict as for the unprefixed form
+
+### Requirement: An unusable patched version is reported as no fix, not as out of range
+
+When an advisory names a patched version gx cannot interpret as a version, gx
+SHALL treat it as though no patched version were named. gx MUST NOT report such
+an advisory as having a fix outside the user's range, because that would tell
+the user a wider specifier would reach a fix when no reachable fix is known.
+
+#### Scenario: Advisory patched version is not a recognizable version
+
+- **WHEN** the manifest pins an action at `^2` and the advisory's first patched
+  version cannot be interpreted as a version
+- **THEN** no command is suggested
+- **AND** the user is told that no fixed version is available and migration is
+  required
+- **AND** the user is NOT told that a fix exists outside their range
 
 ### Requirement: Never suggest an upgrade for a reference an upgrade cannot move
 

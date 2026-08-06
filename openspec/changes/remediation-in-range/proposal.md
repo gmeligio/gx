@@ -31,11 +31,14 @@ the rendering belong to #129/#130 and are explicitly out of scope.
   it classifies the fix into exactly one of three outcomes:
   - `Upgradable { fixed }` — a patched version exists and the specifier admits
     it; `gx upgrade <action>` will reach it.
-  - `NoFixAvailable` — the advisory names no patched version; migration required.
+  - `NoFixAvailable` — the advisory names no patched version, or names one gx
+    cannot interpret; migration required.
   - `OutOfRange { fixed }` — a patched version exists but falls outside the
     specifier; a major bump is required.
 - Reuse `Specifier::matches_version` for condition 2 rather than adding new
-  matching logic. Normalize advisory identifiers through `Version::normalized`
+  matching logic, and widen the crate's existing `parse_semver` from
+  `pub(super)` to `pub(crate)` rather than duplicating it. Normalize advisory
+  identifiers through `Version::normalized`
   so the `v`-prefix mismatch between advisory strings (`3.0.0`) and gx tags
   (`v3.0.0`) cannot produce a wrong verdict.
 - No CLI surface, no output, no network. Nothing calls this yet.
@@ -83,6 +86,7 @@ appears*, which is those issues' business.
   concept is about advisories, not about the action identity model, so it sits
   one level up in `src/domain/`.
 - Reads existing `Specifier`, `ResolvedRef`, and `Version` — changes none of
-  them.
+  them. The one edit outside the new file is widening `parse_semver`'s
+  visibility in `src/domain/action/specifier.rs`; it stays crate-private.
 - No new dependency (`semver = "1"` is already used via `Specifier`).
 - No behavior change for any existing command; `gx` output is byte-identical.
