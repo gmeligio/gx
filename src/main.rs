@@ -252,7 +252,7 @@ fn run_upgrade(
 }
 
 /// Run the audit command, rendering either human output or, with `--json`, a single
-/// JSON document on stdout. Returns the log file to keep it alive until `main` drops it.
+/// JSON document on stdout. Returns the log file to keep it alive until `run` drops it.
 /// Exits the process directly on a non-zero report exit code.
 ///
 /// A missing token surfaces as `Err` from `run` and propagates out of `main`, so no

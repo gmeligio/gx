@@ -1,7 +1,9 @@
 #![expect(clippy::pub_use, reason = "reexport from extracted submodule")]
 
-//! `gx audit` — checks the actions recorded in `gx.lock` against networked, time-varying
-//! knowledge: security advisories and upstream repository state.
+//! `gx audit` — checks the actions recorded in `gx.lock` against knowledge that changes
+//! without the repository changing: today, whether a pin is mutable; next, security
+//! advisories and upstream repository state, which is why the command requires a token
+//! even though the check it currently ships needs no network.
 //!
 //! Separate from `gx lint` because the two answer different questions. Lint judges *your
 //! code* against rules you own: offline, deterministic, and its verdict changes only when
@@ -46,8 +48,8 @@ pub enum Error {
 
 /// Run every check over the locked action set.
 ///
-/// A pure function from lock to findings: no I/O, so it is exercised in tests with a
-/// fixture lock and no network.
+/// Reads only the lock — no network — so it is exercised in tests with a fixture lock and
+/// a no-op progress callback.
 #[must_use]
 pub fn collect_findings(config: &Config, on_progress: &mut dyn FnMut(&str)) -> Vec<Finding> {
     on_progress("Auditing locked actions...");

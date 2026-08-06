@@ -7,7 +7,8 @@
 //!
 //! - [`AdvisoryQuery`] is what checks depend on.
 //! - [`GraphQlAdvisories`] is the real adapter, querying GitHub's GraphQL API.
-//! - `FakeAdvisories` is the `#[cfg(test)]` double returning canned advisories.
+//! - `FakeAdvisories`, in the `#[cfg(test)] mod fake` below, is the double returning
+//!   canned advisories.
 //!
 //! Modeled on [`crate::infra::shellcheck`], which establishes the same trait + adapter +
 //! fake shape.
@@ -22,6 +23,13 @@ use serde::{Deserialize, Serialize};
 
 /// GitHub's GraphQL endpoint.
 const GRAPHQL_URL: &str = "https://api.github.com/graphql";
+
+/// The HTTP status a failed GraphQL query arrives with.
+///
+/// GraphQL reports query-level failures — bad credentials, malformed query — in an
+/// `errors` array with a 200 response, so a rejected query is indistinguishable from a
+/// successful one by status alone. Every failure below therefore carries this status.
+const GRAPHQL_ERROR_STATUS: u16 = 200;
 
 /// The advisory query, parameterized by the action's repository slug.
 ///
@@ -106,8 +114,8 @@ struct Variables<'vars> {
 struct Response {
     /// The `data` half; absent when the query itself failed.
     data: Option<ResponseData>,
-    /// Query-level errors. GraphQL reports these with HTTP 200, so they must be checked
-    /// explicitly or a failed query reads as an empty — and therefore clean — result.
+    /// Query-level errors. See [`GRAPHQL_ERROR_STATUS`] for why these must be checked
+    /// explicitly rather than inferred from the HTTP status.
     #[serde(default)]
     errors: Vec<GraphQlError>,
 }
@@ -184,18 +192,17 @@ impl GraphQlAdvisories {
 
     /// Convert a decoded response into advisories, or an error if the query itself failed.
     fn interpret(response: Response) -> Result<Vec<Advisory>, Error> {
-        // GraphQL signals query failures with HTTP 200 and an `errors` array. Treating
-        // that as "no advisories" is exactly the silent false-clean this command exists
-        // to prevent, so it is an error.
+        // Treating a rejected query as "no advisories" is exactly the silent false-clean
+        // this command exists to prevent, so both failure shapes are errors.
         if let Some(first) = response.errors.first() {
             return Err(Error::ApiError {
-                status: 200,
+                status: GRAPHQL_ERROR_STATUS,
                 url: format!("{GRAPHQL_URL} ({})", first.message),
             });
         }
         let Some(data) = response.data else {
             return Err(Error::ApiError {
-                status: 200,
+                status: GRAPHQL_ERROR_STATUS,
                 url: format!("{GRAPHQL_URL} (response contained no data)"),
             });
         };
