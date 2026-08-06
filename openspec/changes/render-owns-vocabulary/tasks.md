@@ -31,12 +31,12 @@
 
 ## 6. Prove output is unchanged
 
-- [ ] 6.1 Run `mise run test`; confirm the exact-string summary tests (`render_upgrade_with_upgrades`, `render_tidy_with_changes`, `render_init_with_actions`, `render_lint_with_violations`, `render_upgrade_up_to_date`) pass unmodified
-- [ ] 6.2 Confirm the `--json` tests (`to_json_uses_resolved_versions_and_compare`, `to_json_omits_compare_when_absent`, `to_json_up_to_date_has_empty_upgrades`) pass unmodified, proving the serialized contract is intact
-- [ ] 6.3 Run `mise run integ` and confirm green
-- [ ] 6.4 Review the full diff and confirm the only changed user-visible strings are the five lint messages named in section 4
+- [x] 6.1 Run `mise run test`; confirm the exact-string summary tests (`render_upgrade_with_upgrades`, `render_tidy_with_changes`, `render_init_with_actions`, `render_lint_with_violations`, `render_upgrade_up_to_date`) pass unmodified
+- [x] 6.2 Confirm the `--json` tests (`to_json_uses_resolved_versions_and_compare`, `to_json_omits_compare_when_absent`, `to_json_up_to_date_has_empty_upgrades`) pass unmodified, proving the serialized contract is intact
+- [x] 6.3 Run `mise run integ` and confirm green
+- [x] 6.4 Review the full diff and confirm the only changed user-visible strings are the five lint messages named in section 4
 
 ## 7. Spec and close-out
 
-- [ ] 7.1 Confirm the `command-output` delta spec matches what shipped; adjust if implementation diverged
-- [ ] 7.2 Commit with a Conventional Commits title (`refactor(output): ...`), using `--no-gpg-sign` if signing is refused
+- [x] 7.1 Confirm the `command-output` delta spec matches what shipped; adjust if implementation diverged
+- [x] 7.2 Commit with a Conventional Commits title (`refactor(output): ...`), using `--no-gpg-sign` if signing is refused
