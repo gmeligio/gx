@@ -1,6 +1,7 @@
 pub mod github;
 pub mod lock;
 pub mod manifest;
+pub mod registry;
 pub mod repo;
 pub mod shellcheck;
 pub mod workflow_scan;
