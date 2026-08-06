@@ -1,3 +1,18 @@
+> **Note on the enclosing guardrail heading.** These rules sit under
+> `## Guardrail: Error classification (recoverable vs. strict)`, whose title and
+> rationale paragraph describe a single binary. This change makes the
+> classification two-dimensional, so at sync time that heading becomes
+> `## Guardrail: Error classification (skippable and retryable)` and its rationale
+> paragraph is restated to cover both axes. Left as-is, the section title would
+> misstate its own content.
+
+> Both rule headers below are reproduced verbatim from the main spec so they match
+> exactly. Their titles keep the word "recoverable" while their bodies now say
+> "skippable"; at sync time both titles are restated in the skippable/retryable
+> vocabulary along with the guardrail heading above. The rename is deliberately not
+> expressed as a RENAMED delta, because pairing a rename with a MODIFIED block for
+> the same heading would ask the sync step to process one heading twice.
+
 ## MODIFIED Requirements
 
 ### Rule: Resolution errors are classified as recoverable or strict
@@ -87,7 +102,8 @@ the existing pre-run warning about unauthenticated access is unchanged.
 - **GIVEN** resolution is skipped because the GitHub rate limit is exhausted
 - **WHEN** the skip is reported
 - **THEN** the message identifies GitHub as the forge that was rate limited
-- **AND** the message tells the user the limit resets and that a token raises it
+- **AND** the message names the environment variable that raises the limit
+- **AND** the message does NOT claim when the limit resets, because that is not read from the response
 
 #### Scenario: Auth message names the forge and the remedy
 
