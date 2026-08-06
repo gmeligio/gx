@@ -14,7 +14,7 @@
 
 ## 3. Verify
 
-- [ ] 3.1 Confirm no file under `src/` or `tests/` was touched
-- [ ] 3.2 Confirm README needs no edit (line 75 already carries the pointer) and record the `docs/demo.tape` judgment
-- [ ] 3.3 Confirm each newly added or changed citation resolves, checking the anchor is really present on the page and not just a 200 on the base URL
-- [ ] 3.4 Run `mise run test` as a no-regression check and confirm it passes
+- [x] 3.1 Confirm no file under `src/` or `tests/` was touched
+- [x] 3.2 Confirm README needs no edit (line 75 already carries the pointer) and record the `docs/demo.tape` judgment
+- [x] 3.3 Confirm each newly added or changed citation resolves, checking the anchor is really present on the page and not just a 200 on the base URL
+- [x] 3.4 Run `mise run test` as a no-regression check and confirm it passes
