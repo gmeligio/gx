@@ -18,7 +18,7 @@
 ## 4. Update construction sites
 
 - [ ] 4.1 Update the four `map_err` blocks in `src/infra/github/registry.rs` to construct `RateLimited { forge: Forge::GitHub }` / `AuthRequired { forge: Forge::GitHub }`
-- [ ] 4.2 Update test registries that construct these variants: `src/domain/resolution_testutil.rs`, `src/tidy/command_tests.rs`, `src/tidy/lock_sync_tests.rs`, `tests/common/registries.rs`
+- [ ] 4.2 Update test registries that construct these variants: `src/domain/resolution_testutil.rs`, `src/tidy/command_tests.rs`, `src/tidy/lock_sync_tests.rs`, `tests/common/registries.rs`; also check `src/tidy/manifest_sync.rs`, which consumes `AuthRequiredRegistry` without constructing the variant directly
 
 ## 5. Tests
 
@@ -30,5 +30,5 @@
 ## 6. Verify
 
 - [ ] 6.1 `mise run test` passes, including `tests/integ_tidy.rs:674` (tidy succeeds under `AuthRequiredRegistry`) unmodified — the executable form of the skippable promise
-- [ ] 6.2 `mise run integ` passes; confirm no integration assertion depended on the two reworded strings
+- [ ] 6.2 `mise run integ` passes (no test asserts on the two reworded strings; they appear only at their definitions)
 - [ ] 6.3 Confirm no budget in `tests/code_health.rs` was raised and no new file was added to `src/domain/`
