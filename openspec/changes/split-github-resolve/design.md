@@ -81,9 +81,19 @@ to parameterize the host, but neither is designed for here.
 *Placement:* `registry.rs`, next to `authenticated_get` and `check_status`, which
 it composes and which already live there. It stays `pub(super)`. `registry.rs`
 grows by roughly 12 lines to about 270 — well inside budget — and no new file is
-needed for it. `parse_next_link` reads response headers, which `get_json` consumes,
-so pagination keeps its own explicit request path rather than being forced through
-the helper.
+needed for it. It needs a doc comment: `missing_docs_in_private_items` is denied.
+
+*Two call sites are exempt and must NOT be routed through the helper.* There are
+nine `authenticated_get` sites, not eight; the two that do not match the shape
+above are exempt for reasons that are behavioral, not stylistic:
+
+- `dereference_tag` returns `Option` and uses `.ok()?` rather than `map_err`. Its
+  failures are deliberately silent — a failed dereference yields a missing tag,
+  not an error. Routing it through `get_json` would turn that `None` into an
+  `Err` and change what `get_tags_for_sha` returns.
+- `get_version_tags` calls `parse_next_link(response.headers())` *before*
+  `response.json()`, and `json()` consumes the response. Headers cannot be read
+  after `get_json` swallows it, so pagination keeps its own explicit request path.
 
 *Alternative rejected:* a `request.rs` file holding the helper. It would be a
 ~15-line file whose contents belong beside `authenticated_get`, splitting HTTP
@@ -153,10 +163,18 @@ that signal by changing the thing being held fixed.
   `GITHUB_TOKEN` or it fails with `RateLimited`, so it is not part of the local
   gate; run it when a token is available.
 - **Critical path** — the behavior most at risk from a bad move, in order:
-  1. annotated-tag dereferencing (`fetch_ref_commit`'s owner/repo re-extraction
+  1. `get_version_tags`'s pagination loop. It is the largest block that must be
+     transcribed by hand (it is exempt from `get_json`, see Decision 1) and it
+     has **no test coverage at all** — no unit test, and `tests/e2e_github.rs`
+     covers only `resolve_ref` and `get_tags_for_sha`. An inverted or dropped
+     `match next_url { Some(next) => url = next, None => break }` branch would
+     silently return only the first page and every existing test would still
+     pass. This one cannot be caught by running the suite; it has to be caught
+     by reading the diff.
+  2. annotated-tag dereferencing (`fetch_ref_commit`'s owner/repo re-extraction
      from the ref URL is fiddly string surgery — it must move verbatim),
-  2. the tag → release → branch → commit fallback order in `resolve_ref`,
-  3. `operation` strings on `Error::Request`, which appear in user-facing error
+  3. the tag → release → branch → commit fallback order in `resolve_ref`,
+  4. `operation` strings on `Error::Request`, which appear in user-facing error
      messages and are easy to transpose when routing calls through `get_json`.
 - **Gate:** `mise run test` (typecheck, format, lint, size budgets, lockfile,
   unit tests) must pass, with `tests/code_health.rs` unmodified. Its file-count,
@@ -184,8 +202,10 @@ than a side effect.
   place to revisit them.
 - The genuine risk is a *silently successful* refactor that changes which
   endpoint is hit or in what order, since a wrong-but-working call chain can pass
-  unit tests. Mitigated by diff review of call order per method and by the e2e
-  suite.
+  unit tests. Mitigated by diff review of call order per method, and — for
+  `resolve_ref` and `get_tags_for_sha` only — by the e2e suite. `get_version_tags`
+  has no test covering it at any level, so for that method diff review is the
+  *only* mitigation.
 
 ## Risks / Trade-offs
 
