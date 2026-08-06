@@ -224,31 +224,6 @@ impl VersionRegistry for Registry {
         })
     }
 
-    fn tags_for_sha(
-        &self,
-        id: &ActionId,
-        sha: &CommitSha,
-    ) -> Result<Vec<Version>, ResolutionError> {
-        self.get_tags_for_sha(id.as_str(), sha.as_str())
-            .map(|tags| tags.into_iter().map(Version::from).collect())
-            .map_err(|e| match e {
-                Error::RateLimited { .. } => ResolutionError::RateLimited {
-                    forge: Forge::GitHub,
-                },
-                Error::Unauthorized { .. } => ResolutionError::AuthRequired {
-                    forge: Forge::GitHub,
-                },
-                Error::ClientInit(_)
-                | Error::Request { .. }
-                | Error::NotFound { .. }
-                | Error::ApiError { .. }
-                | Error::ParseResponse { .. } => ResolutionError::NoTagsForSha {
-                    action: id.clone(),
-                    sha: sha.clone(),
-                },
-            })
-    }
-
     fn all_tags(&self, id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
         self.get_version_tags(id.as_str())
             .map(|tags| tags.into_iter().map(Version::from).collect())

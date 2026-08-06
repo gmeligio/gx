@@ -13,16 +13,6 @@ impl VersionRegistry for AuthRequiredRegistry {
         })
     }
 
-    fn tags_for_sha(
-        &self,
-        _id: &ActionId,
-        _sha: &CommitSha,
-    ) -> Result<Vec<Version>, ResolutionError> {
-        Err(ResolutionError::AuthRequired {
-            forge: Forge::GitHub,
-        })
-    }
-
     fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
         Err(ResolutionError::AuthRequired {
             forge: Forge::GitHub,
@@ -107,23 +97,6 @@ impl VersionRegistry for FakeRegistry {
             ref_type: Some(RefType::Tag),
             date: CommitDate::from("2026-01-01T00:00:00Z"),
         })
-    }
-
-    fn tags_for_sha(
-        &self,
-        id: &ActionId,
-        _sha: &CommitSha,
-    ) -> Result<Vec<Version>, ResolutionError> {
-        if self.fail_tags {
-            return Err(ResolutionError::AuthRequired {
-                forge: Forge::GitHub,
-            });
-        }
-        Ok(self
-            .tags
-            .get(id.as_str())
-            .map(|(_, tags)| tags.clone())
-            .unwrap_or_default())
     }
 
     fn all_tags(&self, id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
