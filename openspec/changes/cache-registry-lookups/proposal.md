@@ -19,7 +19,7 @@ None. This broadens an existing guarantee rather than introducing a new concept.
 
 ### Modified Capabilities
 
-- `action-resolution`: the requirement "SHA descriptions are deduplicated within a single run" currently promises deduplication for SHA descriptions alone. It is replaced by a requirement covering every registry lookup — SHA lookups, tags-for-SHA, all-tags, and SHA descriptions — so users on the unauthenticated rate limit are far less likely to hit it.
+- `action-resolution`: the requirement "SHA descriptions are deduplicated within a single run" currently promises deduplication for SHA descriptions alone. It is replaced by a requirement covering every registry lookup a run actually issues — version lookups, all-tags, and SHA descriptions — so users on the unauthenticated rate limit are far less likely to hit it. (The trait's fourth method, `tags_for_sha`, is cached too but has no production caller, so the requirement claims nothing for it.)
 
 **Spec relevance gate.** The proposal rules say "requires spec: adds, removes, or changes user-facing behavior" and "skip spec: internal refactoring with no user-visible change". This is not purely internal: the number of GitHub API requests a run makes is user-visible through the 60 req/hour unauthenticated limit — the same limit `gx` already warns about at startup. A repository that previously exhausted quota mid-run and emitted `ResolutionSkipped` warnings can now complete. The existing spec already treats single-run deduplication as spec-worthy behavior (`action-resolution`, "SHA descriptions are deduplicated within a single run"); leaving that requirement narrower than the shipped behavior would let the spec drift. The delta modifies that one requirement and adds nothing else.
 

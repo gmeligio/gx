@@ -6,7 +6,7 @@ Today exactly one of those four is deduplicated. `ShaIndex` (`src/domain/action/
 
 The method that repeats hardest cannot use that mechanism at all. `all_tags` is called in a loop over every manifest spec at `src/upgrade/plan.rs:222` (and again at `:163`) through `service.registry()`, an accessor that reaches past `ActionResolver` to the bare registry. There is no `&mut` in scope there, so covering `all_tags` with the existing idiom would mean a second round of `&mut` threading through `determine_upgrades` → `plan`.
 
-Constraints: single-threaded blocking `reqwest`; `src/domain/action/` is at its 8-file directory budget; the nine existing `VersionRegistry` test doubles should not have to learn about caching; issue #137 will add a retry layer at the same boundary.
+Constraints: single-threaded blocking `reqwest`; `src/domain/action/` is at its 8-file directory budget; the eight existing `VersionRegistry` test doubles should not have to learn about caching; issue #137 will add a retry layer at the same boundary.
 
 ## Goals / Non-Goals
 
@@ -39,7 +39,11 @@ let registry = Caching::new(GithubRegistry::new(token)?);
 
 *Why over changing the port to `&mut self`:* that would remove the need for interior mutability, but contorts the port to serve one wrapper — viral up the call graph, blocks trait objects and shared ownership, makes cache-over-retry layering impossible under exclusive borrows, and forces a signature change onto two real implementations and nine fakes.
 
+*Why over memoizing inside `ActionResolver`:* it already holds `&'reg R` and every command constructs one, so it looks like a cheaper home — no new dependency, no new directory. It fails on the same criterion as `ShaIndex`: `src/upgrade/plan.rs:163` and `:222` call `service.registry().all_tags(...)`, reaching *past* the resolver to the bare registry. A cache inside `ActionResolver` cannot see those calls, which are the ones that matter most.
+
 *Why generic, not `Box<dyn VersionRegistry>`:* Rust decorators are conventionally generic. No allocation per layer, no dynamic dispatch, and the delegation inlines. The existing code is already generic over `R: VersionRegistry` everywhere, so nothing else changes shape.
+
+*Scope note — `tags_for_sha` has no production caller.* The trait declares four methods, but `tags_for_sha` is only ever implemented, never called: `Registry::describe_sha` (`src/infra/github/registry.rs:246`) reaches the same data through the *inherent* helper `get_tags_for_sha`, not the trait method. The decorator caches it anyway, for uniformity — a `VersionRegistry` impl where three of four methods are cached and the fourth silently is not is a trap for the next caller. But the user-facing requirement claims nothing for it, because no user run issues that call. It is covered, not advertised.
 
 Interior mutability behind `&self` is the sanctioned use here. [`std::cell`](https://doc.rust-lang.org/std/cell/index.html) names it explicitly: "Introducing mutability 'inside' of something immutable... caching forces the implementation to perform mutation; or because you must employ mutation to implement a trait method that was originally defined to take `&self`." Cargo's own registry client takes the same shape — [`RemoteRegistry`](https://doc.rust-lang.org/nightly/nightly-rustc/cargo/sources/registry/remote/struct.RemoteRegistry.html) is `&self` plus `RefCell`/`OnceCell` because the `Source` trait's `query` takes `&self`.
 
@@ -70,7 +74,7 @@ The decorator is an adapter over a port, so it belongs in `src/infra/`, not `src
 - `src/infra/github/` is at 4/8 files and would fit, but it is the *GitHub* adapter. The decorator is backend-agnostic — it wraps any `VersionRegistry`, and issue #145 adds a second backend it must also wrap. Filing it under `github/` would misname it.
 - `src/infra/registry/` — chosen. `caching.rs` plus `mod.rs`, 2/8. #137's retry layer lands beside it as `retrying.rs`, which is the arrangement that makes the layer ordering legible at the composition root.
 
-The 8-file budget counts `.rs` files per directory non-recursively. `src/infra/` holds 4 `.rs` files, so adding a subdirectory does not press on it, and the new `src/infra/registry/` starts at 2.
+The 8-file budget counts `.rs` files per directory non-recursively. `src/infra/` holds 3 `.rs` files (`mod.rs`, `repo.rs`, `workflow_update.rs`), so adding a subdirectory does not press on it at all, and the new `src/infra/registry/` starts at 2.
 
 ### Decision 5: Delete `ShaIndex` outright
 
@@ -84,7 +88,7 @@ Keeping both mechanisms was rejected: two caches for one concern, with `describe
 
 **Level: unit, in isolation.** The decorator is tested against a purpose-built counting fake rather than through the commands, because "how many times did the network get hit" is not observable from a command's output — which is exactly the property under test.
 
-- **New test infrastructure**: one counting fake registry, local to the decorator's test module, holding a `Cell<usize>` per method and returning canned successes. It is deliberately *not* added to `src/domain/resolution_testutil.rs` — keeping it local means the nine existing doubles stay untouched and unaware of caching, and issue #143's unified fake does not have to decide whether to model caching.
+- **New test infrastructure**: one counting fake registry, local to the decorator's test module, holding a `Cell<usize>` per method and returning canned successes. It is deliberately *not* added to `src/domain/resolution_testutil.rs` — keeping it local means the eight existing doubles stay untouched and unaware of caching, and issue #143's unified fake does not have to decide whether to model caching.
 - **Critical path — four tests, one per method**: call the method twice with identical arguments, assert the returned values are equal and the fake's counter is 1.
 - **Key discrimination — one test**: call a method twice with *different* arguments, assert the counter is 2. This is the test that would catch a key built from the wrong fields (e.g. `lookup_sha` keyed on `ActionId` alone, silently returning `v3`'s commit for `v4`). That failure mode is a wrong lock entry, not just a slow run, so it is the highest-value assertion here.
 - **Error is not cached — one test**: a fake that always errors, called twice, must show a counter of 2.
