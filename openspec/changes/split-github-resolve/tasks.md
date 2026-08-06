@@ -1,13 +1,14 @@
 ## 1. Baseline
 
 - [ ] 1.1 Record the pre-split behavior baseline: `mise run test` passes and `tests/code_health.rs` is unmodified in the working tree
-- [ ] 1.2 Note current line counts for `src/infra/github/*.rs` so the post-split numbers can be compared
+- [ ] 1.2 Confirm the baseline line-count table in `design.md` (Context) still matches `src/infra/github/*.rs` on disk; the post-split counts get reported against it in 5.4
 
 ## 2. Shared request helper (Decision 1)
 
-- [ ] 2.1 Add `pub(super) fn get_json<T: DeserializeOwned>(&self, url: &str, operation: &'static str) -> Result<T, Error>` to `src/infra/github/registry.rs`, beside `authenticated_get` and `check_status`
+- [ ] 2.1 Add `pub(super) fn get_json<T: DeserializeOwned>(&self, url: &str, operation: &'static str) -> Result<T, Error>` to `src/infra/github/registry.rs`, beside `authenticated_get` and `check_status`, with a doc comment (`missing_docs_in_private_items` is denied)
 - [ ] 2.2 Confirm the helper calls `check_status` before `json()` — parsing a non-2xx body would turn `NotFound` into `ParseResponse` and break `resolve_ref`'s fallback chain
-- [ ] 2.3 Confirm `registry.rs` stays under the 440 logic-line / 550 total-line budgets after the addition
+- [ ] 2.3 Leave `dereference_tag` and `get_version_tags` OFF the helper — they are the two exempt call sites (Decision 1); routing either through `get_json` changes behavior
+- [ ] 2.4 Confirm `registry.rs` stays under the 440 logic-line / 550 total-line budgets after the addition
 
 ## 3. Split into three files (Decision 2)
 
@@ -31,9 +32,10 @@
 ## 5. Verify
 
 - [ ] 5.1 Review the diff method-by-method against the pre-split file, checking URL template and `operation` string for each — these are unchecked string literals (Risks)
-- [ ] 5.2 Confirm each method's endpoint sequence and fallback order is unchanged, especially `resolve_ref`'s tag → release → branch → commit chain
-- [ ] 5.3 Run `mise run test` and confirm it passes with `tests/code_health.rs` unmodified
-- [ ] 5.4 Confirm `src/infra/github/` holds at most 8 `.rs` files and every file is under both line budgets, with headroom for #137, #145, and #141
-- [ ] 5.5 Run `mise run integ`
-- [ ] 5.6 Run `tests/e2e_github.rs` with `GITHUB_TOKEN=$(gh auth token)` if a token is available; note it as skipped if not
-- [ ] 5.7 Confirm no file outside `src/infra/github/` was modified
+- [ ] 5.2 Read `get_version_tags`'s pagination loop line-by-line against the original, especially the `match next_url { Some(next) => url = next, None => break }` branch — it is the largest hand-transcribed block and has no test at any level, so diff review is its only mitigation (critical path #1)
+- [ ] 5.3 Confirm each method's endpoint sequence and fallback order is unchanged, especially `resolve_ref`'s tag → release → branch → commit chain
+- [ ] 5.4 Run `mise run test` and confirm it passes with `tests/code_health.rs` unmodified
+- [ ] 5.5 Report post-split line counts for `src/infra/github/*.rs` against the baseline table in `design.md`; confirm the directory holds at most 8 `.rs` files and every file is under both budgets, with headroom for #137, #145, and #141
+- [ ] 5.6 Run `mise run integ`
+- [ ] 5.7 Run `tests/e2e_github.rs` with `GITHUB_TOKEN=$(gh auth token)` if a token is available; note it as skipped if not
+- [ ] 5.8 Confirm the only files modified are under `src/infra/github/` plus this change's own artifacts
