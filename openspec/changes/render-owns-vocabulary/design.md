@@ -103,6 +103,39 @@ A per-rule assertion in `unpinned.rs` alone (mirroring its existing
 the chokepoint test fails it says only *that* some message is wrong; the per-rule
 one names the culprit. But the chokepoint test is the guard.
 
+### A kind-noun labelling an identifier is the defect; a grammatical subject is not
+
+Implementation surfaced two messages the naive rule "no message may start with a
+kind-noun" would wrongly condemn:
+
+```
+workflow has no top-level `permissions:` block — declare one ...   (missing-permissions)
+workflow triggered by `X` has no `concurrency:` block — add one ... (missing-concurrency)
+```
+
+These are not the same defect. The four action rules used `action ` as a *label
+prefixing an identifier that immediately follows* — `action actions/checkout uses
+tag reference v4` — which is pure redundancy: the identifier already says what it
+is, and the renderer already prints the rule name and location. Strip the label and
+the sentence is unchanged in meaning.
+
+The two workflow-security messages use "workflow" as the *grammatical subject of a
+sentence containing no identifier at all*. Strip it and you get `has no top-level
+permissions: block` — not a sentence. There is nothing else in the message naming
+what is being talked about.
+
+They are also not a vocabulary hazard, which is the whole point of the guardrail.
+`src/lint/command.rs` narrows these rules to `ParsedWorkflow` via
+`filter_map(Parsed::as_workflow)` before they run — deliberately a total function
+rather than a filter, so that "dropping this step is a compile error rather than a
+silent widening that would let every rule judge an action definition". A composite
+action file can never reach them. The word "workflow" there is guaranteed accurate
+by the type system, not a guess that will mislabel a GitLab component later.
+
+So the guard tests for a kind-noun **immediately followed by the identifier it
+labels**, not for a leading noun in general. That is the shape that was actually
+wrong, and it is the shape a future rule would reintroduce.
+
 ### Leave summary lines alone
 
 `All actions up to date` and `N actions discovered` are composed inside
