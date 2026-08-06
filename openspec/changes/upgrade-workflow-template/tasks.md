@@ -20,5 +20,5 @@
 
 ## 4. Gate
 
-- [ ] 4.1 Run `mise run test` and confirm it passes (no Rust change; expected unaffected).
-- [ ] 4.2 Run `git diff --stat main` and confirm the changed-file list contains no path under `src/` or `tests/` — this change is docs-only, so any such path means scope leaked.
+- [x] 4.1 Run `mise run test` and confirm it passes (no Rust change; expected unaffected). 454 unit + 26 code-health tests, 0 failures.
+- [x] 4.2 Run `git diff --stat main` and confirm the changed-file list contains no path under `src/` or `tests/` — this change is docs-only, so any such path means scope leaked. Confirmed: only `README.md`, `docs/`, and the change's own artifacts.
