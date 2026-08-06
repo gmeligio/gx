@@ -3,7 +3,9 @@ use crate::domain::action::resolved::Commit;
 use crate::domain::action::spec::Spec as ActionSpec;
 use crate::domain::action::specifier::Specifier;
 use crate::domain::action::uses_ref::RefType;
-use crate::domain::resolution::{Error as ResolutionError, Forge, ShaDescription, VersionRegistry};
+use crate::domain::resolution::{
+    Error as ResolutionError, Forge, RetryAfter, ShaDescription, VersionRegistry,
+};
 use std::time::Duration;
 use thiserror::Error;
 
@@ -11,6 +13,46 @@ use thiserror::Error;
 const USER_AGENT: &str = "gx-cli";
 /// Timeout in seconds for each HTTP request to the GitHub API.
 const REQUEST_TIMEOUT_SECS: u64 = 30;
+/// Longest reset delay still worth waiting out, in seconds.
+///
+/// An exhausted unauthenticated quota can reset nearly an hour out; blocking a
+/// terminal that long is worse than failing, so anything beyond this becomes
+/// [`RetryAfter::TooDistant`]. Kept in step with the retry layer's own cap.
+const MAX_RETRY_WAIT_SECS: u64 = 5;
+
+/// Reduce GitHub's absolute `x-ratelimit-reset` epoch to a wait worth taking.
+///
+/// Both operands are passed in so the skew and cap cases are unit-testable
+/// without faking a clock. Subtraction saturates: a reset already in the past —
+/// including one that only looks past because the local clock runs ahead of
+/// GitHub's — yields a zero wait rather than a negative or a panic.
+fn normalize_reset(reset_epoch: u64, now_epoch: u64) -> RetryAfter {
+    let secs = reset_epoch.saturating_sub(now_epoch);
+    if secs > MAX_RETRY_WAIT_SECS {
+        return RetryAfter::TooDistant;
+    }
+    RetryAfter::After(Duration::from_secs(secs))
+}
+
+/// Read `x-ratelimit-reset` from a response and normalize it against the clock.
+///
+/// An absent or unparseable header is [`RetryAfter::Unstated`] — the retry layer
+/// falls back to its own backoff rather than guessing at a reset time.
+fn reset_from_headers(response: &reqwest::blocking::Response) -> RetryAfter {
+    let Some(reset_epoch) = response
+        .headers()
+        .get("x-ratelimit-reset")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u64>().ok())
+    else {
+        return RetryAfter::Unstated;
+    };
+    let now_epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    normalize_reset(reset_epoch, now_epoch)
+}
 
 /// Errors that can occur when interacting with the Github API.
 ///
@@ -32,7 +74,11 @@ pub enum Error {
     },
 
     #[error("GitHub API rate limit exceeded for {url}")]
-    RateLimited { url: String },
+    RateLimited {
+        url: String,
+        /// When GitHub said the quota resets, normalized and clamped.
+        retry_after: RetryAfter,
+    },
 
     #[error("GitHub API unauthorized for {url}")]
     Unauthorized { url: String },
@@ -143,6 +189,7 @@ impl Registry {
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             return Error::RateLimited {
                 url: url.to_owned(),
+                retry_after: reset_from_headers(response),
             };
         }
         if status == reqwest::StatusCode::FORBIDDEN {
@@ -155,6 +202,7 @@ impl Registry {
             if remaining == 0 {
                 return Error::RateLimited {
                     url: url.to_owned(),
+                    retry_after: reset_from_headers(response),
                 };
             }
             return Error::Unauthorized {
@@ -183,8 +231,9 @@ impl VersionRegistry for Registry {
         let (sha, ref_type) =
             self.resolve_ref(id.as_str(), version.as_str())
                 .map_err(|e| match e {
-                    Error::RateLimited { .. } => ResolutionError::RateLimited {
+                    Error::RateLimited { retry_after, .. } => ResolutionError::RateLimited {
                         forge: Forge::GitHub,
+                        retry_after,
                     },
                     Error::Unauthorized { .. } => ResolutionError::AuthRequired {
                         forge: Forge::GitHub,
@@ -238,8 +287,9 @@ impl VersionRegistry for Registry {
         self.get_version_tags(id.as_str())
             .map(|tags| tags.into_iter().map(Version::from).collect())
             .map_err(|e| match e {
-                Error::RateLimited { .. } => ResolutionError::RateLimited {
+                Error::RateLimited { retry_after, .. } => ResolutionError::RateLimited {
                     forge: Forge::GitHub,
+                    retry_after,
                 },
                 Error::Unauthorized { .. } => ResolutionError::AuthRequired {
                     forge: Forge::GitHub,
@@ -266,8 +316,9 @@ impl VersionRegistry for Registry {
         let date = self
             .fetch_commit_date(base_repo.as_str(), sha.as_str())
             .map_err(|e| match e {
-                Error::RateLimited { .. } => ResolutionError::RateLimited {
+                Error::RateLimited { retry_after, .. } => ResolutionError::RateLimited {
                     forge: Forge::GitHub,
+                    retry_after,
                 },
                 Error::Unauthorized { .. } => ResolutionError::AuthRequired {
                     forge: Forge::GitHub,
@@ -296,5 +347,47 @@ impl VersionRegistry for Registry {
             repository: base_repo,
             date: CommitDate::from(date),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Duration, MAX_RETRY_WAIT_SECS, RetryAfter, normalize_reset};
+
+    #[test]
+    fn near_reset_is_waited_out() {
+        assert_eq!(
+            normalize_reset(1_000_003, 1_000_000),
+            RetryAfter::After(Duration::from_secs(3)),
+            "a reset a few seconds out is a wait worth taking"
+        );
+    }
+
+    #[test]
+    fn reset_exactly_at_the_cap_is_still_waited_out() {
+        assert_eq!(
+            normalize_reset(1_000_000 + MAX_RETRY_WAIT_SECS, 1_000_000),
+            RetryAfter::After(Duration::from_secs(MAX_RETRY_WAIT_SECS)),
+            "the cap is inclusive, so the boundary does not silently become TooDistant"
+        );
+    }
+
+    #[test]
+    fn hour_out_reset_is_too_distant() {
+        assert_eq!(
+            normalize_reset(1_003_600, 1_000_000),
+            RetryAfter::TooDistant,
+            "an exhausted unauthenticated quota must not stall the terminal"
+        );
+    }
+
+    #[test]
+    fn past_reset_does_not_produce_a_negative_wait() {
+        // The local clock running ahead of GitHub's must not underflow.
+        assert_eq!(
+            normalize_reset(1_000_000, 1_000_030),
+            RetryAfter::After(Duration::ZERO),
+            "a reset already past means retry now, not panic or wrap"
+        );
     }
 }
