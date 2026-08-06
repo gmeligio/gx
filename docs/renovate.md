@@ -125,11 +125,10 @@ features make this a turnkey job rather than a text-scraping exercise:
 - The same **compare link** is written to the run's log file (and shown in CI verbose output), so anyone can
   see *why* each pin moved without it cluttering the terminal summary.
 
-A minimal scheduled job: run `gx upgrade --json`, turn the `upgrades` array into a Markdown body (e.g. with
-`jq`), and hand it to [`peter-evans/create-pull-request`](https://github.com/peter-evans/create-pull-request).
-A copy-paste reference workflow shipped by gx is tracked in
-[gx#121](https://github.com/gmeligio/gx/issues/121); the `--json` contract above is the building block it will
-consume.
+gx ships that job as a copy-paste reference workflow — [`docs/gx-upgrade.yml`](gx-upgrade.yml) — which runs
+`gx upgrade --json` on a schedule, turns the `upgrades` array into a Markdown body with `jq`, and hands it to
+[`peter-evans/create-pull-request`](https://github.com/peter-evans/create-pull-request), skipping the PR when
+`up_to_date` is true. See [upgrade-workflow.md](upgrade-workflow.md) to set it up.
 
 ## Why gx does not ship `gx renovate init`
 

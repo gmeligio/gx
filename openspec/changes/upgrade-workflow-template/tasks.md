@@ -14,9 +14,9 @@
 
 ## 3. Documentation and discovery
 
-- [ ] 3.1 Write `docs/upgrade-workflow.md`: what the template does, how to install it, prerequisites (including that the repo must already have a manifest and lock from `gx init`), and the `GITHUB_TOKEN`-does-not-trigger-CI caveat with the PAT/App fix.
-- [ ] 3.2 Update `docs/renovate.md` to link the shipped template instead of issue #121.
-- [ ] 3.3 Add a README pointer to `docs/upgrade-workflow.md`.
+- [x] 3.1 Write `docs/upgrade-workflow.md`: what the template does, how to install it, prerequisites (including that the repo must already have a manifest and lock from `gx init`), and the `GITHUB_TOKEN`-does-not-trigger-CI caveat with the PAT/App fix.
+- [x] 3.2 Update `docs/renovate.md` to link the shipped template instead of issue #121.
+- [x] 3.3 Add a README pointer to `docs/upgrade-workflow.md`.
 
 ## 4. Gate
 
