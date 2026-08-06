@@ -25,7 +25,8 @@ so the individual checks can follow independently.
 - Audit iterates `gx.lock` entries. It does **not** walk workflow files — discovery stays
   the scanner's job, so future discovery work (composite traversal, job-level `uses:`)
   reaches audit for free.
-- `gx lint` is unchanged and remains 100% offline.
+- `gx lint`'s behavior is unchanged and remains 100% offline — now enforced by a code-health
+  check rather than by convention, in both directions (no HTTP in lint, no scanner in audit).
 - `--json` mode selection in `src/main.rs` is generalized from a hardcoded `Commands::Upgrade`
   match to a per-command property, so `upgrade` behavior is preserved and `audit` (and later
   `lint --json`) reuse one seam.
@@ -37,13 +38,16 @@ one trivially verifiable check so the shell is exercised end to end.
 ## Capabilities
 
 ### New Capabilities
-- `audit-command`: `gx audit` — a networked security audit over the locked action set,
-  its token requirement, its exit-code contract, and its `--json` output.
+- `audit-command`: `gx audit` — a networked security audit over the locked action set, its
+  token requirement, its exit-code contract, its `--json` output, the `mutable-ref` check,
+  and the advisory seam.
 
 ### Modified Capabilities
-- `lint-command`: adds an explicit offline guarantee. `gx lint` performs no network I/O;
-  this is now a stated requirement rather than an accident of implementation, because a
-  sibling command that *does* use the network makes the distinction user-visible.
+- `lint-command`: gains one new requirement (an `ADDED` delta — no existing requirement
+  changes meaning). The offline/networked split becomes mechanically enforced: `gx lint` was
+  already offline by convention, but introducing a sibling command that *does* use the
+  network makes that convention easy to lose, so a code-health check now fails the build if
+  lint code takes an HTTP dependency — or if audit code takes a workflow-scanner dependency.
 
 ## Impact
 

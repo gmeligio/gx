@@ -32,8 +32,10 @@ that four follow-on checks fit.
 
 **Non-Goals:**
 
-- The four real checks. This change ships one check (`mutable-ref`) computed purely from
-  lock data, to prove the shell end to end without a network dependency in the test suite.
+- The four advisory/repository-state checks (#130–#133). This change ships one check,
+  `mutable-ref`, computed purely from lock data, so the shell is proven end to end without a
+  network dependency in the test suite. It is specified as a requirement in its own right,
+  not scaffolding.
 - `[audit.rules]` config, per-rule ignores, `--audit-level`. All checks on by default at
   fixed severities.
 - Finding provenance ("which file do I edit?"). A lock entry cannot answer that; it depends
@@ -59,6 +61,12 @@ references anyway.
 **Enforced, not just intended:** no `src/audit/` file may import the workflow scanner or the
 parsed-workflow types. A test in `tests/code_health.rs` asserts this, so a later check cannot
 reintroduce traversal by accident.
+
+The same test enforces the mirror-image constraint: no `src/lint/` file may import `reqwest`
+or the GitHub API modules. Both directions of the offline/networked split are then a build
+failure rather than a convention, which is what the `lint-command` delta requires. One test
+covers both because they are one invariant — commands are either offline or networked, and
+which one each is may not drift.
 
 ### Lock iteration shape
 
@@ -122,7 +130,8 @@ command exists to prevent.
 - `AdvisoryQuery` — the trait checks depend on.
 - `GraphQlAdvisories` — the real adapter. Builds a JSON body `{"query": ..., "variables": ...}`,
   POSTs to `https://api.github.com/graphql` via the existing `reqwest::blocking::Client`
-  with the `Authorization: Bearer` header, and deserializes the response.
+  with the `Authorization: Bearer` header, and deserializes the response. Failures reuse the
+  `infra::github::Error` variants (defined in `registry.rs`, re-exported from `mod.rs`).
 - `FakeAdvisories` — `#[cfg(test)]` only, returns canned results.
 
 Modeled directly on `src/infra/shellcheck/`, which already establishes trait + real adapter +
@@ -168,9 +177,12 @@ API call. It is a genuine check, not a placeholder, so it does not need removing
   infrastructure #130 needs to test its check offline.
 
 **Integration (`tests/integ_audit.rs`, new):**
-- Fixture lock with a branch entry → one finding, exit code 1 or 0 per its severity.
+- Fixture lock with a branch entry → one warning-severity finding, exit 0 (`mutable-ref` is
+  fixed at `warn`, and per-rule severity config is a Non-Goal, so there is no branch here
+  that yields exit 1).
 - Fixture lock with only tag entries → no findings, clean summary.
-- Empty/absent lock → no findings, exit 0.
+- Absent lock file, and separately an empty lock file → no findings, exit 0. Both are run
+  with a token present, since the token guard precedes the lock read.
 - Missing token → `Err(MissingToken)` from `Command::run`, message names `GITHUB_TOKEN`.
 - **Lock is the only source:** a fixture whose workflows reference an action absent from the
   lock produces no finding for it. This is the load-bearing invariant, so it gets a test that
@@ -181,8 +193,13 @@ All integration tests use fixture files and the fake adapter — no network, no 
 **Code health (`tests/code_health.rs`):**
 - `audit` added to the two command-module lists (layering + duplicate-fn), registering the
   new layer.
-- New assertion: no file under `src/audit/` imports the workflow scanner or parsed-workflow
-  types.
+- New bidirectional assertion: no file under `src/audit/` imports the workflow scanner or
+  parsed-workflow types, and no file under `src/lint/` imports `reqwest` or the GitHub API
+  modules. This is the mechanism the `lint-command` delta requires — the offline/networked
+  split becomes a build failure rather than a convention.
+- The assertion is itself verified by temporarily introducing a forbidden import and
+  confirming the test fails. An enforcement test that cannot fail provides no enforcement,
+  and this one is the only thing standing behind a user-facing guarantee.
 
 **Critical path:** lock → targets → checks → report → exit code, and the token guard that
 precedes all of it. Both are covered by integration tests against real files.
@@ -224,6 +241,14 @@ spinner and the local log file exactly as `lint` and `tidy` do — and are suppr
   error message carries the fix, and it fires before any work, so the failure is immediate
   rather than partway through a run.
 
+- **In this change specifically, the token guard blocks work that needs no token.** The only
+  shipped check, `mutable-ref`, is pure lock data, so until #130–#132 land, `gx audit` demands
+  a credential and then runs one offline check. This is a real interim cost, accepted for one
+  reason: the guard's value is that it is unconditional. A guard that switches on "do any of
+  today's checks need the network?" fails open the moment a networked check is added and the
+  condition is not updated — which is exactly the false-clean this command exists to prevent.
+  Better a user is asked for a token slightly early than one is silently told "clean" later.
+
 - **`mutable-ref` may fire on repositories that intentionally track a branch** → it is a
   warning, not an error, so it does not fail a build. Per-rule ignores are out of scope here;
   if demand appears, the existing `Level`/`Rule`/`IgnoreTarget` types are already rule-name
@@ -235,6 +260,8 @@ spinner and the local log file exactly as `lint` and `tidy` do — and are suppr
 
 ## Open Questions
 
-None blocking. The JSON document's exact field names are chosen to match the queued
-`lint --json` change's output language (findings array with check name, severity, message,
-plus counts); if that change picks different names, one serialization struct changes.
+None. The JSON field names were the one open item; they are now pinned by the `--json`
+requirement in the audit-command spec (per-finding check name, severity, and message, plus
+error and warning counts). `gx audit --json` ships first, so it sets the output language and
+the queued `lint --json` change conforms to it, rather than audit's contract shifting under
+consumers after release.
