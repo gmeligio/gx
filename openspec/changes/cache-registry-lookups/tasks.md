@@ -1,7 +1,7 @@
 ## 1. Dependency
 
-- [ ] 1.1 Add `elsa = "1.11"` to `[dependencies]` in `Cargo.toml` (default features only — `indexmap` stays off)
-- [ ] 1.2 Confirm `mise run lock:check` passes and `stable_deref_trait` does not gain a second version in `Cargo.lock`
+- [x] 1.1 Add `elsa = "1.11"` to `[dependencies]` in `Cargo.toml` (default features only — `indexmap` stays off)
+- [x] 1.2 Confirm `mise run deny` passes and `stable_deref_trait` does not gain a second version in `Cargo.lock`
 
 ## 2. The caching decorator
 
