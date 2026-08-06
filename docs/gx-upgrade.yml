@@ -1,0 +1,73 @@
+# Scheduled, PR-based upgrades for your pinned GitHub Actions.
+#
+# Copy this file to .github/workflows/gx-upgrade.yml in your repository.
+# Prerequisite: your repo already has .github/gx.toml and .github/gx.lock
+# (run `gx init` once if it does not). See docs/upgrade-workflow.md.
+#
+# `gx upgrade` runs in safe mode: it advances gx.lock to the newest versions
+# your gx.toml ranges already allow, and never edits the ranges themselves.
+
+name: gx upgrade
+
+on:
+    schedule:
+        # Mondays at 06:00 UTC. Cron in GitHub Actions is always UTC.
+        - cron: "0 6 * * 1"
+    workflow_dispatch:
+
+permissions:
+    contents: write
+    pull-requests: write
+
+jobs:
+    upgrade:
+        name: Upgrade pinned actions
+        runs-on: ubuntu-24.04
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+            - name: Install gx
+              run: brew install gmeligio/tap/gx
+
+            - name: Upgrade actions
+              run: gx upgrade --json | tee upgrade.json
+              env:
+                  # Without a token gx falls back to unauthenticated GitHub API
+                  # calls, capped at 60 requests/hour.
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Build the pull request body
+              id: report
+              run: |
+                  jq -r '.up_to_date | "up_to_date=\(.)"' upgrade.json >> "$GITHUB_OUTPUT"
+
+                  # One entry per upgraded action, linked to its compare view.
+                  # `compare` is omitted from the JSON when either side is not a
+                  # real tag (e.g. a branch pin), so the link is conditional.
+                  # `in_range` is not shown: in safe mode every entry is in
+                  # range. If you switch to `gx upgrade --latest`, add it — that
+                  # mode can also edit ranges in gx.toml.
+                  jq -r '
+                    "`gx upgrade` advanced the lock to the newest versions your `gx.toml` ranges already allow.",
+                    "",
+                    (.upgrades[]
+                      | if has("compare")
+                        then "- **\(.action)** [`\(.from)` → `\(.to)`](\(.compare))"
+                        else "- **\(.action)** `\(.from)` → `\(.to)`"
+                        end),
+                    "",
+                    "\(.upgrades | length) action(s) upgraded across \(.workflows_updated) file(s)."
+                  ' upgrade.json > body.md
+
+            - name: Open a pull request
+              if: steps.report.outputs.up_to_date == 'false'
+              uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+              with:
+                  # upgrade.json is a build artifact, not part of the change.
+                  add-paths: |
+                      .github/
+                  branch: gx/upgrade
+                  commit-message: "chore(deps): upgrade pinned GitHub Actions"
+                  title: "chore(deps): upgrade pinned GitHub Actions"
+                  body-path: body.md
+                  delete-branch: true

@@ -73,14 +73,24 @@ produces.
 ### 3. Gate on `up_to_date` with a step output, checked by the PR step's `if:`
 
 The `jq` step emits `up_to_date` as a step output; the create-pull-request step carries
-`if: steps.<id>.outputs.up_to_date == 'false'`. This is one boolean read straight off the contract.
+`if: steps.<id>.outputs.up_to_date == 'false'`. This is one boolean read straight off the contract, which
+is exactly what the issue asks for ("skips opening a PR when `up_to_date` is true").
 
 **Alternatives considered:**
 
-- *Test whether `upgrades` is empty* — rejected: it re-derives a fact the contract already states, and the
-  two can differ (an upgrade run with only skips is `up_to_date: false` with an empty `upgrades`).
+- *Test whether `upgrades` is empty* — rejected: it re-derives in `jq` a fact the contract already states
+  as a boolean. `up_to_date` is the field the contract offers for this question; deriving the same answer
+  a second way means two things to keep in sync.
 - *Let create-pull-request no-op on a clean tree* — it does, but the job would still run the action and
-  report a confusing "no changes" success. The explicit gate is what the issue asks for and reads clearly.
+  report a confusing "no changes" success.
+
+**What this gate does not guarantee.** `up_to_date: false` means the *plan* was non-empty, not that files
+changed on disk: `src/upgrade/command.rs` writes the manifest and lock only `if has_manifest`, and
+`workflows_updated` is a separate count that can be `0`. In a repo with no `.github/gx.toml` the run can
+therefore report `up_to_date: false` having written nothing. The template does not add a second gate for
+this — `create-pull-request` already no-ops on a clean tree, so the failure mode is a wasted step, not a
+junk PR — but the companion doc states the prerequisite plainly: the template is for repos that have run
+`gx init`, i.e. that have a manifest and lock.
 
 ### 4. Default `GITHUB_TOKEN`, with the PAT/App caveat documented rather than templated
 
