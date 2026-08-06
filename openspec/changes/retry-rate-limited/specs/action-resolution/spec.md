@@ -78,7 +78,7 @@ A reset time that has already passed, or that is reported as being in the past b
 
 The system SHALL report each retry wait through the same progress channel that carries other resolution progress, stating that the run is waiting on the forge's rate limit and for how long. A command that pauses for several seconds with no explanation reads as a hang.
 
-Progress reporting SHALL NOT write to stdout in `--json` mode, where stdout must remain a single JSON document.
+The announcement SHALL travel the existing progress channel rather than a new one, so it inherits that channel's existing suppression in `--json` mode and cannot corrupt the single JSON document on stdout. No scenario is stated for the `--json` case: progress suppression predates this change and holds whether or not a retry occurs, so any such scenario would pass identically before and after.
 
 #### Scenario: The user sees why the command paused
 
@@ -86,11 +86,11 @@ Progress reporting SHALL NOT write to stdout in `--json` mode, where stdout must
 - **WHEN** the wait begins
 - **THEN** a progress message naming the rate limit and the wait duration is emitted before the process sleeps
 
-#### Scenario: JSON output is not corrupted by retry messages
+#### Scenario: The announcement precedes the wait rather than following it
 
-- **GIVEN** `gx upgrade --json` encounters a rate limit and retries
-- **WHEN** the command completes
-- **THEN** stdout contains exactly one valid JSON document
+- **GIVEN** a rate-limited request that will be retried after a wait
+- **WHEN** the user watches the command
+- **THEN** the explanation appears before the pause, not after it, so the pause is never an unexplained stall
 
 ## MODIFIED Requirements
 
@@ -98,7 +98,7 @@ Progress reporting SHALL NOT write to stdout in `--json` mode, where stdout must
 
 | Error condition | Classification | User experience |
 |---|---|---|
-| Rate limited | Retryable, then recoverable | Retried within a bounded budget; if still failing, warning and action skipped, lock written without it |
+| Rate limited | Retryable, then recoverable | Retried within a bounded budget (unless the forge reports a reset beyond the cap, in which case it is not retried at all); if still failing, warning and action skipped, lock written without it |
 | Auth required | Recoverable | Warning; action skipped, lock written without it — never retried |
 | Action not found (404) | Strict | Hard failure; command exits with error |
 | Server error (5xx) | Strict | Hard failure; command exits with error |

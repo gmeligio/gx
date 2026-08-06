@@ -26,7 +26,7 @@ None. Retrying is not a new domain concept — it is a refinement of how an alre
 ## Impact
 
 - **New**: `src/infra/registry/` module holding the retrying decorator and an injectable clock/sleeper so tests never actually sleep.
-- **Modified**: `src/domain/resolution.rs` — `RateLimited` gains a `retry_after` field (the enum is `#[non_exhaustive]` with named fields, so this is non-breaking). `src/infra/github/registry.rs` — `check_status` reads `X-RateLimit-Reset` and normalizes it into that field.
+- **Modified**: `src/domain/resolution.rs` — a small `RetryAfter` enum (`Unstated` / `After` / `TooDistant`) plus a `retry_after` field on `RateLimited` (the error enum is `#[non_exhaustive]` with named fields, so this is non-breaking). `src/infra/github/registry.rs` — `check_status` reads `X-RateLimit-Reset` and normalizes it into that field.
 - **Modified**: `src/init/command.rs`, `src/tidy/command.rs`, `src/upgrade/command.rs` — wrap the constructed registry in the decorator.
 - **Composition**: the decorator is built to sit *inside* a caching decorator (`Caching::new(Retrying::new(...))`) so a cache hit short-circuits before any retry runs.
 - **No new dependencies.** Uses `std::thread::sleep` and `std::time`.
