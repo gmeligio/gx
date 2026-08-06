@@ -74,7 +74,7 @@ impl FakeRegistry {
         self
     }
 
-    /// Make `tags_for_sha` and `all_tags` return `AuthRequired`.
+    /// Make `all_tags` return `AuthRequired`, and `describe_sha` yield no tags.
     pub fn fail_tags(mut self) -> Self {
         self.fail_tags = true;
         self

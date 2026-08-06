@@ -16,12 +16,12 @@ use std::hash::{Hash as _, Hasher as _};
 /// A versatile mock registry that resolves any version to a deterministic SHA.
 ///
 /// Supports builder methods to configure tag lookups for both `all_tags` and
-/// `tags_for_sha`/`describe_sha`. Default behavior returns empty tag lists.
+/// `describe_sha`. Default behavior returns empty tag lists.
 #[derive(Clone, Default)]
 pub struct FakeRegistry {
     /// Maps `action_id` → list of available version tags (for `all_tags`).
     tags: std::collections::HashMap<String, Vec<String>>,
-    /// Maps `(action_id, sha)` → list of tags pointing to that SHA (for `tags_for_sha` / `describe_sha`).
+    /// Maps `(action_id, sha)` → list of tags pointing to that SHA (for `describe_sha`).
     sha_tags: std::collections::HashMap<(String, String), Vec<String>>,
 }
 
@@ -38,7 +38,7 @@ impl FakeRegistry {
     }
 
     /// Register that a specific SHA has the given tags pointing to it
-    /// (used by `tags_for_sha` and `describe_sha`).
+    /// (used by `describe_sha`).
     pub fn with_sha_tags(mut self, id: &str, sha: &str, tags: Vec<&str>) -> Self {
         self.sha_tags.insert(
             (id.to_owned(), sha.to_owned()),
