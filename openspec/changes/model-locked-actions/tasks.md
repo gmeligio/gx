@@ -1,8 +1,8 @@
 ## 1. Pin the format baseline first
 
-- [ ] 1.1 Add a byte-identity test to `src/infra/lock/tests.rs`: parse a literal two-tier `gx.lock` string covering a tag pin, a branch pin, a bare-commit pin, and two specs sharing one commit; re-serialize; assert the output equals the literal input exactly.
-- [ ] 1.2 Add a sort-order test alongside it whose *input* is deliberately unsorted (at least two action IDs, and two specifiers under one ID, in reverse lexicographic order) and whose *expected output* is a literal sorted string distinct from that input. Byte-identity alone cannot fail on sort order — a fixture that is already sorted serializes in read order whether the sort is correct, inverted, or dropped.
-- [ ] 1.3 Run both tests before touching any domain code and confirm they pass against the current implementation. A test that only passes after the refactor proves nothing.
+- [x] 1.1 Add a byte-identity test to `src/infra/lock/tests.rs`: parse a literal two-tier `gx.lock` string covering a tag pin, a branch pin, a bare-commit pin, and two specs sharing one commit; re-serialize; assert the output equals the literal input exactly.
+- [x] 1.2 Add a sort-order test alongside it whose *input* is deliberately unsorted (at least two action IDs, and two specifiers under one ID, in reverse lexicographic order) and whose *expected output* is a literal sorted string distinct from that input. Byte-identity alone cannot fail on sort order — a fixture that is already sorted serializes in read order whether the sort is correct, inverted, or dropped.
+- [x] 1.3 Run both tests before touching any domain code and confirm they pass against the current implementation. A test that only passes after the refactor proves nothing.
 
 ## 2. Introduce the type
 

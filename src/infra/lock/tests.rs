@@ -209,6 +209,72 @@ fn save_produces_two_tier_format() {
     assert!(!content.contains("{ sha ="), "entries must NOT be inline");
 }
 
+/// A canonical two-tier lock covering every ref kind gx writes: a semver tag,
+/// two specifiers sharing one commit, a branch pin, and a bare-commit pin.
+///
+/// Bare TOML keys (`main`, the SHA) are emitted unquoted by the document
+/// builder, so this fixture reproduces that exactly.
+const CANONICAL_LOCK: &str = concat!(
+    "[resolutions.\"actions/checkout\".\"^4\"]\nversion = \"v4.2.1\"\n\n",
+    "[resolutions.\"actions/checkout\".\"^4.2\"]\nversion = \"v4.2.1\"\n\n",
+    "[resolutions.\"actions/setup-node\".main]\nversion = \"main\"\n\n",
+    "[resolutions.\"docker/build-push-action\".0011223344556677889900aabbccddeeff001122]\nversion = \"0011223344556677889900aabbccddeeff001122\"\n\n",
+    "[actions.\"actions/checkout\".\"v4.2.1\"]\nsha = \"abc123def456789012345678901234567890abcd\"\nrepository = \"actions/checkout\"\nref_type = \"tag\"\ndate = \"2026-01-01T00:00:00Z\"\n\n",
+    "[actions.\"actions/setup-node\".main]\nsha = \"def456789012345678901234567890abcdef1234\"\nrepository = \"actions/setup-node\"\nref_type = \"branch\"\ndate = \"2026-02-02T00:00:00Z\"\n\n",
+    "[actions.\"docker/build-push-action\".0011223344556677889900aabbccddeeff001122]\nsha = \"0011223344556677889900aabbccddeeff001122\"\nrepository = \"docker/build-push-action\"\nref_type = \"commit\"\ndate = \"2026-03-03T00:00:00Z\"\n",
+);
+
+/// Load `content` through a `Store`, save it straight back, and return the bytes written.
+fn load_then_save(content: &str) -> String {
+    let mut file = NamedTempFile::new().unwrap();
+    file.write_all(content.as_bytes()).unwrap();
+    let store = Store::new(file.path());
+    let lock = store.load().unwrap();
+    store.save(&lock).unwrap();
+    std::fs::read_to_string(file.path()).unwrap()
+}
+
+#[test]
+fn two_tier_lock_roundtrips_byte_identically() {
+    assert_eq!(
+        load_then_save(CANONICAL_LOCK),
+        CANONICAL_LOCK,
+        "reading and rewriting an unchanged lock must not alter a single byte"
+    );
+}
+
+#[test]
+fn save_sorts_unsorted_input_into_canonical_order() {
+    // Deliberately reverse-ordered: `docker/...` before `actions/...`, and `^4.2`
+    // before `^4` within one action. A byte-identity check over already-sorted
+    // input cannot catch a broken sort; this input can only match the expected
+    // output if entries are actively reordered.
+    let unsorted = concat!(
+        "[resolutions.\"docker/build-push-action\".\"^5\"]\nversion = \"v5.1.0\"\n\n",
+        "[resolutions.\"actions/checkout\".\"^4.2\"]\nversion = \"v4.2.1\"\n\n",
+        "[resolutions.\"actions/checkout\".\"^4\"]\nversion = \"v4.2.1\"\n\n",
+        "[actions.\"docker/build-push-action\".\"v5.1.0\"]\nsha = \"1111111111111111111111111111111111111111\"\nrepository = \"docker/build-push-action\"\nref_type = \"tag\"\ndate = \"2026-03-03T00:00:00Z\"\n\n",
+        "[actions.\"actions/checkout\".\"v4.2.1\"]\nsha = \"2222222222222222222222222222222222222222\"\nrepository = \"actions/checkout\"\nref_type = \"tag\"\ndate = \"2026-01-01T00:00:00Z\"\n",
+    );
+    let expected = concat!(
+        "[resolutions.\"actions/checkout\".\"^4\"]\nversion = \"v4.2.1\"\n\n",
+        "[resolutions.\"actions/checkout\".\"^4.2\"]\nversion = \"v4.2.1\"\n\n",
+        "[resolutions.\"docker/build-push-action\".\"^5\"]\nversion = \"v5.1.0\"\n\n",
+        "[actions.\"actions/checkout\".\"v4.2.1\"]\nsha = \"2222222222222222222222222222222222222222\"\nrepository = \"actions/checkout\"\nref_type = \"tag\"\ndate = \"2026-01-01T00:00:00Z\"\n\n",
+        "[actions.\"docker/build-push-action\".\"v5.1.0\"]\nsha = \"1111111111111111111111111111111111111111\"\nrepository = \"docker/build-push-action\"\nref_type = \"tag\"\ndate = \"2026-03-03T00:00:00Z\"\n",
+    );
+
+    assert_ne!(
+        unsorted, expected,
+        "fixture must be unsorted, or the assertion below proves nothing"
+    );
+    assert_eq!(
+        load_then_save(unsorted),
+        expected,
+        "entries must be sorted by action ID then specifier/version"
+    );
+}
+
 #[test]
 fn save_roundtrip_preserves_all_fields() {
     let file = NamedTempFile::new().unwrap();
