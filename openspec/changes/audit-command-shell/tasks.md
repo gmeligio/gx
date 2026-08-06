@@ -31,16 +31,16 @@ Satisfies: "Advisory lookups go through a substitutable seam".
 Satisfies: "Checks are identified by a stable kebab-case name",
 "gx audit --json emits one machine-readable document".
 
-- [ ] 3.1 Create `src/audit/check_name.rs` defining `CheckName` via `crate::rule_ids!` with
+- [x] 3.1 Create `src/audit/check_name.rs` defining `CheckName` via `crate::rule_ids!` with
       the single `MutableRef => "mutable-ref"` entry
-- [ ] 3.2 Create `src/audit/report.rs`: `Finding = Diagnostic<CheckName>`,
+- [x] 3.2 Create `src/audit/report.rs`: `Finding = Diagnostic<CheckName>`,
       `Report = crate::diagnostic::Report<CheckName>`, `impl CommandReport for Report`
       (render via `OutputLine::LintDiag`, `exit_code`, clean summary text)
-- [ ] 3.3 Add `Report::to_json()` emitting one document with per-finding check name,
+- [x] 3.3 Add `Report::to_json()` emitting one document with per-finding check name,
       severity, and message, plus error and warning counts
-- [ ] 3.4 Unit tests: rendering clean and non-clean, JSON field names and shape,
+- [x] 3.4 Unit tests: rendering clean and non-clean, JSON field names and shape,
       `CheckName` round-trips to and from the literal string `mutable-ref`
-- [ ] 3.5 Confirm `mutable-ref` is rejected as a `[lint.rules]` key (lint's `RuleName`
+- [x] 3.5 Confirm `mutable-ref` is rejected as a `[lint.rules]` key (lint's `RuleName`
       parse already errors on unknown names — assert it, do not add code)
 
 ## 4. Lock iteration and the mutable-ref check
@@ -48,10 +48,10 @@ Satisfies: "Checks are identified by a stable kebab-case name",
 Satisfies: "Audit the locked action set with gx audit",
 "mutable-ref check reports lock entries pinned to a branch".
 
-- [ ] 4.1 Create `src/audit/target.rs` with `AuditTarget<'lock>` and the single adapter
+- [x] 4.1 Create `src/audit/target.rs` with `AuditTarget<'lock>` and the single adapter
       function building targets from `Lock::entries()`
-- [ ] 4.2 Implement the `mutable-ref` check: warn when a target's `ref_type` is `Branch`
-- [ ] 4.3 Unit tests: `Branch` yields a warning-severity finding naming the action;
+- [x] 4.2 Implement the `mutable-ref` check: warn when a target's `ref_type` is `Branch`
+- [x] 4.3 Unit tests: `Branch` yields a warning-severity finding naming the action;
       `Tag`, `Release`, and `Commit` each yield none
 
 ## 5. Command shell
@@ -59,12 +59,12 @@ Satisfies: "Audit the locked action set with gx audit",
 Satisfies: "Audit the locked action set with gx audit",
 "A missing GitHub token is a loud, actionable failure".
 
-- [ ] 5.1 Create `src/audit/mod.rs`: `Audit` struct, `Error` enum with `MissingToken` whose
+- [x] 5.1 Create `src/audit/mod.rs`: `Audit` struct, `Error` enum with `MissingToken` whose
       message names `GITHUB_TOKEN`, and `impl Command for Audit`
-- [ ] 5.2 Resolve the token first in `run`, before reading the lock or running any check;
+- [x] 5.2 Resolve the token first in `run`, before reading the lock or running any check;
       return `Err(MissingToken)` when absent
-- [ ] 5.3 Run checks over the targets and return `Report::from_diagnostics(...)`
-- [ ] 5.4 Register the module in `src/lib.rs`
+- [x] 5.3 Run checks over the targets and return `Report::from_diagnostics(...)`
+- [x] 5.4 Register the module in `src/lib.rs`
 
 ## 6. CLI registration
 
