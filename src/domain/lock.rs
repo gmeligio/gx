@@ -2,6 +2,7 @@ use super::action::identity::Version;
 use super::action::resolved::{Commit, ResolvedRef};
 use super::action::spec::Spec;
 use super::diff::LockDiff;
+use super::locked_action::LockedAction;
 use std::collections::{HashMap, HashSet};
 
 /// A single lock entry: resolved reference + commit metadata.
@@ -90,9 +91,15 @@ impl Lock {
         self.entries.retain(|k, _| keep.contains(k));
     }
 
-    /// Iterate over entries.
-    pub fn entries(&self) -> impl Iterator<Item = (&Spec, &LockEntry)> {
-        self.entries.iter()
+    /// Iterate the lock as a collection of managed dependencies.
+    ///
+    /// Each row is yielded as a [`LockedAction`] carrying its own [`Spec`], so
+    /// a consumer never re-pairs the map's key onto its value by hand. Order is
+    /// unspecified — callers that need one sort explicitly.
+    pub fn entries(&self) -> impl Iterator<Item = LockedAction<'_>> {
+        self.entries
+            .iter()
+            .map(|(spec, entry)| LockedAction::new(spec, entry))
     }
 
     /// Check if the lock is empty (no entries).
@@ -339,6 +346,57 @@ mod tests {
         assert_eq!(
             entry.commit.sha,
             CommitSha::from("abc123def456789012345678901234567890abcd")
+        );
+    }
+
+    #[test]
+    fn entries_yields_one_locked_action_per_row_carrying_its_spec() {
+        let mut lock = Lock::default();
+        set_action(
+            &mut lock,
+            "actions/checkout",
+            "^4",
+            "abc123def456789012345678901234567890abcd",
+            "v4.2.1",
+        );
+        set_action(
+            &mut lock,
+            "actions/setup-node",
+            "^3",
+            "def456789012345678901234567890abcd123456",
+            "v3.1.0",
+        );
+
+        let mut rows: Vec<_> = lock
+            .entries()
+            .map(|a| {
+                (
+                    a.id().as_str().to_owned(),
+                    a.specifier().as_str().to_owned(),
+                    a.sha().as_str().to_owned(),
+                    a.version_label().to_owned(),
+                )
+            })
+            .collect();
+        rows.sort();
+
+        assert_eq!(
+            rows,
+            vec![
+                (
+                    "actions/checkout".to_owned(),
+                    "^4".to_owned(),
+                    "abc123def456789012345678901234567890abcd".to_owned(),
+                    "v4.2.1".to_owned(),
+                ),
+                (
+                    "actions/setup-node".to_owned(),
+                    "^3".to_owned(),
+                    "def456789012345678901234567890abcd123456".to_owned(),
+                    "v3.1.0".to_owned(),
+                ),
+            ],
+            "each row must carry its own spec, not just the resolution"
         );
     }
 
