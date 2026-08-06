@@ -8,26 +8,26 @@
 
 ## 2. The retrying decorator
 
-- [ ] 2.1 Create `src/infra/registry/mod.rs` declaring the module, and register `pub mod registry;` in `src/infra/mod.rs`. The new directory holds 2 files, well inside the per-directory file budget that `mise run test` enforces.
-- [ ] 2.2 Add the `Waiter` trait and a `ThreadWaiter` production impl wrapping `std::thread::sleep`.
-- [ ] 2.3 Implement `Retrying<R, W = ThreadWaiter>` in `src/infra/registry/retrying.rs`: holds the inner registry, a waiter, and an optional `Box<dyn Fn(&str)>` notifier. Constructor `Retrying::new(inner)` uses `ThreadWaiter` and no notifier; a builder method attaches the notifier.
-- [ ] 2.4 Implement the shared retry loop: attempt the call, and on an error where `is_retryable()` is true and attempts remain, resolve the wait, announce it via the notifier, sleep, and retry. Constants `MAX_ATTEMPTS = 3`, `MAX_RETRY_WAIT = 5s`, backoff `[1s, 2s]`. Wait resolution by `RetryAfter`: `After(d)` waits exactly `d`; `Unstated` waits the backoff value for this attempt index; `TooDistant` returns the error immediately without waiting or retrying.
-- [ ] 2.5 Implement `VersionRegistry for Retrying<R, W>` — `lookup_sha`, `all_tags`, `describe_sha` all route through the shared loop. Keep the three impls thin so the file stays well inside the 440-logic-line budget.
-- [ ] 2.6 Verify the type composes as the inner layer: `Retrying<Registry>` must satisfy `VersionRegistry` so a future `Caching::new(Retrying::new(...))` type-checks. Do not create, fetch, or modify any caching file.
+- [x] 2.1 Create `src/infra/registry/mod.rs` declaring the module, and register `pub mod registry;` in `src/infra/mod.rs`. The new directory holds 2 files, well inside the per-directory file budget that `mise run test` enforces.
+- [x] 2.2 Add the `Waiter` trait and a `ThreadWaiter` production impl wrapping `std::thread::sleep`.
+- [x] 2.3 Implement `Retrying<R, W = ThreadWaiter>` in `src/infra/registry/retrying.rs`: holds the inner registry, a waiter, and an optional `Box<dyn Fn(&str)>` notifier. Constructor `Retrying::new(inner)` uses `ThreadWaiter` and no notifier; a builder method attaches the notifier.
+- [x] 2.4 Implement the shared retry loop: attempt the call, and on an error where `is_retryable()` is true and attempts remain, resolve the wait, announce it via the notifier, sleep, and retry. Constants `MAX_ATTEMPTS = 3`, `MAX_RETRY_WAIT = 5s`, backoff `[1s, 2s]`. Wait resolution by `RetryAfter`: `After(d)` waits exactly `d`; `Unstated` waits the backoff value for this attempt index; `TooDistant` returns the error immediately without waiting or retrying.
+- [x] 2.5 Implement `VersionRegistry for Retrying<R, W>` — `lookup_sha`, `all_tags`, `describe_sha` all route through the shared loop. Keep the three impls thin so the file stays well inside the 440-logic-line budget.
+- [x] 2.6 Verify the type composes as the inner layer: `Retrying<Registry>` must satisfy `VersionRegistry` so a future `Caching::new(Retrying::new(...))` type-checks. Do not create, fetch, or modify any caching file.
 
 ## 3. Tests at the decorator seam
 
-- [ ] 3.1 Add a recording `Waiter` fake that stores requested durations and returns instantly, and a scripted `VersionRegistry` fake returning a caller-supplied result sequence while counting calls. Keep both in the retrying module's `#[cfg(test)]` block at file bottom.
-- [ ] 3.2 Test: rate-limit then success → `Ok`, exactly 2 calls. (spec: transient limit resolves without user intervention)
-- [ ] 3.3 Test: always rate-limited → `Err`, exactly 3 calls. (spec: bounded attempts)
-- [ ] 3.4 Test: `AuthRequired` → `Err`, exactly 1 call. (spec: missing credential not retried)
-- [ ] 3.5 Test: `ResolveFailed` → `Err`, exactly 1 call. (spec: non-retryable failure not retried)
-- [ ] 3.6 Test: `RetryAfter::After(3s)` → the waiter recorded exactly 3s, not a backoff value. (spec: near reset time is waited out)
-- [ ] 3.7 Test: `RetryAfter::Unstated` → the waiter recorded `[1s, 2s]`, increasing and each under the cap. (spec: missing reset falls back to increasing backoff)
-- [ ] 3.8 Test: `RetryAfter::TooDistant` → `Err`, exactly 1 call, and the waiter recorded nothing. Assert alongside 3.7 so the contrast is pinned — "1 call, no wait" alone is also what a no-op layer produces. (spec: distant reset time is not waited on)
-- [ ] 3.9 Test: the notifier fires once per wait and before it, with a message naming the rate limit and the duration. (spec: user sees why the command paused)
-- [ ] 3.10 Test: `describe_sha` and `all_tags` each retry a rate-limit error too — 2 calls apiece on rate-limit-then-success. Guards against a trait method bypassing the shared loop.
-- [ ] 3.11 Confirm no test sleeps: the retrying module's tests must complete effectively instantly.
+- [x] 3.1 Add a recording `Waiter` fake that stores requested durations and returns instantly, and a scripted `VersionRegistry` fake returning a caller-supplied result sequence while counting calls. Keep both in the retrying module's `#[cfg(test)]` block at file bottom.
+- [x] 3.2 Test: rate-limit then success → `Ok`, exactly 2 calls. (spec: transient limit resolves without user intervention)
+- [x] 3.3 Test: always rate-limited → `Err`, exactly 3 calls. (spec: bounded attempts)
+- [x] 3.4 Test: `AuthRequired` → `Err`, exactly 1 call. (spec: missing credential not retried)
+- [x] 3.5 Test: `ResolveFailed` → `Err`, exactly 1 call. (spec: non-retryable failure not retried)
+- [x] 3.6 Test: `RetryAfter::After(3s)` → the waiter recorded exactly 3s, not a backoff value. (spec: near reset time is waited out)
+- [x] 3.7 Test: `RetryAfter::Unstated` → the waiter recorded `[1s, 2s]`, increasing and each under the cap. (spec: missing reset falls back to increasing backoff)
+- [x] 3.8 Test: `RetryAfter::TooDistant` → `Err`, exactly 1 call, and the waiter recorded nothing. Assert alongside 3.7 so the contrast is pinned — "1 call, no wait" alone is also what a no-op layer produces. (spec: distant reset time is not waited on)
+- [x] 3.9 Test: the notifier fires once per wait and before it, with a message naming the rate limit and the duration. (spec: user sees why the command paused)
+- [x] 3.10 Test: `describe_sha` and `all_tags` each retry a rate-limit error too — 2 calls apiece on rate-limit-then-success. Guards against a trait method bypassing the shared loop.
+- [x] 3.11 Confirm no test sleeps: the retrying module's tests must complete effectively instantly.
 
 ## 4. Wire the decorator into the commands
 
@@ -38,7 +38,7 @@
 
 ## 5. Vacuity check and gates
 
-- [ ] 5.1 Mutation-test: temporarily set `MAX_ATTEMPTS = 1` and run the suite. Tests 3.2, 3.3, 3.6, 3.7, 3.9, and 3.10 must all fail. Rewrite any that still pass, then restore the constant and re-run. (3.8 is expected to still pass under this mutation — it is pinned by its pairing with 3.7, not by this mutation.)
+- [x] 5.1 Mutation-test: temporarily set `MAX_ATTEMPTS = 1` and run the suite. Tests 3.2, 3.3, 3.6, 3.7, 3.9, and 3.10 must all fail. Rewrite any that still pass, then restore the constant and re-run. (3.8 is expected to still pass under this mutation — it is pinned by its pairing with 3.7, not by this mutation.)
 - [ ] 5.2 Run `mise run test` — must pass. Do not raise any budget in `tests/code_health.rs`; restructure instead.
 - [ ] 5.3 Run `mise run integ` — must pass.
 - [ ] 5.4 Confirm clippy strict is clean: pedantic, private-item and field docs on every new item, `#[cfg(test)]` at file bottom, any `#[expect(...)]` actually fulfilled.
