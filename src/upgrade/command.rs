@@ -11,6 +11,7 @@ use crate::domain::lock::Lock;
 use crate::infra::github::Registry;
 use crate::infra::lock::Error as LockFileError;
 use crate::infra::manifest::Error as ManifestError;
+use crate::infra::registry::Caching;
 use crate::infra::workflow_update::WorkflowWriter;
 use thiserror::Error;
 
@@ -88,7 +89,7 @@ impl Command for Upgrade {
         on_progress: &mut dyn FnMut(&str),
     ) -> Result<UpgradeReport, RunError> {
         let has_manifest = config.manifest_path.exists();
-        let registry = Registry::new(config.settings.github_token)?;
+        let registry = Caching::new(Registry::new(config.settings.github_token)?);
         let updater = WorkflowWriter::new(repo_root);
 
         let upgrade_plan = plan::plan(
