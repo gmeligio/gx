@@ -68,9 +68,9 @@ Satisfies: "Audit the locked action set with gx audit",
 
 ## 6. CLI registration
 
-- [ ] 6.1 Add `Commands::Audit { json: bool }`, the `cmd_name` arm, and the `use`/`GxError`
+- [x] 6.1 Add `Commands::Audit { json: bool }`, the `cmd_name` arm, and the `use`/`GxError`
       entries in `src/main.rs`
-- [ ] 6.2 Add the dispatch arm running audit, printing JSON under `--json` and rendered
+- [x] 6.2 Add the dispatch arm running audit, printing JSON under `--json` and rendered
       lines otherwise, suppressing spinner and log file in JSON mode
 - [ ] 6.3 Add a named test in `tests/integ_audit.rs` asserting that with `--json` and no
       token, stdout is empty — no JSON document at all, not an empty one and not one with

@@ -4,6 +4,7 @@
 )]
 
 use clap::{Parser, Subcommand};
+use gx::audit::Error as AuditError;
 use gx::command::{Command as _, CommandReport as _};
 use gx::config::{Config, Error as ConfigError};
 use gx::infra::{repo, repo::Error as RepoError};
@@ -14,7 +15,7 @@ use gx::output::log_file::LogFile;
 use gx::output::printer::Printer;
 use gx::tidy::RunError as TidyRunError;
 use gx::upgrade::command::RunError as UpgradeRunError;
-use gx::{init, lint, tidy, upgrade};
+use gx::{audit, init, lint, tidy, upgrade};
 use indicatif::ProgressBar;
 use thiserror::Error;
 
@@ -44,6 +45,10 @@ enum GxError {
     /// Lint command failed.
     #[error(transparent)]
     Lint(#[from] LintError),
+
+    /// Audit command failed.
+    #[error(transparent)]
+    Audit(#[from] AuditError),
 
     /// Repository detection failed.
     #[error(transparent)]
@@ -93,6 +98,16 @@ enum Commands {
     /// and ignores under `[lint.rules]` in `.github/gx.toml`. See
     /// `docs/lint-rules.md`.
     Lint,
+    /// Audit locked actions against security advisories and upstream repository state.
+    ///
+    /// Unlike `gx lint`, which is fully offline, audit queries GitHub and its verdict
+    /// changes over time: the same commit can be clean today and vulnerable tomorrow.
+    /// It reads `.github/gx.lock` and requires a GitHub token in `GITHUB_TOKEN`.
+    Audit {
+        /// Emit the findings as JSON on stdout (for scripting / CI).
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 impl Commands {
@@ -104,7 +119,7 @@ impl Commands {
     /// condition separately is how one of them gets missed when a command gains the flag.
     const fn json_mode(&self) -> bool {
         match self {
-            Self::Upgrade { json, .. } => *json,
+            Self::Upgrade { json, .. } | Self::Audit { json } => *json,
             Self::Tidy | Self::Init | Self::Lint => false,
         }
     }
@@ -236,7 +251,71 @@ fn run_upgrade(
     Ok(lf)
 }
 
-fn main() -> Result<(), GxError> {
+/// Run the audit command, rendering either human output or, with `--json`, a single
+/// JSON document on stdout. Returns the log file to keep it alive until `main` drops it.
+/// Exits the process directly on a non-zero report exit code.
+///
+/// A missing token surfaces as `Err` from `run` and propagates out of `main`, so no
+/// report — and under `--json` no document at all — is ever printed for a run that did
+/// not actually audit anything.
+fn run_audit(
+    printer: &Printer,
+    repo_root: &std::path::Path,
+    config: Config,
+    log_file: Option<LogFile>,
+    json: bool,
+) -> Result<Option<LogFile>, GxError> {
+    // In JSON mode stdout must be a single JSON document, so suppress the spinner and
+    // the local log file (their progress noise would corrupt it).
+    let spinner = if json {
+        None
+    } else {
+        printer.spinner("Auditing...")
+    };
+    let mut lf = if json { None } else { log_file };
+    let report = {
+        let mut cb = make_cb(spinner.as_ref(), &mut lf, printer.is_ci && !json);
+        audit::Audit.run(repo_root, config, &mut cb)?
+    };
+    finish_spinner(spinner);
+
+    if json {
+        #[expect(clippy::print_stdout, reason = "JSON contract is written to stdout")]
+        {
+            println!("{}", report.to_json());
+        }
+    } else {
+        let mut lines = report.render();
+        append_log_path(lf.as_ref(), &mut lines);
+        printer.print_lines(&lines);
+    }
+
+    if report.exit_code() != 0 {
+        std::process::exit(report.exit_code());
+    }
+
+    Ok(lf)
+}
+
+fn main() {
+    // `run` returns the error rather than `main` doing so, because `Termination` prints a
+    // returned error with `Debug` — `Audit(MissingToken)` — which would bury the message
+    // telling the user which variable to set. Printing `Display` here surfaces the full,
+    // actionable text, and every error type in `GxError` already writes a good one.
+    if let Err(error) = run() {
+        #[expect(
+            clippy::print_stderr,
+            reason = "top-level error reporting, before any printer exists"
+        )]
+        {
+            eprintln!("Error: {error}");
+        }
+        std::process::exit(1);
+    }
+}
+
+/// The real entry point. See [`main`] for why the error is returned rather than propagated.
+fn run() -> Result<(), GxError> {
     let cli = Cli::parse();
 
     let printer = Printer::new();
@@ -247,6 +326,7 @@ fn main() -> Result<(), GxError> {
         Commands::Init => "init",
         Commands::Upgrade { .. } => "upgrade",
         Commands::Lint => "lint",
+        Commands::Audit { .. } => "audit",
     };
 
     // `--json` turns stdout into a single machine-readable document, so every
@@ -273,9 +353,18 @@ fn main() -> Result<(), GxError> {
         Err(RepoError::GithubFolder) => {
             if json_mode {
                 // Emit a valid, empty JSON document so a consumer's parser never breaks.
+                // Each command has its own document shape, so the right one must be
+                // chosen here — a consumer of `gx audit --json` parses findings, not
+                // upgrades, and would break on the other command's schema.
+                let empty = match &cli.command {
+                    Commands::Audit { .. } => audit::Report::default().to_json(),
+                    Commands::Tidy | Commands::Init | Commands::Lint | Commands::Upgrade { .. } => {
+                        upgrade::command::empty_json_report()
+                    }
+                };
                 #[expect(clippy::print_stdout, reason = "JSON contract is written to stdout")]
                 {
-                    println!("{}", upgrade::command::empty_json_report());
+                    println!("{empty}");
                 }
             } else {
                 printer.print_lines(&[OutputLine::Summary {
@@ -331,6 +420,7 @@ fn main() -> Result<(), GxError> {
             latest,
             json,
         )?,
+        Commands::Audit { json } => run_audit(&printer, &repo_root, config, lf, json)?,
     };
 
     drop(log_file);
