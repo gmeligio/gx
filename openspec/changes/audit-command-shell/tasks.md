@@ -15,15 +15,15 @@ Isolated from the rest because it is the only work that can regress a shipped co
 
 Satisfies: "Advisory lookups go through a substitutable seam".
 
-- [ ] 2.1 Create `src/infra/github/advisory.rs` with the `AdvisoryQuery` trait, the advisory
+- [x] 2.1 Create `src/infra/github/advisory.rs` with the `AdvisoryQuery` trait, the advisory
       record type, and the GraphQL request/response `serde` structs
-- [ ] 2.2 Implement `GraphQlAdvisories` — JSON POST to `https://api.github.com/graphql` over
+- [x] 2.2 Implement `GraphQlAdvisories` — JSON POST to `https://api.github.com/graphql` over
       the existing `reqwest::blocking::Client`, `Authorization: Bearer` header, reusing the
       `infra::github::Error` variants (defined in `registry.rs`, re-exported from `mod.rs`)
       so auth, rate-limit, and malformed responses stay `Err`
-- [ ] 2.3 Add `FakeAdvisories` under `#[cfg(test)]` returning canned results
-- [ ] 2.4 Export the seam from `src/infra/github/mod.rs`
-- [ ] 2.5 Unit tests: request body shape, response deserialization, and a check-shaped
+- [x] 2.3 Add `FakeAdvisories` under `#[cfg(test)]` returning canned results
+- [x] 2.4 Export the seam from `src/infra/github/mod.rs`
+- [x] 2.5 Unit tests: request body shape, response deserialization, and a check-shaped
       consumer running against `FakeAdvisories` with no network
 
 ## 3. Check identity and findings

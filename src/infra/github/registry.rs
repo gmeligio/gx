@@ -124,6 +124,19 @@ impl Registry {
         })
     }
 
+    /// Build a POST request, attaching the Authorization header only if a token is set.
+    ///
+    /// Used by the GraphQL seam, which is POST-only. Unlike the REST paths, its caller
+    /// requires a token and refuses to run without one — an unauthenticated GraphQL
+    /// request is rejected outright, so a token-less POST could only ever fail.
+    pub(super) fn authenticated_post(&self, url: &str) -> reqwest::blocking::RequestBuilder {
+        let req = self.client.post(url);
+        match &self.token {
+            Some(token) => req.header("Authorization", format!("Bearer {}", token.as_str())),
+            None => req,
+        }
+    }
+
     /// Classify a non-success HTTP response into the appropriate `Error` variant.
     pub(super) fn check_status(response: &reqwest::blocking::Response, url: &str) -> Error {
         let status = response.status();
