@@ -127,7 +127,7 @@ it. The six tests are wrong today; a flag would make them permanently wrong.
 
 | Former type | Becomes |
 | --- | --- |
-| `AuthRequiredRegistry`, `NoopRegistry` | `FakeRegistry::new().failing(Error::AuthRequired { forge })` |
+| `AuthRequiredRegistry`, `NoopRegistry` | `FakeRegistry::new().failing_auth()` |
 | `EmptyDateRegistry` | `FakeRegistry::new().with_empty_dates()` |
 | `FailingDescribeRegistry` | `FakeRegistry::new().failing_describe(reason)` |
 | `MixedRegistry` | `FakeRegistry::new().failing_action("actions/checkout", err)` |
@@ -135,13 +135,26 @@ it. The six tests are wrong today; a flag would make them permanently wrong.
 
 Every knob above has at least one current caller. Nothing speculative is added.
 
-**Verified after implementation.** A caller count over the finished code found
+**Verified after implementation — two knobs deleted, in two passes.**
+
 `with_tags_result` (originally planned as `MockRegistry`'s second half) had **zero**
-callers — the migrated `MockRegistry` tests all drive `all_tags` through `with_all_tags`
-or an error knob instead. It was deleted rather than kept "for symmetry"; a knob with no
-caller is exactly the speculation the Non-Goals rule out. Final knob set and caller counts:
-`with_all_tags` 13, `with_sha_tags` 10, `failing_auth` 3, `failing_describe` 2,
-`with_lookup_result` 2, `failing_action` 1, `with_fixed_sha` 1, `with_empty_dates` 1.
+callers: the migrated `MockRegistry` tests all drive `all_tags` through `with_all_tags` or
+an error knob instead. Deleted rather than kept "for symmetry".
+
+`failing(error)` was then found dead too, by external review. My own caller count missed it
+because it grepped for `.failing(` as a *method call* and its sole call site —
+`failing_auth`, one line below in the same `impl` — registered as a legitimate hit. A
+public method whose only caller is its own convenience wrapper is dead public API, not a
+knob. Its body is now inlined into `failing_auth` and the method is gone. If a non-auth
+registry-wide error is ever needed, giving the `error` field its own setter is two lines.
+
+The lesson for the caller-count check: counting call sites cannot distinguish a real
+consumer from an internal wrapper. The honest question is "would deleting this break any
+*test*", not "does the identifier appear twice".
+
+Final knob set and caller counts: `with_all_tags` 13, `with_sha_tags` 10, `failing_auth` 3,
+`failing_describe` 2, `with_lookup_result` 2, `failing_action` 1, `with_fixed_sha` 1,
+`with_empty_dates` 1. **Seven knobs, every one called from a test.**
 
 ### D4: `lookup_sha`'s default SHA is the deterministic hash
 

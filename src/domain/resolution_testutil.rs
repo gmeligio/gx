@@ -90,19 +90,16 @@ impl FakeRegistry {
         self
     }
 
-    /// Make every method fail with `error`.
-    #[must_use]
-    pub fn failing(mut self, error: ResolutionError) -> Self {
-        self.error = Some(error);
-        self
-    }
-
     /// Make every method fail with `AuthRequired`, the common "no token" case.
+    ///
+    /// The only registry-wide failure any test needs today. If a non-auth one is
+    /// ever wanted, give the field its own setter then.
     #[must_use]
-    pub fn failing_auth(self) -> Self {
-        self.failing(ResolutionError::AuthRequired {
+    pub fn failing_auth(mut self) -> Self {
+        self.error = Some(ResolutionError::AuthRequired {
             forge: Forge::GitHub,
-        })
+        });
+        self
     }
 
     /// Make only `id` fail, leaving every other action resolvable.
