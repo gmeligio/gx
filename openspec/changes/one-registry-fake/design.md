@@ -218,6 +218,27 @@ approaches that, the fix is fewer knobs, not a second file.
   A migrated test that still passes under its mutation is not migrated — it is disabled, and
   gets fixed before this change lands.
 
+**Re-run after the rebase onto the integration base**, because `ShaIndex`'s deletion changed
+the very path the corrected fixtures exercise — `resolve_from_sha` now calls
+`registry.describe_sha` directly instead of routing through a `ShaIndex` cache. Green after a
+rebase proves compilation, not retained strength, so the two load-bearing mutations were run
+again:
+
+- *Reverse tag specificity* → `resolve_from_sha_with_tags`,
+  `sha_first_lock_uses_workflow_sha_and_most_specific_version`, and
+  `sha_to_tag_upgrade_via_registry` all FAILED. The fixtures still reach the tag-selection
+  logic through the new call path.
+- *Make `resolve_from_sha` pass a hardcoded zero-SHA to `describe_sha`* — reintroducing the
+  old double's lie as a **production** bug → **7 tests FAILED**: the six corrected
+  `lock_sync` fixtures plus `resolve_from_sha_with_tags`. Under the old SHA-ignoring fake
+  that bug was undetectable by construction. This is the change's payoff demonstrated rather
+  than argued.
+
+A third variant is worth recording as a *non*-finding: mutating the **fake** to ignore the
+SHA again leaves the suite green. That is correct and expected — the fixtures now register
+tags under the SHA they actually query, so a lying fake returns the same answer. The tests no
+longer *depend* on the lie, which is precisely the property this change bought.
+
 ## Observability
 
 Failures here surface at compile time or as test failures — this is test-only code with no
@@ -252,9 +273,14 @@ Two design choices reduce it structurally:
 - **[One fake with many knobs becomes a god-object]** → Six knobs, each with a current
   caller, in a file well under the 440-line budget. The budget check in `tests/code_health.rs`
   enforces the ceiling; no budget number is raised.
-- **[Concurrent `Caching<R>` work has its own counting fake]** → Out of scope by instruction.
-  Noted at merge; the unified fake would likely serve it, since a decorator test needs the
-  inner registry to be configurable in exactly these ways.
+- **[Concurrent `Caching<R>` work has its own counting fake]** → **Resolved at rebase, and
+  the earlier guess was wrong.** Now that `Caching<R>` is in the base, its `CountingRegistry`
+  (`src/infra/registry/caching_tests.rs`) turns out *not* to be replaceable by the unified
+  fake: it exists to count how many calls reach the inner registry (`Cell<usize>` per method),
+  which is the one thing a cache test must assert and the one thing this fake deliberately
+  does not do. Adding a counting knob with a single caller in another module would be exactly
+  the speculation the Non-Goals rule out. Two doubles is the right number here — they answer
+  different questions. Left alone.
 
 ## Migration Plan
 
