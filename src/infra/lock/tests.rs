@@ -245,10 +245,10 @@ fn two_tier_lock_roundtrips_byte_identically() {
 
 #[test]
 fn save_sorts_unsorted_input_into_canonical_order() {
-    // Deliberately reverse-ordered: `docker/...` before `actions/...`, and `^4.2`
-    // before `^4` within one action. A byte-identity check over already-sorted
-    // input cannot catch a broken sort; this input can only match the expected
-    // output if entries are actively reordered.
+    // `Lock` stores rows in a `HashMap`, so loading already discards input
+    // order — this fixture is reverse-ordered to document the intent, not
+    // because the serializer ever sees that order. What the assertion proves is
+    // that output is sorted deterministically whatever order iteration yields.
     let unsorted = concat!(
         "[resolutions.\"docker/build-push-action\".\"^5\"]\nversion = \"v5.1.0\"\n\n",
         "[resolutions.\"actions/checkout\".\"^4.2\"]\nversion = \"v4.2.1\"\n\n",
@@ -266,7 +266,7 @@ fn save_sorts_unsorted_input_into_canonical_order() {
 
     assert_ne!(
         unsorted, expected,
-        "fixture must be unsorted, or the assertion below proves nothing"
+        "expected output must be the sorted form, not a copy of the fixture"
     );
     assert_eq!(
         load_then_save(unsorted),

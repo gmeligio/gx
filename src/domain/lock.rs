@@ -93,9 +93,7 @@ impl Lock {
 
     /// Iterate the lock as a collection of managed dependencies.
     ///
-    /// Each row is yielded as a [`LockedAction`] carrying its own [`Spec`], so
-    /// a consumer never re-pairs the map's key onto its value by hand. Order is
-    /// unspecified — callers that need one sort explicitly.
+    /// Order is unspecified — callers that need one sort explicitly.
     pub fn entries(&self) -> impl Iterator<Item = LockedAction<'_>> {
         self.entries
             .iter()

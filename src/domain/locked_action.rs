@@ -1,44 +1,26 @@
 use super::action::identity::{ActionId, CommitSha, Repository};
-use super::action::resolved::{Commit, ResolvedRef};
+use super::action::resolved::Commit;
 use super::action::spec::Spec;
 use super::action::specifier::Specifier;
 use super::lock::LockEntry;
 
-/// One managed dependency as recorded in the lock: a borrowed view over a
-/// single lock row, carrying its [`Spec`] alongside the resolution it maps to.
+/// Pairs a lock row's key with its value so consumers read one whole row.
 ///
-/// The lock stores rows as a `HashMap<Spec, LockEntry>`, so the key lives
-/// outside the value and a row is only a whole thought once the two are paired.
-/// [`LockEntry`] is the storage counterpart — the shape the map owns and
-/// mutates in place. `LockedAction` is the read view yielded by
-/// [`Lock::entries`](super::lock::Lock::entries), and it is what a consumer
-/// iterating the lock should name.
-///
-/// # Completeness
-///
-/// Accessors surface stored values verbatim and make no completeness
-/// guarantee. The lock's loaded shape permits rows whose fields are empty, so
-/// [`repository`](Self::repository) may return an empty string and
-/// [`version_label`](Self::version_label) an empty label. A caller that needs a
-/// guarantee asks [`Lock::is_complete`](super::lock::Lock::is_complete).
+/// A loaded lock may hold rows whose fields were never populated, so accessors
+/// that can be empty on disk return [`Option`] rather than an empty value a
+/// caller could use by accident.
 #[derive(Debug, Clone, Copy)]
 pub struct LockedAction<'lock> {
     /// The lock key: action ID plus the specifier it is recorded under.
     spec: &'lock Spec,
-    /// What the specifier resolved to — a tag, a branch, or a bare commit pin.
-    reference: &'lock ResolvedRef,
-    /// Commit metadata for the resolution.
-    commit: &'lock Commit,
+    /// The stored value this row maps to.
+    entry: &'lock LockEntry,
 }
 
 impl<'lock> LockedAction<'lock> {
     /// View a stored lock row as a managed dependency.
     pub(super) fn new(spec: &'lock Spec, entry: &'lock LockEntry) -> Self {
-        Self {
-            spec,
-            reference: &entry.reference,
-            commit: &entry.commit,
-        }
+        Self { spec, entry }
     }
 
     /// The action this row locks, e.g. `actions/checkout`.
@@ -53,35 +35,33 @@ impl<'lock> LockedAction<'lock> {
         &self.spec.specifier
     }
 
-    /// What the specifier resolved to.
-    #[must_use]
-    pub fn reference(&self) -> &'lock ResolvedRef {
-        self.reference
-    }
-
     /// The pinned commit SHA.
     #[must_use]
     pub fn sha(&self) -> &'lock CommitSha {
-        &self.commit.sha
+        &self.entry.commit.sha
     }
 
-    /// The repository the commit was resolved against, as stored.
+    /// The repository the commit was resolved against.
+    ///
+    /// `None` when the row was loaded without one — a caller building a
+    /// `GET /repos/{owner}/{repo}` URL must treat that as "cannot check",
+    /// never as a clean result.
     #[must_use]
-    pub fn repository(&self) -> &'lock Repository {
-        &self.commit.repository
+    pub fn repository(&self) -> Option<&'lock Repository> {
+        let repository = &self.entry.commit.repository;
+        (!repository.as_str().is_empty()).then_some(repository)
     }
 
     /// The full commit metadata, for callers that persist every field.
     #[must_use]
     pub fn commit(&self) -> &'lock Commit {
-        self.commit
+        &self.entry.commit
     }
 
-    /// The string recorded in the lock's `version` slot. A bare commit pin
-    /// round-trips through its SHA (see [`ResolvedRef::label`]).
+    /// The string recorded in the lock's `version` slot.
     #[must_use]
     pub fn version_label(&self) -> &'lock str {
-        self.reference.label(&self.commit.sha)
+        self.entry.version_label()
     }
 }
 
@@ -117,8 +97,10 @@ mod tests {
         assert_eq!(locked.id().as_str(), "actions/checkout");
         assert_eq!(locked.specifier().as_str(), "^4");
         assert_eq!(locked.sha().as_str(), SHA);
-        assert_eq!(locked.repository().as_str(), "actions/checkout");
-        assert_eq!(locked.reference(), &entry.reference);
+        assert_eq!(
+            locked.repository().map(Repository::as_str),
+            Some("actions/checkout")
+        );
     }
 
     #[test]
@@ -138,9 +120,9 @@ mod tests {
     }
 
     #[test]
-    fn accessors_surface_an_incomplete_row_verbatim() {
-        // The loaded shape permits empty fields; the view reports them as
-        // stored rather than hiding or rejecting them.
+    fn repository_is_none_when_the_row_never_stored_one() {
+        // An audit check building `GET /repos/{owner}/{repo}` must be forced to
+        // handle absence, not silently request a malformed URL and report clean.
         let spec = Spec::new(ActionId::from("actions/checkout"), Specifier::parse("^4"));
         let entry = LockEntry {
             reference: ResolvedRef::Tag(Version::from("v4.2.1")),
@@ -152,11 +134,6 @@ mod tests {
             },
         };
 
-        assert!(
-            LockedAction::new(&spec, &entry)
-                .repository()
-                .as_str()
-                .is_empty()
-        );
+        assert_eq!(LockedAction::new(&spec, &entry).repository(), None);
     }
 }
