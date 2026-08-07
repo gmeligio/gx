@@ -72,9 +72,14 @@ produces.
 
 ### 3. Gate on `up_to_date` with a step output, checked by the PR step's `if:`
 
-The `jq` step emits `up_to_date` as a step output; the create-pull-request step carries
-`if: steps.<id>.outputs.up_to_date == 'false'`. This is one boolean read straight off the contract, which
-is exactly what the issue asks for ("skips opening a PR when `up_to_date` is true").
+A dedicated `jq` step emits `up_to_date` as a step output; both the body-building step and the
+create-pull-request step carry `if: steps.report.outputs.up_to_date == 'false'`. This is one boolean read
+straight off the contract, which is exactly what the issue asks for ("skips opening a PR when `up_to_date`
+is true").
+
+Gating the body step too, not just the PR step, matters: the body text asserts the lock advanced. Built
+unconditionally it would write "advanced the lock … 0 action(s) upgraded" into the run log of every quiet
+week — a false statement sitting in the one place a user looks to diagnose the workflow.
 
 **Alternatives considered:**
 
