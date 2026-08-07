@@ -6,7 +6,7 @@ The same gap already shows up today: `Lock::is_complete` (`src/domain/lock.rs:64
 
 ## What Changes
 
-- Introduce `LockedAction` in `src/domain/locked_action.rs`: a self-contained, borrowed view of one lock row carrying its `Spec` alongside its `ResolvedRef` and `Commit`, with accessors for the fields audit needs (`id`, `specifier`, `reference`, `sha`, `repository`, `version_label`).
+- Introduce `LockedAction` in `src/domain/locked_action.rs`: a self-contained, borrowed view of one lock row carrying its `Spec` alongside the `LockEntry` it maps to, with accessors for the fields audit needs (`id`, `specifier`, `sha`, `repository`, `commit`, `version_label`). `repository()` returns `Option` so a row that stored none cannot be mistaken for a usable value.
 - Change `Lock::entries()` to yield `LockedAction` instead of `(&Spec, &LockEntry)`, so the lock reads as a collection of managed dependencies rather than a map that callers must reassemble.
 - Update the one production consumer (`src/infra/lock/format.rs`) to iterate `LockedAction`.
 - Keep `LockEntry` as the map's storage value. It stays the in-place-mutable shape `Lock::set`/`set_version` need; `LockedAction` is the read view over a row.

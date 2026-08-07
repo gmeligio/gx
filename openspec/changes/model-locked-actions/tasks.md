@@ -6,9 +6,10 @@
 
 ## 2. Introduce the type
 
-- [x] 2.1 Create `src/domain/locked_action.rs` with `LockedAction<'lock> { spec: &'lock Spec, reference: &'lock ResolvedRef, commit: &'lock Commit }`, a crate-visible constructor, and accessors `id()`, `specifier()`, `reference()`, `sha()`, `repository()`, `version_label()`. Doc-comment it as the read view over one lock row, naming `LockEntry` as the storage counterpart, and state on the type that accessors surface stored values verbatim with no completeness guarantee — an incomplete row yields an empty `repository()`; callers needing a guarantee ask `Lock::is_complete`.
+- [x] 2.1 Create `src/domain/locked_action.rs` with `LockedAction<'lock> { spec: &'lock Spec, entry: &'lock LockEntry }`, a crate-visible constructor, and accessors `id()`, `specifier()`, `sha()`, `repository()`, `commit()`, `version_label()`. Doc-comment it as the read view over one lock row, naming `LockEntry` as the storage counterpart. Add no accessor no known consumer needs — in particular no `reference()`, since both `build_lock_document` and the #129–#133 checks read the reference only through `version_label()`.
 - [x] 2.2 Register `pub mod locked_action;` in `src/domain/mod.rs`.
-- [x] 2.3 Add unit tests at the bottom of `locked_action.rs`: accessors match the viewed row; `version_label()` is the SHA for a bare-commit pin and the tag string otherwise.
+- [x] 2.3 Make `repository()` return `Option<&Repository>`, `None` for a row that stored none, so an audit check building `GET /repos/{owner}/{repo}` cannot turn an empty value into a malformed URL and report clean.
+- [x] 2.4 Add unit tests at the bottom of `locked_action.rs`: accessors match the viewed row; `version_label()` is the SHA for a bare-commit pin and the tag string otherwise; `repository()` is `None` when the row never stored one.
 
 ## 3. Make the lock yield it
 

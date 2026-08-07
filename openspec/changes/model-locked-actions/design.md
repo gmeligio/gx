@@ -32,7 +32,11 @@ Binding constraints:
 
 ### Introduce `LockedAction` as a borrowed view, not an owned replacement
 
-`LockedAction<'lock>` holds `spec: &'lock Spec` plus `reference: &'lock ResolvedRef` and `commit: &'lock Commit`, and exposes `id()`, `specifier()`, `reference()`, `sha()`, `repository()`, `version_label()`.
+`LockedAction<'lock>` holds `spec: &'lock Spec` plus `entry: &'lock LockEntry`, and exposes `id()`, `specifier()`, `sha()`, `repository()`, `commit()`, `version_label()`.
+
+*Why borrow the whole `LockEntry` rather than its two fields separately:* the row's value is already one struct, so splitting it into `reference` and `commit` references duplicates `LockEntry`'s shape in a second place that must be kept in step with it. Holding the entry lets `version_label()` delegate to `LockEntry::version_label()` — the same expression `format.rs` wrote before this change — instead of reimplementing the label rule.
+
+*No `reference()` accessor:* per the Non-Goal above, an accessor no known consumer needs is not added. `build_lock_document` reads the reference only through `version_label()`, and the audit checks in #129–#133 need the label too, not the `ResolvedRef`. `commit()` exists because `format.rs`'s dedup map stores `&Commit` directly.
 
 *Why borrowed:* `entries()` is called on a `&Lock` in the hot serialization path and, per #129–#133, on every audit run. An owned type would clone a `Spec` and `Commit` per row for read-only consumers. Borrowing costs nothing and keeps `Lock` the single owner.
 
@@ -75,7 +79,7 @@ No new test infrastructure.
 
 No new runtime failure modes. `LockedAction` is a borrowed view with no fallible construction — it performs no parsing, no I/O, and no allocation, so constructing one cannot fail.
 
-**Construction cannot fail, but a row can still be incomplete.** `Lock::is_complete` exists because the loaded shape permits rows whose fields are empty, and this change deliberately leaves it unreworked. `entries()` therefore yields a `LockedAction` for incomplete rows too: `repository()` may return an empty string, and `reference()` may carry an empty label. Nothing in this change reads those — `build_lock_document` re-serializes whatever it was given, which is the existing behavior — but `gx audit` will, and an audit check comparing lock against reality is exactly the caller that hits an empty `repository()`. `LockedAction`'s accessors are documented as surfacing stored values verbatim, with no completeness guarantee; callers needing one must ask `Lock::is_complete`. Recording this here is the point of the change: the zip is now modeled, so the completeness caveat should not be rediscovered four times.
+**Construction cannot fail, but a row can still be incomplete.** `Lock::is_complete` exists because the loaded shape permits rows whose fields are empty, and this change deliberately leaves it unreworked. `entries()` therefore yields a `LockedAction` for incomplete rows too. Where absence is representable, the accessor makes it unignorable rather than surfacing a usable-looking empty value: `repository()` returns `Option<&Repository>`, `None` for a row that never stored one. That is the accessor `gx audit` hits first — a check building `GET /repos/{owner}/{repo}` from an empty string would request a malformed URL and report clean, so the type forces the caller to handle absence. Accessors that cannot be absent (`id()`, `specifier()`, `sha()`) stay plain references. Completeness across all five fields remains `Lock::is_complete`'s question, unreworked here. Recording this here is the point of the change: the zip is now modeled, so the completeness caveat should not be rediscovered four times.
 
 The one behavior that could regress *silently* is lock-file serialization: a reordering or dedup bug in `build_lock_document` would produce a valid-but-different `gx.lock` that no error path would surface, showing up only as spurious churn in a user's diff. That is exactly what the byte-identity test guards, and it is why that test asserts against a literal string rather than a self-round-trip.
 
