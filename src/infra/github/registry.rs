@@ -95,9 +95,6 @@ impl Registry {
     /// a [`Error::ParseResponse`] from parsing an error body. Callers such as
     /// `resolve_ref` depend on this to distinguish a missing ref from a
     /// malformed one.
-    ///
-    /// Not usable by callers that read response headers (the body parse
-    /// consumes the response) or that need failures to stay non-fatal.
     pub(super) fn get_json<T: serde::de::DeserializeOwned>(
         &self,
         url: &str,
