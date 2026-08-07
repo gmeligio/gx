@@ -84,9 +84,10 @@ struct AuditTarget<'lock> {
 }
 ```
 
-Checks take `&AuditTarget`. When `LockedAction` lands, only the adapter changes — every
-field is a subset of `LockedAction`'s accessors (`id`, `version_label`, `sha`), so it is a
-mechanical rewrite of one function, and no check is touched.
+Checks take `&AuditTarget`. **This played out as designed:** `LockedAction` landed while
+this change was in flight, and adapting to it was a four-line rewrite of `targets()`
+(`locked.id()`, `locked.version_label()`, `locked.sha()`, `locked.commit().ref_type`). No
+check file changed.
 
 `repository` is deliberately absent: the only shipped check does not read it, and the
 project forbids speculative state. The advisory checks will need it as the `package` slug,
@@ -114,8 +115,15 @@ same namespace as offline ones, which is the distinction this whole change exist
 ### Token is required, checked before any work
 
 `Settings::github_token` is already `Option<GitHubToken>`, populated from `GITHUB_TOKEN`.
-Audit's `run` resolves it first and returns `Error::MissingToken` when it is `None`. The
-error's `Display` names the variable and how to supply it.
+Audit's `run` resolves it first and returns `Error::MissingToken { forge }` when it is
+`None`. The error's `Display` names the variable via `Forge::token_env()` — not a literal —
+so it reads the same as the sibling resolution errors and cannot go stale when a second
+forge lands. The remedies it adds (`gh auth token`, the `env:` snippet, the refusal
+sentence) are audit-specific and have no upstream equivalent.
+
+A blank or whitespace-only `GITHUB_TOKEN` counts as absent. CI commonly exports the variable
+unconditionally, so `GITHUB_TOKEN=""` is a frequent accident; carrying it as `Some("")` would
+satisfy a presence check while authenticating nothing.
 
 This is checked *before* the lock is read and before any check runs, so there is no path on
 which audit does partial work and reports a partial-looking clean result. The failure is a
@@ -136,7 +144,10 @@ command exists to prevent.
   POSTs to `https://api.github.com/graphql` via the existing `reqwest::blocking::Client`
   with the `Authorization: Bearer` header, and deserializes the response. Failures reuse the
   `infra::github::Error` variants (defined in `registry.rs`, re-exported from `mod.rs`).
-- `FakeAdvisories` — `#[cfg(test)]` only, returns canned results.
+- `FakeAdvisories` — a bottom `#[cfg(test)] mod fake` in the same file, returning canned
+  results. In-file rather than its own file so `src/infra/github/` (6/8 in the integrated
+  base, after `resolve.rs` was split into `dates.rs` and `tags.rs`) keeps a free slot for
+  the first advisory-consuming check — the thing this seam exists to serve.
 
 Modeled directly on `src/infra/shellcheck/`, which already establishes trait + real adapter +
 `#[cfg(test)] fake` in this codebase.
