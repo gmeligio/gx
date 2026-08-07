@@ -32,9 +32,11 @@ the rendering belong to #129/#130 and are explicitly out of scope.
   - `Upgradable { fixed }` — a patched version exists and the specifier admits
     it; `gx upgrade <action>` will reach it.
   - `NoFixAvailable` — the advisory names no patched version, or names one gx
-    cannot interpret; migration required.
-  - `OutOfRange { fixed }` — a patched version exists but falls outside the
-    specifier; a major bump is required.
+    cannot deliver (unparseable, or a prerelease no range admits); migration
+    required.
+  - `OutOfRange { fixed }` — a patched version exists but the specifier cannot
+    reach it; the manifest entry must change — a wider range, typically across a
+    major, or for a branch/SHA pin a semver range at all.
 - Reuse `Specifier::matches_version` for condition 2 rather than adding new
   matching logic, and widen the crate's existing `parse_semver` from
   `pub(super)` to `pub(crate)` rather than duplicating it. Normalize advisory

@@ -26,9 +26,11 @@ pub enum Remediation {
     /// that is not a version, or a prerelease no range admits. Either way there
     /// is nothing to upgrade to and the user must migrate away from the action.
     NoFixAvailable,
-    /// A patched version exists but falls outside the manifest specifier, so
-    /// no `gx upgrade` invocation reaches it — the user must widen the
-    /// specifier, typically across a major version.
+    /// A patched version exists but the manifest specifier cannot reach it, so
+    /// no `gx upgrade` invocation delivers it. Either a range excludes the fix
+    /// (typically a major bump away) or the entry is a branch/SHA pin with no
+    /// range to search — in both cases the manifest entry must change, and the
+    /// caller has the specifier to say which.
     OutOfRange {
         /// The advisory's first patched version, `v`-prefixed.
         fixed: Version,
@@ -74,7 +76,8 @@ impl Remediation {
             // Inverts `matches_version`, which reports `Ref`/`Sha` as exempt.
             // That asks whether a pin is permitted; this asks whether
             // `gx upgrade` would reach the fix — with no range to search, it
-            // would not.
+            // would not. The obstacle is the missing range, not its width, so a
+            // caller must not render this arm as "requires a major bump".
             Specifier::Ref(_) | Specifier::Sha(_) => Self::OutOfRange { fixed },
         }
     }
@@ -172,7 +175,9 @@ mod tests {
 
     /// A branch is not governed by a range, so `gx upgrade` cannot be relied on
     /// to move it. This is the case that inverts `Specifier::matches_version`,
-    /// which reports a `Ref` as exempt.
+    /// which reports a `Ref` as exempt. `OutOfRange` here means "the entry must
+    /// become a range", not "bump the major" — the caller has the specifier and
+    /// distinguishes the two.
     #[test]
     fn branch_specifier_is_never_upgradable() {
         assert_eq!(

@@ -72,11 +72,11 @@ name a locked version only to identify the real-world case; it is not an input.
 
 ### Requirement: An unusable patched version is reported as no fix, not as out of range
 
-When an advisory names a patched version gx cannot deliver — one it cannot
-interpret as a version, or a prerelease, which no ordinary range admits — gx
-SHALL treat it as though no patched version were named. gx MUST NOT report such
-an advisory as having a fix outside the user's range, because that would tell
-the user a wider specifier would reach a fix when no reachable fix is known.
+gx SHALL treat a patched version it cannot deliver — one it cannot interpret as
+a version, or a prerelease, which no ordinary range admits — as though no
+patched version were named. gx MUST NOT report such an advisory as having a fix
+outside the user's range, because that would tell the user a wider specifier
+would reach a fix when no reachable fix is known.
 
 #### Scenario: Advisory patched version is not a recognizable version
 
@@ -117,19 +117,26 @@ shown a range-shaped identifier in place of a version.
 
 ### Requirement: Never suggest an upgrade for a reference an upgrade cannot move
 
-A manifest entry that names a branch or a bare commit SHA is not governed by a
-semver range, so `gx upgrade` cannot be relied on to move it to a patched
-version. gx SHALL NOT suggest `gx upgrade <action>` for such an entry, even when
-the advisory names a patched version.
+gx SHALL NOT suggest `gx upgrade <action>` for a manifest entry that names a
+branch or a bare commit SHA, even when the advisory names a patched version:
+such an entry is not governed by a semver range, so `gx upgrade` cannot be
+relied on to move it to a patched version.
+
+Because the obstacle is the absence of a range rather than its width, gx MUST
+NOT tell such a user that a major bump is what stands in the way. What must be
+conveyed is that the entry has to become a semver range before `gx upgrade` can
+move it.
 
 #### Scenario: Manifest tracks a branch
 
 - **WHEN** the manifest tracks an action at `main` and the advisory names a
   first patched version
 - **THEN** no upgrade command is suggested
+- **AND** the user is NOT told that a major bump is required
 
 #### Scenario: Manifest pins a bare commit SHA
 
 - **WHEN** the manifest pins an action to a 40-character commit SHA and the
   advisory names a first patched version
 - **THEN** no upgrade command is suggested
+- **AND** the user is NOT told that a major bump is required

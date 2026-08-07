@@ -66,8 +66,9 @@ which belongs to the caller. An enum makes the three-way distinction total and
 lets the compiler force #130 to handle each arm.
 
 `fixed` is carried on both non-`NoFixAvailable` arms because the caller needs it
-either way: to name the target on success, and to say "fixed in v3.0.0, outside
-your ^2 range" on failure.
+either way: to name the target on success, and on failure to name the version the
+user must reach for — "fixed in v3.0.0, outside your ^2 range", or "fixed in
+v46.0.1, which a `main` pin will never reach".
 
 ### Condition 2 reuses `Specifier::matches_version` — but only its `Range` arm
 
@@ -87,6 +88,13 @@ matches on the specifier: a `Range` delegates to
 the patched version from an advisory is always a version tag, never a branch and
 never a bare commit — so the `Branch`/`Commit` arms of `matches_version` are
 unreachable from here by construction.
+
+This gives `OutOfRange` two obstacles, not one: a range that excludes the fix,
+and a pin that has no range at all. Its contract is therefore "the manifest entry
+must change", *not* "a major bump is required" — the narrower sentence would be
+false for a branch or SHA pin, on exactly the reasoning that keeps a prerelease
+out of this arm below. The caller still holds the `Specifier`, so #130 can say
+which of the two applies without a fourth variant.
 
 Alternative considered: widening `matches_version` with a flag or a second
 method on `Specifier`. Rejected — it would push a security concern into a type
