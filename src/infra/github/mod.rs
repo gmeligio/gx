@@ -14,4 +14,4 @@ mod responses;
 mod tags;
 
 pub use advisory::{Advisory, AdvisoryQuery, GraphQlAdvisories, Severity as AdvisorySeverity};
-pub use registry::{Error, Registry};
+pub use registry::{Error, MAX_RETRY_WAIT_SECS, Registry};

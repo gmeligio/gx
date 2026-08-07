@@ -17,8 +17,11 @@ const REQUEST_TIMEOUT_SECS: u64 = 30;
 ///
 /// An exhausted unauthenticated quota can reset nearly an hour out; blocking a
 /// terminal that long is worse than failing, so anything beyond this becomes
-/// [`RetryAfter::TooDistant`]. Kept in step with the retry layer's own cap.
-const MAX_RETRY_WAIT_SECS: u64 = 5;
+/// [`RetryAfter::TooDistant`].
+///
+/// The retry layer's backoff schedule must stay under this, which
+/// `infra::registry::retrying` asserts against at compile time.
+pub const MAX_RETRY_WAIT_SECS: u64 = 5;
 
 /// Reduce GitHub's absolute `x-ratelimit-reset` epoch to a wait worth taking.
 ///

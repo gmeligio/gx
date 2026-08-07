@@ -5,6 +5,7 @@ use crate::domain::action::resolved::Commit;
 use crate::domain::resolution::{
     Error as ResolutionError, RetryAfter, ShaDescription, VersionRegistry,
 };
+use crate::infra::github::MAX_RETRY_WAIT_SECS;
 use std::time::Duration;
 
 /// Total attempts per request, counting the first.
@@ -16,9 +17,25 @@ const MAX_ATTEMPTS: usize = 3;
 
 /// Waits used when the forge stated no reset time, indexed by retry number.
 ///
-/// Increasing, and every value within the cap that
-/// [`crate::domain::resolution::RetryAfter`] is normalized against.
+/// Increasing, and every value within the cap a stated reset is clamped to — so
+/// an unstated reset never waits longer than a stated one would be allowed to.
+/// Enforced by the assertion below rather than left to this comment.
 const BACKOFF: [Duration; 2] = [Duration::from_secs(1), Duration::from_secs(2)];
+
+// Fails the build if BACKOFF ever outgrows the cap it claims to respect. The
+// two constants live in different modules — the cap beside the header parsing
+// that applies it, the schedule beside the loop that uses it — so nothing but
+// this binds them. Without it, raising a backoff value past the cap would leave
+// the doc comment above quietly false.
+// Destructured rather than indexed, so adding a backoff step is a compile error
+// here until it is covered too.
+const _: () = {
+    let [first, second] = BACKOFF;
+    assert!(
+        first.as_secs() <= MAX_RETRY_WAIT_SECS && second.as_secs() <= MAX_RETRY_WAIT_SECS,
+        "BACKOFF must stay within MAX_RETRY_WAIT_SECS"
+    );
+};
 
 /// Pauses execution for a requested duration.
 ///
