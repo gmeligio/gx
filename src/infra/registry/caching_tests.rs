@@ -1,7 +1,7 @@
 use super::{Caching, VersionRegistry};
 use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
 use crate::domain::action::resolved::Commit;
-use crate::domain::resolution::{Error as ResolutionError, ShaDescription};
+use crate::domain::resolution::{Error as ResolutionError, Forge, ShaDescription};
 use std::cell::Cell;
 
 /// Registry double that counts how many calls reach it, so a test can assert
@@ -9,8 +9,6 @@ use std::cell::Cell;
 struct CountingRegistry {
     /// Calls that reached `lookup_sha`.
     lookup_sha: Cell<usize>,
-    /// Calls that reached `tags_for_sha`.
-    tags_for_sha: Cell<usize>,
     /// Calls that reached `all_tags`.
     all_tags: Cell<usize>,
     /// Calls that reached `describe_sha`.
@@ -23,7 +21,6 @@ impl CountingRegistry {
     fn new() -> Self {
         Self {
             lookup_sha: Cell::new(0),
-            tags_for_sha: Cell::new(0),
             all_tags: Cell::new(0),
             describe_sha: Cell::new(0),
             fail: false,
@@ -53,27 +50,19 @@ impl VersionRegistry for CountingRegistry {
     fn lookup_sha(&self, _id: &ActionId, version: &Version) -> Result<Commit, ResolutionError> {
         self.lookup_sha.set(self.lookup_sha.get() + 1);
         if self.fail {
-            return Err(ResolutionError::RateLimited);
+            return Err(ResolutionError::RateLimited {
+                forge: Forge::GitHub,
+            });
         }
         Ok(commit_for(version))
-    }
-
-    fn tags_for_sha(
-        &self,
-        _id: &ActionId,
-        sha: &CommitSha,
-    ) -> Result<Vec<Version>, ResolutionError> {
-        self.tags_for_sha.set(self.tags_for_sha.get() + 1);
-        if self.fail {
-            return Err(ResolutionError::RateLimited);
-        }
-        Ok(vec![Version::from(sha.as_str())])
     }
 
     fn all_tags(&self, id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
         self.all_tags.set(self.all_tags.get() + 1);
         if self.fail {
-            return Err(ResolutionError::RateLimited);
+            return Err(ResolutionError::RateLimited {
+                forge: Forge::GitHub,
+            });
         }
         Ok(vec![Version::from(id.as_str())])
     }
@@ -85,7 +74,9 @@ impl VersionRegistry for CountingRegistry {
     ) -> Result<ShaDescription, ResolutionError> {
         self.describe_sha.set(self.describe_sha.get() + 1);
         if self.fail {
-            return Err(ResolutionError::RateLimited);
+            return Err(ResolutionError::RateLimited {
+                forge: Forge::GitHub,
+            });
         }
         Ok(ShaDescription {
             tags: vec![Version::from(sha.as_str())],
@@ -118,17 +109,6 @@ fn lookup_sha_hits_the_registry_once() {
         1,
         "the second lookup must be served from cache"
     );
-}
-
-#[test]
-fn tags_for_sha_hits_the_registry_once() {
-    let cache = Caching::new(CountingRegistry::new());
-
-    let first = cache.tags_for_sha(&action(), &sha()).unwrap();
-    let second = cache.tags_for_sha(&action(), &sha()).unwrap();
-
-    assert_eq!(first, second);
-    assert_eq!(cache.inner.tags_for_sha.get(), 1);
 }
 
 #[test]
@@ -205,8 +185,4 @@ fn errors_are_not_cached() {
     assert!(cache.describe_sha(&action(), &sha()).is_err());
     assert!(cache.describe_sha(&action(), &sha()).is_err());
     assert_eq!(cache.inner.describe_sha.get(), 2);
-
-    assert!(cache.tags_for_sha(&action(), &sha()).is_err());
-    assert!(cache.tags_for_sha(&action(), &sha()).is_err());
-    assert_eq!(cache.inner.tags_for_sha.get(), 2);
 }

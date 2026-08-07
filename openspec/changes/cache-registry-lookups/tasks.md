@@ -7,9 +7,9 @@
 
 - [x] 2.1 Create `src/infra/registry/mod.rs` declaring the `caching` submodule and re-exporting `Caching`
 - [x] 2.2 Register `pub mod registry;` in `src/infra/mod.rs`
-- [x] 2.3 Create `src/infra/registry/caching.rs` with `Caching<R: VersionRegistry>` holding the inner registry plus four `FrozenMap` fields, and a `new(inner: R)` constructor
+- [x] 2.3 Create `src/infra/registry/caching.rs` with `Caching<R: VersionRegistry>` holding the inner registry plus one `FrozenMap` field per port method, and a `new(inner: R)` constructor
 - [x] 2.4 Implement `VersionRegistry for Caching<R>`: each method checks its map, calls the inner registry on a miss, stores only on `Ok`, and returns a clone of the stored value
-- [x] 2.5 Key each map on exactly that method's arguments — `(ActionId, Version)` for `lookup_sha`, `(ActionId, CommitSha)` for `tags_for_sha` and `describe_sha`, `ActionId` for `all_tags`
+- [x] 2.5 Key each map on exactly that method's arguments — `(ActionId, Version)` for `lookup_sha`, `(ActionId, CommitSha)` for `describe_sha`, `ActionId` for `all_tags`
 - [x] 2.6 Add doc comments on the struct and every field (clippy denies `missing_docs_in_private_items`)
 
 ## 3. Delete `ShaIndex`
@@ -31,7 +31,7 @@
 ## 5. Tests
 
 - [x] 5.1 Add a counting fake registry local to `caching.rs`'s test module, with a `Cell<usize>` per method
-- [x] 5.2 Four dedup tests — one per trait method: call twice with identical arguments, assert equal results and an inner call count of 1 (`tags_for_sha` has no production caller but is cached and tested for uniformity)
+- [x] 5.2 One dedup test per trait method: call twice with identical arguments, assert equal results and an inner call count of 1
 - [x] 5.3 A key-discrimination test: call with different arguments, assert the inner call count is 2 and each result is its own
 - [x] 5.4 An error test: a fake that always errors, called twice, must show an inner call count of 2 (errors are not cached)
 - [x] 5.5 Confirm `git diff --stat` shows no change to `src/domain/resolution_testutil.rs` or `tests/common/registries.rs` — the eight existing doubles stay unaware of caching
