@@ -6,10 +6,10 @@ use elsa::FrozenMap;
 /// Memoizes every [`VersionRegistry`] query for the lifetime of one command run.
 ///
 /// A repository that references the same action from several workflows would
-/// otherwise re-issue identical lookups, spending GitHub API quota that the
-/// unauthenticated 60 requests/hour limit makes scarce. Wrapping the concrete
-/// registry at the composition root deduplicates all four queries without any
-/// call site having to know a cache exists.
+/// otherwise re-issue identical lookups, spending API quota that an
+/// unauthenticated rate limit makes scarce. Wrapping the concrete registry at
+/// the composition root deduplicates every query without any call site having
+/// to know a cache exists.
 ///
 /// Entries are inserted, never evicted or overwritten, and the whole map dies
 /// with the process — so a value can never be stale relative to the run that
@@ -23,10 +23,8 @@ pub struct Caching<R: VersionRegistry> {
     inner: R,
     /// Commits by action and version, from [`VersionRegistry::lookup_sha`].
     commits: FrozenMap<(ActionId, Version), Box<Commit>>,
-    /// Tags pointing at a SHA, from [`VersionRegistry::tags_for_sha`].
-    /// `Vec` is already `StableDeref`, so it needs no `Box`; the map yields `&[Version]`.
-    sha_tags: FrozenMap<(ActionId, CommitSha), Vec<Version>>,
     /// Every tag for an action, from [`VersionRegistry::all_tags`].
+    /// `Vec` is already `StableDeref`, so it needs no `Box`; the map yields `&[Version]`.
     repo_tags: FrozenMap<ActionId, Vec<Version>>,
     /// SHA descriptions, from [`VersionRegistry::describe_sha`].
     descriptions: FrozenMap<(ActionId, CommitSha), Box<ShaDescription>>,
@@ -39,7 +37,6 @@ impl<R: VersionRegistry> Caching<R> {
         Self {
             inner,
             commits: FrozenMap::new(),
-            sha_tags: FrozenMap::new(),
             repo_tags: FrozenMap::new(),
             descriptions: FrozenMap::new(),
         }
@@ -58,19 +55,6 @@ impl<R: VersionRegistry> VersionRegistry for Caching<R> {
         }
         let commit = self.inner.lookup_sha(id, version)?;
         Ok(self.commits.insert(key, Box::new(commit)).clone())
-    }
-
-    fn tags_for_sha(
-        &self,
-        id: &ActionId,
-        sha: &CommitSha,
-    ) -> Result<Vec<Version>, ResolutionError> {
-        let key = (id.clone(), sha.clone());
-        if let Some(hit) = self.sha_tags.get(&key) {
-            return Ok(hit.to_vec());
-        }
-        let tags = self.inner.tags_for_sha(id, sha)?;
-        Ok(self.sha_tags.insert(key, tags).to_vec())
     }
 
     fn all_tags(&self, id: &ActionId) -> Result<Vec<Version>, ResolutionError> {

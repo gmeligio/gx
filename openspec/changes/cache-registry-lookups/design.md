@@ -1,8 +1,10 @@
 ## Context
 
-`VersionRegistry` (`src/domain/resolution.rs`) is the port through which all four registry queries flow: `lookup_sha`, `tags_for_sha`, `all_tags`, `describe_sha`. Every method takes `&self`.
+`VersionRegistry` (`src/domain/resolution.rs`) is the port through which every registry query flows: `lookup_sha`, `all_tags`, `describe_sha`. Every method takes `&self`.
 
-Today exactly one of those four is deduplicated. `ShaIndex` (`src/domain/action/tag_selection.rs`) is a `HashMap<(ActionId, CommitSha), ShaDescription>` threaded as `&mut` through four production files and roughly 24 test sites, to memoize `describe_sha` alone. `ActionResolver::resolve_from_sha` carries `sha_index: &mut ShaIndex` as a third parameter — a domain service whose signature is shaped by a caching concern.
+(This change was written when the port also carried a fourth method, `tags_for_sha`. It had no production caller, and #141 deleted it — see the scope note under Decision 1.)
+
+Today exactly one of those is deduplicated. `ShaIndex` (`src/domain/action/tag_selection.rs`) is a `HashMap<(ActionId, CommitSha), ShaDescription>` threaded as `&mut` through four production files and roughly 24 test sites, to memoize `describe_sha` alone. `ActionResolver::resolve_from_sha` carries `sha_index: &mut ShaIndex` as a third parameter — a domain service whose signature is shaped by a caching concern.
 
 The method that repeats hardest cannot use that mechanism at all. `all_tags` is called in a loop over every manifest spec at `src/upgrade/plan.rs:222` (and again at `:163`) through `service.registry()`, an accessor that reaches past `ActionResolver` to the bare registry. There is no `&mut` in scope there, so covering `all_tags` with the existing idiom would mean a second round of `&mut` threading through `determine_upgrades` → `plan`.
 
@@ -12,7 +14,7 @@ Constraints: single-threaded blocking `reqwest`; `src/domain/action/` is at its 
 
 **Goals:**
 
-- Deduplicate all four registry methods for the duration of one command run.
+- Deduplicate every registry method for the duration of one command run.
 - Cover `all_tags` at `src/upgrade/plan.rs:222` with zero call-site changes.
 - Remove the `&mut ShaIndex` threading rather than extend it — net deletion.
 - Leave a composition boundary that #137's retry layer can nest inside without redesign.
@@ -43,7 +45,7 @@ let registry = Caching::new(GithubRegistry::new(token)?);
 
 *Why generic, not `Box<dyn VersionRegistry>`:* Rust decorators are conventionally generic. No allocation per layer, no dynamic dispatch, and the delegation inlines. The existing code is already generic over `R: VersionRegistry` everywhere, so nothing else changes shape.
 
-*Scope note — `tags_for_sha` has no production caller.* The trait declares four methods, but `tags_for_sha` is only ever implemented, never called: `Registry::describe_sha` (`src/infra/github/registry.rs:246`) reaches the same data through the *inherent* helper `get_tags_for_sha`, not the trait method. The decorator caches it anyway, for uniformity — a `VersionRegistry` impl where three of four methods are cached and the fourth silently is not is a trap for the next caller. But the user-facing requirement claims nothing for it, because no user run issues that call. It is covered, not advertised.
+*Scope note — `tags_for_sha` was dead and is now gone.* When this change was written the trait declared four methods, but `tags_for_sha` was only ever implemented, never called: `Registry::describe_sha` reached the same data through the *inherent* helper `get_tags_for_sha`, not the trait method. The decorator cached it anyway, for uniformity, while the user-facing requirement deliberately claimed nothing for it. Surfacing that dead method led to #180, and #141 removed it from the port; this change dropped its cache field and impl on rebase. The requirement never mentioned it, so the spec needed no edit — which is the payoff for not having advertised a benefit that could not materialize.
 
 Interior mutability behind `&self` is the sanctioned use here. [`std::cell`](https://doc.rust-lang.org/std/cell/index.html) names it explicitly: "Introducing mutability 'inside' of something immutable... caching forces the implementation to perform mutation; or because you must employ mutation to implement a trait method that was originally defined to take `&self`." Cargo's own registry client takes the same shape — [`RemoteRegistry`](https://doc.rust-lang.org/nightly/nightly-rustc/cargo/sources/registry/remote/struct.RemoteRegistry.html) is `&self` plus `RefCell`/`OnceCell` because the `Source` trait's `query` takes `&self`.
 
@@ -89,7 +91,7 @@ Keeping both mechanisms was rejected: two caches for one concern, with `describe
 **Level: unit, in isolation.** The decorator is tested against a purpose-built counting fake rather than through the commands, because "how many times did the network get hit" is not observable from a command's output — which is exactly the property under test.
 
 - **New test infrastructure**: one counting fake registry, local to the decorator's test module, holding a `Cell<usize>` per method and returning canned successes. It is deliberately *not* added to `src/domain/resolution_testutil.rs` — keeping it local means the eight existing doubles stay untouched and unaware of caching, and issue #143's unified fake does not have to decide whether to model caching.
-- **Critical path — four tests, one per method**: call the method twice with identical arguments, assert the returned values are equal and the fake's counter is 1.
+- **Critical path — one test per port method**: call the method twice with identical arguments, assert the returned values are equal and the fake's counter is 1. The set is exhaustive over the trait, so a method added to the port without a dedup test is a visible gap rather than a silent one.
 - **Key discrimination — one test**: call a method twice with *different* arguments, assert the counter is 2. This is the test that would catch a key built from the wrong fields (e.g. `lookup_sha` keyed on `ActionId` alone, silently returning `v3`'s commit for `v4`). That failure mode is a wrong lock entry, not just a slow run, so it is the highest-value assertion here.
 - **Error is not cached — one test**: a fake that always errors, called twice, must show a counter of 2.
 - **Regression coverage for the deletion**: the existing `lock_sync`, `manifest_sync`, and `resolution` tests lose their `&mut sha_index` arguments but keep every assertion. They are the evidence that dropping the parameter changed no behavior — if `describe_sha` dedup had been load-bearing for correctness rather than efficiency, those tests fail.
