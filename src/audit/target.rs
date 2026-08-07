@@ -6,9 +6,9 @@
 //! composite traversal, job-level `uses:` — reaches audit for free. Re-walking workflows here
 //! would give audit a second notion of "which actions exist" that drifts from the scanner's.
 //!
-//! [`AuditTarget`] exists so that checks never destructure a lock row themselves. The lock's
-//! per-row representation is changing under a parallel change; when it does, only
-//! [`targets`] is rewritten and no check is touched.
+//! [`AuditTarget`] exists so that checks never destructure a lock row themselves. When the
+//! lock's per-row representation became `LockedAction`, only [`targets`] needed rewriting
+//! and no check changed — which is the property this indirection buys.
 
 use super::check_name::CheckName;
 use super::report::Finding;
@@ -41,11 +41,11 @@ pub struct AuditTarget<'lock> {
 pub fn targets(lock: &Lock) -> Vec<AuditTarget<'_>> {
     let mut found: Vec<AuditTarget<'_>> = lock
         .entries()
-        .map(|(spec, entry)| AuditTarget {
-            id: &spec.id,
-            version: entry.version_label(),
-            sha: &entry.commit.sha,
-            ref_type: entry.commit.ref_type.as_ref(),
+        .map(|locked| AuditTarget {
+            id: locked.id(),
+            version: locked.version_label(),
+            sha: locked.sha(),
+            ref_type: locked.commit().ref_type.as_ref(),
         })
         .collect();
     found.sort_by(|a, b| (a.id.as_str(), a.version).cmp(&(b.id.as_str(), b.version)));

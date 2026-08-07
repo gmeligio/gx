@@ -170,7 +170,7 @@ fn missing_token_never_yields_a_report() {
 
     assert!(result.is_err());
     assert!(
-        matches!(result, Err(AuditError::MissingToken)),
+        matches!(result, Err(AuditError::MissingToken { .. })),
         "a token failure must not degrade into an empty report"
     );
 }

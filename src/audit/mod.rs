@@ -25,6 +25,7 @@ pub use report::{Finding, Report};
 
 use crate::command::Command;
 use crate::config::Config;
+use crate::domain::resolution::Forge;
 use std::path::Path;
 use thiserror::Error;
 
@@ -37,13 +38,23 @@ pub enum Error {
     /// to run: GitHub's GraphQL endpoint rejects unauthenticated requests, so the only
     /// reachable degraded behavior would be reporting "clean" without having checked
     /// anything. For a security command that is worse than not running at all.
+    ///
+    /// Names the variable via [`Forge::token_env`] rather than a literal, so this reads
+    /// the same as the sibling resolution errors and cannot go stale when a second forge
+    /// lands. The remedies below are audit-specific and have no upstream equivalent.
     #[error(
-        "gx audit requires a GitHub token, but GITHUB_TOKEN is not set.\n\
-         Set it and run again, e.g. `GITHUB_TOKEN=$(gh auth token) gx audit`.\n\
-         In GitHub Actions, pass `GITHUB_TOKEN: ${{{{ secrets.GITHUB_TOKEN }}}}` under `env:`.\n\
-         Refusing to continue: an audit without a token could only report a false \"clean\"."
+        "gx audit requires a {forge} token, but {} is not set.\n\
+         Set it and run again, e.g. `{}=$(gh auth token) gx audit`.\n\
+         In GitHub Actions, pass `{}: ${{{{ secrets.GITHUB_TOKEN }}}}` under `env:`.\n\
+         Refusing to continue: an audit without a token could only report a false \"clean\".",
+        forge.token_env(),
+        forge.token_env(),
+        forge.token_env()
     )]
-    MissingToken,
+    MissingToken {
+        /// The forge whose credential is missing.
+        forge: Forge,
+    },
 }
 
 /// Run every check over the locked action set.
@@ -77,7 +88,9 @@ impl Command for Audit {
         // report that reads as clean. The failure is an `Err`, structurally distinct
         // from a `Report` with zero findings.
         if config.settings.github_token.is_none() {
-            return Err(Error::MissingToken);
+            return Err(Error::MissingToken {
+                forge: Forge::GitHub,
+            });
         }
 
         Ok(Report::from_diagnostics(collect_findings(
@@ -93,7 +106,7 @@ impl Command for Audit {
     reason = "tests use unwrap, indexing, and other patterns freely"
 )]
 mod tests {
-    use super::{Audit, Command as _, Error};
+    use super::{Audit, Command as _, Error, Forge};
     use crate::config::{Config, GitHubToken, Settings};
     use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
     use crate::domain::action::resolved::{Commit, ResolvedRef};
@@ -140,14 +153,23 @@ mod tests {
         let result = Audit.run(Path::new("/nonexistent"), config, &mut |_| {});
 
         // Structurally an Err, so it cannot be rendered or serialized as "clean".
-        assert!(matches!(result, Err(Error::MissingToken)));
+        assert!(matches!(result, Err(Error::MissingToken { .. })));
     }
 
     #[test]
     fn missing_token_message_names_the_variable_and_a_fix() {
-        let message = Error::MissingToken.to_string();
-        assert!(message.contains("GITHUB_TOKEN"), "got: {message}");
+        let message = Error::MissingToken {
+            forge: Forge::GitHub,
+        }
+        .to_string();
+        // Asserted against `token_env()` rather than a literal, so the message and the
+        // forge's own notion of its credential variable cannot drift apart.
+        assert!(
+            message.contains(Forge::GitHub.token_env()),
+            "got: {message}"
+        );
         assert!(message.contains("gh auth token"), "got: {message}");
+        assert!(message.contains("false \"clean\""), "got: {message}");
     }
 
     #[test]
@@ -156,7 +178,7 @@ mod tests {
         // guard runs first rather than after a partial audit.
         let config = config_with(branch_lock(), None);
         let result = Audit.run(Path::new("/nonexistent"), config, &mut |_| {});
-        assert!(matches!(result, Err(Error::MissingToken)));
+        assert!(matches!(result, Err(Error::MissingToken { .. })));
     }
 
     #[test]
