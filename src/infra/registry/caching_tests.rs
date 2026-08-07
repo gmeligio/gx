@@ -1,7 +1,7 @@
 use super::{Caching, VersionRegistry};
 use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
 use crate::domain::action::resolved::Commit;
-use crate::domain::resolution::{Error as ResolutionError, Forge, ShaDescription};
+use crate::domain::resolution::{Error as ResolutionError, Forge, RetryAfter, ShaDescription};
 use std::cell::Cell;
 
 /// Registry double that counts how many calls reach it, so a test can assert
@@ -52,6 +52,7 @@ impl VersionRegistry for CountingRegistry {
         if self.fail {
             return Err(ResolutionError::RateLimited {
                 forge: Forge::GitHub,
+                retry_after: RetryAfter::TooDistant,
             });
         }
         Ok(commit_for(version))
@@ -62,6 +63,7 @@ impl VersionRegistry for CountingRegistry {
         if self.fail {
             return Err(ResolutionError::RateLimited {
                 forge: Forge::GitHub,
+                retry_after: RetryAfter::TooDistant,
             });
         }
         Ok(vec![Version::from(id.as_str())])
@@ -76,6 +78,7 @@ impl VersionRegistry for CountingRegistry {
         if self.fail {
             return Err(ResolutionError::RateLimited {
                 forge: Forge::GitHub,
+                retry_after: RetryAfter::TooDistant,
             });
         }
         Ok(ShaDescription {

@@ -99,8 +99,7 @@ impl Command for Upgrade {
             // layer. Each wait is announced through the progress channel; in
             // `--json` mode that channel is already suppressed, so the single
             // JSON document on stdout stays intact.
-            let (registry, progress) =
-                caching_retrying(github, &mut *on_progress);
+            let (registry, progress) = caching_retrying(github, &mut *on_progress);
             plan::plan(
                 &config.manifest,
                 &config.lock,

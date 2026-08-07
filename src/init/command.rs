@@ -56,8 +56,7 @@ impl Command for Init {
         // and a wait is only spent on a request that must reach GitHub. Each wait
         // is announced through the progress channel so a pause is never an
         // unexplained stall.
-        let (registry, progress) =
-            caching_retrying(github, &mut *on_progress);
+        let (registry, progress) = caching_retrying(github, &mut *on_progress);
         let scanner = FileWorkflowScanner::new(repo_root);
         let updater = WorkflowWriter::new(repo_root);
 

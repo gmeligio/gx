@@ -4,11 +4,11 @@
 
 Three commands construct the registry: `src/init/command.rs:53`, `src/tidy/command.rs:211`, `src/upgrade/command.rs:91`. Each has an `on_progress: &mut dyn FnMut(&str)` in scope at that point, but hands it onward to `plan(...)` — so it is mutably borrowed for the duration of the resolution work and cannot simply be handed to a long-lived registry as well.
 
-`resolution::Error::is_retryable()` exists and returns `true` only for `RateLimited`. It has no caller today. `is_skippable()` is a different question answered in `src/tidy/lock_sync.rs`, where a skippable error becomes a warning and the lock is written without that entry; `tests/integ_tidy.rs:674` asserts `gx tidy` *succeeds* against an always-`AuthRequired` registry. Nothing may change that.
+`resolution::Error::is_retryable()` returns `true` only for `RateLimited`. It had no caller when this was written, and was briefly deleted on the caching branch as speculative generality; this change is its intended consumer, so it is restored and now gates the retry loop. `is_skippable()` is a different question answered in `src/tidy/lock_sync.rs`, where a skippable error becomes a warning and the lock is written without that entry; `tests/integ_tidy.rs:674` asserts `gx tidy` *succeeds* against an always-`AuthRequired` registry. Nothing may change that.
 
 There is no `sleep` anywhere in `src/`. The only `Duration` values are a 30s HTTP request timeout and an 80ms spinner tick.
 
-Constraint from a concurrent, unmerged branch: a `Caching<R>` decorator over `VersionRegistry` is arriving at `src/infra/registry/caching.rs`. The intended composition is `Caching::new(Retrying::new(Registry::new(token)?))` so a cache hit short-circuits before any retry runs. This design must compose that way and must not assume the caching file exists.
+**Resolved.** This began as a constraint from a concurrent, unmerged branch: a `Caching<R>` decorator was arriving at `src/infra/registry/caching.rs`, and this design had to compose with it without being able to build against it. That branch has since landed. The composition is now real and built at all three roots by `caching_retrying` (`src/infra/registry/mod.rs`), whose return type `Caching<Retrying<'cb, R>>` makes the cache-outside-retry ordering compiler-checked rather than conventional. A cache hit therefore short-circuits before any retry runs, and a wait is only ever spent on a request that genuinely has to reach the forge.
 
 ## Goals / Non-Goals
 
