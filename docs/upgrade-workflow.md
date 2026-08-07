@@ -1,7 +1,7 @@
 # Scheduled upgrade PRs
 
 gx ships a reference workflow, [`gx-upgrade.yml`](gx-upgrade.yml), that keeps `.github/gx.lock` current on a
-schedule and opens a pull request when something moves. Copy it into your repository and you are done:
+schedule and opens a pull request when something moves. Copy it into your repository:
 
 ```bash
 curl -o .github/workflows/gx-upgrade.yml \
@@ -20,15 +20,9 @@ cannot cover — see [renovate.md](renovate.md) for why.
   "Allow GitHub Actions to create and approve pull requests". Without it the last step fails with a
   permissions error from the API.
 
-## What the workflow does
+## The pull request body
 
-| Step | Why |
-|---|---|
-| `gx upgrade --json \| tee upgrade.json` | Advances the lock and emits the machine-readable report. `tee` keeps it in the run log, so you can always see the document that produced the PR. |
-| `jq` over `upgrade.json` | Builds the PR body, and reads `up_to_date` into a step output. |
-| `peter-evans/create-pull-request` | Opens or updates the PR — skipped entirely when `up_to_date` is `true`. |
-
-The PR body is generated from the JSON contract, never by scraping human output. Each upgraded action becomes
+The body is generated from `gx upgrade --json`, never by scraping human output. Each upgraded action becomes
 one line linking to its GitHub compare view:
 
 ```markdown
@@ -37,6 +31,9 @@ one line linking to its GitHub compare view:
 
 The `compare` field is omitted when either side is not a real version tag (a branch pin, for example), so
 those lines render without a link rather than with a broken one.
+
+The raw JSON is echoed into the run log, so the document that produced a PR — or that decided not to open
+one — is always recoverable from the Actions run.
 
 ## Customizing it
 
@@ -51,11 +48,8 @@ It is a template, not a product — edit the copy in your repo.
 
 ## The `GITHUB_TOKEN` caveat
 
-By design, **a PR opened using the default `GITHUB_TOKEN` does not trigger your other workflows** — so your CI
-will not run on the upgrade PR. GitHub documents this as a deliberate restriction against recursive workflow
-runs ("other `GITHUB_TOKEN`-triggered events do not create workflow runs at all" —
-[events that trigger workflows](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request)),
-not a bug in the template.
+PRs opened with the default `GITHUB_TOKEN` don't trigger other workflows, so CI won't run on the upgrade PR.
+This is [GitHub's deliberate guard against recursive runs](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request).
 
 If you need CI to run on these PRs, authenticate the `create-pull-request` step with a
 [GitHub App token](https://github.com/peter-evans/create-pull-request/blob/main/docs/concepts-guidelines.md#authenticating-with-github-app-generated-tokens)

@@ -36,17 +36,16 @@ jobs:
                   # calls, capped at 60 requests/hour.
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-            - name: Build the pull request body
+            - name: Check whether anything moved
               id: report
-              run: |
-                  jq -r '.up_to_date | "up_to_date=\(.)"' upgrade.json >> "$GITHUB_OUTPUT"
+              run: jq -r '.up_to_date | "up_to_date=\(.)"' upgrade.json >> "$GITHUB_OUTPUT"
 
+            - name: Build the pull request body
+              if: steps.report.outputs.up_to_date == 'false'
+              run: |
                   # One entry per upgraded action, linked to its compare view.
                   # `compare` is omitted from the JSON when either side is not a
                   # real tag (e.g. a branch pin), so the link is conditional.
-                  # `in_range` is not shown: in safe mode every entry is in
-                  # range. If you switch to `gx upgrade --latest`, add it — that
-                  # mode can also edit ranges in gx.toml.
                   jq -r '
                     "`gx upgrade` advanced the lock to the newest versions your `gx.toml` ranges already allow.",
                     "",
