@@ -13,8 +13,7 @@ use super::action::specifier::{Specifier, parse_semver};
 /// What a user can do about an action with a known vulnerability.
 ///
 /// Produced from a manifest [`Specifier`] plus the advisory's
-/// `firstPatchedVersion`. Exhaustive by construction: every input lands in
-/// exactly one variant, so a caller rendering a finding must handle all three.
+/// `firstPatchedVersion`, so a caller rendering a finding must handle all three.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Remediation {
     /// A patched version exists and the manifest specifier admits it, so
@@ -23,9 +22,9 @@ pub enum Remediation {
         /// The advisory's first patched version, `v`-prefixed.
         fixed: Version,
     },
-    /// The advisory names no patched version, or names one that cannot be
-    /// interpreted as a version. Either way there is nothing to upgrade to and
-    /// the user must migrate away from the action.
+    /// The advisory names no patched version gx can deliver — none at all, one
+    /// that is not a version, or a prerelease no range admits. Either way there
+    /// is nothing to upgrade to and the user must migrate away from the action.
     NoFixAvailable,
     /// A patched version exists but falls outside the manifest specifier, so
     /// no `gx upgrade` invocation reaches it — the user must widen the
@@ -47,14 +46,20 @@ impl Remediation {
     /// this only answers what to do about it.
     #[must_use]
     pub fn classify(specifier: &Specifier, first_patched: Option<&str>) -> Self {
-        // Parse before normalizing. An identifier that is not a version has no
-        // reachable fix, so it is `NoFixAvailable` like an absent one — never
-        // `OutOfRange`, which would claim a wider specifier could reach a fix
-        // that does not exist.
-        let Some(identifier) = first_patched.filter(|id| parse_semver(id).is_some()) else {
+        // An identifier that names no version gx can reach is `NoFixAvailable`
+        // like an absent one — never `OutOfRange`, which would claim a wider
+        // specifier reaches a fix that does not exist. A prerelease qualifies:
+        // semver keeps it out of any range not already carrying one.
+        let Some(patched) = first_patched
+            .and_then(parse_semver)
+            .filter(|v| v.pre.is_empty())
+        else {
             return Self::NoFixAvailable;
         };
-        let fixed = Version::normalized(identifier);
+        // Canonicalize from the parsed version, not the raw identifier, so
+        // `fixed` is always a concrete lowercase-`v` version: `V46.0.1` and
+        // `2.37` reach the user as `v46.0.1` and `v2.37.0`.
+        let fixed = Version::normalized(&patched.to_string());
 
         match specifier {
             // The patched version from an advisory is always a version tag,
@@ -66,24 +71,11 @@ impl Remediation {
                     Self::OutOfRange { fixed }
                 }
             }
-            // Note the inverted polarity against `Specifier::matches_version`,
-            // which reports `Ref`/`Sha` as *exempt* (`true`) because it asks
-            // whether an existing pin is permitted. The question here is
-            // whether `gx upgrade` would *reach* the fix, and a branch or bare
-            // SHA gives it no range to search — so it would not.
+            // Inverts `matches_version`, which reports `Ref`/`Sha` as exempt.
+            // That asks whether a pin is permitted; this asks whether
+            // `gx upgrade` would reach the fix — with no range to search, it
+            // would not.
             Specifier::Ref(_) | Specifier::Sha(_) => Self::OutOfRange { fixed },
-        }
-    }
-
-    /// The version to upgrade to, when `gx upgrade` can reach the fix.
-    ///
-    /// `None` for both no-command outcomes, so a caller can gate the suggestion
-    /// on this without re-matching the variants.
-    #[must_use]
-    pub const fn upgrade_target(&self) -> Option<&Version> {
-        match self {
-            Self::Upgradable { fixed } => Some(fixed),
-            Self::NoFixAvailable | Self::OutOfRange { .. } => None,
         }
     }
 }
@@ -183,28 +175,24 @@ mod tests {
     /// which reports a `Ref` as exempt.
     #[test]
     fn branch_specifier_is_never_upgradable() {
-        let remediation = Remediation::classify(&Specifier::parse("main"), Some("46.0.1"));
         assert_eq!(
-            remediation,
+            Remediation::classify(&Specifier::parse("main"), Some("46.0.1")),
             Remediation::OutOfRange {
                 fixed: Version::from("v46.0.1")
             }
         );
-        assert!(remediation.upgrade_target().is_none());
     }
 
     /// A bare SHA pin likewise gives `gx upgrade` no range to search.
     #[test]
     fn sha_specifier_is_never_upgradable() {
         let sha = "a".repeat(40);
-        let remediation = Remediation::classify(&Specifier::parse(&sha), Some("46.0.1"));
         assert_eq!(
-            remediation,
+            Remediation::classify(&Specifier::parse(&sha), Some("46.0.1")),
             Remediation::OutOfRange {
                 fixed: Version::from("v46.0.1")
             }
         );
-        assert!(remediation.upgrade_target().is_none());
     }
 
     /// An identifier that is not a version must not be reported as a fix beyond
@@ -218,6 +206,20 @@ mod tests {
         );
     }
 
+    /// A prerelease fix is not reachable: semver excludes prereleases from a
+    /// range whose own bound carries none, so `^2` does not admit `2.1.0-beta.1`.
+    /// Reported as `NoFixAvailable` rather than `OutOfRange` — widening the
+    /// specifier is not what stands in the way, so telling the user a major
+    /// bump is required would be false. Same reasoning as an unparseable
+    /// identifier: there is no fix `gx upgrade` can deliver.
+    #[test]
+    fn prerelease_patched_version_has_no_reachable_fix() {
+        assert_eq!(
+            Remediation::classify(&Specifier::parse("^2"), Some("2.1.0-beta.1")),
+            Remediation::NoFixAvailable
+        );
+    }
+
     /// An empty identifier is as unusable as an absent one.
     #[test]
     fn empty_patched_version_has_no_fix() {
@@ -227,22 +229,35 @@ mod tests {
         );
     }
 
-    /// Only the upgradable outcome yields a command target.
+    /// `parse_semver` accepts an uppercase `V`, so classification must too —
+    /// and `fixed` must still come out in gx's lowercase `v` form rather than
+    /// echoing the advisory's casing to the user.
     #[test]
-    fn only_upgradable_yields_an_upgrade_target() {
+    fn uppercase_v_prefix_is_canonicalized() {
         assert_eq!(
-            Remediation::classify(&Specifier::parse("^46"), Some("46.0.1")).upgrade_target(),
-            Some(&Version::from("v46.0.1"))
+            Remediation::classify(&Specifier::parse("^46"), Some("V46.0.1")),
+            Remediation::Upgradable {
+                fixed: Version::from("v46.0.1")
+            }
         );
-        assert!(
-            Remediation::classify(&Specifier::parse("^2"), Some("3.0.0"))
-                .upgrade_target()
-                .is_none()
+    }
+
+    /// An advisory may name an imprecise identifier. `parse_semver` pads it, so
+    /// `fixed` must carry the concrete padded version — telling a user "fixed
+    /// in v2" when the fix is v2.0.0 is range-shaped, not a version.
+    #[test]
+    fn imprecise_patched_version_is_padded_to_a_concrete_version() {
+        assert_eq!(
+            Remediation::classify(&Specifier::parse("~2.37"), Some("2.37")),
+            Remediation::Upgradable {
+                fixed: Version::from("v2.37.0")
+            }
         );
-        assert!(
-            Remediation::classify(&Specifier::parse("^1"), None)
-                .upgrade_target()
-                .is_none()
+        assert_eq!(
+            Remediation::classify(&Specifier::parse("^2"), Some("2")),
+            Remediation::Upgradable {
+                fixed: Version::from("v2.0.0")
+            }
         );
     }
 }

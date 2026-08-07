@@ -72,7 +72,8 @@ name a locked version only to identify the real-world case; it is not an input.
 
 ### Requirement: An unusable patched version is reported as no fix, not as out of range
 
-When an advisory names a patched version gx cannot interpret as a version, gx
+When an advisory names a patched version gx cannot deliver — one it cannot
+interpret as a version, or a prerelease, which no ordinary range admits — gx
 SHALL treat it as though no patched version were named. gx MUST NOT report such
 an advisory as having a fix outside the user's range, because that would tell
 the user a wider specifier would reach a fix when no reachable fix is known.
@@ -85,6 +86,34 @@ the user a wider specifier would reach a fix when no reachable fix is known.
 - **AND** the user is told that no fixed version is available and migration is
   required
 - **AND** the user is NOT told that a fix exists outside their range
+
+#### Scenario: Advisory patched version is a prerelease
+
+- **WHEN** the manifest pins an action at `^2` and the advisory's first patched
+  version is `2.1.0-beta.1`
+- **THEN** no command is suggested
+- **AND** the user is told that no fixed version is available and migration is
+  required
+- **AND** the user is NOT told that a major bump is required, because widening
+  the specifier would not reach the prerelease either
+
+### Requirement: The reported fixed version is canonical
+
+Whatever form an advisory uses for its patched version, gx SHALL report it as a
+concrete, lowercase-`v`-prefixed version. A user comparing the reported fix
+against their manifest and lock — where every version gx prints is `v`-prefixed
+— SHALL NOT have to reconcile a differently-shaped string, and SHALL NOT be
+shown a range-shaped identifier in place of a version.
+
+#### Scenario: Advisory uses an uppercase `V` prefix
+
+- **WHEN** an advisory's first patched version is `V46.0.1`
+- **THEN** the reported fixed version is `v46.0.1`
+
+#### Scenario: Advisory names an imprecise version
+
+- **WHEN** an advisory's first patched version is `2.37`
+- **THEN** the reported fixed version is `v2.37.0`, not `v2.37`
 
 ### Requirement: Never suggest an upgrade for a reference an upgrade cannot move
 

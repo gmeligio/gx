@@ -94,15 +94,34 @@ used by drift detection, and risk changing `tidy`'s behavior. Keeping the
 inversion local to `Remediation` is smaller and cannot regress an existing
 caller.
 
+### A prerelease fix is `NoFixAvailable`, not `OutOfRange`
+
+Semver excludes a prerelease from any range whose bound does not itself carry
+one, so `^2` does not admit `2.1.0-beta.1`. Delegating to `matches_version`
+would therefore land it in `OutOfRange` — correct-by-delegation on the range
+question, but the rendered sentence would be false: "outside your `^2` range —
+requires a major bump" when a major bump would not reach it either. The
+obstacle is the prerelease, not the specifier's width.
+
+Classified as `NoFixAvailable` on exactly the reasoning already applied to
+unparseable identifiers: gx has no fix it can deliver, so migration is the
+honest advice. Implemented as an explicit `v.pre.is_empty()` filter rather than
+left to `matches_version`, because the correct answer here differs from the
+range verdict.
+
 ### The `v` prefix is normalized once, at the boundary
 
 Advisory `firstPatchedVersion.identifier` strings are usually bare (`46.0.1`);
 gx `Version` values usually carry a `v` (`v46.0.1`). Two defenses, both already
 existing:
 
-- On the way in, the advisory string is canonicalized with
-  `Version::normalized`, so the `fixed` value carried in the enum (and later
-  rendered) is in gx's usual `v`-prefixed form regardless of input.
+- On the way in, the identifier is canonicalized from the **parsed** semver —
+  `Version::normalized(&parsed.to_string())`, not from the raw string. This is
+  load-bearing in two ways `Version::normalized` alone does not cover:
+  `parse_semver` accepts an uppercase `V`, which `normalized` would leave as
+  `V46.0.1` because it only prefixes digit-leading strings; and `parse_semver`
+  pads `2.37` to `2.37.0`, which the raw string would not reflect, leaving
+  `fixed` range-shaped rather than a concrete version.
 - On the way through, `matches_version` → `parse_semver` strips a leading `v`
   anyway, so matching is prefix-insensitive independent of the above.
 
@@ -130,9 +149,9 @@ of the advisory feed into every caller's match, for no different user action.
 
 Concretely: parse the identifier with `parse_semver` before classifying, and
 treat an unparseable identifier the same as an absent one. This means
-`Remediation` never carries a `fixed` value it could not parse, which also makes
-`Version::normalized`'s digit-leading guard a non-issue — every string reaching
-it is known-parseable and therefore digit-leading once its `v` is stripped.
+`Remediation` never carries a `fixed` value it could not parse. Because the
+carried value is then rebuilt from the parsed semver rather than the raw string,
+`Version::normalized`'s digit-leading guard cannot bite.
 
 `parse_semver` is currently `pub(super)` inside `src/domain/action/`, so it must
 widen to `pub(crate)` for `src/domain/remediation.rs` to call it. That one-word

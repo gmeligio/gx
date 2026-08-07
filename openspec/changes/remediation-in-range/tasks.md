@@ -16,12 +16,12 @@
       `Option<&str>` advisory first-patched identifier; an absent **or
       unparseable** identifier ⇒ `NoFixAvailable`, so `fixed` is never carried
       as an uninterpretable string.
-- [x] 2.3 **Only after 2.2 has established the identifier parses**, normalize it
-      through `Version::normalized` so the `fixed` value carried in the enum is
-      `v`-prefixed regardless of advisory form. Order matters: `normalized`
-      prefixes only digit-leading strings, so normalizing a raw identifier
-      before parsing would let an uninterpretable one through unprefixed and
-      reintroduce the false `OutOfRange` this design rules out.
+- [x] 2.3 Canonicalize `fixed` from the **parsed** semver
+      (`Version::normalized(&parsed.to_string())`), not the raw identifier, so
+      an uppercase `V` and an imprecise `2.37` both reach the user as `v46.0.1`
+      and `v2.37.0`.
+- [x] 2.6 Filter out prerelease patched versions to `NoFixAvailable`; no range
+      admits them, so `OutOfRange`'s "requires a major bump" would be false.
 - [x] 2.4 For a `Specifier::Range`, delegate the reachability test to
       `Specifier::matches_version(&ResolvedRef::Tag(fixed))`; in range ⇒
       `Upgradable`, otherwise ⇒ `OutOfRange`.
@@ -39,7 +39,10 @@
       `reviewdog/action-setup` shape (advisory range `= 1`, no
       `firstPatchedVersion`; the specifier is never consulted).
 - [x] 3.4 `v`-prefix tolerance: `v46.0.1` reaches the same verdict as `46.0.1`,
-      and the `fixed` value is `v`-prefixed in both.
+      and the `fixed` value is `v`-prefixed in both. Also uppercase `V46.0.1`
+      canonicalized to `v46.0.1`, and imprecise `2.37` padded to `v2.37.0`.
+- [x] 3.7 A prerelease patched version (`^2` + `2.1.0-beta.1`) classifies as
+      `NoFixAvailable`.
 - [x] 3.5 No upgrade suggested for a branch specifier (`main`) or a bare 40-hex
       SHA specifier, even with a patched version present.
 - [x] 3.6 An unparseable patched identifier classifies as `NoFixAvailable` —
