@@ -1,14 +1,14 @@
 > **Note on the enclosing guardrail heading.** These rules sit under
 > `## Guardrail: Error classification (recoverable vs. strict)`, whose title and
-> rationale paragraph use "recoverable" for a property this change renames to
-> "skippable", so at sync time that heading becomes
-> `## Guardrail: Error classification (skippable vs. strict)` and its rationale
-> paragraph is restated in that vocabulary. Left as-is, the section title would
+> rationale paragraph describe a single binary. This change makes the
+> classification two-dimensional, so at sync time that heading becomes
+> `## Guardrail: Error classification (skippable and retryable)` and its rationale
+> paragraph is restated to cover both axes. Left as-is, the section title would
 > misstate its own content.
 
 > Both rule headers below are reproduced verbatim from the main spec so they match
 > exactly. Their titles keep the word "recoverable" while their bodies now say
-> "skippable"; at sync time both titles are restated in the skippable/strict
+> "skippable"; at sync time both titles are restated in the skippable/retryable
 > vocabulary along with the guardrail heading above. The rename is deliberately not
 > expressed as a RENAMED delta, because pairing a rename with a MODIFIED block for
 > the same heading would ask the sync step to process one heading twice.
@@ -17,41 +17,47 @@
 
 ### Rule: Resolution errors are classified as recoverable or strict
 
-Classification answers one question: **may the current run continue without this
-action?** A skippable error is reported as a warning and the lock is written
-without that entry. A non-skippable (strict) error fails the command.
+Classification is two-dimensional. A single "recoverable" bit cannot express both
+of the decisions callers make, so each resolution error carries two independent
+properties:
 
-Skippable does NOT mean retryable. A missing or rejected credential is skippable —
-the run continues without that action — but repeating the identical request cannot
-produce a different outcome. The classification carries no promise that a caller
-may re-issue a skippable request; a caller that retries MUST decide that from the
-specific failure, not from skippability.
+- **Skippable** — may the current run continue without this action? A skippable
+  error is reported as a warning and the lock is written without that entry. A
+  non-skippable (strict) error fails the command.
+- **Retryable** — would repeating the identical request plausibly succeed? Only a
+  retryable error may be re-issued by a caller that retries.
 
-| Error condition | Classification | User experience |
-|---|---|---|
-| Rate limited | Skippable | Warning; action skipped, lock written without it |
-| Auth required | Skippable | Warning; action skipped, lock written without it |
-| Action not found (404) | Strict | Hard failure; command exits with error |
-| Server error (5xx) | Strict | Hard failure; command exits with error |
+**Skippable does NOT imply retryable**, and the two MUST be asked separately. A
+missing or rejected credential is skippable — the run continues without that
+action — but repeating the identical request cannot produce a different outcome.
+A caller that retries MUST gate on retryability, never on skippability.
 
-#### Scenario: Rate limiting is skippable
+| Error condition | Skippable | Retryable | User experience |
+|---|---|---|---|
+| Rate limited | Yes | Yes | Warning; action skipped, lock written without it |
+| Auth required | Yes | No | Warning; action skipped, lock written without it |
+| Action not found (404) | No | No | Hard failure; command exits with error |
+| Server error (5xx) | No | No | Hard failure; command exits with error |
+
+#### Scenario: Rate limiting is both skippable and retryable
 
 - **GIVEN** resolution fails because the forge's rate limit is exhausted
 - **WHEN** the error is classified
 - **THEN** it is skippable, so the run continues and the lock is written without that action
+- **AND** it is retryable, so a retrying caller may re-issue the request
 
-#### Scenario: Missing authorization is skippable
+#### Scenario: Missing authorization is skippable but not retryable
 
 - **GIVEN** resolution fails because no credential is configured for the forge
 - **WHEN** the error is classified
 - **THEN** it is skippable, so the run continues and the lock is written without that action
-- **AND** the classification does not imply the request may be retried
+- **AND** it is NOT retryable, because repeating the request without a credential cannot succeed
 
-#### Scenario: Strict errors are not skippable
+#### Scenario: Strict errors are neither skippable nor retryable
 
 - **GIVEN** resolution fails with a not-found or server error
 - **WHEN** the error is classified
-- **THEN** it is not skippable, and the command fails
+- **THEN** it is neither skippable nor retryable, and the command fails
 
 ### Rule: Recoverable errors produce warnings; strict errors produce failures
 

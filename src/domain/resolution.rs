@@ -80,9 +80,22 @@ impl Error {
     /// without that entry; anything else fails the command. Authorization
     /// failures are skippable so that a user without a token still gets a partial
     /// lock and a warning rather than a hard failure.
+    ///
+    /// This is not the same question as [`Self::is_retryable`].
     #[must_use]
     pub fn is_skippable(&self) -> bool {
         matches!(self, Self::RateLimited { .. } | Self::AuthRequired { .. })
+    }
+
+    /// Returns `true` when repeating the identical request could plausibly succeed.
+    ///
+    /// Only rate limiting qualifies. [`Self::AuthRequired`] is excluded even though
+    /// it is skippable: re-issuing a request with the same absent or rejected
+    /// credential cannot produce a different outcome, so retrying it only delays
+    /// the failure.
+    #[must_use]
+    pub fn is_retryable(&self) -> bool {
+        matches!(self, Self::RateLimited { .. })
     }
 }
 
@@ -356,7 +369,7 @@ mod tests {
         );
     }
 
-    /// A `ResolveFailed` to exercise `is_skippable` against a strict variant.
+    /// A `ResolveFailed` to exercise the predicates against a strict variant.
     fn resolve_failed() -> Error {
         Error::ResolveFailed {
             spec: ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4")),
@@ -389,6 +402,33 @@ mod tests {
     #[test]
     fn strict_errors_are_not_skippable() {
         assert!(!resolve_failed().is_skippable());
+    }
+
+    #[test]
+    fn rate_limited_is_retryable() {
+        assert!(
+            Error::RateLimited {
+                forge: Forge::GitHub
+            }
+            .is_retryable()
+        );
+    }
+
+    #[test]
+    fn auth_required_is_not_retryable() {
+        // Skippable but never retryable: repeating a request with the same
+        // absent credential cannot succeed, so a retrying caller must not.
+        assert!(
+            !Error::AuthRequired {
+                forge: Forge::GitHub
+            }
+            .is_retryable()
+        );
+    }
+
+    #[test]
+    fn strict_errors_are_not_retryable() {
+        assert!(!resolve_failed().is_retryable());
     }
 
     #[test]
