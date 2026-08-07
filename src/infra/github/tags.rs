@@ -5,7 +5,7 @@ use super::responses::{GitRefEntry, GitTagResponse};
 
 #[expect(
     clippy::multiple_inherent_impl,
-    reason = "tag lookup is in a separate file for clarity"
+    reason = "Registry's impl is split across files to stay within the per-file size budget"
 )]
 impl Registry {
     /// Get all tags that point to a specific commit SHA.

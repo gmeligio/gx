@@ -9,7 +9,7 @@ pub(super) const GITHUB_API_BASE: &str = "https://api.github.com";
 
 #[expect(
     clippy::multiple_inherent_impl,
-    reason = "resolution logic is in a separate file for clarity"
+    reason = "Registry's impl is split across files to stay within the per-file size budget"
 )]
 impl Registry {
     /// Resolve a ref (tag, branch, or commit) to a full commit SHA and detect the ref type.
