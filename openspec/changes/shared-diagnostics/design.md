@@ -138,20 +138,41 @@ what fixes the inversion: `config.rs` importing `crate::diagnostic::` points
 - *Leave it in `lint/` and have audit import from lint* — preserves the exact
   inversion this change exists to remove. Rejected.
 
-### D4: Rule identity is a type parameter, not a trait object
+### D4: Rule identity stays a closed, enumerable type
 
-`Diagnostic` becomes `Diagnostic<Id>` with `Id` the rule-identity type;
-`lint::Diagnostic` is a type alias `Diagnostic<RuleName>`. Audit later aliases
-`Diagnostic<CheckName>`.
+`Diagnostic` becomes `Diagnostic<Id>` with `Id` the rule-identity type, and
+`lint::Diagnostic` is a type alias `Diagnostic<RuleName>`.
 
-A generic parameter keeps the enum's exhaustive matching and `Copy` semantics that
-the rules rely on, costs nothing at runtime, and needs no `dyn` or boxing. The
-bound is only what the shared code actually calls: `Display` (for rendering) plus
-the ordinary derives.
+The decision that carries weight here is not the type *parameter* — it is that the
+identity remains a **closed set that can be enumerated**. `RuleName::ALL` is what
+makes the two guard tests in this change writable at all:
 
-**Alternative considered:** store the identity as a `String`. Simpler signature,
-but throws away exhaustiveness — the very property that makes an unrecognized rule
-name a compile error today. Rejected.
+- `every_reported_rule_name_is_accepted_in_config` builds a `[lint.rules]` table
+  from `ALL` and parses it, proving the config surface accepts every name gx can
+  print.
+- `every_rule_has_a_documented_default_level` pairs `ALL` against the documented
+  default set, so a rule cannot run at an undocumented default.
+
+Both derive their expectations from the definition rather than restating a list,
+which is the property that makes them catch drift instead of re-encoding it.
+
+**Alternative considered — `String` identity.** Simpler signature, and it would
+drop the parameter entirely. Rejected on present-day grounds: a `String` rule id
+cannot be enumerated, so `ALL` disappears and both guard tests above become
+unwritable. It also erases the closed-set guarantee that makes an unrecognized
+rule name a parse error rather than a silently-ignored key. That is a concrete
+loss in this branch, not a hypothetical one.
+
+Given a closed enum, the type parameter itself is close to free: `Id` carries no
+bounds anywhere in `src/diagnostic/` — nothing inspects the identity, it is only
+carried and handed to the renderer — so it costs no `dyn`, no boxing, and no
+runtime work, while preserving the `Copy` and exhaustive-matching semantics the
+rules already rely on.
+
+A consequence, not a justification: because `Id` is unconstrained, `gx audit`
+(#129) can later alias `Diagnostic<CheckName>` without touching this module. That
+is a benefit if it happens; the enumeration property above is why the design is
+correct today either way.
 
 ### D5: `Context` stays in `lint/`
 
