@@ -14,11 +14,12 @@ gx splits an action version into two files, the same way every mature package ma
 | `.github/gx.lock` (lock) | the **resolved version + commit SHA**, e.g. `v6.0.2` at a 40-char SHA | `package-lock.json`, `uv.lock`, `pnpm-lock.yaml` |
 
 The shape is the same, but the Renovate integration is not. Each of those analogues has a **native Renovate
-manager that owns its lock file** — npm lists `package-lock.json`, `pnpm-lock.yaml`, and `yarn.lock`, and
+manager that owns its lock file** — [npm](https://docs.renovatebot.com/modules/manager/npm/) lists
+`package-lock.json`, `pnpm-lock.yaml`, and `yarn.lock`, and
 [PEP 621](https://docs.renovatebot.com/modules/manager/pep621/) lists `pdm.lock` and `uv.lock` — and
 regenerates it by driving the ecosystem's own CLI (`npm`, `pnpm`, Yarn, `pdm`, `uv`). gx has no native
 manager, so it is attached by a **custom regex manager over `gx.toml` alone**, which never sees `gx.lock`.
-That difference, not anything about gx's file layout, is what produces the limitation below.
+That difference is what produces the limitation below.
 
 An update can move either layer:
 
