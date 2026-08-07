@@ -25,8 +25,8 @@ token gets a partial lock and a warning, not a hard failure.
 - `resolution::Error` names no vendor in any variant identifier or literal string.
 - Both error enums are `#[non_exhaustive]` before any variant is added.
 - Adding a forge adds zero failure variants.
-- A caller can ask "may I skip this?" and "may I retry this?" and get correct,
-  separate answers.
+- The classification predicate is named for the question it answers, and the spec
+  records that skippable implies nothing about retryability.
 - Messages tell the user what to do.
 
 **Non-Goals:**
@@ -67,47 +67,41 @@ budget of 8 (`tests/code_health.rs`), so a `forge.rs` would fit. It is co-locate
 because the type is ~15 lines and has exactly one consumer; a file per small type
 would fragment the error definition across two places for no reader benefit.
 
-### Decision 2: Split `is_recoverable()` into `is_skippable()` and `is_retryable()`
+### Decision 2: Rename `is_recoverable()` to `is_skippable()`
 
-The prompt's premise — "retrying a missing token never succeeds, so `AuthRequired`
-is not recoverable" — is correct about *retry* and wrong about the predicate's
-current meaning. `is_recoverable()` today gates warn-and-skip, where `AuthRequired`
+The premise this change started from — "retrying a missing token never succeeds, so
+`AuthRequired` is not recoverable" — is correct about *retry* and wrong about the
+predicate's meaning. `is_recoverable()` gates warn-and-skip, where `AuthRequired`
 must stay `true`: flipping one bit would make `gx tidy` hard-fail for every user
 without a `GITHUB_TOKEN`, contradicting the spec guardrail and breaking
 `tests/integ_tidy.rs:674`. That is a UX regression, not a fix.
 
-The real defect is that one predicate answers two questions. So:
+The defect is the *name*. "Recoverable" reads as "safe to retry", which is what
+invited the misreading; the predicate never answered that question. Renaming it
+fixes the ambiguity outright:
 
-| variant | `is_skippable` | `is_retryable` |
-|---|---|---|
-| `RateLimited` | true | true |
-| `AuthRequired` | true | **false** |
-| `ResolveFailed` | false | false |
-| `NoTagsForSha` | false | false |
+| variant | `is_skippable` |
+|---|---|
+| `RateLimited` | true |
+| `AuthRequired` | true |
+| `ResolveFailed` | false |
 
-`is_recoverable()` is **renamed** to `is_skippable()` rather than kept as an alias:
-its one caller is renamed with it, the name now says what it decides, and leaving
-both would preserve exactly the ambiguity being removed. `is_retryable()` is added
-with no caller yet — it is the single piece of forward work this change owes #137,
-and it is ~4 lines, fully tested, and impossible to get right later without
-re-deciding the classification. Adding it here is what prevents #137 from wiring
-retry to the wrong bit.
+Renamed rather than aliased: its one caller is renamed with it, and keeping both
+names would preserve exactly the ambiguity being removed.
 
-*Why this is not the same "no consumer yet" that Decision 4 rejects.* Decision 4
-declines `retry_after` because it has no consumer; `is_retryable()` is added despite
-having none. The distinguishing test is not "does a caller exist" but "can this be
-got right later at the same cost". The predicate is a pure function of the variant
-set being decided in this very change — deferring it means #137 re-opens the
-classification with the enum already frozen, and the wrong-answer case
-(`AuthRequired`) is exactly the one a retry author is likely to get wrong. The
-`Duration` is the opposite: its correct value depends on clock and skew policy that
-belong with the retry loop, so writing it now would be guessing at a shape #137
-would change anyway.
+*Considered and rejected — also adding `is_retryable()`.* An earlier draft shipped
+a second predicate for #137 to gate on, on the theory that the classification is
+cheapest to get right while the variant set is being decided. It was cut: #137's
+branch does not call it. Its `Retrying` decorator destructures the specific failure
+directly (`let ResolutionError::RateLimited { retry_after, .. } = error else …`),
+which is the better design — a retry loop needs the wait value, not a boolean, so
+the boolean would have been dead on arrival in the one place built to consume it.
+With no caller in either branch it was speculative generality, and cutting it leaves
+this change as a rename: one predicate, honestly named, one caller.
 
-*Alternative considered — a `Classification` enum returned by one method*
-(`Skip | Retry | Fail`). Rejected: it models the two properties as mutually
-exclusive, but `RateLimited` is genuinely both, so the enum would need
-`SkipAndRetry` and collapse back into a product of two booleans.
+What survives from that reasoning is the *documentation* of the distinction. The
+spec states that skippable carries no retry promise, so the next reader cannot
+repeat the misreading even without a second predicate to point at.
 
 ### Decision 3: Message text leads with the remedy
 
@@ -184,9 +178,10 @@ and is the reason not to pre-emptively add `_ =>` arms.
 Unit-level, in the existing `#[cfg(test)]` block at the bottom of
 `src/domain/resolution.rs`. No new test infrastructure.
 
-- **Critical path:** the classification table. One test per variant per predicate,
-  with `is_retryable()` on `AuthRequired` being the assertion that exists to stop
-  #137 from retrying an unsatisfiable request. These are pure and cheap.
+- **Critical path:** the classification table. One test per variant for
+  `is_skippable`, with `AuthRequired` being the case that must stay `true` — it is
+  the assertion that stops a future reader from "fixing" it into a hard failure.
+  These are pure and cheap.
 - **Message text:** assert the rendered `Display` of each forge-carrying variant
   contains the forge name and the remedy env var. Asserting the substring rather
   than the full string keeps the test from being a change-detector on wording while
@@ -223,9 +218,9 @@ the property that keeps this from being a behavioral regression.
   crate is a CLI binary; the method has one in-tree caller. `#[non_exhaustive]` in
   the same change is the larger break and is deliberate. Both are cheap now and
   expensive after #137 and #145 build on the current shape.
-- **[Two predicates invite a caller using the wrong one]** → The names state the
-  question they answer, and each has a doc comment giving the wrong-answer case
-  (`is_retryable` explicitly notes auth is excluded because retry cannot help).
+- **[A reader still reads "skippable" as "safe to retry"]** → The name no longer
+  suggests it, and the spec says explicitly that skippability carries no retry
+  promise. A caller that retries reads the specific failure instead.
 - **[Message wording churn could break integration assertions]** → Searched: no test
   asserts on the two changed strings. `tests/integ_tidy.rs` asserts on exit status
   and lock contents. `mise run integ` confirms.

@@ -5,7 +5,7 @@ use super::responses::{CommitDetailResponse, ReleaseResponse, TagObjectResponse}
 
 #[expect(
     clippy::multiple_inherent_impl,
-    reason = "date lookup is in a separate file for clarity"
+    reason = "Registry's impl is split across files to stay within the per-file size budget"
 )]
 impl Registry {
     /// Fetch the commit date from a commit SHA.
