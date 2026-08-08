@@ -13,6 +13,14 @@ gx splits an action version into two files, the same way every mature package ma
 | `.github/gx.toml` (manifest) | the **range** you allow, e.g. `actions/checkout = "^6"` | `package.json`, `pyproject.toml`, pnpm `catalog:` |
 | `.github/gx.lock` (lock) | the **resolved version + commit SHA**, e.g. `v6.0.2` at a 40-char SHA | `package-lock.json`, `uv.lock`, `pnpm-lock.yaml` |
 
+The shape is the same, but the Renovate integration is not. Each of those analogues has a **native Renovate
+manager that owns its lock file** — [npm](https://docs.renovatebot.com/modules/manager/npm/) lists
+`package-lock.json`, `pnpm-lock.yaml`, and `yarn.lock`, and
+[PEP 621](https://docs.renovatebot.com/modules/manager/pep621/) lists `pdm.lock` and `uv.lock` — and
+regenerates it by driving the ecosystem's own CLI (`npm`, `pnpm`, Yarn, `pdm`, `uv`). gx has no native
+manager, so it is attached by a **custom regex manager over `gx.toml` alone**, which never sees `gx.lock`.
+That difference is what produces the limitation below.
+
 An update can move either layer:
 
 - **In-range (minor/patch)** — a new tag still satisfies the range (`^6` already permits `6.0.2` *and*
@@ -34,11 +42,20 @@ That single fact sets the boundary:
   and `v6.0.3` ships, the range `^6` already permits both, so from Renovate's point of view **nothing needs
   to change** — and it never looks at the lock to notice the drift.
 
-This is not a `rangeStrategy` you can flip. Renovate's `update-lockfile` strategy only advances a lock when
-the manager extracts a **`lockedVersion`**, and a custom regex manager captures only `currentValue` (the
-range) — it has no `lockedVersion` (see the strategy matrix in
-[renovate#19802](https://github.com/renovatebot/renovate/issues/19802)). For a range like `^6`, `replace`,
-`bump`, and `update-lockfile` are all no-ops on an in-range update.
+This is not a `rangeStrategy` you can flip. Renovate documents `update-lockfile` as working for a **fixed list
+of managers**, and custom managers are not on it:
+
+> `update-lockfile` = Update the lock file when in-range updates are available, otherwise `replace` for updates
+> out of range. Works for `bundler`, `cargo`, `composer`, `gleam`, `npm`, `yarn`, `pnpm`, `terraform`, `poetry`
+> and `uv` so far
+>
+> — [`rangeStrategy`](https://docs.renovatebot.com/configuration-options/#rangestrategy)
+
+The reason is structural. Advancing a lock requires the manager to know the **locked version**, and a
+[custom regex manager](https://docs.renovatebot.com/modules/manager/regex/) has no capture group for one — its
+groups are `depName`/`packageName`, `currentValue`, `datasource`, `versioning`, `depType`, `extractVersion`,
+`currentDigest`, `registryUrl`, and `indentation`. It captures the range and nothing about the resolution. So
+for a range like `^6`, `replace`, `bump`, and `update-lockfile` are all no-ops on an in-range update.
 
 Nor can you close the gap with a post-upgrade hook on the hosted app.
 [`postUpgradeTasks`](https://docs.renovatebot.com/configuration-options/#postupgradetasks) *could* run
@@ -143,7 +160,9 @@ maintenance cost:
   every upstream schema change into a gx maintenance chore.
 
 The only way to get true in-range, lock-advancing PRs *driven by Renovate* is a **native gx manager inside
-Renovate** — one that detects a gx project by `gx.lock`, reads the resolved version, and invokes gx to
-regenerate the lock, exactly as Renovate's native uv and pnpm managers do. That is the real endpoint, tracked
+Renovate** — one that matches `gx.toml`, declares `gx.lock` as a lock file it owns, and invokes gx to
+regenerate it. That is how Renovate's existing managers are built: PEP 621 matches `pyproject.toml` and names
+`pdm.lock` and `uv.lock` in its `lockFileNames`, then delegates regeneration to `pdm` or `uv`. The manifest is
+what identifies the project; the lock is what the manager maintains. That is the real endpoint, tracked
 in [gx#111](https://github.com/gmeligio/gx/issues/111). Until it exists, the two-piece setup above is the
 honest arrangement.
