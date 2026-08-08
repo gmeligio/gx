@@ -1,6 +1,6 @@
 use super::Error as GithubError;
 use super::Registry;
-use super::resolve::GITHUB_API_BASE;
+use super::registry::GITHUB_API_BASE;
 use super::responses::{GitRefEntry, GitTagResponse};
 
 #[expect(
@@ -17,7 +17,7 @@ impl Registry {
     ///
     /// # Errors
     ///
-    /// Returns an error if no token is set, the request fails, or the response cannot be parsed.
+    /// Returns an error if the request fails or the response cannot be parsed.
     pub fn get_tags_for_sha(
         &self,
         owner_repo: &str,
@@ -87,8 +87,8 @@ impl Registry {
     ///
     /// # Errors
     ///
-    /// Returns an error if no token is set, the request fails, or the response cannot be parsed.
-    pub fn get_version_tags(&self, owner_repo: &str) -> Result<Vec<String>, GithubError> {
+    /// Returns an error if the request fails or the response cannot be parsed.
+    pub(super) fn get_version_tags(&self, owner_repo: &str) -> Result<Vec<String>, GithubError> {
         let base_repo = owner_repo.split('/').take(2).collect::<Vec<_>>().join("/");
 
         let mut all_refs: Vec<GitRefEntry> = Vec::new();

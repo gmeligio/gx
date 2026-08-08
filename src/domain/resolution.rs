@@ -11,8 +11,8 @@ use thiserror::Error;
 /// A code-hosting platform that a [`VersionRegistry`] resolves against.
 ///
 /// Carried as data on the failure variants that are inherently platform-specific,
-/// so [`Error`] grows only with failure semantics and never gains a variant per
-/// platform.
+/// so [`enum@Error`] grows only with failure semantics and never gains a variant
+/// per platform.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Forge {

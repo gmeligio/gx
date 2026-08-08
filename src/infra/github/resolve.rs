@@ -1,11 +1,9 @@
 use super::Error as GithubError;
 use super::Registry;
+use super::registry::GITHUB_API_BASE;
 use super::responses::{CommitResponse, GitRef, GitTagResponse};
 use crate::domain::action::identity::CommitSha;
 use crate::domain::action::uses_ref::RefType;
-
-/// Base URL for the GitHub REST API.
-pub(super) const GITHUB_API_BASE: &str = "https://api.github.com";
 
 #[expect(
     clippy::multiple_inherent_impl,
