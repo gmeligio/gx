@@ -2,6 +2,7 @@ use super::Error as GithubError;
 use super::Registry;
 use super::registry::GITHUB_API_BASE;
 use super::responses::{GitRefEntry, GitTagResponse};
+use crate::domain::action::identity::base_repo_of;
 
 #[expect(
     clippy::multiple_inherent_impl,
@@ -23,8 +24,7 @@ impl Registry {
         owner_repo: &str,
         sha: &str,
     ) -> Result<Vec<String>, GithubError> {
-        // Handle subpath actions (e.g., "github/codeql-action/upload-sarif")
-        let base_repo = owner_repo.split('/').take(2).collect::<Vec<_>>().join("/");
+        let base_repo = base_repo_of(owner_repo);
 
         let url = format!("{GITHUB_API_BASE}/repos/{base_repo}/git/refs/tags");
 
@@ -89,7 +89,7 @@ impl Registry {
     ///
     /// Returns an error if the request fails or the response cannot be parsed.
     pub(super) fn get_version_tags(&self, owner_repo: &str) -> Result<Vec<String>, GithubError> {
-        let base_repo = owner_repo.split('/').take(2).collect::<Vec<_>>().join("/");
+        let base_repo = base_repo_of(owner_repo);
 
         let mut all_refs: Vec<GitRefEntry> = Vec::new();
         let mut url =
