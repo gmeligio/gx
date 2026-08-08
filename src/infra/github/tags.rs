@@ -2,6 +2,7 @@ use super::Error as GithubError;
 use super::Registry;
 use super::registry::GITHUB_API_BASE;
 use super::responses::{GitRefEntry, GitTagResponse};
+use crate::domain::action::identity::base_repo_of;
 
 #[expect(
     clippy::multiple_inherent_impl,
@@ -17,14 +18,13 @@ impl Registry {
     ///
     /// # Errors
     ///
-    /// Returns an error if no token is set, the request fails, or the response cannot be parsed.
+    /// Returns an error if the request fails or the response cannot be parsed.
     pub fn get_tags_for_sha(
         &self,
         owner_repo: &str,
         sha: &str,
     ) -> Result<Vec<String>, GithubError> {
-        // Handle subpath actions (e.g., "github/codeql-action/upload-sarif")
-        let base_repo = owner_repo.split('/').take(2).collect::<Vec<_>>().join("/");
+        let base_repo = base_repo_of(owner_repo);
 
         let url = format!("{GITHUB_API_BASE}/repos/{base_repo}/git/refs/tags");
 
@@ -49,7 +49,8 @@ impl Registry {
     /// Dereference an annotated tag to check if it points to the given commit SHA.
     /// Returns `Some(tag_name)` if the tag's underlying commit matches, `None` otherwise.
     ///
-    /// Not `get_json`: a failed dereference must stay non-fatal.
+    /// Deliberately does not use `get_json`: a failed dereference must stay
+    /// non-fatal, yielding a missing tag rather than an error.
     pub(super) fn dereference_tag(
         &self,
         base_repo: &str,
@@ -81,13 +82,14 @@ impl Registry {
     /// results to tags starting with "v" (semver convention).
     /// Handles pagination via Link header.
     ///
-    /// Not `get_json`: the `Link` header must be read before the body.
+    /// Deliberately does not use `get_json`: the `Link` header must be read
+    /// before the body is parsed, and parsing consumes the response.
     ///
     /// # Errors
     ///
-    /// Returns an error if no token is set, the request fails, or the response cannot be parsed.
-    pub fn get_version_tags(&self, owner_repo: &str) -> Result<Vec<String>, GithubError> {
-        let base_repo = owner_repo.split('/').take(2).collect::<Vec<_>>().join("/");
+    /// Returns an error if the request fails or the response cannot be parsed.
+    pub(super) fn get_version_tags(&self, owner_repo: &str) -> Result<Vec<String>, GithubError> {
+        let base_repo = base_repo_of(owner_repo);
 
         let mut all_refs: Vec<GitRefEntry> = Vec::new();
         let mut url =
@@ -140,7 +142,7 @@ impl Registry {
 }
 
 /// Parse the `Link` header to find the `rel="next"` URL for pagination.
-fn parse_next_link(headers: &reqwest::header::HeaderMap) -> Option<String> {
+pub(super) fn parse_next_link(headers: &reqwest::header::HeaderMap) -> Option<String> {
     let link_header = headers.get("link")?.to_str().ok()?;
     for part in link_header.split(',') {
         let trimmed_part = part.trim();
@@ -159,7 +161,7 @@ fn parse_next_link(headers: &reqwest::header::HeaderMap) -> Option<String> {
 ///
 /// Only matches lightweight tags where `object.sha` is the commit SHA directly.
 /// Annotated tags (`object_type` == "tag") must be dereferenced separately.
-fn filter_refs_by_sha(refs: &[GitRefEntry], sha: &str) -> Vec<String> {
+pub(super) fn filter_refs_by_sha(refs: &[GitRefEntry], sha: &str) -> Vec<String> {
     refs.iter()
         .filter(|r| r.object.sha == sha)
         .map(|r| {

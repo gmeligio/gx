@@ -12,7 +12,7 @@ use crate::domain::lock::Lock;
 use crate::domain::manifest::Manifest;
 use crate::domain::resolution::testutil::FakeRegistry;
 use crate::domain::resolution::{
-    ActionResolver, Error as ResolutionError, ShaDescription, VersionRegistry,
+    ActionResolver, Error as ResolutionError, Forge, ShaDescription, VersionRegistry,
 };
 
 // ---------------------------------------------------------------------------
@@ -25,7 +25,9 @@ struct MixedRegistry;
 impl VersionRegistry for MixedRegistry {
     fn lookup_sha(&self, id: &ActionId, _version: &Version) -> Result<Commit, ResolutionError> {
         if id.as_str() == "actions/checkout" {
-            Err(ResolutionError::AuthRequired)
+            Err(ResolutionError::AuthRequired {
+                forge: Forge::GitHub,
+            })
         } else {
             Ok(Commit {
                 sha: CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
@@ -35,22 +37,19 @@ impl VersionRegistry for MixedRegistry {
             })
         }
     }
-    fn tags_for_sha(
-        &self,
-        _id: &ActionId,
-        _sha: &CommitSha,
-    ) -> Result<Vec<Version>, ResolutionError> {
-        Err(ResolutionError::AuthRequired)
-    }
     fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
-        Err(ResolutionError::AuthRequired)
+        Err(ResolutionError::AuthRequired {
+            forge: Forge::GitHub,
+        })
     }
     fn describe_sha(
         &self,
         _id: &ActionId,
         _sha: &CommitSha,
     ) -> Result<ShaDescription, ResolutionError> {
-        Err(ResolutionError::AuthRequired)
+        Err(ResolutionError::AuthRequired {
+            forge: Forge::GitHub,
+        })
     }
 }
 

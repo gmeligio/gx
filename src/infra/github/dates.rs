@@ -12,7 +12,7 @@ impl Registry {
     ///
     /// # Errors
     ///
-    /// Returns an error if no token is set, the request fails, or the response cannot be parsed.
+    /// Returns an error if the request fails or the response cannot be parsed.
     pub(super) fn fetch_commit_date(
         &self,
         base_repo: &str,

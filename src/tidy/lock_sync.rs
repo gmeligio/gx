@@ -49,7 +49,7 @@ pub(super) fn update_lock<R: VersionRegistry>(
             Ok(Some(event)) => events.push(event),
             Ok(None) => {}
             Err(e) => {
-                if e.is_recoverable() {
+                if e.is_skippable() {
                     events.push(SyncEvent::ResolutionSkipped {
                         spec: spec.clone(),
                         reason: e.to_string(),
