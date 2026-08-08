@@ -15,17 +15,33 @@ on:
         - cron: "0 6 * * 1"
     workflow_dispatch:
 
-permissions:
-    contents: write
-    pull-requests: write
+# A manual run must not race the scheduled one onto the same branch. Not
+# cancel-in-progress: interrupting a push could leave gx/upgrade half-written.
+concurrency:
+    group: gx-upgrade
+    cancel-in-progress: false
 
 jobs:
     upgrade:
         name: Upgrade pinned actions
         runs-on: ubuntu-24.04
+        timeout-minutes: 15
+        # Scoped to this job, not the workflow, so a job added later does not
+        # inherit write access. Both are required by create-pull-request.
+        permissions:
+            contents: write
+            pull-requests: write
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+              with:
+                  # Keeps GITHUB_TOKEN out of .git/config, where every later
+                  # step could read it. create-pull-request authenticates on
+                  # its own. Revisit if you switch it to an SSH deploy key.
+                  persist-credentials: false
 
+            # Installing from a tap trusts whoever controls it, and this runs
+            # before the write-scoped steps. Pin or vendor gx if that trust is
+            # not one you want to extend.
             - name: Install gx
               run: brew install gmeligio/tap/gx
 
@@ -38,6 +54,8 @@ jobs:
 
             - name: Check whether anything moved
               id: report
+              # Safe only because up_to_date is a JSON boolean. Writing a
+              # string field here would let its contents add output keys.
               run: jq -r '.up_to_date | "up_to_date=\(.)"' upgrade.json >> "$GITHUB_OUTPUT"
 
             - name: Build the pull request body
