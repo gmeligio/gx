@@ -7,6 +7,8 @@ use crate::domain::resolution::{Error as ResolutionError, ShaDescription, Versio
 use std::time::Duration;
 use thiserror::Error;
 
+/// Base URL for the GitHub REST API.
+pub(super) const GITHUB_API_BASE: &str = "https://api.github.com";
 /// HTTP User-Agent header value sent with all GitHub API requests.
 const USER_AGENT: &str = "gx-cli";
 /// Timeout in seconds for each HTTP request to the GitHub API.
@@ -84,6 +86,39 @@ impl Registry {
             Some(token) => req.header("Authorization", format!("Bearer {}", token.as_str())),
             None => req,
         }
+    }
+
+    /// Send an authenticated GET and deserialize a successful JSON response.
+    ///
+    /// `operation` names the API call in [`Error::Request`] for diagnostics.
+    ///
+    /// The status is classified *before* the body is parsed, so a non-2xx
+    /// response yields the precise error (e.g. [`Error::NotFound`]) rather than
+    /// a [`Error::ParseResponse`] from parsing an error body. Callers such as
+    /// `resolve_ref` depend on this to distinguish a missing ref from a
+    /// malformed one.
+    pub(super) fn get_json<T: serde::de::DeserializeOwned>(
+        &self,
+        url: &str,
+        operation: &'static str,
+    ) -> Result<T, Error> {
+        let response = self
+            .authenticated_get(url)
+            .send()
+            .map_err(|source| Error::Request {
+                operation,
+                url: url.to_owned(),
+                source,
+            })?;
+
+        if !response.status().is_success() {
+            return Err(Self::check_status(&response, url));
+        }
+
+        response.json().map_err(|source| Error::ParseResponse {
+            url: url.to_owned(),
+            source,
+        })
     }
 
     /// Classify a non-success HTTP response into the appropriate `Error` variant.
