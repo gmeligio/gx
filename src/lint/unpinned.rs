@@ -128,10 +128,7 @@ mod tests {
 
     #[test]
     fn message_does_not_label_the_identifier_with_a_kind_noun() {
-        // The renderer owns user-facing vocabulary; a rule must not prefix the
-        // identifier with the noun naming its kind. Sibling of the workflow-path
-        // check below — same discipline, different field. The cross-rule guard
-        // lives in `lint/report.rs`; this one names the culprit when it fires.
+        // The renderer owns the words a user reads, so the noun cannot be fixed here.
         let action = located("v4", None);
         let diag = UnpinnedRule::check_action(&action).unwrap();
         assert!(
