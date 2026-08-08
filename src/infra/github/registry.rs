@@ -99,9 +99,9 @@ impl Registry {
     ///
     /// The status is classified *before* the body is parsed, so a non-2xx
     /// response yields the precise error (e.g. [`Error::NotFound`]) rather than
-    /// a [`Error::ParseResponse`] from parsing an error body. Callers such as
-    /// `resolve_ref` depend on this to distinguish a missing ref from a
-    /// malformed one.
+    /// a [`Error::ParseResponse`] from parsing an error body. That keeps
+    /// [`Error::RateLimited`] and [`Error::Unauthorized`] intact, which is what
+    /// the [`VersionRegistry`] impl maps to a skippable [`ResolutionError`].
     ///
     /// Not usable by callers that read response headers (the body parse
     /// consumes the response) or that need failures to stay non-fatal.
