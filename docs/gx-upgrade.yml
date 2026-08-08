@@ -3,15 +3,12 @@
 # Copy this file to .github/workflows/gx-upgrade.yml in your repository.
 # Prerequisite: your repo already has .github/gx.toml and .github/gx.lock
 # (run `gx init` once if it does not). See docs/upgrade-workflow.md.
-#
-# `gx upgrade` runs in safe mode: it advances gx.lock to the newest versions
-# your gx.toml ranges already allow, and never edits the ranges themselves.
 
 name: gx upgrade
 
 on:
     schedule:
-        # Mondays at 06:00 UTC. Cron in GitHub Actions is always UTC.
+        # Cron in GitHub Actions is always UTC.
         - cron: "0 6 * * 1"
     workflow_dispatch:
 
@@ -26,8 +23,7 @@ jobs:
         name: Upgrade pinned actions
         runs-on: ubuntu-24.04
         timeout-minutes: 15
-        # Scoped to this job, not the workflow, so a job added later does not
-        # inherit write access. Both are required by create-pull-request.
+        # Scoped to this job so a job added later does not inherit write access.
         permissions:
             contents: write
             pull-requests: write
@@ -35,8 +31,8 @@ jobs:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
               with:
                   # Keeps GITHUB_TOKEN out of .git/config, where every later
-                  # step could read it. create-pull-request authenticates on
-                  # its own. Revisit if you switch it to an SSH deploy key.
+                  # step could read it; create-pull-request authenticates on
+                  # its own.
                   persist-credentials: false
 
             # Installing from a tap trusts whoever controls it, and this runs
@@ -61,7 +57,6 @@ jobs:
             - name: Build the pull request body
               if: steps.report.outputs.up_to_date == 'false'
               run: |
-                  # One entry per upgraded action, linked to its compare view.
                   # `compare` is omitted from the JSON when either side is not a
                   # real tag (e.g. a branch pin), so the link is conditional.
                   jq -r '
