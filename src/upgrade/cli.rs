@@ -55,7 +55,7 @@ pub enum Error {
 ///
 /// # Errors
 ///
-/// Returns [`Error`] for invalid upgrade mode combinations.
+/// Returns [`enum@Error`] for invalid upgrade mode combinations.
 pub fn resolve_upgrade_mode(action: Option<&str>, latest: bool) -> Result<Request, Error> {
     match (action, latest) {
         (None, true) => Ok(Request::new(Mode::Latest, Scope::All)),

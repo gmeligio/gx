@@ -73,7 +73,7 @@ impl Registry {
     /// # Panics
     ///
     /// This method panics if called from within an async runtime. See docs on
-    /// [`reqwest::blocking`][crate::blocking] for details.
+    /// [`reqwest::blocking`] for details.
     pub fn new(token: Option<crate::config::GitHubToken>) -> Result<Self, Error> {
         let client = reqwest::blocking::Client::builder()
             .user_agent(USER_AGENT)
