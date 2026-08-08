@@ -9,19 +9,19 @@ use gx::domain::action::resolved::Commit;
 use gx::domain::action::spec::Spec as ActionSpec;
 use gx::domain::action::specifier::Specifier;
 use gx::domain::action::uses_ref::RefType;
-use gx::domain::resolution::{Error as ResolutionError, ShaDescription, VersionRegistry};
+use gx::domain::resolution::{Error as ResolutionError, Forge, ShaDescription, VersionRegistry};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash as _, Hasher as _};
 
 /// A versatile mock registry that resolves any version to a deterministic SHA.
 ///
 /// Supports builder methods to configure tag lookups for both `all_tags` and
-/// `tags_for_sha`/`describe_sha`. Default behavior returns empty tag lists.
+/// `describe_sha`. Default behavior returns empty tag lists.
 #[derive(Clone, Default)]
 pub struct FakeRegistry {
     /// Maps `action_id` → list of available version tags (for `all_tags`).
     tags: std::collections::HashMap<String, Vec<String>>,
-    /// Maps `(action_id, sha)` → list of tags pointing to that SHA (for `tags_for_sha` / `describe_sha`).
+    /// Maps `(action_id, sha)` → list of tags pointing to that SHA (for `describe_sha`).
     sha_tags: std::collections::HashMap<(String, String), Vec<String>>,
 }
 
@@ -38,7 +38,7 @@ impl FakeRegistry {
     }
 
     /// Register that a specific SHA has the given tags pointing to it
-    /// (used by `tags_for_sha` and `describe_sha`).
+    /// (used by `describe_sha`).
     pub fn with_sha_tags(mut self, id: &str, sha: &str, tags: Vec<&str>) -> Self {
         self.sha_tags.insert(
             (id.to_owned(), sha.to_owned()),
@@ -70,22 +70,6 @@ impl VersionRegistry for FakeRegistry {
             ref_type: Some(RefType::Tag),
             date: CommitDate::from("2026-01-01T00:00:00Z"),
         })
-    }
-
-    fn tags_for_sha(
-        &self,
-        id: &ActionId,
-        sha: &CommitSha,
-    ) -> Result<Vec<Version>, ResolutionError> {
-        let key = (id.as_str().to_owned(), sha.as_str().to_owned());
-        Ok(self
-            .sha_tags
-            .get(&key)
-            .cloned()
-            .unwrap_or_default()
-            .into_iter()
-            .map(Version::from)
-            .collect())
     }
 
     fn all_tags(&self, id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
@@ -127,19 +111,15 @@ pub struct AuthRequiredRegistry;
 
 impl VersionRegistry for AuthRequiredRegistry {
     fn lookup_sha(&self, _id: &ActionId, _version: &Version) -> Result<Commit, ResolutionError> {
-        Err(ResolutionError::AuthRequired)
-    }
-
-    fn tags_for_sha(
-        &self,
-        _id: &ActionId,
-        _sha: &CommitSha,
-    ) -> Result<Vec<Version>, ResolutionError> {
-        Err(ResolutionError::AuthRequired)
+        Err(ResolutionError::AuthRequired {
+            forge: Forge::GitHub,
+        })
     }
 
     fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
-        Err(ResolutionError::AuthRequired)
+        Err(ResolutionError::AuthRequired {
+            forge: Forge::GitHub,
+        })
     }
 
     fn describe_sha(
@@ -147,7 +127,9 @@ impl VersionRegistry for AuthRequiredRegistry {
         _id: &ActionId,
         _sha: &CommitSha,
     ) -> Result<ShaDescription, ResolutionError> {
-        Err(ResolutionError::AuthRequired)
+        Err(ResolutionError::AuthRequired {
+            forge: Forge::GitHub,
+        })
     }
 }
 
@@ -164,14 +146,6 @@ impl VersionRegistry for EmptyDateRegistry {
             ref_type: Some(RefType::Tag),
             date: CommitDate::from(""),
         })
-    }
-
-    fn tags_for_sha(
-        &self,
-        _id: &ActionId,
-        _sha: &CommitSha,
-    ) -> Result<Vec<Version>, ResolutionError> {
-        Ok(vec![])
     }
 
     fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
@@ -204,14 +178,6 @@ impl VersionRegistry for FailingDescribeRegistry {
             ref_type: Some(RefType::Tag),
             date: CommitDate::from("2026-01-01T00:00:00Z"),
         })
-    }
-
-    fn tags_for_sha(
-        &self,
-        _id: &ActionId,
-        _sha: &CommitSha,
-    ) -> Result<Vec<Version>, ResolutionError> {
-        Ok(vec![])
     }
 
     fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, ResolutionError> {

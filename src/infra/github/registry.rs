@@ -3,7 +3,7 @@ use crate::domain::action::resolved::Commit;
 use crate::domain::action::spec::Spec as ActionSpec;
 use crate::domain::action::specifier::Specifier;
 use crate::domain::action::uses_ref::RefType;
-use crate::domain::resolution::{Error as ResolutionError, ShaDescription, VersionRegistry};
+use crate::domain::resolution::{Error as ResolutionError, Forge, ShaDescription, VersionRegistry};
 use std::time::Duration;
 use thiserror::Error;
 
@@ -13,7 +13,12 @@ const USER_AGENT: &str = "gx-cli";
 const REQUEST_TIMEOUT_SECS: u64 = 30;
 
 /// Errors that can occur when interacting with the Github API.
+///
+/// These stay GitHub-specific and never leave this module: the
+/// [`VersionRegistry`] impl below maps them into the forge-neutral
+/// [`ResolutionError`], preserving the concrete cause via `#[source]`.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum Error {
     #[error("failed to create HTTP client")]
     ClientInit(#[source] reqwest::Error),
@@ -165,8 +170,12 @@ impl VersionRegistry for Registry {
         let (sha, ref_type) =
             self.resolve_ref(id.as_str(), version.as_str())
                 .map_err(|e| match e {
-                    Error::RateLimited { .. } => ResolutionError::RateLimited,
-                    Error::Unauthorized { .. } => ResolutionError::AuthRequired,
+                    Error::RateLimited { .. } => ResolutionError::RateLimited {
+                        forge: Forge::GitHub,
+                    },
+                    Error::Unauthorized { .. } => ResolutionError::AuthRequired {
+                        forge: Forge::GitHub,
+                    },
                     Error::ClientInit(_)
                     | Error::Request { .. }
                     | Error::NotFound { .. }
@@ -212,33 +221,16 @@ impl VersionRegistry for Registry {
         })
     }
 
-    fn tags_for_sha(
-        &self,
-        id: &ActionId,
-        sha: &CommitSha,
-    ) -> Result<Vec<Version>, ResolutionError> {
-        self.get_tags_for_sha(id.as_str(), sha.as_str())
-            .map(|tags| tags.into_iter().map(Version::from).collect())
-            .map_err(|e| match e {
-                Error::RateLimited { .. } => ResolutionError::RateLimited,
-                Error::Unauthorized { .. } => ResolutionError::AuthRequired,
-                Error::ClientInit(_)
-                | Error::Request { .. }
-                | Error::NotFound { .. }
-                | Error::ApiError { .. }
-                | Error::ParseResponse { .. } => ResolutionError::NoTagsForSha {
-                    action: id.clone(),
-                    sha: sha.clone(),
-                },
-            })
-    }
-
     fn all_tags(&self, id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
         self.get_version_tags(id.as_str())
             .map(|tags| tags.into_iter().map(Version::from).collect())
             .map_err(|e| match e {
-                Error::RateLimited { .. } => ResolutionError::RateLimited,
-                Error::Unauthorized { .. } => ResolutionError::AuthRequired,
+                Error::RateLimited { .. } => ResolutionError::RateLimited {
+                    forge: Forge::GitHub,
+                },
+                Error::Unauthorized { .. } => ResolutionError::AuthRequired {
+                    forge: Forge::GitHub,
+                },
                 Error::ClientInit(_)
                 | Error::Request { .. }
                 | Error::NotFound { .. }
@@ -261,8 +253,12 @@ impl VersionRegistry for Registry {
         let date = self
             .fetch_commit_date(base_repo.as_str(), sha.as_str())
             .map_err(|e| match e {
-                Error::RateLimited { .. } => ResolutionError::RateLimited,
-                Error::Unauthorized { .. } => ResolutionError::AuthRequired,
+                Error::RateLimited { .. } => ResolutionError::RateLimited {
+                    forge: Forge::GitHub,
+                },
+                Error::Unauthorized { .. } => ResolutionError::AuthRequired {
+                    forge: Forge::GitHub,
+                },
                 Error::ClientInit(_)
                 | Error::Request { .. }
                 | Error::NotFound { .. }

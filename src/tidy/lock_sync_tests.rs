@@ -6,13 +6,12 @@ use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Version};
 use crate::domain::action::resolved::Commit;
 use crate::domain::action::spec::Spec as ActionSpec;
 use crate::domain::action::specifier::Specifier;
-use crate::domain::action::tag_selection::ShaIndex;
 use crate::domain::action::uses_ref::RefType;
 use crate::domain::lock::Lock;
 use crate::domain::manifest::Manifest;
 use crate::domain::resolution::testutil::FakeRegistry;
 use crate::domain::resolution::{
-    ActionResolver, Error as ResolutionError, ShaDescription, VersionRegistry,
+    ActionResolver, Error as ResolutionError, Forge, ShaDescription, VersionRegistry,
 };
 
 // ---------------------------------------------------------------------------
@@ -25,7 +24,9 @@ struct MixedRegistry;
 impl VersionRegistry for MixedRegistry {
     fn lookup_sha(&self, id: &ActionId, _version: &Version) -> Result<Commit, ResolutionError> {
         if id.as_str() == "actions/checkout" {
-            Err(ResolutionError::AuthRequired)
+            Err(ResolutionError::AuthRequired {
+                forge: Forge::GitHub,
+            })
         } else {
             Ok(Commit {
                 sha: CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
@@ -35,22 +36,19 @@ impl VersionRegistry for MixedRegistry {
             })
         }
     }
-    fn tags_for_sha(
-        &self,
-        _id: &ActionId,
-        _sha: &CommitSha,
-    ) -> Result<Vec<Version>, ResolutionError> {
-        Err(ResolutionError::AuthRequired)
-    }
     fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
-        Err(ResolutionError::AuthRequired)
+        Err(ResolutionError::AuthRequired {
+            forge: Forge::GitHub,
+        })
     }
     fn describe_sha(
         &self,
         _id: &ActionId,
         _sha: &CommitSha,
     ) -> Result<ShaDescription, ResolutionError> {
-        Err(ResolutionError::AuthRequired)
+        Err(ResolutionError::AuthRequired {
+            forge: Forge::GitHub,
+        })
     }
 }
 
@@ -76,15 +74,7 @@ fn lock_resolves_from_workflow_sha_first() {
 
     let registry = FakeRegistry::new().fail_tags();
     let resolver = ActionResolver::new(&registry);
-    let mut sha_index = ShaIndex::new();
-    update_lock(
-        &mut lock,
-        &mut manifest,
-        &resolver,
-        &workflow_shas,
-        &mut sha_index,
-    )
-    .unwrap();
+    update_lock(&mut lock, &mut manifest, &resolver, &workflow_shas).unwrap();
 
     let entry = lock.get(&key).expect("lock entry must exist");
     assert_eq!(
@@ -110,15 +100,7 @@ fn sha_first_lock_uses_workflow_sha_and_most_specific_version() {
         vec!["v3", "v3.6", "v3.6.1"],
     );
     let resolver = ActionResolver::new(&registry);
-    let mut sha_index = ShaIndex::new();
-    update_lock(
-        &mut lock,
-        &mut manifest,
-        &resolver,
-        &workflow_shas,
-        &mut sha_index,
-    )
-    .unwrap();
+    update_lock(&mut lock, &mut manifest, &resolver, &workflow_shas).unwrap();
 
     let entry = lock.get(&key).expect("lock entry must exist");
     assert_eq!(
@@ -144,15 +126,7 @@ fn version_ref_falls_back_to_registry_resolution() {
 
     let registry = FakeRegistry::new().with_fixed_sha(registry_sha).fail_tags();
     let resolver = ActionResolver::new(&registry);
-    let mut sha_index = ShaIndex::new();
-    update_lock(
-        &mut lock,
-        &mut manifest,
-        &resolver,
-        &workflow_shas,
-        &mut sha_index,
-    )
-    .unwrap();
+    update_lock(&mut lock, &mut manifest, &resolver, &workflow_shas).unwrap();
 
     let entry = lock.get(&key).expect("lock entry must exist");
     assert_eq!(
@@ -179,16 +153,8 @@ fn update_lock_recoverable_errors_are_skipped() {
     let workflow_shas = HashMap::new();
 
     let resolver = ActionResolver::new(&MixedRegistry);
-    let mut sha_index = ShaIndex::new();
     // Should not error — checkout is recoverable (AuthRequired), setup-node succeeds
-    update_lock(
-        &mut lock,
-        &mut manifest,
-        &resolver,
-        &workflow_shas,
-        &mut sha_index,
-    )
-    .unwrap();
+    update_lock(&mut lock, &mut manifest, &resolver, &workflow_shas).unwrap();
 
     let setup_node_key = ActionSpec::new(
         ActionId::from("actions/setup-node"),
@@ -230,15 +196,7 @@ fn out_of_range_pinned_sha_is_reresolved_within_range() {
         vec!["v6", "v6.0", "v6.0.2"],
     );
     let resolver = ActionResolver::new(&registry);
-    let mut sha_index = ShaIndex::new();
-    update_lock(
-        &mut lock,
-        &mut manifest,
-        &resolver,
-        &workflow_shas,
-        &mut sha_index,
-    )
-    .unwrap();
+    update_lock(&mut lock, &mut manifest, &resolver, &workflow_shas).unwrap();
 
     let entry = lock.get(&key).expect("lock entry must exist");
     let version = entry.version_label();
@@ -268,15 +226,7 @@ fn out_of_range_pinned_sha_sub_major_is_reresolved() {
         vec!["v1.16", "v1.16.0"],
     );
     let resolver = ActionResolver::new(&registry);
-    let mut sha_index = ShaIndex::new();
-    update_lock(
-        &mut lock,
-        &mut manifest,
-        &resolver,
-        &workflow_shas,
-        &mut sha_index,
-    )
-    .unwrap();
+    update_lock(&mut lock, &mut manifest, &resolver, &workflow_shas).unwrap();
 
     let entry = lock.get(&key).expect("lock entry must exist");
     let version = entry.version_label();
@@ -306,15 +256,7 @@ fn out_of_range_pin_emits_event() {
         vec!["v6", "v6.0", "v6.0.2"],
     );
     let resolver = ActionResolver::new(&registry);
-    let mut sha_index = ShaIndex::new();
-    let events = update_lock(
-        &mut lock,
-        &mut manifest,
-        &resolver,
-        &workflow_shas,
-        &mut sha_index,
-    )
-    .unwrap();
+    let events = update_lock(&mut lock, &mut manifest, &resolver, &workflow_shas).unwrap();
 
     let has_event = events.iter().any(|e| {
         matches!(
@@ -345,15 +287,7 @@ fn in_range_pin_emits_no_event() {
         vec!["v5", "v5.4", "v5.4.0"],
     );
     let resolver = ActionResolver::new(&registry);
-    let mut sha_index = ShaIndex::new();
-    let events = update_lock(
-        &mut lock,
-        &mut manifest,
-        &resolver,
-        &workflow_shas,
-        &mut sha_index,
-    )
-    .unwrap();
+    let events = update_lock(&mut lock, &mut manifest, &resolver, &workflow_shas).unwrap();
 
     assert!(
         !events
@@ -385,15 +319,7 @@ fn init_derived_specifier_keeps_sha_version() {
         vec!["v6", "v6.0", "v6.0.2"],
     );
     let resolver = ActionResolver::new(&registry);
-    let mut sha_index = ShaIndex::new();
-    let events = update_lock(
-        &mut lock,
-        &mut manifest,
-        &resolver,
-        &workflow_shas,
-        &mut sha_index,
-    )
-    .unwrap();
+    let events = update_lock(&mut lock, &mut manifest, &resolver, &workflow_shas).unwrap();
 
     assert!(
         !events
