@@ -214,6 +214,11 @@ fn save_produces_two_tier_format() {
 ///
 /// Bare TOML keys (`main`, the SHA) are emitted unquoted by the document
 /// builder, so this fixture reproduces that exactly.
+///
+/// The two shared-commit specifiers pin field order and layout, not the dedup
+/// tie-break — both load from one `[actions]` row, so either winner writes the
+/// same bytes. `two_specs_sharing_a_version_write_the_first_commit_in_sort_order`
+/// covers that.
 const CANONICAL_LOCK: &str = concat!(
     "[resolutions.\"actions/checkout\".\"^4\"]\nversion = \"v4.2.1\"\n\n",
     "[resolutions.\"actions/checkout\".\"^4.2\"]\nversion = \"v4.2.1\"\n\n",
@@ -245,10 +250,9 @@ fn two_tier_lock_roundtrips_byte_identically() {
 
 #[test]
 fn save_sorts_unsorted_input_into_canonical_order() {
-    // `Lock` stores rows in a `HashMap`, so loading already discards input
-    // order — this fixture is reverse-ordered to document the intent, not
-    // because the serializer ever sees that order. What the assertion proves is
-    // that output is sorted deterministically whatever order iteration yields.
+    // Reverse-ordered to read as the sort's input, though `Lock`'s `HashMap`
+    // already discards that order before the serializer sees it. The assertion
+    // holds for any iteration order: output must come out sorted.
     let unsorted = concat!(
         "[resolutions.\"docker/build-push-action\".\"^5\"]\nversion = \"v5.1.0\"\n\n",
         "[resolutions.\"actions/checkout\".\"^4.2\"]\nversion = \"v4.2.1\"\n\n",
@@ -272,6 +276,43 @@ fn save_sorts_unsorted_input_into_canonical_order() {
         load_then_save(unsorted),
         expected,
         "entries must be sorted by action ID then specifier/version"
+    );
+}
+
+#[test]
+fn two_specs_sharing_a_version_write_the_first_commit_in_sort_order() {
+    // Two specs can map to one `[actions]` row, and `build_lock_document` keeps
+    // the first in sort order. Loading from disk can't produce disagreeing
+    // commits under one version, so only an in-memory lock exercises the choice.
+    let mut lock = crate::domain::lock::Lock::default();
+    for (specifier, sha) in [
+        ("^4.2", "2222222222222222222222222222222222222222"),
+        ("^4", "1111111111111111111111111111111111111111"),
+    ] {
+        lock.set(
+            &make_key("actions/checkout", specifier),
+            ResolvedRef::Tag(Version::from("v4.2.1")),
+            Commit {
+                sha: CommitSha::from(sha),
+                repository: Repository::from("actions/checkout"),
+                ref_type: Some(RefType::Tag),
+                date: CommitDate::from("2026-01-01T00:00:00Z"),
+            },
+        );
+    }
+
+    let file = NamedTempFile::new().unwrap();
+    let store = Store::new(file.path());
+    store.save(&lock).unwrap();
+    let content = std::fs::read_to_string(file.path()).unwrap();
+
+    assert!(
+        content.contains("sha = \"1111111111111111111111111111111111111111\""),
+        "`^4` sorts before `^4.2`, so its commit wins the dedup:\n{content}"
+    );
+    assert!(
+        !content.contains("2222222222222222222222222222222222222222"),
+        "the later spec's commit must not overwrite the first:\n{content}"
     );
 }
 

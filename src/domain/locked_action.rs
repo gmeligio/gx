@@ -4,11 +4,17 @@ use super::action::spec::Spec;
 use super::action::specifier::Specifier;
 use super::lock::LockEntry;
 
-/// Pairs a lock row's key with its value so consumers read one whole row.
+/// One action as locked: a row's key paired with its value, read as a whole.
+///
+/// The read view that [`Lock::entries`] yields. [`LockEntry`] is the other half
+/// — what the map stores and mutates in place. Reach for this one to read a row,
+/// that one to write it.
 ///
 /// A loaded lock may hold rows whose fields were never populated, so accessors
 /// that can be empty on disk return [`Option`] rather than an empty value a
 /// caller could use by accident.
+///
+/// [`Lock::entries`]: super::lock::Lock::entries
 #[derive(Debug, Clone, Copy)]
 pub struct LockedAction<'lock> {
     /// The lock key: action ID plus the specifier it is recorded under.
