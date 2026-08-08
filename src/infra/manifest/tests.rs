@@ -1,10 +1,10 @@
 use super::{Manifest, Store, create, parse, parse_lint_config};
+use crate::diagnostic::RuleName;
 use crate::domain::action::identity::ActionId;
 use crate::domain::action::specifier::Specifier;
 use crate::domain::diff::ManifestDiff;
 use crate::domain::file::site::{JobId, Scope, StepIndex, WorkflowPath};
 use crate::domain::manifest::overrides::ActionOverride;
-use crate::lint::RuleName;
 use std::fs;
 use std::io::Write as _;
 use std::path::Path;
