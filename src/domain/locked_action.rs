@@ -4,17 +4,10 @@ use super::action::spec::Spec;
 use super::action::specifier::Specifier;
 use super::lock::LockEntry;
 
-/// One action as locked: a row's key paired with its value, read as a whole.
+/// One action as locked: a row's key paired with its value.
 ///
-/// The read view that [`Lock::entries`] yields. [`LockEntry`] is the other half
-/// — what the map stores and mutates in place. Reach for this one to read a row,
-/// that one to write it.
-///
-/// A loaded lock may hold rows whose fields were never populated, so accessors
-/// that can be empty on disk return [`Option`] rather than an empty value a
-/// caller could use by accident.
-///
-/// [`Lock::entries`]: super::lock::Lock::entries
+/// Read a row through this; write one through [`LockEntry`], which is what the
+/// map stores.
 #[derive(Debug, Clone, Copy)]
 pub struct LockedAction<'lock> {
     /// The lock key: action ID plus the specifier it is recorded under.
@@ -49,16 +42,15 @@ impl<'lock> LockedAction<'lock> {
 
     /// The repository the commit was resolved against.
     ///
-    /// `None` when the row was loaded without one — a caller building a
-    /// `GET /repos/{owner}/{repo}` URL must treat that as "cannot check",
-    /// never as a clean result.
+    /// `None` for a row that stored none, so a check building
+    /// `GET /repos/{owner}/{repo}` can't request a malformed URL and report clean.
     #[must_use]
     pub fn repository(&self) -> Option<&'lock Repository> {
         let repository = &self.entry.commit.repository;
         (!repository.as_str().is_empty()).then_some(repository)
     }
 
-    /// The full commit metadata, for callers that persist every field.
+    /// The full commit metadata.
     #[must_use]
     pub fn commit(&self) -> &'lock Commit {
         &self.entry.commit
@@ -127,8 +119,6 @@ mod tests {
 
     #[test]
     fn repository_is_none_when_the_row_never_stored_one() {
-        // An audit check building `GET /repos/{owner}/{repo}` must be forced to
-        // handle absence, not silently request a malformed URL and report clean.
         let spec = Spec::new(ActionId::from("actions/checkout"), Specifier::parse("^4"));
         let entry = LockEntry {
             reference: ResolvedRef::Tag(Version::from("v4.2.1")),

@@ -124,31 +124,6 @@ fn load_unrecognized_content_returns_error() {
 // ========== Store::save tests ==========
 
 #[test]
-fn save_and_load_roundtrip() {
-    let file = NamedTempFile::new().unwrap();
-    let store = Store::new(file.path());
-
-    let mut lock = crate::domain::lock::Lock::default();
-    set_resolved(
-        &mut lock,
-        "actions/checkout",
-        "^4",
-        "abc123def456789012345678901234567890abcd",
-    );
-
-    store.save(&lock).unwrap();
-
-    let loaded = store.load().unwrap();
-    let result = loaded.get(&make_key("actions/checkout", "^4"));
-    assert!(result.is_some());
-    let entry = result.unwrap();
-    assert_eq!(
-        entry.commit.sha,
-        CommitSha::from("abc123def456789012345678901234567890abcd")
-    );
-}
-
-#[test]
 fn save_sorts_actions_alphabetically() {
     let file = NamedTempFile::new().unwrap();
     let store = Store::new(file.path());
@@ -187,38 +162,11 @@ fn save_sorts_actions_alphabetically() {
     assert!(section_lines[2].contains("docker/build-push-action"));
 }
 
-#[test]
-fn save_produces_two_tier_format() {
-    let file = NamedTempFile::new().unwrap();
-    let store = Store::new(file.path());
-
-    let mut lock = crate::domain::lock::Lock::default();
-    set_resolved(
-        &mut lock,
-        "actions/checkout",
-        "^4",
-        "abc123def456789012345678901234567890abcd",
-    );
-
-    store.save(&lock).unwrap();
-
-    let content = std::fs::read_to_string(file.path()).unwrap();
-    assert!(!content.contains("version = \"1.4\""));
-    assert!(content.contains("[resolutions.\"actions/checkout\".\"^4\"]"));
-    assert!(content.contains("[actions.\"actions/checkout\""));
-    assert!(!content.contains("{ sha ="), "entries must NOT be inline");
-}
-
 /// A canonical two-tier lock covering every ref kind gx writes: a semver tag,
 /// two specifiers sharing one commit, a branch pin, and a bare-commit pin.
 ///
-/// Bare TOML keys (`main`, the SHA) are emitted unquoted by the document
-/// builder, so this fixture reproduces that exactly.
-///
-/// The two shared-commit specifiers pin field order and layout, not the dedup
-/// tie-break — both load from one `[actions]` row, so either winner writes the
-/// same bytes. `two_specs_sharing_a_version_write_the_first_commit_in_sort_order`
-/// covers that.
+/// Bare TOML keys (`main`, the SHA) are unquoted because that is what the
+/// document builder emits.
 const CANONICAL_LOCK: &str = concat!(
     "[resolutions.\"actions/checkout\".\"^4\"]\nversion = \"v4.2.1\"\n\n",
     "[resolutions.\"actions/checkout\".\"^4.2\"]\nversion = \"v4.2.1\"\n\n",
@@ -250,9 +198,8 @@ fn two_tier_lock_roundtrips_byte_identically() {
 
 #[test]
 fn save_sorts_unsorted_input_into_canonical_order() {
-    // Reverse-ordered to read as the sort's input, though `Lock`'s `HashMap`
-    // already discards that order before the serializer sees it. The assertion
-    // holds for any iteration order: output must come out sorted.
+    // `Lock`'s `HashMap` discards this order before the serializer sees it; the
+    // assertion holds for whatever order iteration yields.
     let unsorted = concat!(
         "[resolutions.\"docker/build-push-action\".\"^5\"]\nversion = \"v5.1.0\"\n\n",
         "[resolutions.\"actions/checkout\".\"^4.2\"]\nversion = \"v4.2.1\"\n\n",
@@ -281,9 +228,8 @@ fn save_sorts_unsorted_input_into_canonical_order() {
 
 #[test]
 fn two_specs_sharing_a_version_write_the_first_commit_in_sort_order() {
-    // Two specs can map to one `[actions]` row, and `build_lock_document` keeps
-    // the first in sort order. Loading from disk can't produce disagreeing
-    // commits under one version, so only an in-memory lock exercises the choice.
+    // Built in memory, not from a fixture: two specs loaded from disk share one
+    // `[actions]` row, so their commits can never disagree to begin with.
     let mut lock = crate::domain::lock::Lock::default();
     for (specifier, sha) in [
         ("^4.2", "2222222222222222222222222222222222222222"),
