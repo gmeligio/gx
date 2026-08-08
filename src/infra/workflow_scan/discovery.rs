@@ -3,7 +3,8 @@
 //! Scanner and writer both discover files here. Two implementations could drift, leaving
 //! gx aware of a reference it never rewrites.
 //!
-//! Kind is decided here and carried on [`ManagedFile`]; nothing downstream recomputes it
+//! Kind is decided here and carried on [`ManagedFile`](crate::infra::workflow_scan::discovery::ManagedFile);
+//! nothing downstream recomputes it
 //! from a path. That is what lets an action definition outside `.github/actions` be read
 //! as one — a path says where a file sits, not which schema it follows.
 
