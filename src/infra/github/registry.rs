@@ -7,6 +7,8 @@ use crate::domain::resolution::{Error as ResolutionError, ShaDescription, Versio
 use std::time::Duration;
 use thiserror::Error;
 
+/// Base URL for the GitHub REST API.
+pub(super) const GITHUB_API_BASE: &str = "https://api.github.com";
 /// HTTP User-Agent header value sent with all GitHub API requests.
 const USER_AGENT: &str = "gx-cli";
 /// Timeout in seconds for each HTTP request to the GitHub API.

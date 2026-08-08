@@ -1,6 +1,6 @@
 use super::Error as GithubError;
 use super::Registry;
-use super::resolve::GITHUB_API_BASE;
+use super::registry::GITHUB_API_BASE;
 use super::responses::{CommitDetailResponse, ReleaseResponse, TagObjectResponse};
 
 #[expect(

@@ -1,6 +1,6 @@
 use super::Error as GithubError;
 use super::Registry;
-use super::resolve::GITHUB_API_BASE;
+use super::registry::GITHUB_API_BASE;
 use super::responses::{GitRefEntry, GitTagResponse};
 
 #[expect(
@@ -140,7 +140,7 @@ impl Registry {
 }
 
 /// Parse the `Link` header to find the `rel="next"` URL for pagination.
-pub(super) fn parse_next_link(headers: &reqwest::header::HeaderMap) -> Option<String> {
+fn parse_next_link(headers: &reqwest::header::HeaderMap) -> Option<String> {
     let link_header = headers.get("link")?.to_str().ok()?;
     for part in link_header.split(',') {
         let trimmed_part = part.trim();
@@ -159,7 +159,7 @@ pub(super) fn parse_next_link(headers: &reqwest::header::HeaderMap) -> Option<St
 ///
 /// Only matches lightweight tags where `object.sha` is the commit SHA directly.
 /// Annotated tags (`object_type` == "tag") must be dereferenced separately.
-pub(super) fn filter_refs_by_sha(refs: &[GitRefEntry], sha: &str) -> Vec<String> {
+fn filter_refs_by_sha(refs: &[GitRefEntry], sha: &str) -> Vec<String> {
     refs.iter()
         .filter(|r| r.object.sha == sha)
         .map(|r| {
