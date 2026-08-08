@@ -22,9 +22,8 @@ impl Rule for UnsyncedManifestRule {
 
         // Actions in workflows but not in manifest
         for action_id in workflow_actions.difference(&manifest_actions) {
-            let msg = format!(
-                "action {action_id} is used in workflows but not declared in manifest (gx.toml)"
-            );
+            let msg =
+                format!("{action_id} is used in workflows but not declared in manifest (gx.toml)");
             diagnostics.push(Diagnostic::new(
                 RuleName::UnsyncedManifest,
                 self.default_level(),
@@ -35,7 +34,7 @@ impl Rule for UnsyncedManifestRule {
         // Actions in manifest but not in any workflow
         for action_id in manifest_actions.difference(&workflow_actions) {
             let msg = format!(
-                "action {action_id} is declared in manifest (gx.toml) but not used in any workflow"
+                "{action_id} is declared in manifest (gx.toml) but not used in any workflow"
             );
             diagnostics.push(Diagnostic::new(
                 RuleName::UnsyncedManifest,

@@ -92,7 +92,7 @@ impl CommandReport for Report {
             // The compare link is intentionally omitted from the terminal line —
             // it is verbose. It lives in the `--json` contract and the log file.
             lines.push(OutputLine::Upgraded {
-                action: entry.action.clone(),
+                id: entry.action.clone(),
                 from: entry.from.clone(),
                 to: entry.to.clone(),
             });
@@ -100,7 +100,7 @@ impl CommandReport for Report {
 
         for (action, reason) in &self.skipped {
             lines.push(OutputLine::Skipped {
-                action: action.clone(),
+                id: action.clone(),
                 reason: reason.clone(),
             });
         }
@@ -172,12 +172,12 @@ mod tests {
         let lines = report.render();
 
         assert!(lines.contains(&OutputLine::Upgraded {
-            action: "actions/checkout".to_owned(),
+            id: "actions/checkout".to_owned(),
             from: "v6".to_owned(),
             to: "v6.0.2".to_owned(),
         }));
         assert!(lines.contains(&OutputLine::Upgraded {
-            action: "jdx/mise-action".to_owned(),
+            id: "jdx/mise-action".to_owned(),
             from: "v3".to_owned(),
             to: "v3.6.2".to_owned(),
         }));
