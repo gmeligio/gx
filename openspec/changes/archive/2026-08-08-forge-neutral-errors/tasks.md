@@ -12,7 +12,7 @@
 ## 3. Split the classification predicate
 
 - [x] 3.1 Rename `is_recoverable()` to `is_skippable()`; keep `RateLimited` and `AuthRequired` returning `true` so a tokenless run still warns and skips rather than hard-failing
-- [x] 3.2 Record in the spec that skippability carries no retry promise (an earlier draft added an `is_retryable()` predicate; cut as speculative once #137 was found to gate on the failure directly)
+- [x] 3.2 Add `is_retryable()` returning `true` only for `RateLimited`; document on it that auth is excluded because repeating the request cannot change the outcome
 - [x] 3.3 Update the sole caller `src/tidy/lock_sync.rs:52` to `is_skippable()`
 
 ## 4. Update construction sites
@@ -23,7 +23,7 @@
 ## 5. Tests
 
 - [x] 5.1 Replace the `is_recoverable_*` tests with `is_skippable` tests covering all four variants
-- [x] 5.2 Assert `AuthRequired` stays skippable, so a future reader cannot turn a tokenless run into a hard failure
+- [x] 5.2 Add `is_retryable` tests covering every variant, including the assertion that `AuthRequired` is NOT retryable
 - [x] 5.3 Add `Display` tests asserting each forge-carrying variant's message contains the forge name and its remedy env var (substring assertions, not full-string, per the test strategy)
 - [x] 5.4 Update `src/domain/resolution.rs`'s existing `resolve_from_sha_describe_error_propagates` test for the new variant shape
 

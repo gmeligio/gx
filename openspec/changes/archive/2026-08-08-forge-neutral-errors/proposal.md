@@ -31,15 +31,18 @@ retry) is about to pull apart — see below.
   still rendered — a user with both a GitHub and a GitLab action in one workflow
   needs to know which one ran out of quota — but it comes from the field, not the
   variant.
-- `is_recoverable()` is **renamed to `is_skippable()`**. The old name invited a
-  retry reading it never supported: its only caller (`tidy::lock_sync`) uses it to
-  decide warn-and-skip, and both rate-limit and auth stay `true` there. Reading it
-  as "safe to retry" and flipping `AuthRequired` to `false` would hard-fail every
-  tokenless run. The name now states the question it answers.
+- `is_recoverable()` is **split into two predicates** because it answers two
+  different questions with one bit:
+  - `is_skippable()` — may this run continue without this action? (caller:
+    `tidy::lock_sync`, warn-and-skip). Both rate-limit and auth stay `true`.
+  - `is_retryable()` — would the same request succeed if repeated? Rate limit
+    `true`; auth `false`, because retrying a missing token never succeeds. Reading
+    the old name as "safe to retry" and flipping `AuthRequired` to `false` would
+    have hard-failed every tokenless run; splitting is what makes both answers
+    correct at once.
 
-  A caller that retries must decide that from the specific failure, not from
-  skippability — the two are different questions, and #137 makes that decision for
-  itself.
+  No retry logic is built here — only the predicate. #137's `Retrying` decorator is
+  its caller.
 - `github::Error` keeps its precise, GitHub-specific variants behind the existing
   mapping boundary at `impl VersionRegistry for Registry`, with `#[source]` chaining
   preserved.
@@ -60,9 +63,9 @@ None. This adds no capability a user can invoke.
   relevance gate ("adds, removes, or changes user-facing behavior") is met rather
   than the "internal refactoring with no user-visible change" skip:
   1. The spec's **Guardrail: Error classification** table is the normative statement
-     of which failures warn and which fail. Its vocabulary ("recoverable") is the
-     name this change removes, and the table must say explicitly that skippable
-     carries no retry promise — otherwise the next reader repeats the misreading.
+     of which failures warn and which fail. It has one "Classification" column; this
+     change makes classification two-dimensional (skippable x retryable), so the
+     table must be restated or it will contradict the code.
   2. The error text a user reads on a skipped resolution changes. The guardrail's
      "User experience" column already claims territory over that text, and the
      project rule "Error classification determines whether user sees warning or hard
