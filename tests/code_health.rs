@@ -321,7 +321,7 @@ fn ignore_attribute_budget() {
 }
 
 // ---------------------------------------------------------------------------
-// Task 1.1 — Layer dependency direction
+// Layer dependency direction
 // ---------------------------------------------------------------------------
 
 /// Domain modules must not import from command modules or infra.
@@ -372,7 +372,7 @@ fn domain_does_not_import_upward() {
 }
 
 // ---------------------------------------------------------------------------
-// The offline/networked command split
+// Offline/networked command split
 // ---------------------------------------------------------------------------
 
 /// `gx lint` is offline and `gx audit` reads only the lock — both enforced, not assumed.
@@ -518,7 +518,7 @@ fn forbidden_import_matcher_catches_real_import_shapes() {
 }
 
 // ---------------------------------------------------------------------------
-// Task 1.2 — Duplicate private function detection across command modules
+// Duplicate private functions across command modules
 // ---------------------------------------------------------------------------
 
 /// Private (non-`pub`) functions with the same name across different command
@@ -610,18 +610,14 @@ fn no_duplicate_private_fns_across_command_modules() {
 }
 
 // ---------------------------------------------------------------------------
-// Task 1.3 — File size budget
+// File size budget
 // ---------------------------------------------------------------------------
 
 /// No `.rs` file in `src/` should exceed the line budget.
 ///
-/// Current budget is set to the current maximum + margin while large files
-/// are being split. Target is 500 lines per file.
+/// Ratchet: lower this as files are split. Target 500.
 #[test]
 fn file_size_budget() {
-    // TODO: lower further once infra/github.rs and upgrade/mod.rs are split.
-    //       Domain splits (manifest.rs, lock.rs, identity.rs, resolution.rs) are done.
-    //       identity.rs grew with Repository, VersionComment, CommitDate newtypes.
     let max_lines: usize = 550;
 
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -647,7 +643,7 @@ fn file_size_budget() {
 }
 
 // ---------------------------------------------------------------------------
-// Task 1.4 — Folder file count budget
+// Folder file count budget
 // ---------------------------------------------------------------------------
 
 // Count only direct .rs files per directory (non-recursive)
@@ -778,7 +774,7 @@ fn folder_file_count_budget() {
 }
 
 // ---------------------------------------------------------------------------
-// Task 1.5 — Logic line budget
+// Logic line budget
 // ---------------------------------------------------------------------------
 
 /// No `.rs` file in `src/` should exceed the logic line budget.
@@ -787,8 +783,7 @@ fn folder_file_count_budget() {
 /// first `#[cfg(test)]` to EOF). Standalone `tests.rs` files are excluded
 /// entirely (they are 100% test code).
 ///
-/// Budget: 440 (current max: 438 in infra/github/resolve.rs).
-/// Target: 300 once large files are split.
+/// Ratchet: lower this as files are split. Target 300.
 #[test]
 fn logic_line_budget() {
     let max_logic_lines: usize = 440;
@@ -875,19 +870,16 @@ fn logic_line_budget() {
 }
 
 // ---------------------------------------------------------------------------
-// Task 1.6 — mod.rs reexports only
+// mod.rs reexports only
 // ---------------------------------------------------------------------------
 
-/// Every `mod.rs` should ideally contain only reexports, module declarations,
-/// attributes, and comments. Logic belongs in named files.
+/// Every `mod.rs` should contain only reexports, module declarations, attributes, and
+/// comments. Logic belongs in named files.
 ///
-/// Budget: 360 per file (current max: 354 in lint/mod.rs).
-/// Target: 0 (mod.rs should be reexports only).
+/// Ratchet: lower this as logic moves out. Target 0.
 #[test]
 fn mod_rs_reexports_only() {
     let max_mod_logic: usize = 360;
-    // Target: 0 (mod.rs should be reexports only).
-    // Current max: 354 (lint/mod.rs). Headroom for minor multi-line use edge cases.
 
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let src_dir = manifest_dir.join("src");
@@ -952,18 +944,13 @@ fn mod_rs_reexports_only() {
 }
 
 // ---------------------------------------------------------------------------
-// Task 1.7 — No generic file names
+// No generic file names
 // ---------------------------------------------------------------------------
 
 /// File names should describe what the code does, not what kind of code it is.
-///
-/// Budget: 1 (current: upgrade/types.rs).
-/// Target: 0.
 #[test]
 fn no_generic_file_names() {
-    let max_generic_names: usize = 1;
-    // Target: 0.
-    // Current violation: upgrade/types.rs
+    let max_generic_names: usize = 0;
 
     let denied = [
         "types.rs",

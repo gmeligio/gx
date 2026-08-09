@@ -174,9 +174,9 @@ jobs:
     );
 }
 
-/// Task 2.5: Manifest authority — manifest v4 must survive even when workflows
-/// have a stale SHA pointing at v3.  The manifest is the source of truth for
-/// existing actions; tidy must never downgrade it from workflow state.
+/// Manifest authority: manifest v4 must survive even when workflows have a stale SHA
+/// pointing at v3. The manifest is the source of truth for existing actions; tidy must
+/// never downgrade it from workflow state.
 #[test]
 fn manifest_authority_not_overwritten_by_workflow_sha() {
     let temp_dir = tempfile::TempDir::new().unwrap();
