@@ -64,8 +64,6 @@ impl Remediation {
         let fixed = Version::normalized(&patched.to_string());
 
         match specifier {
-            // The patched version from an advisory is always a version tag,
-            // so `Branch`/`Commit` are unreachable here by construction.
             Specifier::Range { .. } => {
                 if specifier.matches_version(&ResolvedRef::Tag(fixed.clone())) {
                     Self::Upgradable { fixed }
@@ -73,11 +71,10 @@ impl Remediation {
                     Self::OutOfRange { fixed }
                 }
             }
-            // Inverts `matches_version`, which reports `Ref`/`Sha` as exempt.
-            // That asks whether a pin is permitted; this asks whether
-            // `gx upgrade` would reach the fix — with no range to search, it
-            // would not. The obstacle is the missing range, not its width, so a
-            // caller must not render this arm as "requires a major bump".
+            // Deliberately inverts `matches_version`, which treats `Ref`/`Sha` as exempt:
+            // that asks whether a pin is permitted, this asks whether `gx upgrade` reaches
+            // the fix. The obstacle is the missing range, not its width, so a caller must
+            // not render this arm as "requires a major bump".
             Specifier::Ref(_) | Specifier::Sha(_) => Self::OutOfRange { fixed },
         }
     }

@@ -1,14 +1,12 @@
 //! What audit checks see: one borrowed view per `gx.lock` row, and the `mutable-ref` check.
 //!
-//! **Audit reads the lock, never workflow files.** The lock already records
-//! `(action_id, version, sha, repository, ref_type)`, which is everything a check needs, and
-//! deriving the audited set from it means every improvement to how gx discovers actions —
-//! composite traversal, job-level `uses:` — reaches audit for free. Re-walking workflows here
-//! would give audit a second notion of "which actions exist" that drifts from the scanner's.
+//! **Audit reads the lock, never workflow files.** The lock records everything a check
+//! needs, so every improvement to how gx discovers actions reaches audit for free.
+//! Re-walking workflows would give audit a second notion of "which actions exist" that
+//! drifts from the scanner's.
 //!
-//! [`AuditTarget`] exists so that checks never destructure a lock row themselves. When the
-//! lock's per-row representation became `LockedAction`, only [`targets`] needed rewriting
-//! and no check changed — which is the property this indirection buys.
+//! [`AuditTarget`] exists so checks never destructure a lock row themselves. When the
+//! row representation became `LockedAction`, only [`targets`] changed — no check did.
 
 use super::check_name::CheckName;
 use super::report::Finding;
@@ -18,10 +16,6 @@ use crate::domain::action::uses_ref::RefType;
 use crate::domain::lock::Lock;
 
 /// One locked action, as an audit check sees it.
-///
-/// A borrowed projection of a lock row, deliberately narrower than the row itself: it
-/// exposes what checks need and nothing more, so the row's shape can change without
-/// reaching into every check.
 pub struct AuditTarget<'lock> {
     /// The action's identity, e.g. `actions/checkout`.
     pub id: &'lock ActionId,

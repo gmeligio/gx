@@ -1,14 +1,11 @@
 //! The lint rule identity.
 //!
-//! Defined alongside the shared diagnostics vocabulary rather than inside `lint/`
-//! because `config` and `infra::manifest` must name a rule to parse `[lint.rules]`,
-//! and neither may depend on a command module. `lint::RuleName` re-exports this.
+//! Here and not in `lint/` because `config` and `infra::manifest` must name a rule to
+//! parse `[lint.rules]`, and neither may depend on a command. `lint::RuleName` re-exports
+//! this.
 
 super::identity::rule_ids! {
-    /// Canonical identifier for a lint rule.
-    ///
-    /// Adding a rule is a one-line edit here: the enum, `as_str`, `ALL`, `Display`,
-    /// `FromStr`, `Serialize`, and `Deserialize` are all generated from this list.
+    /// Canonical identifier for a lint rule. Add one by adding a line.
     RuleName {
         ShaMismatch => "sha-mismatch",
         Unpinned => "unpinned",

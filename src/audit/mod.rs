@@ -59,14 +59,12 @@ pub enum Error {
 
 /// Run every check over the locked action set.
 ///
-/// Reads only the lock — no network — so it is exercised in tests with a fixture lock and
-/// a no-op progress callback.
+/// Reads only the lock — no network — so tests drive it with a fixture lock.
 #[must_use]
 pub fn collect_findings(config: &Config, on_progress: &mut dyn FnMut(&str)) -> Vec<Finding> {
     on_progress("Auditing locked actions...");
     let targets = target::targets(&config.lock);
-    // Each check is one line here and one function in `target.rs`, so checks developed in
-    // parallel do not collide.
+    // One line per check, so checks developed in parallel do not collide.
     targets.iter().filter_map(target::mutable_ref).collect()
 }
 
@@ -83,10 +81,8 @@ impl Command for Audit {
         config: Config,
         on_progress: &mut dyn FnMut(&str),
     ) -> Result<Report, Error> {
-        // Checked before anything else — before the lock is read and before any check
-        // runs — so there is no path on which audit does partial work and returns a
-        // report that reads as clean. The failure is an `Err`, structurally distinct
-        // from a `Report` with zero findings.
+        // First, so no path does partial work and returns a report that reads as clean.
+        // An `Err` is structurally distinct from a `Report` with zero findings.
         if config.settings.github_token.is_none() {
             return Err(Error::MissingToken {
                 forge: Forge::GitHub,

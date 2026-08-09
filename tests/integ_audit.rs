@@ -159,10 +159,9 @@ fn missing_token_fails_loudly_and_names_the_variable() {
 
 #[test]
 fn missing_token_never_yields_a_report() {
-    // The load-bearing property: "could not check" and "checked and clean" are different
-    // types, so a token failure cannot be rendered or serialized as a clean result. A
-    // consumer of `--json` reading `{"findings": []}` would otherwise conclude the audit
-    // passed when it never ran.
+    // "Could not check" and "checked and clean" are different types. Otherwise a
+    // `--json` consumer reading `{"findings": []}` concludes the audit passed when
+    // it never ran.
     let temp = TempDir::new().unwrap();
     let root = repo_with_lock(&temp, Some(TAG_LOCK));
 
