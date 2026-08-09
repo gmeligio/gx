@@ -32,20 +32,20 @@ impl CommandReport for Report {
 
         for action in &self.removed {
             lines.push(OutputLine::Removed {
-                action: action.to_string(),
+                id: action.to_string(),
             });
         }
 
         for (action, version) in &self.added {
             lines.push(OutputLine::Added {
-                action: action.to_string(),
+                id: action.to_string(),
                 version: version.to_string(),
             });
         }
 
         for (action, from, to) in &self.upgraded {
             lines.push(OutputLine::Upgraded {
-                action: action.to_string(),
+                id: action.to_string(),
                 from: from.clone(),
                 to: to.to_string(),
             });
@@ -108,10 +108,10 @@ mod tests {
         let lines = report.render();
 
         assert!(lines.contains(&OutputLine::Removed {
-            action: "actions/unused".to_owned(),
+            id: "actions/unused".to_owned(),
         }));
         assert!(lines.contains(&OutputLine::Added {
-            action: "actions/new".to_owned(),
+            id: "actions/new".to_owned(),
             version: "^2".to_owned(),
         }));
         assert!(lines.contains(&OutputLine::Summary {

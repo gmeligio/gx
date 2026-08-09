@@ -16,7 +16,7 @@ impl UnpinnedRule {
             return None;
         }
         let msg = format!(
-            "action {} uses tag reference {} instead of SHA pin",
+            "{} uses tag reference {} instead of SHA pin",
             &action.action.id,
             action.action.reference.label()
         );
@@ -124,6 +124,18 @@ mod tests {
         let action = located_at("v4", None, None);
         let diag = UnpinnedRule::check_action(&action).unwrap();
         assert_eq!(diag.line, None);
+    }
+
+    #[test]
+    fn message_does_not_label_the_identifier_with_a_kind_noun() {
+        // The renderer owns the words a user reads, so the noun cannot be fixed here.
+        let action = located("v4", None);
+        let diag = UnpinnedRule::check_action(&action).unwrap();
+        assert!(
+            !diag.message.starts_with("action "),
+            "message should not prefix the identifier with `action `: {}",
+            diag.message
+        );
     }
 
     #[test]

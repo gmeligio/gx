@@ -4,22 +4,42 @@ use std::path::PathBuf;
 
 /// Semantic output line variants produced by render functions.
 /// Colors are applied at print boundary — no ANSI codes here.
+///
+/// Producers pass bare identifiers and never a noun naming their kind: the words a
+/// user reads are chosen here, and gx labels workflows, composite actions and
+/// components alike.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Line {
-    /// An action was upgraded from one version to another.
+    /// An entry was upgraded from one version to another.
     Upgraded {
-        action: String,
+        /// Identifier of the upgraded entry.
+        id: String,
         from: String,
         to: String,
     },
-    /// An action was added.
-    Added { action: String, version: String },
-    /// An action was removed.
-    Removed { action: String },
-    /// An action was changed with a detail note.
-    Changed { action: String, detail: String },
-    /// An action was skipped with a reason.
-    Skipped { action: String, reason: String },
+    /// An entry was added.
+    Added {
+        /// Identifier of the added entry.
+        id: String,
+        version: String,
+    },
+    /// An entry was removed.
+    Removed {
+        /// Identifier of the removed entry.
+        id: String,
+    },
+    /// An entry was changed with a detail note.
+    Changed {
+        /// Identifier of the changed entry.
+        id: String,
+        detail: String,
+    },
+    /// An entry was skipped with a reason.
+    Skipped {
+        /// Identifier of the skipped entry.
+        id: String,
+        reason: String,
+    },
     /// A warning message.
     Warning { message: String },
     /// A lint diagnostic.
@@ -46,35 +66,35 @@ impl Line {
     #[must_use]
     pub fn format_line(&self, use_color: bool) -> String {
         match self {
-            Line::Upgraded { action, from, to } => {
+            Line::Upgraded { id, from, to } => {
                 let arrow = if use_color {
                     style("↑").cyan().to_string()
                 } else {
                     "↑".to_owned()
                 };
-                format!(" {arrow} {action:<30} {from} → {to}")
+                format!(" {arrow} {id:<30} {from} → {to}")
             }
-            Line::Added { action, version } => {
+            Line::Added { id, version } => {
                 let plus = if use_color {
                     style("+").green().to_string()
                 } else {
                     "+".to_owned()
                 };
-                format!(" {plus} {action:<30} {version}")
+                format!(" {plus} {id:<30} {version}")
             }
-            Line::Removed { action } => {
+            Line::Removed { id } => {
                 let minus = if use_color {
                     style("−").red().to_string()
                 } else {
                     "−".to_owned()
                 };
-                format!(" {minus} {action}")
+                format!(" {minus} {id}")
             }
-            Line::Changed { action, detail } => {
-                format!(" ~ {action:<30} {detail}")
+            Line::Changed { id, detail } => {
+                format!(" ~ {id:<30} {detail}")
             }
-            Line::Skipped { action, reason } => {
-                format!(" - {action:<30} ({reason})")
+            Line::Skipped { id, reason } => {
+                format!(" - {id:<30} ({reason})")
             }
             Line::Warning { message } => {
                 let prefix = if use_color {
@@ -154,7 +174,7 @@ mod tests {
     #[test]
     fn format_line_upgraded_no_color() {
         let line = Line::Upgraded {
-            action: "actions/checkout".to_owned(),
+            id: "actions/checkout".to_owned(),
             from: "v3".to_owned(),
             to: "v4".to_owned(),
         };
@@ -238,7 +258,7 @@ mod tests {
     #[test]
     fn format_line_added_no_color() {
         let line = Line::Added {
-            action: "actions/setup-node".to_owned(),
+            id: "actions/setup-node".to_owned(),
             version: "v4".to_owned(),
         };
         let result = line.format_line(false);

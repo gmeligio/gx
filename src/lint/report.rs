@@ -87,8 +87,21 @@ impl CommandReport for Report {
 )]
 mod tests {
     use super::*;
-    use crate::domain::file::site::WorkflowPath;
-    use crate::lint::RuleName;
+    use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
+    use crate::domain::action::resolved::{Commit, ResolvedRef};
+    use crate::domain::action::spec::Spec;
+    use crate::domain::action::specifier::Specifier;
+    use crate::domain::action::uses_ref::ParsedRef;
+    use crate::domain::file::actions::{ActionSet, Located, WorkflowAction};
+    use crate::domain::file::site::{Id, JobId, Origin, Slot, StepIndex, WorkflowPath};
+    use crate::domain::lock::Lock;
+    use crate::domain::manifest::Manifest;
+    use crate::lint::rule::Rule as _;
+    use crate::lint::{Context, RuleName};
+    use std::collections::HashMap;
+
+    /// Kind-nouns a producer must not use to label an identifier it then names.
+    const KIND_NOUNS: [&str; 3] = ["action", "workflow", "component"];
 
     #[test]
     fn render_lint_clean() {
@@ -136,5 +149,127 @@ mod tests {
         assert!(lines.contains(&OutputLine::Summary {
             text: "1 error · 1 warning".to_owned(),
         }));
+    }
+
+    /// Build a `Located` for `actions/checkout` with the given reference shape.
+    fn located(reference: ParsedRef) -> Located {
+        Located {
+            action: WorkflowAction {
+                id: ActionId::from("actions/checkout"),
+                reference,
+            },
+            site: Id {
+                file: WorkflowPath::new(".github/workflows/ci.yml"),
+                slot: Slot::WorkflowStep {
+                    job: JobId::from("build"),
+                    step: StepIndex::from(0_u16),
+                },
+            },
+            origin: Origin { line: Some(7) },
+        }
+    }
+
+    /// Collect messages the four action-scoped rules actually produce.
+    ///
+    /// Every string comes from a rule's own `format!`, so the assertion below is a
+    /// guard rather than a restatement of what the test author typed.
+    fn rule_produced_diagnostics() -> Vec<Diagnostic> {
+        let sha = CommitSha::from("8e8c483db84b4bee98b60c0593521ed34d9990e8");
+        let mut out = Vec::new();
+
+        let tag_ref_is_not_a_pin = ParsedRef::Ref(Version::from("v4"));
+        out.extend(crate::lint::unpinned::UnpinnedRule::check_action(&located(
+            tag_ref_is_not_a_pin,
+        )));
+
+        let empty_lock = Lock::new(HashMap::new());
+        out.extend(crate::lint::sha_mismatch::ShaMismatchRule::check_action(
+            &located(ParsedRef::Sha(sha.clone())),
+            &empty_lock,
+        ));
+
+        let spec = Spec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
+        let mut lock = Lock::new(HashMap::new());
+        let locked_sha_disagreeing_with_the_pin =
+            CommitSha::from("1111111111111111111111111111111111111111");
+        lock.set(
+            &spec,
+            ResolvedRef::Tag(Version::from("v4")),
+            Commit {
+                sha: locked_sha_disagreeing_with_the_pin,
+                repository: Repository::from("actions/checkout"),
+                ref_type: None,
+                date: CommitDate::from("2024-01-01T00:00:00Z"),
+            },
+        );
+        out.extend(crate::lint::stale_comment::StaleCommentRule::check_action(
+            &located(ParsedRef::Pinned {
+                sha,
+                comment: Version::from("v4"),
+            }),
+            &lock,
+        ));
+
+        let mut action_set = ActionSet::new();
+        action_set.add(&WorkflowAction {
+            id: ActionId::from("actions/only-in-workflow"),
+            reference: ParsedRef::Ref(Version::from("v1")),
+        });
+        let mut manifest = Manifest::new(HashMap::new());
+        manifest.set(
+            ActionId::from("actions/only-in-manifest"),
+            Specifier::from_v1("v1"),
+        );
+        let ctx = Context {
+            manifest: &manifest,
+            lock: &empty_lock,
+            workflows: &[],
+            workflows_full: &[],
+            action_set: &action_set,
+        };
+        out.extend(crate::lint::unsynced_manifest::UnsyncedManifestRule.check(&ctx));
+
+        out
+    }
+
+    /// Whether `message` opens with `noun` used as a label on the identifier that
+    /// follows it, as in `action actions/checkout uses ...`.
+    ///
+    /// A noun carrying a sentence that names no identifier — `workflow has no
+    /// top-level permissions: block` — is legitimate, so an `owner/repo` shape must
+    /// follow for the noun to count as a label.
+    fn labels_an_identifier(message: &str, noun: &str) -> bool {
+        message
+            .strip_prefix(noun)
+            .and_then(|rest| rest.strip_prefix(' '))
+            .and_then(|rest| rest.split_whitespace().next())
+            .is_some_and(|word| word.contains('/'))
+    }
+
+    #[test]
+    fn rendered_diagnostics_carry_no_kind_noun() {
+        // A noun baked into a rule message is fixed where the renderer cannot
+        // change it, so the renderer stops owning the words a user reads.
+        let diagnostics = rule_produced_diagnostics();
+        assert!(
+            diagnostics.len() >= 5,
+            "fixture should exercise all four offending rules (unsynced-manifest \
+             emits two), got {} diagnostics",
+            diagnostics.len()
+        );
+
+        let report = Report::from_diagnostics(diagnostics);
+        for line in report.render() {
+            let OutputLine::LintDiag { message, .. } = line else {
+                continue;
+            };
+            for noun in KIND_NOUNS {
+                assert!(
+                    !labels_an_identifier(&message, noun),
+                    "rule message must not prefix an identifier with `{noun}` — the \
+                     renderer owns that vocabulary. Got: {message}"
+                );
+            }
+        }
     }
 }
