@@ -2,53 +2,22 @@
 // errors, and the manifest-range-authoritative reconciliation (#95).
 
 use super::*;
-use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Version};
-use crate::domain::action::resolved::Commit;
+use crate::domain::action::identity::{ActionId, CommitSha};
 use crate::domain::action::spec::Spec as ActionSpec;
 use crate::domain::action::specifier::Specifier;
-use crate::domain::action::uses_ref::RefType;
 use crate::domain::lock::Lock;
 use crate::domain::manifest::Manifest;
 use crate::domain::resolution::testutil::FakeRegistry;
-use crate::domain::resolution::{
-    ActionResolver, Error as ResolutionError, Forge, ShaDescription, VersionRegistry,
-};
+use crate::domain::resolution::{ActionResolver, Error as ResolutionError, Forge};
 
-// ---------------------------------------------------------------------------
-// Registry helpers
-// ---------------------------------------------------------------------------
+// `describe_sha` is keyed on the SHA, so each test registers its tags under the
+// same `workflow_sha` it feeds to `update_lock` — otherwise the SHA-first path
+// sees no tags at all.
 
-/// Registry where `actions/checkout` fails with `AuthRequired` but all other actions resolve.
-#[derive(Clone)]
-struct MixedRegistry;
-impl VersionRegistry for MixedRegistry {
-    fn lookup_sha(&self, id: &ActionId, _version: &Version) -> Result<Commit, ResolutionError> {
-        if id.as_str() == "actions/checkout" {
-            Err(ResolutionError::AuthRequired {
-                forge: Forge::GitHub,
-            })
-        } else {
-            Ok(Commit {
-                sha: CommitSha::from("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-                repository: id.base_repo(),
-                ref_type: Some(RefType::Tag),
-                date: CommitDate::from("2026-01-01T00:00:00Z"),
-            })
-        }
-    }
-    fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
-        Err(ResolutionError::AuthRequired {
-            forge: Forge::GitHub,
-        })
-    }
-    fn describe_sha(
-        &self,
-        _id: &ActionId,
-        _sha: &CommitSha,
-    ) -> Result<ShaDescription, ResolutionError> {
-        Err(ResolutionError::AuthRequired {
-            forge: Forge::GitHub,
-        })
+/// `AuthRequired`, the error every failure case in this file uses.
+fn auth_required() -> ResolutionError {
+    ResolutionError::AuthRequired {
+        forge: Forge::GitHub,
     }
 }
 
@@ -72,7 +41,9 @@ fn lock_resolves_from_workflow_sha_first() {
     let mut workflow_shas = HashMap::new();
     workflow_shas.insert(key.clone(), CommitSha::from(workflow_sha));
 
-    let registry = FakeRegistry::new().fail_tags();
+    // No tags registered for this SHA: describe_sha still succeeds, so the
+    // SHA-first path runs and the workflow SHA is kept.
+    let registry = FakeRegistry::new();
     let resolver = ActionResolver::new(&registry);
     update_lock(&mut lock, &mut manifest, &resolver, &workflow_shas).unwrap();
 
@@ -96,7 +67,7 @@ fn sha_first_lock_uses_workflow_sha_and_most_specific_version() {
 
     let registry = FakeRegistry::new().with_sha_tags(
         "jdx/mise-action",
-        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        workflow_sha,
         vec!["v3", "v3.6", "v3.6.1"],
     );
     let resolver = ActionResolver::new(&registry);
@@ -124,7 +95,7 @@ fn version_ref_falls_back_to_registry_resolution() {
     let key = ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
     let workflow_shas = HashMap::new(); // no SHA in workflow
 
-    let registry = FakeRegistry::new().with_fixed_sha(registry_sha).fail_tags();
+    let registry = FakeRegistry::new().with_fixed_sha(registry_sha);
     let resolver = ActionResolver::new(&registry);
     update_lock(&mut lock, &mut manifest, &resolver, &workflow_shas).unwrap();
 
@@ -152,7 +123,9 @@ fn update_lock_recoverable_errors_are_skipped() {
     let mut lock = Lock::default();
     let workflow_shas = HashMap::new();
 
-    let resolver = ActionResolver::new(&MixedRegistry);
+    // Only checkout fails; setup-node still resolves.
+    let registry = FakeRegistry::new().failing_action("actions/checkout", auth_required());
+    let resolver = ActionResolver::new(&registry);
     // Should not error — checkout is recoverable (AuthRequired), setup-node succeeds
     update_lock(&mut lock, &mut manifest, &resolver, &workflow_shas).unwrap();
 
@@ -192,7 +165,7 @@ fn out_of_range_pinned_sha_is_reresolved_within_range() {
     // whose lookup tag is v5.
     let registry = FakeRegistry::new().with_sha_tags(
         "actions/checkout",
-        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        workflow_sha,
         vec!["v6", "v6.0", "v6.0.2"],
     );
     let resolver = ActionResolver::new(&registry);
@@ -220,11 +193,8 @@ fn out_of_range_pinned_sha_sub_major_is_reresolved() {
     let mut workflow_shas = HashMap::new();
     workflow_shas.insert(key.clone(), CommitSha::from(workflow_sha));
 
-    let registry = FakeRegistry::new().with_sha_tags(
-        "some/action",
-        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        vec!["v1.16", "v1.16.0"],
-    );
+    let registry =
+        FakeRegistry::new().with_sha_tags("some/action", workflow_sha, vec!["v1.16", "v1.16.0"]);
     let resolver = ActionResolver::new(&registry);
     update_lock(&mut lock, &mut manifest, &resolver, &workflow_shas).unwrap();
 
@@ -252,7 +222,7 @@ fn out_of_range_pin_emits_event() {
 
     let registry = FakeRegistry::new().with_sha_tags(
         "actions/checkout",
-        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        workflow_sha,
         vec!["v6", "v6.0", "v6.0.2"],
     );
     let resolver = ActionResolver::new(&registry);
@@ -283,7 +253,7 @@ fn in_range_pin_emits_no_event() {
     // In-range tags: SHA-first keeps v5.4.0, no re-resolution.
     let registry = FakeRegistry::new().with_sha_tags(
         "actions/checkout",
-        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        workflow_sha,
         vec!["v5", "v5.4", "v5.4.0"],
     );
     let resolver = ActionResolver::new(&registry);
@@ -315,7 +285,7 @@ fn init_derived_specifier_keeps_sha_version() {
 
     let registry = FakeRegistry::new().with_sha_tags(
         "actions/checkout",
-        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        workflow_sha,
         vec!["v6", "v6.0", "v6.0.2"],
     );
     let resolver = ActionResolver::new(&registry);

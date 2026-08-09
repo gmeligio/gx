@@ -1,6 +1,15 @@
 use super::specifier::higher_version;
 use std::fmt;
 
+/// Keep the first two path segments of an action reference: its owner and repo.
+///
+/// Subpath actions like "github/codeql-action/upload-sarif" name a directory
+/// inside a repo, but every repo-level API addresses only "github/codeql-action".
+#[must_use]
+pub fn base_repo_of(owner_repo: &str) -> String {
+    owner_repo.split('/').take(2).collect::<Vec<_>>().join("/")
+}
+
 /// Unique identifier for an action (e.g., "actions/checkout").
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ActionId(pub String);
@@ -12,10 +21,9 @@ impl ActionId {
     }
 
     /// Extract the base repository (owner/repo) from the action ID.
-    /// Handles subpath actions like "github/codeql-action/upload-sarif".
     #[must_use]
     pub fn base_repo(&self) -> Repository {
-        Repository::from(self.0.split('/').take(2).collect::<Vec<_>>().join("/"))
+        Repository::from(base_repo_of(&self.0))
     }
 
     /// Build the GitHub compare URL for a version transition on this action's

@@ -124,31 +124,6 @@ fn load_unrecognized_content_returns_error() {
 // ========== Store::save tests ==========
 
 #[test]
-fn save_and_load_roundtrip() {
-    let file = NamedTempFile::new().unwrap();
-    let store = Store::new(file.path());
-
-    let mut lock = crate::domain::lock::Lock::default();
-    set_resolved(
-        &mut lock,
-        "actions/checkout",
-        "^4",
-        "abc123def456789012345678901234567890abcd",
-    );
-
-    store.save(&lock).unwrap();
-
-    let loaded = store.load().unwrap();
-    let result = loaded.get(&make_key("actions/checkout", "^4"));
-    assert!(result.is_some());
-    let entry = result.unwrap();
-    assert_eq!(
-        entry.commit.sha,
-        CommitSha::from("abc123def456789012345678901234567890abcd")
-    );
-}
-
-#[test]
 fn save_sorts_actions_alphabetically() {
     let file = NamedTempFile::new().unwrap();
     let store = Store::new(file.path());
@@ -188,25 +163,39 @@ fn save_sorts_actions_alphabetically() {
 }
 
 #[test]
-fn save_produces_two_tier_format() {
+fn two_specs_sharing_a_version_write_the_first_commit_in_sort_order() {
+    // Built in memory, not from a fixture: two specs loaded from disk share one
+    // `[actions]` row, so their commits can never disagree to begin with.
+    let mut lock = crate::domain::lock::Lock::default();
+    for (specifier, sha) in [
+        ("^4.2", "2222222222222222222222222222222222222222"),
+        ("^4", "1111111111111111111111111111111111111111"),
+    ] {
+        lock.set(
+            &make_key("actions/checkout", specifier),
+            ResolvedRef::Tag(Version::from("v4.2.1")),
+            Commit {
+                sha: CommitSha::from(sha),
+                repository: Repository::from("actions/checkout"),
+                ref_type: Some(RefType::Tag),
+                date: CommitDate::from("2026-01-01T00:00:00Z"),
+            },
+        );
+    }
+
     let file = NamedTempFile::new().unwrap();
     let store = Store::new(file.path());
-
-    let mut lock = crate::domain::lock::Lock::default();
-    set_resolved(
-        &mut lock,
-        "actions/checkout",
-        "^4",
-        "abc123def456789012345678901234567890abcd",
-    );
-
     store.save(&lock).unwrap();
-
     let content = std::fs::read_to_string(file.path()).unwrap();
-    assert!(!content.contains("version = \"1.4\""));
-    assert!(content.contains("[resolutions.\"actions/checkout\".\"^4\"]"));
-    assert!(content.contains("[actions.\"actions/checkout\""));
-    assert!(!content.contains("{ sha ="), "entries must NOT be inline");
+
+    assert!(
+        content.contains("sha = \"1111111111111111111111111111111111111111\""),
+        "`^4` sorts before `^4.2`, so its commit wins the dedup:\n{content}"
+    );
+    assert!(
+        !content.contains("2222222222222222222222222222222222222222"),
+        "the later spec's commit must not overwrite the first:\n{content}"
+    );
 }
 
 /// A canonical two-tier lock covering every ref kind gx writes: a semver tag,

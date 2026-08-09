@@ -1,6 +1,5 @@
 #![expect(
     clippy::unwrap_used,
-    clippy::string_slice,
     clippy::assertions_on_result_states,
     clippy::shadow_unrelated,
     reason = "tests use unwrap, indexing, and other patterns freely"
@@ -8,10 +7,10 @@
 
 mod common;
 
-use common::registries::{AuthRequiredRegistry, FakeRegistry};
 use common::setup::{create_empty_manifest, create_test_repo, write_composite_action};
 use gx::domain::manifest::Manifest;
 use gx::domain::resolution::VersionRegistry;
+use gx::domain::resolution::testutil::FakeRegistry;
 use gx::infra::lock::Store as LockStore;
 use gx::infra::manifest::patch::apply_manifest_diff;
 use gx::infra::manifest::{self};
@@ -671,7 +670,7 @@ jobs:
         .write_all(workflow_content.as_bytes())
         .unwrap();
 
-    let result = run_tidy_with_registry(&root, &AuthRequiredRegistry);
+    let result = run_tidy_with_registry(&root, &FakeRegistry::new().failing_auth());
 
     assert!(
         result.is_ok(),

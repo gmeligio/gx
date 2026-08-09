@@ -1,63 +1,68 @@
 # Scheduled upgrade PRs
 
-gx ships a reference workflow, [`gx-upgrade.yml`](gx-upgrade.yml), that keeps `.github/gx.lock` current on a
-schedule and opens a pull request when something moves. Copy it into your repository:
+gx ships a ready-made workflow, [`gx-upgrade.yml`](gx-upgrade.yml), that checks for newer versions of your
+pinned actions on a schedule and opens a pull request when it finds any.
 
-```bash
-curl -o .github/workflows/gx-upgrade.yml \
-  https://raw.githubusercontent.com/gmeligio/gx/main/docs/gx-upgrade.yml
-```
+## Setup
 
-It runs `gx upgrade` in **safe mode**: the lock advances to the newest versions your `gx.toml` ranges already
-allow, and the ranges themselves are never edited. That is the half of the update problem Renovate structurally
-cannot cover — see [renovate.md](renovate.md) for why.
+1. Make sure your repo has `.github/gx.toml` and `.github/gx.lock`. If it doesn't, run `gx init` once and
+   commit the result.
+2. Copy the workflow in:
 
-## Prerequisites
+   ```bash
+   curl -o .github/workflows/gx-upgrade.yml \
+     https://raw.githubusercontent.com/gmeligio/gx/main/docs/gx-upgrade.yml
+   ```
 
-- **A manifest and lock.** The workflow upgrades `.github/gx.toml` + `.github/gx.lock`. If your repo has
-  neither, run `gx init` once and commit the result first.
-- **Actions may open pull requests.** In *Settings → Actions → General → Workflow permissions*, enable
-  "Allow GitHub Actions to create and approve pull requests". Without it the last step fails with a
-  permissions error from the API.
+3. Let Actions open pull requests: in *Settings → Actions → General → Workflow permissions*, turn on
+   "Allow GitHub Actions to create and approve pull requests". Without it, the final step fails with a
+   permissions error.
+
+## What it does
+
+Every Monday at 06:00 UTC it runs `gx upgrade`, which updates `gx.lock` to the newest versions your `gx.toml`
+ranges already allow. It never widens those ranges, so a new major version won't land on you unasked. That
+in-range advancement is the piece Renovate can't do — [renovate.md](renovate.md) explains why.
+
+If nothing moved, the run ends quietly. If something did, you get a pull request.
 
 ## The pull request body
 
-The body is generated from `gx upgrade --json`, never by scraping human output. Each upgraded action becomes
-one line linking to its GitHub compare view:
+The body comes from `gx upgrade --json`, so it stays accurate as gx's console output changes. Each upgraded
+action gets one line, linking to the compare view on GitHub:
 
-```markdown
-- **actions/checkout** [`v6.0.1` → `v6.0.3`](https://github.com/actions/checkout/compare/v6.0.1...v6.0.3)
-```
+> - **actions/checkout** [`v6.0.1` → `v6.0.3`](https://github.com/actions/checkout/compare/v6.0.1...v6.0.3)
 
-The `compare` field is omitted when either side is not a real version tag (a branch pin, for example), so
-those lines render without a link rather than with a broken one.
+When one side isn't a real version tag — a branch pin, say — gx leaves the link out, and the line renders as
+plain text rather than a dead link.
 
-The raw JSON is echoed into the run log, so the document that produced a PR — or that decided not to open
-one — is always recoverable from the Actions run.
+The full JSON also goes to the run log, so you can always see what a run decided, including runs that opened
+no PR.
 
-## Customizing it
+## CI won't run on the PR
 
-It is a template, not a product — edit the copy in your repo.
+Pull requests opened with the default `GITHUB_TOKEN` don't trigger other workflows, so your usual checks stay
+idle. That's [GitHub's guard against workflows triggering themselves in a loop](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request).
 
-- **Schedule.** The `cron` is Monday 06:00 UTC. GitHub cron is always UTC and has no timezone option.
-- **Reviewers, labels, PR title.** See the
-  [`create-pull-request` inputs](https://github.com/peter-evans/create-pull-request#action-inputs).
-- **Crossing majors.** `gx upgrade --latest` also edits ranges in `gx.toml`. If you switch to it, consider
-  surfacing the `in_range` field in the body — in safe mode it is always `true`, which is why the template
-  leaves it out.
-
-## The `GITHUB_TOKEN` caveat
-
-PRs opened with the default `GITHUB_TOKEN` don't trigger other workflows, so CI won't run on the upgrade PR.
-This is [GitHub's deliberate guard against recursive runs](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request).
-
-If you need CI to run on these PRs, authenticate the `create-pull-request` step with a
+To get CI running, authenticate the `create-pull-request` step with a
 [GitHub App token](https://github.com/peter-evans/create-pull-request/blob/main/docs/concepts-guidelines.md#authenticating-with-github-app-generated-tokens)
-or a personal access token instead. The template stays on `GITHUB_TOKEN` because it is the zero-setup default;
-switching is a two-line change.
+or a personal access token. It's a two-line change. The template ships with `GITHUB_TOKEN` because it needs no
+setup at all.
+
+## Changing it
+
+The file is yours once you copy it — edit away.
+
+- **Schedule.** Change the `cron`. GitHub runs it in UTC and offers no timezone setting.
+- **Reviewers, labels, title.** See the
+  [`create-pull-request` inputs](https://github.com/peter-evans/create-pull-request#action-inputs).
+- **Crossing majors.** `gx upgrade --latest` will also widen a range in `gx.toml` when the newest version sits
+  outside it. If you switch to it, consider adding each upgrade's `in_range` field to the body: `false` means
+  that action's range was rewritten, which is the change worth a closer look. The template leaves the field out
+  because plain `gx upgrade` never rewrites a range, so it would always read `true`.
 
 ## Keeping the pins current
 
-The template SHA-pins the actions it uses, with the version in a trailing comment — the same practice gx exists
-to enforce. Those pins age. If you use gx on your own repository, `gx tidy` and `gx upgrade` will manage them
-for you once the file lives in `.github/workflows/`, exactly like any other workflow.
+The workflow SHA-pins the actions it uses, with the version in a trailing comment — the practice gx exists to
+enforce. Those pins age like any other. Once the file sits in `.github/workflows/`, `gx tidy` and `gx upgrade`
+maintain it alongside your other workflows.

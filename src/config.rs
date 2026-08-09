@@ -148,8 +148,8 @@ impl Config {
     ///
     /// # Errors
     ///
-    /// Returns [`ConfigError::Manifest`] if the manifest file cannot be parsed.
-    /// Returns [`ConfigError::Lock`] if the lock file cannot be parsed.
+    /// Returns [`Error::Manifest`] if the manifest file cannot be parsed.
+    /// Returns [`Error::Lock`] if the lock file cannot be parsed.
     pub fn load(repo_root: &Path) -> Result<Self, Error> {
         let manifest_path = repo_root.join(".github").join(MANIFEST_FILE_NAME);
         let lock_path = repo_root.join(".github").join(LOCK_FILE_NAME);
