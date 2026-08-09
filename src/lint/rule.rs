@@ -1,140 +1,50 @@
-//! Rule identity, diagnostic shape, shared context, and the ignore-matching helpers
-//! the runner uses to apply per-rule `ignore` lists. Kept separate from `command.rs`
-//! so the runner stays focused on phase orchestration.
+//! Lint's `Rule` trait and checking context. The record, matchers, and report are
+//! shared — see [`crate::diagnostic`].
 
-use super::report::Report;
-use crate::config::{IgnoreTarget, Level, Lint as LintConfig};
+use crate::command::CommandReport;
+use crate::config::{Level, Lint as LintConfig};
+use crate::diagnostic::{matches_ignore_action, matches_ignore_workflow};
 use crate::domain::file::actions::{ActionSet as WorkflowActionSet, Located as LocatedAction};
 use crate::domain::file::parsed::ParsedWorkflow;
-use crate::domain::file::site::{JobId, StepIndex, WorkflowPath};
 use crate::domain::lock::Lock;
 use crate::domain::manifest::Manifest;
-use serde::{Deserialize, Serialize};
-use std::str::FromStr;
+use crate::output::lines::Line as OutputLine;
 
-/// Canonical identifier for a lint rule.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum RuleName {
-    ShaMismatch,
-    Unpinned,
-    StaleComment,
-    UnsyncedManifest,
-    MissingPermissions,
-    ExcessivePermissions,
-    DangerousTrigger,
-    PrHeadCheckout,
-    MissingConcurrency,
-    UnprotectedSecrets,
-    DanglingReference,
-    InvalidExpression,
-    RunShellcheck,
-}
+pub use crate::diagnostic::{Diagnostic, Report, RuleName};
 
-impl std::fmt::Display for RuleName {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::ShaMismatch => write!(f, "sha-mismatch"),
-            Self::Unpinned => write!(f, "unpinned"),
-            Self::StaleComment => write!(f, "stale-comment"),
-            Self::UnsyncedManifest => write!(f, "unsynced-manifest"),
-            Self::MissingPermissions => write!(f, "missing-permissions"),
-            Self::ExcessivePermissions => write!(f, "excessive-permissions"),
-            Self::DangerousTrigger => write!(f, "dangerous-trigger"),
-            Self::PrHeadCheckout => write!(f, "pr-head-checkout"),
-            Self::MissingConcurrency => write!(f, "missing-concurrency"),
-            Self::UnprotectedSecrets => write!(f, "unprotected-secrets"),
-            Self::DanglingReference => write!(f, "dangling-reference"),
-            Self::InvalidExpression => write!(f, "invalid-expression"),
-            Self::RunShellcheck => write!(f, "run-shellcheck"),
+/// Text shown when a lint run found nothing.
+const NO_ISSUES: &str = "No lint issues found";
+
+impl CommandReport for Report {
+    fn render(&self) -> Vec<OutputLine> {
+        if self.diagnostics.is_empty() {
+            return vec![OutputLine::Summary {
+                text: NO_ISSUES.to_owned(),
+            }];
         }
-    }
-}
 
-impl FromStr for RuleName {
-    type Err = String;
+        let mut lines: Vec<OutputLine> = self
+            .diagnostics
+            .iter()
+            .map(|diag| OutputLine::LintDiag {
+                level: diag.level,
+                workflow: diag.workflow.as_ref().map(std::string::ToString::to_string),
+                line: diag.line,
+                rule: diag.rule.to_string(),
+                message: diag.message.clone(),
+            })
+            .collect();
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "sha-mismatch" => Ok(Self::ShaMismatch),
-            "unpinned" => Ok(Self::Unpinned),
-            "stale-comment" => Ok(Self::StaleComment),
-            "unsynced-manifest" => Ok(Self::UnsyncedManifest),
-            "missing-permissions" => Ok(Self::MissingPermissions),
-            "excessive-permissions" => Ok(Self::ExcessivePermissions),
-            "dangerous-trigger" => Ok(Self::DangerousTrigger),
-            "pr-head-checkout" => Ok(Self::PrHeadCheckout),
-            "missing-concurrency" => Ok(Self::MissingConcurrency),
-            "unprotected-secrets" => Ok(Self::UnprotectedSecrets),
-            "dangling-reference" => Ok(Self::DanglingReference),
-            "invalid-expression" => Ok(Self::InvalidExpression),
-            "run-shellcheck" => Ok(Self::RunShellcheck),
-            other => Err(format!("unrecognized rule name: {other}")),
-        }
-    }
-}
+        lines.push(OutputLine::Blank);
+        lines.push(OutputLine::Summary {
+            text: self.summary(NO_ISSUES),
+        });
 
-/// A single diagnostic reported by a lint rule.
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct Diagnostic {
-    /// Name of the rule that produced this diagnostic.
-    pub rule: RuleName,
-    /// Severity level.
-    pub level: Level,
-    /// Human-readable message.
-    pub message: String,
-    /// Optional workflow file path where the issue was found.
-    pub workflow: Option<WorkflowPath>,
-    /// Optional job id (set by rules whose diagnostics target a specific job).
-    pub job: Option<JobId>,
-    /// Optional 0-based step index (set by step-scoped diagnostics).
-    pub step: Option<StepIndex>,
-    /// Optional 1-based source line of the offending `uses:` scalar. Set by rules whose
-    /// diagnostic maps to a single workflow line; left `None` for manifest-level or
-    /// whole-file diagnostics that have no single line to point at.
-    pub line: Option<u32>,
-}
-
-impl Diagnostic {
-    /// Create a new diagnostic.
-    pub fn new<S: Into<String>>(rule: RuleName, level: Level, message: S) -> Self {
-        Self {
-            rule,
-            level,
-            message: message.into(),
-            workflow: None,
-            job: None,
-            step: None,
-            line: None,
-        }
+        lines
     }
 
-    /// Set the workflow field.
-    #[must_use]
-    pub fn with_workflow(mut self, workflow: WorkflowPath) -> Self {
-        self.workflow = Some(workflow);
-        self
-    }
-
-    /// Set the job field.
-    #[must_use]
-    pub fn with_job(mut self, job: JobId) -> Self {
-        self.job = Some(job);
-        self
-    }
-
-    /// Set the step field.
-    #[must_use]
-    pub fn with_step(mut self, step: StepIndex) -> Self {
-        self.step = Some(step);
-        self
-    }
-
-    /// Set the source line.
-    #[must_use]
-    pub fn with_line(mut self, line: Option<u32>) -> Self {
-        self.line = line;
-        self
+    fn exit_code(&self) -> i32 {
+        Self::exit_code(self)
     }
 }
 
@@ -146,17 +56,13 @@ pub struct Context<'ctx> {
     pub lock: &'ctx Lock,
     /// All located actions from scanned workflows.
     pub workflows: &'ctx [LocatedAction],
-    /// Structural per-workflow parses, consumed by the workflow-security and
-    /// workflow-validity rules.
-    ///
-    /// Workflow files only — enforced by the type, not by a filter. [`ParsedWorkflow`] is
-    /// the workflow variant of [`Parsed`](crate::domain::file::parsed::Parsed), so an
-    /// action definition cannot reach this field: it has no `on:`, no top-level
-    /// `permissions:`, and no jobs, and every rule reading this would misjudge it. Their
-    /// `uses:` references still reach the action-hygiene rules (sha-mismatch, unpinned,
-    /// stale-comment, unsynced-manifest) through `workflows` and `action_set`.
-    ///
+    /// Per-workflow parses for the workflow-security and workflow-validity rules.
     /// Empty when no workflows were scanned.
+    ///
+    /// Workflow files only, and the type enforces it rather than a filter: an action
+    /// definition has no `on:`, no top-level `permissions:` and no jobs, so every rule
+    /// reading this would misjudge one. Their `uses:` still reaches the action-hygiene
+    /// rules through `workflows` and `action_set`.
     pub workflows_full: &'ctx [ParsedWorkflow],
     /// Aggregated action set from all workflows.
     pub action_set: &'ctx WorkflowActionSet,
@@ -181,9 +87,8 @@ pub fn format_and_report(diagnostics: Vec<Diagnostic>) -> Report {
     Report::from_diagnostics(diagnostics)
 }
 
-/// Run a workflow-scoped rule. Filters its diagnostics through the per-rule `ignore`
-/// list using the new workflow/job-aware matcher, applies the configured severity, and
-/// pushes the survivors onto `out`.
+/// Run a workflow-scoped rule, pushing the diagnostics that survive its `ignore` list
+/// onto `out` at the configured severity.
 pub(super) fn run_workflow_rule<R: Rule>(
     rule: &R,
     default_level: Level,
@@ -207,38 +112,6 @@ pub(super) fn run_workflow_rule<R: Rule>(
     }
 }
 
-/// True when the target's `workflow` key (if any) matches the diagnostic's workflow by
-/// suffix. A `None` target workflow always matches; a `Some` requires both a diagnostic
-/// workflow and a suffix match. Shared by all three ignore matchers below, which differ
-/// only in how they handle the `action` and `job` axes.
-fn workflow_matches(diag_workflow: Option<&WorkflowPath>, target: &IgnoreTarget) -> bool {
-    let Some(target_workflow) = &target.workflow else {
-        return true;
-    };
-    diag_workflow.is_some_and(|w| w.as_str().ends_with(target_workflow.as_str()))
-}
-
-/// Ignore matcher for workflow-security diagnostics. Uses Diagnostic's structural
-/// fields (workflow, job) directly. The `action` key is meaningless for these rules,
-/// so an ignore target that specifies `action` will NOT match — users should omit it.
-fn matches_ignore_workflow(diag: &Diagnostic, target: &IgnoreTarget) -> bool {
-    if target.action.is_some() {
-        return false;
-    }
-    if !workflow_matches(diag.workflow.as_ref(), target) {
-        return false;
-    }
-    if let Some(target_job) = &target.job {
-        let Some(diag_job) = &diag.job else {
-            return false;
-        };
-        if diag_job.as_str() != target_job.as_str() {
-            return false;
-        }
-    }
-    true
-}
-
 /// Check if a per-action diagnostic is ignored via lint config.
 pub(super) fn is_ignored(
     diag: &Diagnostic,
@@ -254,75 +127,29 @@ pub(super) fn is_ignored(
         .any(|target| matches_ignore_action(diag, target, action))
 }
 
-/// Check if a diagnostic matches an ignore target using the current action context.
-fn matches_ignore_action(diag: &Diagnostic, target: &IgnoreTarget, action: &LocatedAction) -> bool {
-    if diag.workflow.is_none() {
-        return false;
-    }
-
-    if let Some(target_action) = &target.action
-        && action.action.id.as_str() != target_action.as_str()
-    {
-        return false;
-    }
-
-    if !workflow_matches(diag.workflow.as_ref(), target) {
-        return false;
-    }
-
-    if target.job.is_some() {
-        return false;
-    }
-
-    true
-}
-
-/// Ignore matcher kept for the `UnsyncedManifest` aggregate phase, which lacks a
-/// per-action `LocatedAction` to scope against. Resolves the diagnostic's workflow
-/// against the workflow set and applies intersection semantics across action / workflow.
-pub(super) fn matches_ignore(
-    diag: &Diagnostic,
-    target: &IgnoreTarget,
-    located_actions: &[LocatedAction],
-) -> bool {
-    let Some(diag_workflow) = &diag.workflow else {
-        return false;
-    };
-
-    let diag_action = located_actions
-        .iter()
-        .find(|loc| loc.site.file == *diag_workflow)
-        .map(|loc| &loc.action.id);
-
-    if let Some(target_action) = &target.action {
-        if let Some(matched_action) = diag_action {
-            if matched_action.as_str() != target_action.as_str() {
-                return false;
-            }
-        } else {
-            return false;
-        }
-    }
-
-    if !workflow_matches(Some(diag_workflow), target) {
-        return false;
-    }
-
-    if target.job.is_some() {
-        return false;
-    }
-
-    true
-}
-
 #[cfg(test)]
 #[expect(
     clippy::unwrap_used,
+    clippy::indexing_slicing,
     reason = "tests use unwrap, indexing, and other patterns freely"
 )]
 mod tests {
-    use super::{Diagnostic, Level, RuleName, WorkflowPath};
+    use super::{CommandReport as _, Diagnostic, Level, OutputLine, Report, Rule as _, RuleName};
+    use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
+    use crate::domain::action::resolved::{Commit, ResolvedRef};
+    use crate::domain::action::spec::Spec;
+    use crate::domain::action::specifier::Specifier;
+    use crate::domain::action::uses_ref::ParsedRef;
+    use crate::domain::file::actions::{ActionSet, Located, WorkflowAction};
+    use crate::domain::file::site::{Id, JobId, Origin, Slot, StepIndex, WorkflowPath};
+    use crate::domain::lock::Lock;
+    use crate::domain::manifest::Manifest;
+    use crate::lint::Context;
+    use std::collections::HashMap;
     use std::str::FromStr as _;
+
+    /// Kind-nouns a producer must not use to label an identifier it then names.
+    const KIND_NOUNS: [&str; 3] = ["action", "workflow", "component"];
 
     #[test]
     fn diagnostic_can_be_created() {
@@ -343,83 +170,331 @@ mod tests {
         );
     }
 
+    /// A rule's config name and its reported name must be one string.
+    ///
+    /// Driven off `ALL`, not a written-out list, so a rule added later is covered
+    /// without editing this test.
     #[test]
-    fn rule_name_display_roundtrip() {
-        for name in [
-            RuleName::ShaMismatch,
-            RuleName::Unpinned,
-            RuleName::StaleComment,
-            RuleName::UnsyncedManifest,
-            RuleName::MissingPermissions,
-            RuleName::ExcessivePermissions,
-            RuleName::DangerousTrigger,
-            RuleName::PrHeadCheckout,
-            RuleName::MissingConcurrency,
-            RuleName::UnprotectedSecrets,
-            RuleName::DanglingReference,
-            RuleName::InvalidExpression,
-            RuleName::RunShellcheck,
-        ] {
-            let s = name.to_string();
-            assert_eq!(RuleName::from_str(&s), Ok(name));
+    fn every_rule_name_agrees_across_config_and_output() {
+        for &name in RuleName::ALL {
+            let rendered = name.to_string();
+            let quoted = serde_json::to_string(&name).unwrap();
+            let configured = quoted.trim_matches('"');
+
+            assert_eq!(
+                rendered,
+                name.as_str(),
+                "Display must equal as_str for {name:?}"
+            );
+            assert_eq!(
+                configured, rendered,
+                "the config name and the reported name must be one string for {name:?}"
+            );
+            assert_eq!(
+                RuleName::from_str(&rendered),
+                Ok(name),
+                "the reported name must parse back for {name:?}"
+            );
+            assert_eq!(
+                serde_json::from_str::<RuleName>(&format!("\"{rendered}\"")).unwrap(),
+                name,
+                "the reported name must deserialize back for {name:?}"
+            );
         }
     }
 
+    /// `ALL` must actually enumerate the enum, or every test driven off it is vacuous.
     #[test]
-    fn rule_name_from_str_valid() {
+    fn all_covers_every_rule_and_names_are_unique() {
+        let names: std::collections::BTreeSet<&str> =
+            RuleName::ALL.iter().map(|n| n.as_str()).collect();
         assert_eq!(
-            RuleName::from_str("sha-mismatch"),
-            Ok(RuleName::ShaMismatch)
+            names.len(),
+            RuleName::ALL.len(),
+            "two rules share a name — config could not distinguish them"
         );
-        assert_eq!(RuleName::from_str("unpinned"), Ok(RuleName::Unpinned));
-        assert_eq!(
-            RuleName::from_str("stale-comment"),
-            Ok(RuleName::StaleComment)
-        );
-        assert_eq!(
-            RuleName::from_str("unsynced-manifest"),
-            Ok(RuleName::UnsyncedManifest)
-        );
-        assert_eq!(
-            RuleName::from_str("missing-permissions"),
-            Ok(RuleName::MissingPermissions)
-        );
-        assert_eq!(
-            RuleName::from_str("excessive-permissions"),
-            Ok(RuleName::ExcessivePermissions)
-        );
-        assert_eq!(
-            RuleName::from_str("dangerous-trigger"),
-            Ok(RuleName::DangerousTrigger)
-        );
-        assert_eq!(
-            RuleName::from_str("pr-head-checkout"),
-            Ok(RuleName::PrHeadCheckout)
-        );
-        assert_eq!(
-            RuleName::from_str("missing-concurrency"),
-            Ok(RuleName::MissingConcurrency)
-        );
-        assert_eq!(
-            RuleName::from_str("unprotected-secrets"),
-            Ok(RuleName::UnprotectedSecrets)
-        );
-        assert_eq!(
-            RuleName::from_str("dangling-reference"),
-            Ok(RuleName::DanglingReference)
-        );
-        assert_eq!(
-            RuleName::from_str("invalid-expression"),
-            Ok(RuleName::InvalidExpression)
-        );
-        assert_eq!(
-            RuleName::from_str("run-shellcheck"),
-            Ok(RuleName::RunShellcheck)
-        );
+        assert_eq!(RuleName::ALL.len(), 13, "expected 13 lint rules");
     }
 
     #[test]
     fn rule_name_from_str_invalid() {
         RuleName::from_str("nonexistent-rule").unwrap_err();
+    }
+
+    /// Every rule gx can report must be configurable in `[lint.rules]` by the very name
+    /// it reports — the maintainer's copy-from-output, paste-into-config workflow.
+    ///
+    /// Built from `RuleName::ALL`, so this covers a rule added later without edits. It
+    /// exercises the real TOML surface, which is where the names are used as map keys.
+    #[test]
+    fn every_reported_rule_name_is_accepted_in_config() {
+        let mut toml_str = String::from("[rules]\n");
+        for name in RuleName::ALL {
+            use std::fmt::Write as _;
+            writeln!(toml_str, "{name} = {{ level = \"warn\" }}").unwrap();
+        }
+
+        let config: crate::config::Lint = toml::from_str(&toml_str).unwrap();
+
+        assert_eq!(
+            config.rules.len(),
+            RuleName::ALL.len(),
+            "every implemented rule must be configurable by its reported name"
+        );
+        for &name in RuleName::ALL {
+            assert!(
+                config.rules.contains_key(&name),
+                "{name} is reported by gx lint but was not accepted in [lint.rules]"
+            );
+        }
+    }
+
+    /// Rule names are `BTreeMap` keys on the manifest *write* path too, so serializing
+    /// must emit a plain string in key position and round-trip unchanged.
+    #[test]
+    fn rule_names_round_trip_as_toml_map_keys() {
+        let mut rules = std::collections::BTreeMap::new();
+        for &name in RuleName::ALL {
+            rules.insert(
+                name,
+                crate::config::Rule {
+                    level: Level::Warn,
+                    ignore: Vec::new(),
+                },
+            );
+        }
+
+        let emitted = toml::to_string(&rules).unwrap();
+        for &name in RuleName::ALL {
+            assert!(
+                emitted.contains(name.as_str()),
+                "{name} must survive serialization as a map key"
+            );
+        }
+
+        let reparsed: std::collections::BTreeMap<RuleName, crate::config::Rule> =
+            toml::from_str(&emitted).unwrap();
+        assert_eq!(reparsed.len(), RuleName::ALL.len());
+    }
+
+    /// Every rule's zero-config default, as the spec documents it. A rule added later
+    /// fails here until its default is written down — the drift that left three rules
+    /// undocumented.
+    ///
+    /// Coverage only, not the levels: each rule's own test pins its `default_level()`,
+    /// and `command.rs` builds the rules per-phase rather than in a list to iterate.
+    #[test]
+    fn every_rule_has_a_documented_default_level() {
+        let documented: std::collections::BTreeMap<RuleName, Level> = [
+            (RuleName::ShaMismatch, Level::Error),
+            (RuleName::Unpinned, Level::Error),
+            (RuleName::UnsyncedManifest, Level::Error),
+            (RuleName::StaleComment, Level::Warn),
+            (RuleName::MissingPermissions, Level::Error),
+            (RuleName::ExcessivePermissions, Level::Error),
+            (RuleName::DangerousTrigger, Level::Error),
+            (RuleName::PrHeadCheckout, Level::Error),
+            (RuleName::MissingConcurrency, Level::Warn),
+            (RuleName::UnprotectedSecrets, Level::Error),
+            (RuleName::DanglingReference, Level::Error),
+            (RuleName::InvalidExpression, Level::Error),
+            (RuleName::RunShellcheck, Level::Warn),
+        ]
+        .into_iter()
+        .collect();
+
+        for &name in RuleName::ALL {
+            assert!(
+                documented.contains_key(&name),
+                "{name} runs but its zero-config default is not documented"
+            );
+        }
+        assert_eq!(
+            documented.len(),
+            RuleName::ALL.len(),
+            "the documented default set must not list rules that do not exist"
+        );
+    }
+
+    /// A typo'd rule name must be rejected, naming the offending key.
+    #[test]
+    fn unrecognized_rule_name_is_rejected() {
+        let err = serde_json::from_str::<RuleName>("\"sha-missmatch\"").unwrap_err();
+        assert!(
+            err.to_string().contains("sha-missmatch"),
+            "error must name the offending key, got: {err}"
+        );
+    }
+
+    #[test]
+    fn render_lint_clean() {
+        let report = Report::default();
+        let lines = report.render();
+        assert_eq!(lines.len(), 1);
+        assert!(
+            matches!(&lines[0], OutputLine::Summary { text } if text == "No lint issues found")
+        );
+    }
+
+    #[test]
+    fn render_lint_with_violations() {
+        let diagnostics = vec![
+            Diagnostic::new(
+                RuleName::Unpinned,
+                Level::Error,
+                "actions/checkout@main is not pinned",
+            )
+            .with_workflow(WorkflowPath::new("ci.yml")),
+            Diagnostic::new(
+                RuleName::StaleComment,
+                Level::Warn,
+                "version comment does not match lock",
+            )
+            .with_workflow(WorkflowPath::new("ci.yml")),
+        ];
+        let report = Report::from_diagnostics(diagnostics);
+        let lines = report.render();
+
+        assert!(lines.iter().any(|l| matches!(
+            l,
+            OutputLine::LintDiag {
+                level: Level::Error,
+                ..
+            }
+        )));
+        assert!(lines.iter().any(|l| matches!(
+            l,
+            OutputLine::LintDiag {
+                level: Level::Warn,
+                ..
+            }
+        )));
+        assert!(lines.contains(&OutputLine::Summary {
+            text: "1 error · 1 warning".to_owned(),
+        }));
+    }
+
+    /// Build a `Located` for `actions/checkout` with the given reference shape.
+    fn located(reference: ParsedRef) -> Located {
+        Located {
+            action: WorkflowAction {
+                id: ActionId::from("actions/checkout"),
+                reference,
+            },
+            site: Id {
+                file: WorkflowPath::new(".github/workflows/ci.yml"),
+                slot: Slot::WorkflowStep {
+                    job: JobId::from("build"),
+                    step: StepIndex::from(0_u16),
+                },
+            },
+            origin: Origin { line: Some(7) },
+        }
+    }
+
+    /// Diagnostics the four action-scoped rules actually produce.
+    ///
+    /// Every message comes from a rule's own `format!`, never a literal typed here —
+    /// that is what makes the assertion a guard and not a restatement.
+    fn rule_produced_diagnostics() -> Vec<Diagnostic> {
+        let sha = CommitSha::from("8e8c483db84b4bee98b60c0593521ed34d9990e8");
+        let mut out = Vec::new();
+
+        // unpinned: a bare tag ref is not a SHA pin.
+        out.extend(crate::lint::unpinned::UnpinnedRule::check_action(&located(
+            ParsedRef::Ref(Version::from("v4")),
+        )));
+
+        // sha-mismatch: a bare SHA absent from an empty lock.
+        let empty_lock = Lock::new(HashMap::new());
+        out.extend(crate::lint::sha_mismatch::ShaMismatchRule::check_action(
+            &located(ParsedRef::Sha(sha.clone())),
+            &empty_lock,
+        ));
+
+        // stale-comment: a pinned SHA that disagrees with the locked one.
+        let spec = Spec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
+        let mut lock = Lock::new(HashMap::new());
+        lock.set(
+            &spec,
+            ResolvedRef::Tag(Version::from("v4")),
+            Commit {
+                sha: CommitSha::from("1111111111111111111111111111111111111111"),
+                repository: Repository::from("actions/checkout"),
+                ref_type: None,
+                date: CommitDate::from("2024-01-01T00:00:00Z"),
+            },
+        );
+        out.extend(crate::lint::stale_comment::StaleCommentRule::check_action(
+            &located(ParsedRef::Pinned {
+                sha,
+                comment: Version::from("v4"),
+            }),
+            &lock,
+        ));
+
+        // unsynced-manifest: both directions — one action only in a workflow,
+        // one only in the manifest.
+        let mut action_set = ActionSet::new();
+        action_set.add(&WorkflowAction {
+            id: ActionId::from("actions/only-in-workflow"),
+            reference: ParsedRef::Ref(Version::from("v1")),
+        });
+        let mut manifest = Manifest::new(HashMap::new());
+        manifest.set(
+            ActionId::from("actions/only-in-manifest"),
+            Specifier::from_v1("v1"),
+        );
+        let ctx = Context {
+            manifest: &manifest,
+            lock: &empty_lock,
+            workflows: &[],
+            workflows_full: &[],
+            action_set: &action_set,
+        };
+        out.extend(crate::lint::unsynced_manifest::UnsyncedManifestRule.check(&ctx));
+
+        out
+    }
+
+    /// Whether `message` opens with `noun` used as a label on the identifier that
+    /// follows it, as in `action actions/checkout uses ...`.
+    ///
+    /// A noun carrying a sentence that names no identifier — `workflow has no
+    /// top-level permissions: block` — is legitimate, so an `owner/repo` shape must
+    /// follow for the noun to count as a label.
+    fn labels_an_identifier(message: &str, noun: &str) -> bool {
+        message
+            .strip_prefix(noun)
+            .and_then(|rest| rest.strip_prefix(' '))
+            .and_then(|rest| rest.split_whitespace().next())
+            .is_some_and(|word| word.contains('/'))
+    }
+
+    #[test]
+    fn rendered_diagnostics_carry_no_kind_noun() {
+        // A noun baked into a rule message is fixed where the renderer cannot change
+        // it, so the renderer stops owning the words a user reads.
+        let diagnostics = rule_produced_diagnostics();
+        assert!(
+            diagnostics.len() >= 5,
+            "fixture should exercise all four offending rules (unsynced-manifest \
+             emits two), got {} diagnostics",
+            diagnostics.len()
+        );
+
+        let report = Report::from_diagnostics(diagnostics);
+        for line in report.render() {
+            let OutputLine::LintDiag { message, .. } = line else {
+                continue;
+            };
+            for noun in KIND_NOUNS {
+                assert!(
+                    !labels_an_identifier(&message, noun),
+                    "rule message must not prefix an identifier with `{noun}` — the \
+                     renderer owns that vocabulary. Got: {message}"
+                );
+            }
+        }
     }
 }

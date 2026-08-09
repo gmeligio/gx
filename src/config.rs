@@ -66,14 +66,14 @@ pub struct Rule {
 pub struct Lint {
     /// Per-rule configuration, keyed by rule name.
     #[serde(default)]
-    pub rules: BTreeMap<crate::lint::RuleName, Rule>,
+    pub rules: BTreeMap<crate::diagnostic::RuleName, Rule>,
 }
 
 impl Lint {
     /// Get the effective configuration for a rule, applying defaults if not explicitly configured.
     /// Each rule has its own default level; unconfigured rules use their defaults.
     #[must_use]
-    pub fn get_rule(&self, name: crate::lint::RuleName, default_level: Level) -> Rule {
+    pub fn get_rule(&self, name: crate::diagnostic::RuleName, default_level: Level) -> Rule {
         self.rules.get(&name).cloned().unwrap_or(Rule {
             level: default_level,
             ignore: Vec::new(),
@@ -291,19 +291,21 @@ job = "build"
         let config: Lint = toml::from_str(toml_str).unwrap();
         assert_eq!(config.rules.len(), 3);
         assert_eq!(
-            config.rules[&crate::lint::RuleName::ShaMismatch].level,
+            config.rules[&crate::diagnostic::RuleName::ShaMismatch].level,
             Level::Error
         );
         assert_eq!(
-            config.rules[&crate::lint::RuleName::Unpinned].level,
+            config.rules[&crate::diagnostic::RuleName::Unpinned].level,
             Level::Error
         );
         assert_eq!(
-            config.rules[&crate::lint::RuleName::Unpinned].ignore.len(),
+            config.rules[&crate::diagnostic::RuleName::Unpinned]
+                .ignore
+                .len(),
             1
         );
         assert_eq!(
-            config.rules[&crate::lint::RuleName::StaleComment].level,
+            config.rules[&crate::diagnostic::RuleName::StaleComment].level,
             Level::Off
         );
     }
@@ -317,7 +319,7 @@ job = "build"
     #[test]
     fn lint_config_get_rule_uses_default_when_unconfigured() {
         let config = Lint::default();
-        let rule = config.get_rule(crate::lint::RuleName::ShaMismatch, Level::Error);
+        let rule = config.get_rule(crate::diagnostic::RuleName::ShaMismatch, Level::Error);
         assert_eq!(rule.level, Level::Error);
         assert!(rule.ignore.is_empty());
     }
@@ -326,7 +328,7 @@ job = "build"
     fn lint_config_get_rule_returns_configured_value() {
         let mut config = Lint::default();
         config.rules.insert(
-            crate::lint::RuleName::Unpinned,
+            crate::diagnostic::RuleName::Unpinned,
             Rule {
                 level: Level::Warn,
                 ignore: vec![IgnoreTarget {
@@ -336,7 +338,7 @@ job = "build"
                 }],
             },
         );
-        let rule = config.get_rule(crate::lint::RuleName::Unpinned, Level::Error);
+        let rule = config.get_rule(crate::diagnostic::RuleName::Unpinned, Level::Error);
         assert_eq!(rule.level, Level::Warn);
         assert_eq!(rule.ignore.len(), 1);
     }
@@ -345,13 +347,13 @@ job = "build"
     fn lint_config_get_rule_respects_off_level() {
         let mut config = Lint::default();
         config.rules.insert(
-            crate::lint::RuleName::StaleComment,
+            crate::diagnostic::RuleName::StaleComment,
             Rule {
                 level: Level::Off,
                 ignore: vec![],
             },
         );
-        let rule = config.get_rule(crate::lint::RuleName::StaleComment, Level::Warn);
+        let rule = config.get_rule(crate::diagnostic::RuleName::StaleComment, Level::Warn);
         assert_eq!(rule.level, Level::Off);
     }
 }

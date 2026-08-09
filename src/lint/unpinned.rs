@@ -129,6 +129,7 @@ mod tests {
     #[test]
     fn message_does_not_label_the_identifier_with_a_kind_noun() {
         // The renderer owns the words a user reads, so the noun cannot be fixed here.
+        // `lint/rule.rs` guards every rule at once; this one names the culprit.
         let action = located("v4", None);
         let diag = UnpinnedRule::check_action(&action).unwrap();
         assert!(

@@ -2,8 +2,8 @@
 
 /// Core lint command runner (phase orchestration + the public Lint command).
 mod command;
-pub mod report;
-/// Rule identity (`RuleName`), `Diagnostic`/`Context`/`Rule` types, and ignore matchers.
+/// Lint's rule identity (`RuleName`), the `Rule` trait, `Context`, and the lint
+/// `Diagnostic`/`Report` aliases over the shared diagnostics vocabulary.
 mod rule;
 /// Runs shellcheck over bash/sh `run:` bodies and surfaces its findings.
 mod run_shellcheck;
@@ -21,4 +21,4 @@ mod workflow_security;
 mod workflow_validity;
 
 pub use command::{Error, Lint, collect_diagnostics};
-pub use rule::{Context, Diagnostic, Rule, RuleName, format_and_report};
+pub use rule::{Context, Diagnostic, Report, Rule, RuleName, format_and_report};
