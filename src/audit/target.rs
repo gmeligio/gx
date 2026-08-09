@@ -46,13 +46,10 @@ pub fn targets(lock: &Lock) -> Vec<AuditTarget<'_>> {
     found
 }
 
-/// Report every target pinned to a branch.
+/// Report every target pinned to a branch, whose SHA moves out from under the lock.
 ///
-/// A branch pin is not a pin: the SHA recorded today is not what the branch resolves to
-/// tomorrow, so neither the lock's reproducibility nor any SHA-based guarantee gx makes
-/// holds for that entry. Reported at `warn` rather than `error` because tracking a branch
-/// is a configuration gx itself supports and writes — it may well be deliberate, and
-/// failing the build on it would be gx overruling the user.
+/// `warn`, not `error`: gx itself supports and writes branch pins, so failing the build on
+/// one would overrule a user who chose it deliberately.
 pub fn mutable_ref(target: &AuditTarget<'_>) -> Option<Finding> {
     if target.ref_type != Some(&RefType::Branch) {
         return None;

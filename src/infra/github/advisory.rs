@@ -1,21 +1,12 @@
 //! GitHub security advisory lookups for GitHub Actions.
 //!
-//! Advisories are the one piece of gx's knowledge that changes without the repository
-//! changing, so the checks that consume them must be testable without the network — a
-//! check that decides "vulnerable or not" and is only ever exercised against the live API
-//! is a check nobody can trust. Hence the seam:
+//! A check deciding "vulnerable or not" must be testable offline, hence the seam:
+//! [`AdvisoryQuery`] is what checks depend on, [`GraphQlAdvisories`] is the real adapter,
+//! and `FakeAdvisories` below is the double. Same shape as [`crate::infra::shellcheck`].
 //!
-//! - [`AdvisoryQuery`] is what checks depend on.
-//! - [`GraphQlAdvisories`] is the real adapter, querying GitHub's GraphQL API.
-//! - `FakeAdvisories`, in the `#[cfg(test)] mod fake` below, is the double returning
-//!   canned advisories.
-//!
-//! Modeled on [`crate::infra::shellcheck`], which establishes the same trait + adapter +
-//! fake shape.
-//!
-//! GraphQL rather than REST because `securityVulnerabilities` accepts an ecosystem filter
-//! and returns affected version ranges in one round trip. It is also why `gx audit`
-//! requires a token: this endpoint rejects unauthenticated requests outright.
+//! GraphQL rather than REST because `securityVulnerabilities` filters by ecosystem and
+//! returns affected ranges in one round trip. It is also why `gx audit` needs a token:
+//! this endpoint rejects unauthenticated requests.
 
 use super::Error;
 use super::Registry;

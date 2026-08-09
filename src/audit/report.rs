@@ -1,8 +1,7 @@
 //! Audit's findings and the report that aggregates them.
 //!
-//! The record, the severity counting, the exit code, and the summary pluralization are all
-//! [`crate::diagnostic`]'s, parameterized by audit's own [`CheckName`]. Only the rendering
-//! and the JSON contract are audit-specific.
+//! Everything but the rendering and the JSON contract comes from [`crate::diagnostic`],
+//! parameterized by audit's own [`CheckName`].
 
 use super::check_name::CheckName;
 use crate::command::CommandReport;
@@ -54,9 +53,8 @@ impl CommandReport for Report {
 
 /// One finding as it appears in `--json` output.
 ///
-/// A distinct type from [`Finding`] rather than a `Serialize` derive on the shared
-/// diagnostic: these key names are a published contract for CI consumers, so they must not
-/// shift when the internal record gains or renames a field.
+/// Its own type, not a `Serialize` derive on [`Finding`]: these key names are a published
+/// contract, so they must not shift when the internal record gains a field.
 #[derive(Serialize)]
 struct JsonFinding<'find> {
     /// The check that produced this finding, e.g. `mutable-ref`.

@@ -1,15 +1,13 @@
 #![expect(clippy::pub_use, reason = "reexport from extracted submodule")]
 
-//! `gx audit` — checks the actions recorded in `gx.lock` against knowledge that changes
-//! without the repository changing: today, whether a pin is mutable; next, security
-//! advisories and upstream repository state, which is why the command requires a token
-//! even though the check it currently ships needs no network.
+//! `gx audit` — checks the actions in `gx.lock` against knowledge that changes without the
+//! repository changing: today whether a pin is mutable, next security advisories. That is
+//! why it requires a token even though the check it ships needs no network.
 //!
-//! Separate from `gx lint` because the two answer different questions. Lint judges *your
-//! code* against rules you own: offline, deterministic, and its verdict changes only when
-//! you edit a file. Audit judges *the world's knowledge about your dependencies*, so the
-//! same commit is clean today and critical tomorrow. Folding networked checks into lint
-//! would break a hermeticity users reasonably rely on.
+//! Separate from `gx lint`, which judges your code against rules you own — offline, and its
+//! verdict changes only when you edit a file. Audit judges the world's knowledge about your
+//! dependencies, so the same commit is clean today and critical tomorrow. Folding networked
+//! checks into lint would break a hermeticity users rely on.
 //!
 //! Audit reads `gx.lock` and never walks workflow files — see the `target` module for why.
 
@@ -34,14 +32,9 @@ use thiserror::Error;
 pub enum Error {
     /// No GitHub token was available.
     ///
-    /// Unlike gx's REST paths, which fall back to unauthenticated requests, audit refuses
-    /// to run: GitHub's GraphQL endpoint rejects unauthenticated requests, so the only
-    /// reachable degraded behavior would be reporting "clean" without having checked
-    /// anything. For a security command that is worse than not running at all.
-    ///
-    /// Names the variable via [`Forge::token_env`] rather than a literal, so this reads
-    /// the same as the sibling resolution errors and cannot go stale when a second forge
-    /// lands. The remedies below are audit-specific and have no upstream equivalent.
+    /// Audit refuses to run rather than degrade, unlike gx's REST paths: the GraphQL
+    /// endpoint rejects unauthenticated requests, so the only degraded behavior available
+    /// is a false "clean".
     #[error(
         "gx audit requires a {forge} token, but {} is not set.\n\
          Set it and run again, e.g. `{}=$(gh auth token) gx audit`.\n\

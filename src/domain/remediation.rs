@@ -1,19 +1,15 @@
 //! Whether a known vulnerability can be remediated with `gx upgrade`.
 //!
-//! `gx upgrade` moves an action only *within* its manifest specifier. So an
-//! advisory's patched version is reachable only when the specifier admits it.
-//! Suggesting a command that cannot reach the fix is worse than suggesting
-//! nothing: the user runs it during a security incident, nothing changes, and
-//! they lose trust in the tool. This module makes that call conservatively.
+//! `gx upgrade` moves an action only *within* its manifest specifier, so a patched version
+//! is reachable only when the specifier admits it. Suggesting a command that cannot reach
+//! the fix is worse than suggesting nothing — the user runs it mid-incident and nothing
+//! changes — so this module errs conservative.
 
 use super::action::identity::Version;
 use super::action::resolved::ResolvedRef;
 use super::action::specifier::{Specifier, parse_semver};
 
 /// What a user can do about an action with a known vulnerability.
-///
-/// Produced from a manifest [`Specifier`] plus the advisory's
-/// `firstPatchedVersion`, so a caller rendering a finding must handle all three.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Remediation {
     /// A patched version exists and the manifest specifier admits it, so
@@ -40,27 +36,22 @@ pub enum Remediation {
 impl Remediation {
     /// Classify how an advisory's fix relates to what the manifest allows.
     ///
-    /// `first_patched` is the advisory's `firstPatchedVersion` identifier, which
-    /// is absent for advisories with no known fix. It may or may not carry a
-    /// `v` prefix; the verdict does not depend on which form is used.
-    ///
-    /// Determining that the action is vulnerable at all is the caller's job —
-    /// this only answers what to do about it.
+    /// `first_patched` is the advisory's `firstPatchedVersion`, absent when there is no
+    /// known fix, and `v`-prefixed or not. Whether the action is vulnerable at all is the
+    /// caller's question; this only answers what to do about it.
     #[must_use]
     pub fn classify(specifier: &Specifier, first_patched: Option<&str>) -> Self {
-        // An identifier that names no version gx can reach is `NoFixAvailable`
-        // like an absent one — never `OutOfRange`, which would claim a wider
-        // specifier reaches a fix that does not exist. A prerelease qualifies:
-        // semver keeps it out of any range not already carrying one.
+        // Unreachable fix is `NoFixAvailable`, never `OutOfRange` — the latter would claim
+        // a wider specifier reaches a fix that does not exist. Prereleases count: semver
+        // keeps them out of any range not already carrying one.
         let Some(patched) = first_patched
             .and_then(parse_semver)
             .filter(|v| v.pre.is_empty())
         else {
             return Self::NoFixAvailable;
         };
-        // Canonicalize from the parsed version, not the raw identifier, so
-        // `fixed` is always a concrete lowercase-`v` version: `V46.0.1` and
-        // `2.37` reach the user as `v46.0.1` and `v2.37.0`.
+        // From the parsed version, not the raw identifier, so `V46.0.1` and `2.37` reach
+        // the user as `v46.0.1` and `v2.37.0`.
         let fixed = Version::normalized(&patched.to_string());
 
         match specifier {

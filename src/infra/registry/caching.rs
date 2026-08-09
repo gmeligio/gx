@@ -5,19 +5,15 @@ use elsa::FrozenMap;
 
 /// Memoizes every [`VersionRegistry`] query for the lifetime of one command run.
 ///
-/// A repository that references the same action from several workflows would
-/// otherwise re-issue identical lookups, spending API quota that an
-/// unauthenticated rate limit makes scarce. Wrapping the concrete registry at
-/// the composition root deduplicates every query without any call site having
-/// to know a cache exists.
+/// One action referenced from several workflows would otherwise re-issue identical
+/// lookups, spending quota an unauthenticated rate limit makes scarce. Wrapping at the
+/// composition root deduplicates without any call site knowing a cache exists.
 ///
-/// Entries are inserted, never evicted or overwritten, and the whole map dies
-/// with the process — so a value can never be stale relative to the run that
-/// fetched it, and the next run always observes current registry state.
+/// Entries are never evicted, and the map dies with the process — so a value cannot go
+/// stale within a run, and the next run sees current state.
 ///
-/// [`FrozenMap`] is what lets this work behind `&self`: it permits insertion
-/// through a shared reference, so unlike a `RefCell` there is no borrow to
-/// accidentally hold across the inner registry call that populates it.
+/// [`FrozenMap`] is what makes this work behind `&self`: it inserts through a shared
+/// reference, so unlike `RefCell` there is no borrow to hold across the inner call.
 pub struct Caching<R: VersionRegistry> {
     /// The registry that answers whatever this decorator has not already cached.
     inner: R,
