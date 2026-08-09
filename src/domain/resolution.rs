@@ -11,8 +11,8 @@ use thiserror::Error;
 /// A code-hosting platform that a [`VersionRegistry`] resolves against.
 ///
 /// Carried as data on the failure variants that are inherently platform-specific,
-/// so [`Error`] grows only with failure semantics and never gains a variant per
-/// platform.
+/// so [`enum@Error`] grows only with failure semantics and never gains a variant
+/// per platform.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Forge {
@@ -89,14 +89,11 @@ impl Error {
 
     /// Returns `true` when repeating the identical request could plausibly succeed.
     ///
-    /// Only rate limiting qualifies. [`Self::AuthRequired`] is excluded even though
-    /// it is skippable: re-issuing a request with the same absent or rejected
-    /// credential cannot produce a different outcome, so retrying it only delays
-    /// the failure.
-    ///
-    /// Distinct from [`Self::is_skippable`], which decides whether the user sees a
-    /// warning or a hard failure. This decides whether to try again at all, and
-    /// gates the retry loop in `infra::registry::retrying`.
+    /// Only rate limiting qualifies. [`Self::AuthRequired`] is skippable but not
+    /// retryable: the same absent credential fails the same way, so retrying it
+    /// only delays the failure. That is why the two questions need two predicates
+    /// — [`Self::is_skippable`] picks warning over hard failure, this one decides
+    /// whether to try again at all.
     #[must_use]
     pub fn is_retryable(&self) -> bool {
         matches!(self, Self::RateLimited { .. })
@@ -363,8 +360,8 @@ mod tests {
 
     #[test]
     fn auth_required_is_not_retryable() {
-        // Skippable but never retryable: repeating a request with the same
-        // absent credential cannot succeed, so a retrying caller must not.
+        // The one variant where the two predicates disagree — collapsing them
+        // into one bit would make the retry loop spin on a missing token.
         assert!(
             !Error::AuthRequired {
                 forge: Forge::GitHub

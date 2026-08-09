@@ -11,7 +11,7 @@
 //! same commit is clean today and critical tomorrow. Folding networked checks into lint
 //! would break a hermeticity users reasonably rely on.
 //!
-//! Audit reads `gx.lock` and never walks workflow files — see [`target`] for why.
+//! Audit reads `gx.lock` and never walks workflow files — see the `target` module for why.
 
 /// The audit check identity, built from `rule_ids!`.
 mod check_name;

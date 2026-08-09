@@ -16,6 +16,7 @@ mod report;
 /// The lint rule identity, built from `rule_ids!`.
 mod rule_name;
 
+pub(crate) use identity::rule_ids;
 pub use record::{Diagnostic, matches_ignore, matches_ignore_action, matches_ignore_workflow};
 pub use report::Report;
 pub use rule_name::RuleName;

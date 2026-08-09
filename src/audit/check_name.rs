@@ -5,7 +5,7 @@
 //! `[lint.rules]` and would put time-varying checks in the same namespace as offline ones —
 //! the distinction `gx audit` exists to draw.
 
-crate::rule_ids! {
+crate::diagnostic::rule_ids! {
     /// Canonical identifier for an audit check.
     ///
     /// Adding a check is a one-line edit here: the enum, `as_str`, `ALL`, `Display`,
