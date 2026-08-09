@@ -1,20 +1,18 @@
 #![expect(clippy::pub_use, reason = "reexport from extracted submodule")]
 
-//! Diagnostics vocabulary shared by the commands that report findings.
+//! Diagnostics shared by the commands that report findings.
 //!
-//! Lives at the crate root rather than inside a command module so that lower-level
-//! modules (`config`, `infra`) can name a rule identity without depending on any
-//! command.
+//! At the crate root, not under a command, so `config` and `infra` can name a rule
+//! without depending on one.
 
-/// The `rule_ids!` macro: one list generates a rule-identity enum and all its
-/// string conversions. Declared first — `macro_rules!` is only visible to modules
+/// The `rule_ids!` macro. Declared first — `macro_rules!` is visible only to modules
 /// declared after it.
 mod identity;
 /// The diagnostic record and the ignore matchers.
 mod record;
-/// Severity counts, exit code, and the pluralized summary line.
+/// Severity counts, exit code, and the summary line.
 mod report;
-/// The lint rule identity, built from `rule_ids!`.
+/// The lint rule identity.
 mod rule_name;
 
 pub use record::Diagnostic;

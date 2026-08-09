@@ -1,23 +1,10 @@
-//! The `rule_ids!` macro: one list of `Variant => "kebab-name"` pairs generates the
-//! enum, `as_str`, `ALL`, `Display`, `FromStr`, `Serialize`, and `Deserialize`.
-//!
-//! One list, because the name a rule is configured by in `[lint.rules]` and the name
-//! it prints in output must be the same string. Maintaining those as separate lists
-//! makes them agree only by discipline, and that is a user-visible failure when it
-//! slips: a rule gx names in output that `gx.toml` then refuses to configure.
-//!
-//! Adding a rule is a one-line edit here, so concurrent changes that each add one
-//! cannot conflict.
+//! The `rule_ids!` macro.
 
-/// Define a rule-identity enum from a single list of `Variant => "name"` pairs.
+/// Generate a rule-identity enum from one list of `Variant => "name"` pairs, with
+/// `as_str`, `ALL`, `Display`, `FromStr`, `Serialize`, and `Deserialize`.
 ///
-/// Generates the enum plus `as_str`, `ALL`, `Display`, `FromStr`, `Serialize`, and
-/// `Deserialize` — all reading from that one list, so the name accepted in
-/// configuration and the name printed in output cannot drift apart.
-///
-/// `Serialize` emits a plain string via `serialize_str` rather than a unit variant,
-/// because these values are used as `BTreeMap` keys in the `[lint.rules]` table and
-/// TOML requires a string in key position.
+/// `Serialize` writes a plain string via `serialize_str`, not a unit variant: these
+/// are `BTreeMap` keys in `[lint.rules]`, and TOML needs a string in key position.
 macro_rules! rule_ids {
     (
         $(#[$enum_meta:meta])*
@@ -35,12 +22,12 @@ macro_rules! rule_ids {
         }
 
         impl $name {
-            /// Every variant, in declaration order. Iterate this instead of
-            /// restating the list, so a rule added later is covered automatically.
+            /// Every variant, in declaration order. Iterate this rather than
+            /// restating the list, so a rule added later is covered for free.
             pub const ALL: &'static [Self] = &[$(Self::$variant),+];
 
-            /// The canonical kebab-case name — the single source for both the
-            /// configuration key and the rendered output.
+            /// The kebab-case name, used for both the config key and the output —
+            /// one string, so the two cannot drift.
             #[must_use]
             pub const fn as_str(self) -> &'static str {
                 match self {

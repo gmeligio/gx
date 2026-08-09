@@ -1,5 +1,5 @@
-//! Aggregation over a set of diagnostics: severity counts, the exit code they imply,
-//! and the pluralized summary line. None of this is specific to any one command.
+//! Severity counts over a set of diagnostics, the exit code they imply, and the
+//! summary line.
 
 use super::record::Diagnostic;
 use crate::config::Level;

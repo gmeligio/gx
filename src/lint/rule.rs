@@ -1,6 +1,5 @@
-//! Lint's rule identity, the `Rule` trait, and the shared checking context. The
-//! diagnostic record, ignore matchers, and report aggregation are general and live in
-//! [`crate::diagnostic`]; this module supplies only the lint-specific half.
+//! Lint's `Rule` trait and checking context. The record, matchers, and report are
+//! shared — see [`crate::diagnostic`].
 
 use crate::command::CommandReport;
 use crate::config::{Level, Lint as LintConfig};
@@ -57,17 +56,13 @@ pub struct Context<'ctx> {
     pub lock: &'ctx Lock,
     /// All located actions from scanned workflows.
     pub workflows: &'ctx [LocatedAction],
-    /// Structural per-workflow parses, consumed by the workflow-security and
-    /// workflow-validity rules.
-    ///
-    /// Workflow files only — enforced by the type, not by a filter. [`ParsedWorkflow`] is
-    /// the workflow variant of [`Parsed`](crate::domain::file::parsed::Parsed), so an
-    /// action definition cannot reach this field: it has no `on:`, no top-level
-    /// `permissions:`, and no jobs, and every rule reading this would misjudge it. Their
-    /// `uses:` references still reach the action-hygiene rules (sha-mismatch, unpinned,
-    /// stale-comment, unsynced-manifest) through `workflows` and `action_set`.
-    ///
+    /// Per-workflow parses for the workflow-security and workflow-validity rules.
     /// Empty when no workflows were scanned.
+    ///
+    /// Workflow files only, and the type enforces it rather than a filter: an action
+    /// definition has no `on:`, no top-level `permissions:` and no jobs, so every rule
+    /// reading this would misjudge one. Their `uses:` still reaches the action-hygiene
+    /// rules through `workflows` and `action_set`.
     pub workflows_full: &'ctx [ParsedWorkflow],
     /// Aggregated action set from all workflows.
     pub action_set: &'ctx WorkflowActionSet,
@@ -92,9 +87,8 @@ pub fn format_and_report(diagnostics: Vec<Diagnostic>) -> Report {
     Report::from_diagnostics(diagnostics)
 }
 
-/// Run a workflow-scoped rule. Filters its diagnostics through the per-rule `ignore`
-/// list using the new workflow/job-aware matcher, applies the configured severity, and
-/// pushes the survivors onto `out`.
+/// Run a workflow-scoped rule, pushing the diagnostics that survive its `ignore` list
+/// onto `out` at the configured severity.
 pub(super) fn run_workflow_rule<R: Rule>(
     rule: &R,
     default_level: Level,
@@ -176,12 +170,10 @@ mod tests {
         );
     }
 
-    /// The name a rule is configured by and the name it is reported by must be the
-    /// same string, for every rule, derived from one definition.
+    /// A rule's config name and its reported name must be one string.
     ///
-    /// Driven off `RuleName::ALL` rather than a written-out list: a rule added later
-    /// is covered without editing this test, which is the property that makes the
-    /// single-list guarantee real instead of merely intended.
+    /// Driven off `ALL`, not a written-out list, so a rule added later is covered
+    /// without editing this test.
     #[test]
     fn every_rule_name_agrees_across_config_and_output() {
         for &name in RuleName::ALL {
@@ -285,14 +277,12 @@ mod tests {
         assert_eq!(reparsed.len(), RuleName::ALL.len());
     }
 
-    /// The zero-config default level of every implemented rule, as the specification
-    /// documents it. Pairs `RuleName::ALL` against this table so a rule added later
-    /// fails here until its default is written down — the drift that left
-    /// `dangling-reference`, `invalid-expression`, and `run-shellcheck` undocumented.
+    /// Every rule's zero-config default, as the spec documents it. A rule added later
+    /// fails here until its default is written down — the drift that left three rules
+    /// undocumented.
     ///
-    /// Only coverage is asserted, not the levels: each rule's own test pins its
-    /// `default_level()` (e.g. `sha_mismatch.rs`), and the rules are constructed
-    /// per-phase in `command.rs` rather than kept in a list this could iterate.
+    /// Coverage only, not the levels: each rule's own test pins its `default_level()`,
+    /// and `command.rs` builds the rules per-phase rather than in a list to iterate.
     #[test]
     fn every_rule_has_a_documented_default_level() {
         let documented: std::collections::BTreeMap<RuleName, Level> = [
@@ -402,11 +392,10 @@ mod tests {
         }
     }
 
-    /// Collect messages the four action-scoped rules actually produce.
+    /// Diagnostics the four action-scoped rules actually produce.
     ///
-    /// Every string here comes from a rule's own `format!` — never from a literal
-    /// written in this test — which is what makes the assertion below a guard
-    /// rather than a restatement of what the author typed.
+    /// Every message comes from a rule's own `format!`, never a literal typed here —
+    /// that is what makes the assertion a guard and not a restatement.
     fn rule_produced_diagnostics() -> Vec<Diagnostic> {
         let sha = CommitSha::from("8e8c483db84b4bee98b60c0593521ed34d9990e8");
         let mut out = Vec::new();
@@ -484,14 +473,8 @@ mod tests {
 
     #[test]
     fn rendered_diagnostics_carry_no_kind_noun() {
-        // The renderer owns user-facing vocabulary: a rule must not label an
-        // identifier with the noun naming its kind, or the noun is fixed upstream
-        // where the renderer cannot change it. Sibling of
-        // `format_line_lint_diag_renders_location_once` in `output/lines.rs`,
-        // which guards the same discipline for the workflow path.
-        //
-        // Asserted against messages the rules actually produced, so restoring an
-        // `action ` prefix in any rule below turns this red.
+        // A noun baked into a rule message is fixed where the renderer cannot change
+        // it, so the renderer stops owning the words a user reads.
         let diagnostics = rule_produced_diagnostics();
         assert!(
             diagnostics.len() >= 5,

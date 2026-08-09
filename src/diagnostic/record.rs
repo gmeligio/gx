@@ -1,8 +1,5 @@
-//! The diagnostic record and the ignore matchers that decide whether a diagnostic
-//! survives a user's `ignore` configuration.
-//!
-//! Nothing here is specific to any one command: a command supplies its rules, and the
-//! record, the matchers, and the report in `super::report` are shared.
+//! The diagnostic record, and the matchers deciding whether one survives a user's
+//! `ignore` configuration.
 
 use crate::config::IgnoreTarget;
 use crate::config::Level;
@@ -75,10 +72,8 @@ impl Diagnostic {
     }
 }
 
-/// True when the target's `workflow` key (if any) matches the diagnostic's workflow by
-/// suffix. A `None` target workflow always matches; a `Some` requires both a diagnostic
-/// workflow and a suffix match. Shared by all three ignore matchers below, which differ
-/// only in how they handle the `action` and `job` axes.
+/// Whether the target's `workflow` key matches the diagnostic's, by suffix. No key
+/// matches everything; a key with no diagnostic workflow matches nothing.
 fn workflow_matches(diag_workflow: Option<&WorkflowPath>, target: &IgnoreTarget) -> bool {
     let Some(target_workflow) = &target.workflow else {
         return true;
@@ -86,9 +81,10 @@ fn workflow_matches(diag_workflow: Option<&WorkflowPath>, target: &IgnoreTarget)
     diag_workflow.is_some_and(|w| w.as_str().ends_with(target_workflow.as_str()))
 }
 
-/// Ignore matcher for workflow-scoped diagnostics. Uses the diagnostic's structural
-/// fields (workflow, job) directly. The `action` key is meaningless for these rules,
-/// so an ignore target that specifies `action` will NOT match — users should omit it.
+/// For workflow-scoped diagnostics, matched on workflow and job.
+///
+/// An `action` key never matches here — these rules judge a workflow, not an action,
+/// so a target naming one is a mistake rather than a narrower filter.
 pub(crate) fn matches_ignore_workflow(diag: &Diagnostic, target: &IgnoreTarget) -> bool {
     if target.action.is_some() {
         return false;
@@ -107,7 +103,7 @@ pub(crate) fn matches_ignore_workflow(diag: &Diagnostic, target: &IgnoreTarget) 
     true
 }
 
-/// Check if a diagnostic matches an ignore target using the current action context.
+/// For per-action diagnostics, where the caller knows which action is being checked.
 pub(crate) fn matches_ignore_action(
     diag: &Diagnostic,
     target: &IgnoreTarget,
@@ -134,9 +130,8 @@ pub(crate) fn matches_ignore_action(
     true
 }
 
-/// Ignore matcher for aggregate phases that lack a per-action `LocatedAction` to scope
-/// against. Resolves the diagnostic's workflow against the workflow set and applies
-/// intersection semantics across action / workflow.
+/// For aggregate phases with no action in hand: recovers one by looking up the
+/// diagnostic's workflow in `located_actions`.
 pub(crate) fn matches_ignore(
     diag: &Diagnostic,
     target: &IgnoreTarget,
