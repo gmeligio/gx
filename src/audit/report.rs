@@ -1,7 +1,7 @@
 //! Audit's findings and the report that aggregates them.
 //!
-//! Everything but the rendering and the JSON contract comes from [`crate::diagnostic`],
-//! parameterized by audit's own [`CheckName`].
+//! Only the rendering and the JSON contract below are audit's; the rest is
+//! [`crate::diagnostic`] parameterized by [`CheckName`].
 
 use super::check_name::CheckName;
 use crate::command::CommandReport;

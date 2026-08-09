@@ -1,15 +1,11 @@
 #![expect(clippy::pub_use, reason = "reexport from extracted submodule")]
 
-//! `gx audit` — checks the actions in `gx.lock` against knowledge that changes without the
-//! repository changing: today whether a pin is mutable, next security advisories. That is
-//! why it requires a token even though the check it ships needs no network.
+//! `gx audit` — checks `gx.lock` against knowledge that changes without the repository
+//! changing: today whether a pin is mutable, next security advisories.
 //!
-//! Separate from `gx lint`, which judges your code against rules you own — offline, and its
-//! verdict changes only when you edit a file. Audit judges the world's knowledge about your
-//! dependencies, so the same commit is clean today and critical tomorrow. Folding networked
-//! checks into lint would break a hermeticity users rely on.
-//!
-//! Audit reads `gx.lock` and never walks workflow files — see the `target` module for why.
+//! That is the line against `gx lint`, which is offline and whose verdict changes only when
+//! you edit a file. The same commit is clean today and critical tomorrow here, so audit
+//! requires a token even for the check it ships, which needs no network.
 
 /// The audit check identity, built from `rule_ids!`.
 mod check_name;
@@ -30,25 +26,23 @@ use thiserror::Error;
 /// Errors that can occur during the audit command.
 #[derive(Debug, Error)]
 pub enum Error {
-    /// No GitHub token was available.
-    ///
-    /// Audit refuses to run rather than degrade, unlike gx's REST paths: the GraphQL
-    /// endpoint rejects unauthenticated requests, so the only degraded behavior available
-    /// is a false "clean".
+    /// No GitHub token was available. The GraphQL endpoint rejects unauthenticated
+    /// requests, so there is no degraded mode — only a false "clean".
     #[error(
-        "gx audit requires a {forge} token, but {} is not set.\n\
-         Set it and run again, e.g. `{}=$(gh auth token) gx audit`.\n\
-         In GitHub Actions, pass `{}: ${{{{ secrets.GITHUB_TOKEN }}}}` under `env:`.\n\
+        "gx audit requires a {forge} token, but {var} is not set.\n\
+         Set it and run again, e.g. `{var}=$(gh auth token) gx audit`.\n\
+         In GitHub Actions, pass `{var}: ${{{{ secrets.GITHUB_TOKEN }}}}` under `env:`.\n\
          Refusing to continue: an audit without a token could only report a false \"clean\".",
-        forge.token_env(),
-        forge.token_env(),
-        forge.token_env()
+        var = forge.token_env()
     )]
     MissingToken {
         /// The forge whose credential is missing.
         forge: Forge,
     },
 }
+
+/// Every check audit runs. Adding one is a line here.
+const CHECKS: &[fn(&target::AuditTarget<'_>) -> Option<Finding>] = &[target::mutable_ref];
 
 /// Run every check over the locked action set.
 ///
@@ -57,8 +51,20 @@ pub enum Error {
 pub fn collect_findings(config: &Config, on_progress: &mut dyn FnMut(&str)) -> Vec<Finding> {
     on_progress("Auditing locked actions...");
     let targets = target::targets(&config.lock);
-    // One line per check, so checks developed in parallel do not collide.
-    targets.iter().filter_map(target::mutable_ref).collect()
+    targets
+        .iter()
+        .flat_map(|target| CHECKS.iter().filter_map(move |check| check(target)))
+        .collect()
+}
+
+/// Fail before any check runs, so no run reports findings it could not have gathered.
+fn require_token(config: &Config) -> Result<(), Error> {
+    if config.settings.github_token.is_none() {
+        return Err(Error::MissingToken {
+            forge: Forge::GitHub,
+        });
+    }
+    Ok(())
 }
 
 /// The audit command.
@@ -74,14 +80,7 @@ impl Command for Audit {
         config: Config,
         on_progress: &mut dyn FnMut(&str),
     ) -> Result<Report, Error> {
-        // First, so no path does partial work and returns a report that reads as clean.
-        // An `Err` is structurally distinct from a `Report` with zero findings.
-        if config.settings.github_token.is_none() {
-            return Err(Error::MissingToken {
-                forge: Forge::GitHub,
-            });
-        }
-
+        require_token(&config)?;
         Ok(Report::from_diagnostics(collect_findings(
             &config,
             on_progress,

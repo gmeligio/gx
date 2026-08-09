@@ -1,12 +1,8 @@
 //! What audit checks see: one borrowed view per `gx.lock` row, and the `mutable-ref` check.
 //!
-//! **Audit reads the lock, never workflow files.** The lock records everything a check
-//! needs, so every improvement to how gx discovers actions reaches audit for free.
-//! Re-walking workflows would give audit a second notion of "which actions exist" that
-//! drifts from the scanner's.
-//!
-//! [`AuditTarget`] exists so checks never destructure a lock row themselves. When the
-//! row representation became `LockedAction`, only [`targets`] changed — no check did.
+//! Reading the lock rather than workflow files keeps one notion of "which actions exist" —
+//! whatever the scanner found. [`targets`] is the only place that touches a lock row, so
+//! checks are unaffected when its shape changes.
 
 use super::check_name::CheckName;
 use super::report::Finding;
@@ -27,11 +23,7 @@ pub struct AuditTarget<'lock> {
     pub ref_type: Option<&'lock RefType>,
 }
 
-/// Project every lock entry into an [`AuditTarget`].
-///
-/// The single adapter between the lock's row representation and what checks consume.
-/// Sorted by action id so findings come out in a stable order regardless of the lock's
-/// internal map ordering — a user diffing two audit runs should see real changes only.
+/// Project every lock entry into an [`AuditTarget`], in an order two runs can be diffed.
 pub fn targets(lock: &Lock) -> Vec<AuditTarget<'_>> {
     let mut found: Vec<AuditTarget<'_>> = lock
         .entries()
@@ -42,21 +34,21 @@ pub fn targets(lock: &Lock) -> Vec<AuditTarget<'_>> {
             ref_type: locked.commit().ref_type.as_ref(),
         })
         .collect();
-    found.sort_by(|a, b| (a.id.as_str(), a.version).cmp(&(b.id.as_str(), b.version)));
+    found.sort_by_key(|target| (target.id.as_str(), target.version));
     found
 }
 
+/// gx writes branch pins itself, so a user on one likely meant it — say so, don't fail.
+const MUTABLE_REF_SEVERITY: Level = Level::Warn;
+
 /// Report every target pinned to a branch, whose SHA moves out from under the lock.
-///
-/// `warn`, not `error`: gx itself supports and writes branch pins, so failing the build on
-/// one would overrule a user who chose it deliberately.
 pub fn mutable_ref(target: &AuditTarget<'_>) -> Option<Finding> {
     if target.ref_type != Some(&RefType::Branch) {
         return None;
     }
     Some(Finding::new(
         CheckName::MutableRef,
-        Level::Warn,
+        MUTABLE_REF_SEVERITY,
         format!(
             "{} is pinned to branch {}, which moves; {} is not a stable reference",
             target.id,
