@@ -1,21 +1,21 @@
 //! The diagnostic record and the ignore matchers that decide whether a diagnostic
 //! survives a user's `ignore` configuration.
 //!
-//! Generic over the rule-identity type so that each command supplies its own closed
-//! set of rule names while sharing one diagnostic vocabulary.
+//! Nothing here is specific to any one command: a command supplies its rules, and the
+//! record, the matchers, and the report in `super::report` are shared.
 
 use crate::config::IgnoreTarget;
 use crate::config::Level;
 use crate::domain::file::actions::Located as LocatedAction;
 use crate::domain::file::site::{JobId, StepIndex, WorkflowPath};
 
+use super::RuleName;
+
 /// A single diagnostic reported by a rule.
-///
-/// `Id` is the reporting command's rule-identity type (e.g. `lint::RuleName`).
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct Diagnostic<Id> {
+pub struct Diagnostic {
     /// Identity of the rule that produced this diagnostic.
-    pub rule: Id,
+    pub rule: RuleName,
     /// Severity level.
     pub level: Level,
     /// Human-readable message.
@@ -32,9 +32,9 @@ pub struct Diagnostic<Id> {
     pub line: Option<u32>,
 }
 
-impl<Id> Diagnostic<Id> {
+impl Diagnostic {
     /// Create a new diagnostic.
-    pub fn new<S: Into<String>>(rule: Id, level: Level, message: S) -> Self {
+    pub fn new<S: Into<String>>(rule: RuleName, level: Level, message: S) -> Self {
         Self {
             rule,
             level,
@@ -89,7 +89,7 @@ fn workflow_matches(diag_workflow: Option<&WorkflowPath>, target: &IgnoreTarget)
 /// Ignore matcher for workflow-scoped diagnostics. Uses the diagnostic's structural
 /// fields (workflow, job) directly. The `action` key is meaningless for these rules,
 /// so an ignore target that specifies `action` will NOT match — users should omit it.
-pub fn matches_ignore_workflow<Id>(diag: &Diagnostic<Id>, target: &IgnoreTarget) -> bool {
+pub(crate) fn matches_ignore_workflow(diag: &Diagnostic, target: &IgnoreTarget) -> bool {
     if target.action.is_some() {
         return false;
     }
@@ -108,8 +108,8 @@ pub fn matches_ignore_workflow<Id>(diag: &Diagnostic<Id>, target: &IgnoreTarget)
 }
 
 /// Check if a diagnostic matches an ignore target using the current action context.
-pub fn matches_ignore_action<Id>(
-    diag: &Diagnostic<Id>,
+pub(crate) fn matches_ignore_action(
+    diag: &Diagnostic,
     target: &IgnoreTarget,
     action: &LocatedAction,
 ) -> bool {
@@ -137,8 +137,8 @@ pub fn matches_ignore_action<Id>(
 /// Ignore matcher for aggregate phases that lack a per-action `LocatedAction` to scope
 /// against. Resolves the diagnostic's workflow against the workflow set and applies
 /// intersection semantics across action / workflow.
-pub fn matches_ignore<Id>(
-    diag: &Diagnostic<Id>,
+pub(crate) fn matches_ignore(
+    diag: &Diagnostic,
     target: &IgnoreTarget,
     located_actions: &[LocatedAction],
 ) -> bool {

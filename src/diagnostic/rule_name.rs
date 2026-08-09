@@ -4,7 +4,7 @@
 //! because `config` and `infra::manifest` must name a rule to parse `[lint.rules]`,
 //! and neither may depend on a command module. `lint::RuleName` re-exports this.
 
-crate::rule_ids! {
+super::identity::rule_ids! {
     /// Canonical identifier for a lint rule.
     ///
     /// Adding a rule is a one-line edit here: the enum, `as_str`, `ALL`, `Display`,

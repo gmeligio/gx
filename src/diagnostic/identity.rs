@@ -18,7 +18,6 @@
 /// `Serialize` emits a plain string via `serialize_str` rather than a unit variant,
 /// because these values are used as `BTreeMap` keys in the `[lint.rules]` table and
 /// TOML requires a string in key position.
-#[macro_export]
 macro_rules! rule_ids {
     (
         $(#[$enum_meta:meta])*
@@ -84,3 +83,5 @@ macro_rules! rule_ids {
         }
     };
 }
+
+pub(crate) use rule_ids;

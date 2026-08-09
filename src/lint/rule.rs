@@ -11,14 +11,7 @@ use crate::domain::lock::Lock;
 use crate::domain::manifest::Manifest;
 use crate::output::lines::Line as OutputLine;
 
-pub use crate::diagnostic::RuleName;
-
-/// A single diagnostic reported by a lint rule — the shared record carrying lint's
-/// own rule identity.
-pub type Diagnostic = crate::diagnostic::Diagnostic<RuleName>;
-
-/// A set of lint diagnostics with their severity counts.
-pub type Report = crate::diagnostic::Report<RuleName>;
+pub use crate::diagnostic::{Diagnostic, Report, RuleName};
 
 /// Text shown when a lint run found nothing.
 const NO_ISSUES: &str = "No lint issues found";
@@ -296,6 +289,10 @@ mod tests {
     /// documents it. Pairs `RuleName::ALL` against this table so a rule added later
     /// fails here until its default is written down — the drift that left
     /// `dangling-reference`, `invalid-expression`, and `run-shellcheck` undocumented.
+    ///
+    /// Only coverage is asserted, not the levels: each rule's own test pins its
+    /// `default_level()` (e.g. `sha_mismatch.rs`), and the rules are constructed
+    /// per-phase in `command.rs` rather than kept in a list this could iterate.
     #[test]
     fn every_rule_has_a_documented_default_level() {
         let documented: std::collections::BTreeMap<RuleName, Level> = [

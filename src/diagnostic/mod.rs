@@ -7,7 +7,8 @@
 //! command.
 
 /// The `rule_ids!` macro: one list generates a rule-identity enum and all its
-/// string conversions.
+/// string conversions. Declared first — `macro_rules!` is only visible to modules
+/// declared after it.
 mod identity;
 /// The diagnostic record and the ignore matchers.
 mod record;
@@ -16,6 +17,7 @@ mod report;
 /// The lint rule identity, built from `rule_ids!`.
 mod rule_name;
 
-pub use record::{Diagnostic, matches_ignore, matches_ignore_action, matches_ignore_workflow};
+pub use record::Diagnostic;
+pub(crate) use record::{matches_ignore, matches_ignore_action, matches_ignore_workflow};
 pub use report::Report;
 pub use rule_name::RuleName;

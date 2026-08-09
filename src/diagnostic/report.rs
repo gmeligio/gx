@@ -5,32 +5,20 @@ use super::record::Diagnostic;
 use crate::config::Level;
 
 /// A set of diagnostics plus the severity counts derived from them.
-///
-/// `Id` is the reporting command's rule-identity type (e.g. `lint::RuleName`).
-#[derive(Debug)]
-pub struct Report<Id> {
+#[derive(Debug, Default)]
+pub struct Report {
     /// All diagnostics found.
-    pub diagnostics: Vec<Diagnostic<Id>>,
+    pub diagnostics: Vec<Diagnostic>,
     /// Number of error-level diagnostics.
     pub error_count: usize,
     /// Number of warning-level diagnostics.
     pub warning_count: usize,
 }
 
-impl<Id> Default for Report<Id> {
-    fn default() -> Self {
-        Self {
-            diagnostics: Vec::new(),
-            error_count: 0,
-            warning_count: 0,
-        }
-    }
-}
-
-impl<Id> Report<Id> {
+impl Report {
     /// Build a report from a list of diagnostics, counting severities.
     #[must_use]
-    pub fn from_diagnostics(diagnostics: Vec<Diagnostic<Id>>) -> Self {
+    pub fn from_diagnostics(diagnostics: Vec<Diagnostic>) -> Self {
         let error_count = diagnostics
             .iter()
             .filter(|d| d.level == Level::Error)
