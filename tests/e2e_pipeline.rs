@@ -1,7 +1,6 @@
 #![expect(
     clippy::unwrap_used,
     clippy::expect_used,
-    clippy::string_slice,
     clippy::shadow_unrelated,
     reason = "tests use unwrap, indexing, and other patterns freely"
 )]

@@ -471,6 +471,20 @@ mod tests {
         out
     }
 
+    /// Whether `message` opens with `noun` used as a label on the identifier that
+    /// follows it, as in `action actions/checkout uses ...`.
+    ///
+    /// A noun carrying a sentence that names no identifier — `workflow has no
+    /// top-level permissions: block` — is legitimate, so an `owner/repo` shape must
+    /// follow for the noun to count as a label.
+    fn labels_an_identifier(message: &str, noun: &str) -> bool {
+        message
+            .strip_prefix(noun)
+            .and_then(|rest| rest.strip_prefix(' '))
+            .and_then(|rest| rest.split_whitespace().next())
+            .is_some_and(|word| word.contains('/'))
+    }
+
     #[test]
     fn rendered_diagnostics_carry_no_kind_noun() {
         // The renderer owns user-facing vocabulary: a rule must not label an
@@ -495,21 +509,8 @@ mod tests {
                 continue;
             };
             for noun in KIND_NOUNS {
-                // Only a noun *labelling an identifier* is the defect: `action
-                // actions/checkout uses ...` repeats what the identifier already
-                // says. A noun carrying a sentence that names no identifier
-                // (`workflow has no top-level permissions: block`) is legitimate,
-                // so require a following token that looks like an `owner/repo`.
-                let Some(rest) = message.strip_prefix(noun).and_then(|r| r.strip_prefix(' '))
-                else {
-                    continue;
-                };
-                let labels_an_id = rest
-                    .split_whitespace()
-                    .next()
-                    .is_some_and(|word| word.contains('/'));
                 assert!(
-                    !labels_an_id,
+                    !labels_an_identifier(&message, noun),
                     "rule message must not prefix an identifier with `{noun}` — the \
                      renderer owns that vocabulary. Got: {message}"
                 );

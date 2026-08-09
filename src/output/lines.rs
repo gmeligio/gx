@@ -5,9 +5,9 @@ use std::path::PathBuf;
 /// Semantic output line variants produced by render functions.
 /// Colors are applied at print boundary — no ANSI codes here.
 ///
-/// The `id` field carries a bare identifier (e.g. `actions/checkout`), never a
-/// noun naming what kind of thing it is. Choosing user-facing vocabulary belongs
-/// to this rendering boundary, so producers must not bake a noun into the data.
+/// Producers pass bare identifiers and never a noun naming their kind: the words a
+/// user reads are chosen here, and gx labels workflows, composite actions and
+/// components alike.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Line {
     /// An entry was upgraded from one version to another.

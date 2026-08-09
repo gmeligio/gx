@@ -108,7 +108,7 @@ mod tests {
     use crate::domain::action::tag_selection::ShaIndex;
     use crate::domain::manifest::Manifest;
     use crate::domain::resolution::ActionResolver;
-    use crate::domain::resolution::testutil::{AuthRequiredRegistry, FakeRegistry};
+    use crate::domain::resolution::testutil::FakeRegistry;
 
     #[test]
     fn select_version_single() {
@@ -137,7 +137,10 @@ mod tests {
         let mut manifest = Manifest::default();
         manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1(sha));
 
-        let registry = FakeRegistry::new().with_all_tags("actions/checkout", vec!["v4", "v4.0.0"]);
+        // Resolution goes through `describe_sha`, which is keyed on the SHA — so
+        // the tags must be registered against the SHA the manifest actually pins.
+        let registry =
+            FakeRegistry::new().with_sha_tags("actions/checkout", sha, vec!["v4", "v4.0.0"]);
         let resolver = ActionResolver::new(&registry);
         let mut sha_index = ShaIndex::new();
         upgrade_sha_versions_to_tags(&mut manifest, &resolver, &mut sha_index);
@@ -156,7 +159,8 @@ mod tests {
         let mut manifest = Manifest::default();
         manifest.set(ActionId::from("actions/checkout"), Specifier::from_v1(sha));
 
-        let resolver = ActionResolver::new(&AuthRequiredRegistry);
+        let registry = FakeRegistry::new().failing_auth();
+        let resolver = ActionResolver::new(&registry);
         let mut sha_index = ShaIndex::new();
         upgrade_sha_versions_to_tags(&mut manifest, &resolver, &mut sha_index);
 

@@ -3,6 +3,7 @@ pub mod diff;
 pub mod event;
 pub mod file;
 pub mod lock;
+pub mod locked_action;
 pub mod manifest;
 pub mod resolution;
 

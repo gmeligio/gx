@@ -99,6 +99,9 @@ Add `gx lint` to your workflow to enforce pinning on every PR:
   run: gx lint
 ```
 
+To keep actions current, copy [docs/gx-upgrade.yml](docs/gx-upgrade.yml) into `.github/workflows/`. It runs
+`gx upgrade` on a schedule and opens a PR with the changes. See [docs/upgrade-workflow.md](docs/upgrade-workflow.md).
+
 </details>
 
 ## Contributing
