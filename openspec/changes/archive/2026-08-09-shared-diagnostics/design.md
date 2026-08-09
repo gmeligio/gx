@@ -194,8 +194,8 @@ After: 7 direct `.rs` files (`command.rs`, `mod.rs`, `rule.rs`,
 folding `unsynced_manifest.rs` into the aggregate phase later if #128 and #109
 both need room.
 
-`src/diagnostic/` starts at 3 files (`mod.rs`, `record.rs`, `report.rs`), well
-inside budget.
+`src/diagnostic/` starts at 5 files (`mod.rs`, `identity.rs`, `record.rs`,
+`report.rs`, `rule_name.rs`), well inside budget.
 
 No budget number in `tests/code_health.rs` is raised. Both new files sit far below
 the 440-logic-line limit, since the material being moved is ~200 logic lines
