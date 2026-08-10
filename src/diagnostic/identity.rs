@@ -3,8 +3,12 @@
 /// Generate a rule-identity enum from one list of `Variant => "name"` pairs, with
 /// `as_str`, `ALL`, `Display`, `FromStr`, `Serialize`, and `Deserialize`.
 ///
-/// `Serialize` writes a plain string via `serialize_str`, not a unit variant: these
-/// are `BTreeMap` keys in `[lint.rules]`, and TOML needs a string in key position.
+/// One list, so the name a rule is configured by in `[lint.rules]` and the name it
+/// prints cannot drift apart. Two lists would agree only by discipline, and a rule gx
+/// names in output that `gx.toml` refuses to configure is a user-visible break.
+///
+/// `Serialize` writes a plain string via `serialize_str`, not a unit variant: these are
+/// `BTreeMap` keys in `[lint.rules]`, and TOML needs a string in key position.
 macro_rules! rule_ids {
     (
         $(#[$enum_meta:meta])*
@@ -22,12 +26,12 @@ macro_rules! rule_ids {
         }
 
         impl $name {
-            /// Every variant, in declaration order. Iterate this rather than
-            /// restating the list, so a rule added later is covered for free.
+            /// Every variant, in declaration order. Iterate this instead of
+            /// restating the list, so a rule added later is covered automatically.
             pub const ALL: &'static [Self] = &[$(Self::$variant),+];
 
-            /// The kebab-case name, used for both the config key and the output —
-            /// one string, so the two cannot drift.
+            /// The canonical kebab-case name — the single source for both the
+            /// configuration key and the rendered output.
             #[must_use]
             pub const fn as_str(self) -> &'static str {
                 match self {

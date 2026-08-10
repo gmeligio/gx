@@ -1,9 +1,11 @@
 use super::Error as GithubError;
 use super::Registry;
-use super::registry::GITHUB_API_BASE;
 use super::responses::{CommitResponse, GitRef, GitTagResponse};
-use crate::domain::action::identity::{CommitSha, base_repo_of};
+use crate::domain::action::identity::CommitSha;
 use crate::domain::action::uses_ref::RefType;
+
+/// Base URL for the GitHub REST API.
+pub(super) const GITHUB_API_BASE: &str = "https://api.github.com";
 
 #[expect(
     clippy::multiple_inherent_impl,
@@ -34,7 +36,9 @@ impl Registry {
             return Ok((ref_name.to_owned(), Some(RefType::Commit)));
         }
 
-        let base_repo = base_repo_of(owner_repo);
+        // Handle subpath actions (e.g., "github/codeql-action/upload-sarif")
+        // Extract just the owner/repo part (first two path segments)
+        let base_repo = owner_repo.split('/').take(2).collect::<Vec<_>>().join("/");
 
         // Try to resolve as a tag first
         let tag_url = format!("{GITHUB_API_BASE}/repos/{base_repo}/git/ref/tags/{ref_name}");

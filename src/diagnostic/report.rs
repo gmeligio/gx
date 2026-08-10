@@ -1,24 +1,36 @@
-//! Severity counts over a set of diagnostics, the exit code they imply, and the
-//! summary line.
+//! Aggregation over a set of diagnostics: severity counts, the exit code they imply,
+//! and the pluralized summary line. None of this is specific to any one command.
 
 use super::record::Diagnostic;
 use crate::config::Level;
 
 /// A set of diagnostics plus the severity counts derived from them.
-#[derive(Debug, Default)]
-pub struct Report {
+///
+/// `Id` is the reporting command's rule-identity type (e.g. `lint::RuleName`).
+#[derive(Debug)]
+pub struct Report<Id> {
     /// All diagnostics found.
-    pub diagnostics: Vec<Diagnostic>,
+    pub diagnostics: Vec<Diagnostic<Id>>,
     /// Number of error-level diagnostics.
     pub error_count: usize,
     /// Number of warning-level diagnostics.
     pub warning_count: usize,
 }
 
-impl Report {
+impl<Id> Default for Report<Id> {
+    fn default() -> Self {
+        Self {
+            diagnostics: Vec::new(),
+            error_count: 0,
+            warning_count: 0,
+        }
+    }
+}
+
+impl<Id> Report<Id> {
     /// Build a report from a list of diagnostics, counting severities.
     #[must_use]
-    pub fn from_diagnostics(diagnostics: Vec<Diagnostic>) -> Self {
+    pub fn from_diagnostics(diagnostics: Vec<Diagnostic<Id>>) -> Self {
         let error_count = diagnostics
             .iter()
             .filter(|d| d.level == Level::Error)

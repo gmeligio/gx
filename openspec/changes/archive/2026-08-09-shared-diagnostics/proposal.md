@@ -31,13 +31,14 @@ file they conflict by construction and cannot run in parallel.
 
 - Introduce a shared diagnostics home holding the genuinely general vocabulary:
   the diagnostic record, its builder, the ignore matchers, and the report
-  counting / exit-code / summary logic — none of it lint-specific, so `gx audit`
-  reports through the same types rather than a second copy of them.
-- **Collapse the three synchronized lists into one.** A `rule_ids!` macro takes a
-  single list of `Variant => "kebab-name"` pairs and generates the enum, `as_str`,
-  `ALL`, `Display`, `FromStr`, `Serialize`, and `Deserialize` from it. Adding a
-  rule becomes a one-line edit, so the three queued audit-check issues touch one
-  line each and stop conflicting.
+  counting / exit-code / summary logic — parameterized over a rule-identity type
+  so `lint::RuleName` and a future `audit::CheckName` are two instantiations of
+  one vocabulary rather than two copies of it.
+- **Collapse the three synchronized lists into one.** The enum's `serde`
+  `rename_all = "kebab-case"` derive is already the single authoritative
+  name list; `Display` and `FromStr` are re-expressed in terms of it instead of
+  restating it. Adding a rule becomes a one-line enum edit, so the three queued
+  audit-check issues touch one line each and stop conflicting.
 - Repoint `src/config.rs` and `src/infra/manifest/convert.rs` at the shared home,
   removing the config → command dependency inversion.
 - Free at least one file slot in `src/lint/`, unblocking #128 and #109.
@@ -87,11 +88,8 @@ it is built.
 - **Public API**: `gx::lint::{Diagnostic, RuleName, Context, Rule}` are re-exported
   from their new home so `tests/integ_lint.rs` and `tests/common/setup.rs` keep
   compiling unchanged.
-- **Dependencies**: none added. `rule_ids!` is a local `macro_rules!`, and the
-  `Serialize`/`Deserialize` it generates are hand-written rather than derived:
-  rule names are `BTreeMap` keys in `[lint.rules]`, and TOML requires a string in
-  key position, which `serialize_str` gives and a `rename_all` unit-variant derive
-  does not.
+- **Dependencies**: none added. The single name list is obtained from the `serde`
+  derive already on the enum.
 - **Output**: unchanged. `mise run integ` asserts on output text and is the proof.
 - **Unblocks**: #128, #109 (need a `src/lint/` slot); #129 and its #130/#131/#132
   checks (need the shared vocabulary and the one-line rule addition).

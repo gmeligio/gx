@@ -40,7 +40,8 @@ to the code without the list being updated.
 **Goals:**
 
 - One authoritative list per rule-identity type. Adding a rule is a one-line edit.
-- A shared diagnostics home usable by both `lint` and a future `audit`.
+- A shared diagnostics home usable by both `lint` and a future `audit`,
+  parameterized over rule identity.
 - `src/config.rs` and `src/infra/manifest/convert.rs` stop importing from a
   command module.
 - At least one free file slot in `src/lint/`.
@@ -139,9 +140,12 @@ what fixes the inversion: `config.rs` importing `crate::diagnostic::` points
 
 ### D4: Rule identity stays a closed, enumerable type
 
-`Diagnostic` names `RuleName` concretely. The decision that carries weight is that
-the identity remains a **closed set that can be enumerated**: `RuleName::ALL` is
-what makes the two guard tests in this change writable at all:
+`Diagnostic` becomes `Diagnostic<Id>` with `Id` the rule-identity type, and
+`lint::Diagnostic` is a type alias `Diagnostic<RuleName>`.
+
+The decision that carries weight here is not the type *parameter* — it is that the
+identity remains a **closed set that can be enumerated**. `RuleName::ALL` is what
+makes the two guard tests in this change writable at all:
 
 - `every_reported_rule_name_is_accepted_in_config` builds a `[lint.rules]` table
   from `ALL` and parses it, proving the config surface accepts every name gx can
@@ -159,13 +163,16 @@ unwritable. It also erases the closed-set guarantee that makes an unrecognized
 rule name a parse error rather than a silently-ignored key. That is a concrete
 loss in this branch, not a hypothetical one.
 
-**Alternative considered — a `Diagnostic<Id>` type parameter,** so `gx audit`
-(#129) could later alias `Diagnostic<CheckName>`. Rejected: it has exactly one
-instantiation today and no bounds anywhere, so it is generality bought for a
-caller that does not exist — the speculative shape the brief forbids. It also
-forces a manual `Default` impl on `Report`, since a derive would demand
-`Id: Default`. Adding the parameter when audit lands is mechanical, and audit may
-well share `RuleName` outright rather than need a second identity type.
+Given a closed enum, the type parameter itself is close to free: `Id` carries no
+bounds anywhere in `src/diagnostic/` — nothing inspects the identity, it is only
+carried and handed to the renderer — so it costs no `dyn`, no boxing, and no
+runtime work, while preserving the `Copy` and exhaustive-matching semantics the
+rules already rely on.
+
+A consequence, not a justification: because `Id` is unconstrained, `gx audit`
+(#129) can later alias `Diagnostic<CheckName>` without touching this module. That
+is a benefit if it happens; the enumeration property above is why the design is
+correct today either way.
 
 ### D5: `Context` stays in `lint/`
 
@@ -194,8 +201,8 @@ After: 7 direct `.rs` files (`command.rs`, `mod.rs`, `rule.rs`,
 folding `unsynced_manifest.rs` into the aggregate phase later if #128 and #109
 both need room.
 
-`src/diagnostic/` starts at 5 files (`mod.rs`, `identity.rs`, `record.rs`,
-`report.rs`, `rule_name.rs`), well inside budget.
+`src/diagnostic/` starts at 3 files (`mod.rs`, `record.rs`, `report.rs`), well
+inside budget.
 
 No budget number in `tests/code_health.rs` is raised. Both new files sit far below
 the 440-logic-line limit, since the material being moved is ~200 logic lines
@@ -262,8 +269,8 @@ D2 records the byte-compatibility argument explicitly rather than assuming it.
   macro small, local, and documented, and by the invocation reading as a plain
   list of `Variant => "name"` pairs. Judged a smaller cost than four hand-synced
   lists.
-- **Moving `Diagnostic` out of `lint/` touches every rule file's import** →
-  Mechanical; `lint::Diagnostic` re-exports it so rule bodies are unchanged. The
+- **Generic `Diagnostic<Id>` touches every rule file's signature** → Mechanical;
+  the type alias `lint::Diagnostic` absorbs it so rule bodies are unchanged. The
   external API (`gx::lint::Diagnostic`) keeps its name, so `tests/` is unaffected.
 - **`FromStr` is currently dead code and this change keeps it** → It becomes live:
   `Deserialize` routes through it. That converts dead code into the single parse

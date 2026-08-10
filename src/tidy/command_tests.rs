@@ -8,7 +8,6 @@ use crate::domain::action::specifier::Specifier;
 use crate::domain::action::uses_ref::RefType;
 use crate::domain::lock::Lock;
 use crate::domain::manifest::Manifest;
-use crate::domain::resolution::testutil::FakeRegistry;
 use crate::infra::lock;
 use crate::infra::manifest;
 use crate::infra::workflow_scan::FileScanner as FileWorkflowScanner;
@@ -27,12 +26,32 @@ fn tidy_error_resolution_failed_displays_specs() {
     );
 }
 
-/// A registry that fails every call, standing in for a run with no token.
-///
-/// These tests pre-seed the lock so nothing needs resolving; the registry only has
-/// to exist and never succeed.
-fn noop_registry() -> FakeRegistry {
-    FakeRegistry::new().failing_auth()
+#[derive(Clone, Copy)]
+struct NoopRegistry;
+impl crate::domain::resolution::VersionRegistry for NoopRegistry {
+    fn lookup_sha(
+        &self,
+        _id: &ActionId,
+        _version: &Version,
+    ) -> Result<crate::domain::action::resolved::Commit, crate::domain::resolution::Error> {
+        Err(crate::domain::resolution::Error::AuthRequired {
+            forge: crate::domain::resolution::Forge::GitHub,
+        })
+    }
+    fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, crate::domain::resolution::Error> {
+        Err(crate::domain::resolution::Error::AuthRequired {
+            forge: crate::domain::resolution::Forge::GitHub,
+        })
+    }
+    fn describe_sha(
+        &self,
+        _id: &ActionId,
+        _sha: &CommitSha,
+    ) -> Result<crate::domain::resolution::ShaDescription, crate::domain::resolution::Error> {
+        Err(crate::domain::resolution::Error::AuthRequired {
+            forge: crate::domain::resolution::Forge::GitHub,
+        })
+    }
 }
 
 /// Bug #1 + #2: when workflows have a minority version (e.g. windows.yml uses
@@ -108,7 +127,7 @@ jobs:
     let scanner = FileWorkflowScanner::new(repo_root);
     let updater = WorkflowWriter::new(repo_root);
 
-    let tidy_plan = plan(&manifest, &lock, &noop_registry(), &scanner, |_| {}).unwrap();
+    let tidy_plan = plan(&manifest, &lock, &NoopRegistry, &scanner, |_| {}).unwrap();
 
     // Apply the plan
     crate::infra::manifest::create(&manifest_path, &tidy_plan.manifest).unwrap();
@@ -155,9 +174,9 @@ jobs:
     );
 }
 
-/// Task 2.5: Manifest authority — manifest v4 must survive even when workflows
-/// have a stale SHA pointing at v3.  The manifest is the source of truth for
-/// existing actions; tidy must never downgrade it from workflow state.
+/// Manifest authority: manifest v4 must survive even when workflows have a stale SHA
+/// pointing at v3. The manifest is the source of truth for existing actions; tidy must
+/// never downgrade it from workflow state.
 #[test]
 fn manifest_authority_not_overwritten_by_workflow_sha() {
     let temp_dir = tempfile::TempDir::new().unwrap();
@@ -194,7 +213,7 @@ jobs:
 
     let scanner = FileWorkflowScanner::new(repo_root);
 
-    let tidy_plan = plan(&manifest, &lock, &noop_registry(), &scanner, |_| {}).unwrap();
+    let tidy_plan = plan(&manifest, &lock, &NoopRegistry, &scanner, |_| {}).unwrap();
 
     // Manifest diff must NOT change checkout's version — v4 is preserved
     assert!(
@@ -228,7 +247,7 @@ fn plan_empty_workflows_returns_empty_plan() {
     let lock = Lock::default();
     let scanner = FileWorkflowScanner::new(repo_root);
 
-    let result = plan(&manifest, &lock, &noop_registry(), &scanner, |_| {}).unwrap();
+    let result = plan(&manifest, &lock, &NoopRegistry, &scanner, |_| {}).unwrap();
     assert!(result.is_empty(), "Plan for empty workflows must be empty");
 }
 
@@ -261,7 +280,7 @@ fn plan_one_new_action_produces_added_entries() {
     let manifest = Manifest::default(); // empty — action is "new"
     let scanner = FileWorkflowScanner::new(repo_root);
 
-    let result = plan(&manifest, &lock, &noop_registry(), &scanner, |_| {}).unwrap();
+    let result = plan(&manifest, &lock, &NoopRegistry, &scanner, |_| {}).unwrap();
 
     // Manifest should have added action
     assert!(
@@ -321,7 +340,7 @@ fn plan_removed_action_produces_removed_entries() {
 
     let scanner = FileWorkflowScanner::new(repo_root);
 
-    let result = plan(&manifest, &lock, &noop_registry(), &scanner, |_| {}).unwrap();
+    let result = plan(&manifest, &lock, &NoopRegistry, &scanner, |_| {}).unwrap();
 
     // checkout should be removed from manifest
     assert!(
@@ -383,7 +402,7 @@ fn plan_everything_in_sync_returns_empty_plan() {
 
     let scanner = FileWorkflowScanner::new(repo_root);
 
-    let result = plan(&manifest, &lock, &noop_registry(), &scanner, |_| {}).unwrap();
+    let result = plan(&manifest, &lock, &NoopRegistry, &scanner, |_| {}).unwrap();
 
     // Everything is in sync — plan should have no manifest/lock changes
     assert!(

@@ -162,70 +162,6 @@ fn save_sorts_actions_alphabetically() {
     assert!(section_lines[2].contains("docker/build-push-action"));
 }
 
-/// A canonical two-tier lock covering every ref kind gx writes: a semver tag,
-/// two specifiers sharing one commit, a branch pin, and a bare-commit pin.
-///
-/// Bare TOML keys (`main`, the SHA) are unquoted because that is what the
-/// document builder emits.
-const CANONICAL_LOCK: &str = concat!(
-    "[resolutions.\"actions/checkout\".\"^4\"]\nversion = \"v4.2.1\"\n\n",
-    "[resolutions.\"actions/checkout\".\"^4.2\"]\nversion = \"v4.2.1\"\n\n",
-    "[resolutions.\"actions/setup-node\".main]\nversion = \"main\"\n\n",
-    "[resolutions.\"docker/build-push-action\".0011223344556677889900aabbccddeeff001122]\nversion = \"0011223344556677889900aabbccddeeff001122\"\n\n",
-    "[actions.\"actions/checkout\".\"v4.2.1\"]\nsha = \"abc123def456789012345678901234567890abcd\"\nrepository = \"actions/checkout\"\nref_type = \"tag\"\ndate = \"2026-01-01T00:00:00Z\"\n\n",
-    "[actions.\"actions/setup-node\".main]\nsha = \"def456789012345678901234567890abcdef1234\"\nrepository = \"actions/setup-node\"\nref_type = \"branch\"\ndate = \"2026-02-02T00:00:00Z\"\n\n",
-    "[actions.\"docker/build-push-action\".0011223344556677889900aabbccddeeff001122]\nsha = \"0011223344556677889900aabbccddeeff001122\"\nrepository = \"docker/build-push-action\"\nref_type = \"commit\"\ndate = \"2026-03-03T00:00:00Z\"\n",
-);
-
-/// Load `content` through a `Store`, save it straight back, and return the bytes written.
-fn load_then_save(content: &str) -> String {
-    let mut file = NamedTempFile::new().unwrap();
-    file.write_all(content.as_bytes()).unwrap();
-    let store = Store::new(file.path());
-    let lock = store.load().unwrap();
-    store.save(&lock).unwrap();
-    std::fs::read_to_string(file.path()).unwrap()
-}
-
-#[test]
-fn two_tier_lock_roundtrips_byte_identically() {
-    assert_eq!(
-        load_then_save(CANONICAL_LOCK),
-        CANONICAL_LOCK,
-        "reading and rewriting an unchanged lock must not alter a single byte"
-    );
-}
-
-#[test]
-fn save_sorts_unsorted_input_into_canonical_order() {
-    // `Lock`'s `HashMap` discards this order before the serializer sees it; the
-    // assertion holds for whatever order iteration yields.
-    let unsorted = concat!(
-        "[resolutions.\"docker/build-push-action\".\"^5\"]\nversion = \"v5.1.0\"\n\n",
-        "[resolutions.\"actions/checkout\".\"^4.2\"]\nversion = \"v4.2.1\"\n\n",
-        "[resolutions.\"actions/checkout\".\"^4\"]\nversion = \"v4.2.1\"\n\n",
-        "[actions.\"docker/build-push-action\".\"v5.1.0\"]\nsha = \"1111111111111111111111111111111111111111\"\nrepository = \"docker/build-push-action\"\nref_type = \"tag\"\ndate = \"2026-03-03T00:00:00Z\"\n\n",
-        "[actions.\"actions/checkout\".\"v4.2.1\"]\nsha = \"2222222222222222222222222222222222222222\"\nrepository = \"actions/checkout\"\nref_type = \"tag\"\ndate = \"2026-01-01T00:00:00Z\"\n",
-    );
-    let expected = concat!(
-        "[resolutions.\"actions/checkout\".\"^4\"]\nversion = \"v4.2.1\"\n\n",
-        "[resolutions.\"actions/checkout\".\"^4.2\"]\nversion = \"v4.2.1\"\n\n",
-        "[resolutions.\"docker/build-push-action\".\"^5\"]\nversion = \"v5.1.0\"\n\n",
-        "[actions.\"actions/checkout\".\"v4.2.1\"]\nsha = \"2222222222222222222222222222222222222222\"\nrepository = \"actions/checkout\"\nref_type = \"tag\"\ndate = \"2026-01-01T00:00:00Z\"\n\n",
-        "[actions.\"docker/build-push-action\".\"v5.1.0\"]\nsha = \"1111111111111111111111111111111111111111\"\nrepository = \"docker/build-push-action\"\nref_type = \"tag\"\ndate = \"2026-03-03T00:00:00Z\"\n",
-    );
-
-    assert_ne!(
-        unsorted, expected,
-        "expected output must be the sorted form, not a copy of the fixture"
-    );
-    assert_eq!(
-        load_then_save(unsorted),
-        expected,
-        "entries must be sorted by action ID then specifier/version"
-    );
-}
-
 #[test]
 fn two_specs_sharing_a_version_write_the_first_commit_in_sort_order() {
     // Built in memory, not from a fixture: two specs loaded from disk share one
@@ -259,6 +195,72 @@ fn two_specs_sharing_a_version_write_the_first_commit_in_sort_order() {
     assert!(
         !content.contains("2222222222222222222222222222222222222222"),
         "the later spec's commit must not overwrite the first:\n{content}"
+    );
+}
+
+/// A canonical two-tier lock covering every ref kind gx writes: a semver tag,
+/// two specifiers sharing one commit, a branch pin, and a bare-commit pin.
+///
+/// Bare TOML keys (`main`, the SHA) are emitted unquoted by the document
+/// builder, so this fixture reproduces that exactly.
+const CANONICAL_LOCK: &str = concat!(
+    "[resolutions.\"actions/checkout\".\"^4\"]\nversion = \"v4.2.1\"\n\n",
+    "[resolutions.\"actions/checkout\".\"^4.2\"]\nversion = \"v4.2.1\"\n\n",
+    "[resolutions.\"actions/setup-node\".main]\nversion = \"main\"\n\n",
+    "[resolutions.\"docker/build-push-action\".0011223344556677889900aabbccddeeff001122]\nversion = \"0011223344556677889900aabbccddeeff001122\"\n\n",
+    "[actions.\"actions/checkout\".\"v4.2.1\"]\nsha = \"abc123def456789012345678901234567890abcd\"\nrepository = \"actions/checkout\"\nref_type = \"tag\"\ndate = \"2026-01-01T00:00:00Z\"\n\n",
+    "[actions.\"actions/setup-node\".main]\nsha = \"def456789012345678901234567890abcdef1234\"\nrepository = \"actions/setup-node\"\nref_type = \"branch\"\ndate = \"2026-02-02T00:00:00Z\"\n\n",
+    "[actions.\"docker/build-push-action\".0011223344556677889900aabbccddeeff001122]\nsha = \"0011223344556677889900aabbccddeeff001122\"\nrepository = \"docker/build-push-action\"\nref_type = \"commit\"\ndate = \"2026-03-03T00:00:00Z\"\n",
+);
+
+/// Load `content` through a `Store`, save it straight back, and return the bytes written.
+fn load_then_save(content: &str) -> String {
+    let mut file = NamedTempFile::new().unwrap();
+    file.write_all(content.as_bytes()).unwrap();
+    let store = Store::new(file.path());
+    let lock = store.load().unwrap();
+    store.save(&lock).unwrap();
+    std::fs::read_to_string(file.path()).unwrap()
+}
+
+#[test]
+fn two_tier_lock_roundtrips_byte_identically() {
+    assert_eq!(
+        load_then_save(CANONICAL_LOCK),
+        CANONICAL_LOCK,
+        "reading and rewriting an unchanged lock must not alter a single byte"
+    );
+}
+
+#[test]
+fn save_sorts_unsorted_input_into_canonical_order() {
+    // `Lock` stores rows in a `HashMap`, so loading already discards input
+    // order — this fixture is reverse-ordered to document the intent, not
+    // because the serializer ever sees that order. What the assertion proves is
+    // that output is sorted deterministically whatever order iteration yields.
+    let unsorted = concat!(
+        "[resolutions.\"docker/build-push-action\".\"^5\"]\nversion = \"v5.1.0\"\n\n",
+        "[resolutions.\"actions/checkout\".\"^4.2\"]\nversion = \"v4.2.1\"\n\n",
+        "[resolutions.\"actions/checkout\".\"^4\"]\nversion = \"v4.2.1\"\n\n",
+        "[actions.\"docker/build-push-action\".\"v5.1.0\"]\nsha = \"1111111111111111111111111111111111111111\"\nrepository = \"docker/build-push-action\"\nref_type = \"tag\"\ndate = \"2026-03-03T00:00:00Z\"\n\n",
+        "[actions.\"actions/checkout\".\"v4.2.1\"]\nsha = \"2222222222222222222222222222222222222222\"\nrepository = \"actions/checkout\"\nref_type = \"tag\"\ndate = \"2026-01-01T00:00:00Z\"\n",
+    );
+    let expected = concat!(
+        "[resolutions.\"actions/checkout\".\"^4\"]\nversion = \"v4.2.1\"\n\n",
+        "[resolutions.\"actions/checkout\".\"^4.2\"]\nversion = \"v4.2.1\"\n\n",
+        "[resolutions.\"docker/build-push-action\".\"^5\"]\nversion = \"v5.1.0\"\n\n",
+        "[actions.\"actions/checkout\".\"v4.2.1\"]\nsha = \"2222222222222222222222222222222222222222\"\nrepository = \"actions/checkout\"\nref_type = \"tag\"\ndate = \"2026-01-01T00:00:00Z\"\n\n",
+        "[actions.\"docker/build-push-action\".\"v5.1.0\"]\nsha = \"1111111111111111111111111111111111111111\"\nrepository = \"docker/build-push-action\"\nref_type = \"tag\"\ndate = \"2026-03-03T00:00:00Z\"\n",
+    );
+
+    assert_ne!(
+        unsorted, expected,
+        "expected output must be the sorted form, not a copy of the fixture"
+    );
+    assert_eq!(
+        load_then_save(unsorted),
+        expected,
+        "entries must be sorted by action ID then specifier/version"
     );
 }
 

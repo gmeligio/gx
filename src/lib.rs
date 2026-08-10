@@ -3,6 +3,7 @@
     reason = "dev-dependencies are only used in integration tests"
 )]
 
+pub mod audit;
 pub mod command;
 pub mod config;
 pub mod diagnostic;

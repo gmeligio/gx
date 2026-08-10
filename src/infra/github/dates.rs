@@ -1,6 +1,6 @@
 use super::Error as GithubError;
 use super::Registry;
-use super::registry::GITHUB_API_BASE;
+use super::resolve::GITHUB_API_BASE;
 use super::responses::{CommitDetailResponse, ReleaseResponse, TagObjectResponse};
 
 #[expect(
@@ -12,7 +12,7 @@ impl Registry {
     ///
     /// # Errors
     ///
-    /// Returns an error if the request fails or the response cannot be parsed.
+    /// Returns an error if no token is set, the request fails, or the response cannot be parsed.
     pub(super) fn fetch_commit_date(
         &self,
         base_repo: &str,

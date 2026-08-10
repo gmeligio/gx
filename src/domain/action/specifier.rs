@@ -213,7 +213,10 @@ impl From<&str> for Specifier {
 
 /// Attempts to parse a version string into a semver `Version`.
 /// Handles common formats like `"v4"`, `"v4.1"`, `"v4.1.2"`, `"4.1.2"`.
-pub(super) fn parse_semver(version: &str) -> Option<semver::Version> {
+///
+/// Visible to the whole crate so `domain::remediation` can reuse it rather than
+/// keeping a second, drifting copy of the `v`-stripping and `.0` padding rules.
+pub(crate) fn parse_semver(version: &str) -> Option<semver::Version> {
     // Strip leading 'v' or 'V' if present
     let normalized = version
         .strip_prefix('v')

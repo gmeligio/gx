@@ -1,18 +1,22 @@
-//! The diagnostic record, and the matchers deciding whether one survives a user's
-//! `ignore` configuration.
+//! The diagnostic record and the ignore matchers that decide whether a diagnostic
+//! survives a user's `ignore` configuration.
+//!
+//! Generic over the rule-identity type so that each command supplies its own closed
+//! set of rule names while sharing one diagnostic vocabulary.
 
 use crate::config::IgnoreTarget;
 use crate::config::Level;
+use crate::domain::action::identity::ActionId;
 use crate::domain::file::actions::Located as LocatedAction;
 use crate::domain::file::site::{JobId, StepIndex, WorkflowPath};
 
-use super::RuleName;
-
 /// A single diagnostic reported by a rule.
+///
+/// `Id` is the reporting command's rule-identity type (e.g. `lint::RuleName`).
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct Diagnostic {
+pub struct Diagnostic<Id> {
     /// Identity of the rule that produced this diagnostic.
-    pub rule: RuleName,
+    pub rule: Id,
     /// Severity level.
     pub level: Level,
     /// Human-readable message.
@@ -29,9 +33,9 @@ pub struct Diagnostic {
     pub line: Option<u32>,
 }
 
-impl Diagnostic {
+impl<Id> Diagnostic<Id> {
     /// Create a new diagnostic.
-    pub fn new<S: Into<String>>(rule: RuleName, level: Level, message: S) -> Self {
+    pub fn new<S: Into<String>>(rule: Id, level: Level, message: S) -> Self {
         Self {
             rule,
             level,
@@ -72,97 +76,72 @@ impl Diagnostic {
     }
 }
 
-/// Whether the target's `workflow` key matches the diagnostic's, by suffix. No key
-/// matches everything; a key with no diagnostic workflow matches nothing.
-fn workflow_matches(diag_workflow: Option<&WorkflowPath>, target: &IgnoreTarget) -> bool {
+/// An `ignore` target matches only when every key it sets matches — an unset key imposes
+/// nothing. Each axis below answers for one key.
+///
+/// A `workflow` key matches by suffix, so `ci.yml` covers `.github/workflows/ci.yml`.
+fn workflow_axis(diag_workflow: Option<&WorkflowPath>, target: &IgnoreTarget) -> bool {
     let Some(target_workflow) = &target.workflow else {
         return true;
     };
     diag_workflow.is_some_and(|w| w.as_str().ends_with(target_workflow.as_str()))
 }
 
-/// For workflow-scoped diagnostics, matched on workflow and job.
-///
-/// An `action` key never matches here — these rules judge a workflow, not an action,
-/// so a target naming one is a mistake rather than a narrower filter.
-pub(crate) fn matches_ignore_workflow(diag: &Diagnostic, target: &IgnoreTarget) -> bool {
-    if target.action.is_some() {
-        return false;
-    }
-    if !workflow_matches(diag.workflow.as_ref(), target) {
-        return false;
-    }
-    if let Some(target_job) = &target.job {
-        let Some(diag_job) = &diag.job else {
-            return false;
-        };
-        if diag_job.as_str() != target_job.as_str() {
-            return false;
-        }
-    }
-    true
+/// A `job` key matches the diagnostic's own job. Diagnostics with no job never match one.
+fn job_axis<Id>(diag: &Diagnostic<Id>, target: &IgnoreTarget) -> bool {
+    let Some(target_job) = &target.job else {
+        return true;
+    };
+    diag.job
+        .as_ref()
+        .is_some_and(|j| j.as_str() == target_job.as_str())
 }
 
-/// For per-action diagnostics, where the caller knows which action is being checked.
-pub(crate) fn matches_ignore_action(
-    diag: &Diagnostic,
+/// An `action` key matches the action the diagnostic is about, when one is known.
+fn action_axis(diag_action: Option<&ActionId>, target: &IgnoreTarget) -> bool {
+    let Some(target_action) = &target.action else {
+        return true;
+    };
+    diag_action.is_some_and(|id| id.as_str() == target_action.as_str())
+}
+
+/// Matcher for workflow-scoped rules, which are about a file rather than an action — so an
+/// `action` key never matches one and users should omit it.
+pub fn matches_ignore_workflow<Id>(diag: &Diagnostic<Id>, target: &IgnoreTarget) -> bool {
+    target.action.is_none()
+        && workflow_axis(diag.workflow.as_ref(), target)
+        && job_axis(diag, target)
+}
+
+/// Matcher for action-scoped rules, where the caller already knows which action the
+/// diagnostic is about.
+pub fn matches_ignore_action<Id>(
+    diag: &Diagnostic<Id>,
     target: &IgnoreTarget,
     action: &LocatedAction,
 ) -> bool {
-    if diag.workflow.is_none() {
-        return false;
-    }
-
-    if let Some(target_action) = &target.action
-        && action.action.id.as_str() != target_action.as_str()
-    {
-        return false;
-    }
-
-    if !workflow_matches(diag.workflow.as_ref(), target) {
-        return false;
-    }
-
-    if target.job.is_some() {
-        return false;
-    }
-
-    true
+    diag.workflow.is_some()
+        && action_axis(Some(&action.action.id), target)
+        && workflow_axis(diag.workflow.as_ref(), target)
+        && target.job.is_none()
 }
 
-/// For aggregate phases with no action in hand: recovers one by looking up the
-/// diagnostic's workflow in `located_actions`.
-pub(crate) fn matches_ignore(
-    diag: &Diagnostic,
+/// Matcher for aggregate phases, which have no action in hand and must recover it from the
+/// diagnostic's workflow.
+pub fn matches_ignore<Id>(
+    diag: &Diagnostic<Id>,
     target: &IgnoreTarget,
     located_actions: &[LocatedAction],
 ) -> bool {
     let Some(diag_workflow) = &diag.workflow else {
         return false;
     };
-
     let diag_action = located_actions
         .iter()
         .find(|loc| loc.site.file == *diag_workflow)
         .map(|loc| &loc.action.id);
 
-    if let Some(target_action) = &target.action {
-        if let Some(matched_action) = diag_action {
-            if matched_action.as_str() != target_action.as_str() {
-                return false;
-            }
-        } else {
-            return false;
-        }
-    }
-
-    if !workflow_matches(Some(diag_workflow), target) {
-        return false;
-    }
-
-    if target.job.is_some() {
-        return false;
-    }
-
-    true
+    action_axis(diag_action, target)
+        && workflow_axis(Some(diag_workflow), target)
+        && target.job.is_none()
 }

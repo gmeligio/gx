@@ -32,11 +32,11 @@
 
 - [x] 3.1 Create `src/diagnostic/` with `mod.rs`, `record.rs`, `report.rs`; add
       `pub mod diagnostic;` to `src/lib.rs`
-- [x] 3.2 Move `Diagnostic` + builders into `record.rs`, naming `RuleName`
-      concretely (design D4)
+- [x] 3.2 Move `Diagnostic` + builders into `record.rs` as `Diagnostic<Id>`,
+      generic over rule identity (design D4)
 - [x] 3.3 Move the three ignore matchers and `workflow_matches` into `record.rs`
 - [x] 3.4 Move counting, `exit_code`, and summary pluralization into
-      `diagnostic/report.rs` as `Report`
+      `diagnostic/report.rs` as `Report<Id>`
 - [x] 3.5 Leave `Level`, `IgnoreTarget`, and `Rule` defined in `src/config.rs` —
       they are already generic and `lint/` imports them, which is the correct
       direction. The `config → lint` edge comes solely from `RuleName`
@@ -47,8 +47,8 @@
 - [x] 4.1 Trim `src/lint/rule.rs` to its residue — `RuleName` (the `rule_ids!`
       call), the `Rule` trait, `Context`, and runner wrappers — keeping the
       filename; delete `src/lint/report.rs` (8 → 7 files)
-- [x] 4.2 Re-export `lint::Diagnostic` / `lint::Report` from `crate::diagnostic`;
-      keep `gx::lint::{Diagnostic, RuleName, Context, Rule}` re-exported so
+- [x] 4.2 Add `lint::Diagnostic` / `lint::Report` type aliases over the generic
+      types; keep `gx::lint::{Diagnostic, RuleName, Context, Rule}` re-exported so
       `tests/` compiles unchanged
 - [x] 4.3 Update the 13 rule files and `command.rs` to the new import paths
 - [x] 4.4 Repoint `src/config.rs` and `src/infra/manifest/convert.rs` off

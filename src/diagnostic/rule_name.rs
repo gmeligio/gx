@@ -1,7 +1,8 @@
 //! The lint rule identity.
 //!
 //! Here and not in `lint/` because `config` and `infra::manifest` must name a rule to
-//! parse `[lint.rules]`, and neither may depend on a command.
+//! parse `[lint.rules]`, and neither may depend on a command. `lint::RuleName` re-exports
+//! this.
 
 super::identity::rule_ids! {
     /// Canonical identifier for a lint rule. Add one by adding a line.

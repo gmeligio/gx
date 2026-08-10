@@ -117,12 +117,27 @@ pub struct Config {
     pub manifest_migrated: bool,
 }
 
+/// Interpret a raw `GITHUB_TOKEN` value, treating blank as absent.
+///
+/// Split out from [`Settings::from_env`] so it is testable without mutating process
+/// environment, which is global and makes parallel tests flaky.
+fn parse_token(raw: Option<String>) -> Option<GitHubToken> {
+    raw.filter(|token| !token.trim().is_empty())
+        .map(GitHubToken::from)
+}
+
 impl Settings {
     /// Load settings from environment variables.
+    ///
+    /// A blank `GITHUB_TOKEN` is treated as absent rather than as an empty credential.
+    /// CI commonly exports the variable unconditionally, so `GITHUB_TOKEN=""` is a
+    /// frequent accident; carrying it as `Some("")` would send an unusable `Bearer`
+    /// header and, for token-requiring commands, satisfy a presence check while
+    /// authenticating nothing.
     #[must_use]
     pub fn from_env() -> Self {
         Self {
-            github_token: env::var("GITHUB_TOKEN").ok().map(GitHubToken::from),
+            github_token: parse_token(env::var("GITHUB_TOKEN").ok()),
         }
     }
 }
@@ -174,6 +189,22 @@ mod tests {
     fn settings_default_has_no_token() {
         let settings = Settings::default();
         assert!(settings.github_token.is_none());
+    }
+
+    #[test]
+    fn blank_token_is_treated_as_absent() {
+        // CI often exports GITHUB_TOKEN unconditionally, so an empty value is a common
+        // accident. Carrying it as Some("") would satisfy a presence check while
+        // authenticating nothing — for `gx audit` that would mean a false "clean".
+        assert!(super::parse_token(Some(String::new())).is_none());
+        assert!(super::parse_token(Some("   ".to_owned())).is_none());
+        assert!(super::parse_token(None).is_none());
+    }
+
+    #[test]
+    fn real_token_is_kept_verbatim() {
+        let token = super::parse_token(Some("ghp_example".to_owned()));
+        assert_eq!(token.as_ref().map(GitHubToken::as_str), Some("ghp_example"));
     }
 
     #[test]

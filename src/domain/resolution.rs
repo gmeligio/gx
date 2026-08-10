@@ -3,7 +3,7 @@ use super::action::resolved::{Commit, Resolved, ResolvedRef};
 use super::action::spec::Spec as ActionSpec;
 use super::action::specifier::Specifier;
 
-use super::action::tag_selection::{ShaIndex, select_most_specific_tag};
+use super::action::tag_selection::select_most_specific_tag;
 use super::action::uses_ref::RefType;
 use std::fmt;
 use thiserror::Error;
@@ -89,10 +89,11 @@ impl Error {
 
     /// Returns `true` when repeating the identical request could plausibly succeed.
     ///
-    /// Only rate limiting qualifies. [`Self::AuthRequired`] is excluded even though
-    /// it is skippable: re-issuing a request with the same absent or rejected
-    /// credential cannot produce a different outcome, so retrying it only delays
-    /// the failure.
+    /// Only rate limiting qualifies. [`Self::AuthRequired`] is skippable but not
+    /// retryable: the same absent credential fails the same way, so retrying it
+    /// only delays the failure. That is why the two questions need two predicates
+    /// — [`Self::is_skippable`] picks warning over hard failure, this one decides
+    /// whether to try again at all.
     #[must_use]
     pub fn is_retryable(&self) -> bool {
         matches!(self, Self::RateLimited { .. })
@@ -173,13 +174,8 @@ impl<'reg, R: VersionRegistry> ActionResolver<'reg, R> {
     /// # Errors
     ///
     /// Returns `Error` if the registry lookup fails.
-    pub fn resolve_from_sha(
-        &self,
-        id: &ActionId,
-        sha: &CommitSha,
-        sha_index: &mut ShaIndex,
-    ) -> Result<Resolved, Error> {
-        let desc = sha_index.get_or_describe(self.registry, id, sha)?;
+    pub fn resolve_from_sha(&self, id: &ActionId, sha: &CommitSha) -> Result<Resolved, Error> {
+        let desc = self.registry.describe_sha(id, sha)?;
         // Establish the kind once, at construction: a tag if one points at this
         // SHA, otherwise a bare commit pin with no version label. No SHA is ever
         // fabricated into a version slot.
@@ -191,9 +187,9 @@ impl<'reg, R: VersionRegistry> ActionResolver<'reg, R> {
             reference,
             commit: Commit {
                 sha: sha.clone(),
-                repository: desc.repository.clone(),
+                repository: desc.repository,
                 ref_type,
-                date: desc.date.clone(),
+                date: desc.date,
             },
         })
     }
@@ -212,7 +208,7 @@ mod tests {
     use super::testutil::FakeRegistry;
     use super::{
         ActionId, ActionResolver, ActionSpec, Commit, CommitDate, CommitSha, Error, Forge, RefType,
-        Repository, ShaIndex, Version,
+        Repository, Version,
     };
     use crate::domain::action::resolved::ResolvedRef;
     use crate::domain::action::specifier::Specifier;
@@ -266,10 +262,9 @@ mod tests {
         );
         let service = ActionResolver::new(&registry);
         let id = ActionId::from("owner/repo");
-        let mut sha_index = ShaIndex::new();
 
         let result = service
-            .resolve_from_sha(&id, &sha, &mut sha_index)
+            .resolve_from_sha(&id, &sha)
             .expect("Expected Ok result");
 
         assert_eq!(result.reference, ResolvedRef::Tag(Version::from("v3.6.1")));
@@ -285,10 +280,9 @@ mod tests {
         let registry = FakeRegistry::new();
         let service = ActionResolver::new(&registry);
         let id = ActionId::from("owner/repo");
-        let mut sha_index = ShaIndex::new();
 
         let result = service
-            .resolve_from_sha(&id, &sha, &mut sha_index)
+            .resolve_from_sha(&id, &sha)
             .expect("Expected Ok result");
 
         // No tag points at this SHA: the reference is a bare Commit, not a SHA
@@ -306,9 +300,8 @@ mod tests {
         let service = ActionResolver::new(&registry);
         let id = ActionId::from("owner/repo");
         let sha = CommitSha::from("abc123def456789012345678901234567890abcd");
-        let mut sha_index = ShaIndex::new();
 
-        let result = service.resolve_from_sha(&id, &sha, &mut sha_index);
+        let result = service.resolve_from_sha(&id, &sha);
         assert!(
             matches!(
                 result,
@@ -367,8 +360,8 @@ mod tests {
 
     #[test]
     fn auth_required_is_not_retryable() {
-        // Skippable but never retryable: repeating a request with the same
-        // absent credential cannot succeed, so a retrying caller must not.
+        // The one variant where the two predicates disagree — collapsing them
+        // into one bit would make the retry loop spin on a missing token.
         assert!(
             !Error::AuthRequired {
                 forge: Forge::GitHub

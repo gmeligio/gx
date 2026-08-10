@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use super::Error as TidyError;
 use crate::domain::action::identity::{CommitSha, Version};
 use crate::domain::action::spec::Spec as ActionSpec;
-use crate::domain::action::tag_selection::ShaIndex;
 use crate::domain::event::Event as SyncEvent;
 use crate::domain::lock::Lock;
 use crate::domain::manifest::Manifest;
@@ -21,7 +20,6 @@ pub(super) fn update_lock<R: VersionRegistry>(
     manifest: &mut Manifest,
     resolver: &ActionResolver<'_, R>,
     workflow_shas: &HashMap<ActionSpec, CommitSha>,
-    sha_index: &mut ShaIndex,
 ) -> Result<Vec<SyncEvent>, TidyError> {
     let mut events: Vec<SyncEvent> = Vec::new();
     let mut unresolved = Vec::new();
@@ -45,7 +43,7 @@ pub(super) fn update_lock<R: VersionRegistry>(
     }
 
     for spec in &all_specs {
-        match populate_lock_entry(lock, resolver, spec, workflow_shas, sha_index) {
+        match populate_lock_entry(lock, resolver, spec, workflow_shas) {
             Ok(Some(event)) => events.push(event),
             Ok(None) => {}
             Err(e) => {
@@ -88,7 +86,6 @@ fn populate_lock_entry<R: VersionRegistry>(
     resolver: &ActionResolver<'_, R>,
     spec: &ActionSpec,
     workflow_shas: &HashMap<ActionSpec, CommitSha>,
-    sha_index: &mut ShaIndex,
 ) -> Result<Option<SyncEvent>, ResolutionError> {
     if lock.has(spec) {
         return Ok(None);
@@ -98,7 +95,7 @@ fn populate_lock_entry<R: VersionRegistry>(
     // there is no SHA or it can't be described.
     let sha_first = workflow_shas
         .get(spec)
-        .and_then(|sha| resolver.resolve_from_sha(&spec.id, sha, sha_index).ok());
+        .and_then(|sha| resolver.resolve_from_sha(&spec.id, sha).ok());
     let Some(action) = sha_first else {
         let action = resolver.resolve(spec)?;
         lock.set(spec, action.reference, action.commit);

@@ -321,7 +321,7 @@ fn ignore_attribute_budget() {
 }
 
 // ---------------------------------------------------------------------------
-// Task 1.1 — Layer dependency direction
+// Layer dependency direction
 // ---------------------------------------------------------------------------
 
 /// Domain modules must not import from command modules or infra.
@@ -338,6 +338,7 @@ fn domain_does_not_import_upward() {
         "crate::upgrade",
         "crate::lint",
         "crate::init",
+        "crate::audit",
         "crate::infra",
     ];
 
@@ -371,7 +372,197 @@ fn domain_does_not_import_upward() {
 }
 
 // ---------------------------------------------------------------------------
-// Task 1.2 — Duplicate private function detection across command modules
+// Offline/networked command split
+// ---------------------------------------------------------------------------
+
+/// `gx lint` is offline and `gx audit` reads only the lock — both enforced, not assumed.
+///
+/// These are two halves of one invariant: a command is either offline or networked, and
+/// which one it is may not drift. Users rely on `gx lint` running in a pre-commit hook or a
+/// network-isolated runner, so the first rule that reaches for the API to "just check one
+/// thing" would silently turn a fast, deterministic gate into a flaky, credential-dependent
+/// one. In the other direction, audit deriving its own action set from workflow files would
+/// give it a second notion of "which actions exist" that drifts from the scanner's.
+///
+/// Enforced here because neither property is visible in a diff that violates it.
+#[test]
+fn offline_and_networked_command_layers_stay_separate() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let src_dir = manifest_dir.join("src");
+
+    // (directory, forbidden import substrings, why)
+    let rules: &[(&str, &[&str], &str)] = &[
+        (
+            "lint",
+            &["reqwest", "infra::github"],
+            "gx lint must stay offline — networked checks belong in gx audit",
+        ),
+        (
+            "audit",
+            &[
+                "workflow_scan",
+                "file::scan",
+                "file::parsed",
+                "WorkflowScanner",
+            ],
+            "gx audit must read gx.lock, never walk workflow files",
+        ),
+    ];
+
+    let mut violations: Vec<String> = Vec::new();
+
+    for &(dir, forbidden, why) in rules {
+        for file in collect_rs_files(&src_dir.join(dir)) {
+            let Ok(content) = fs::read_to_string(&file) else {
+                continue;
+            };
+            for (lineno, needle) in forbidden_imports_in(&content, forbidden) {
+                violations.push(format!(
+                    "{}:{lineno}: forbidden import `{needle}` — {why}",
+                    file.display(),
+                ));
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "Offline/networked layer violations:\n  {}",
+        violations.join("\n  ")
+    );
+}
+
+/// Find forbidden module references inside `use` statements in `content`.
+///
+/// Returns `(1-based line number, matched needle)` per violation.
+///
+/// Accumulates a whole `use` statement before matching, because rustfmt wraps a long
+/// import across lines and a line-at-a-time scan would miss the wrapped remainder — the
+/// exact shape a forbidden import is most likely to take. Only import statements count:
+/// prose in a doc comment naming a forbidden module (as these modules' own docs do) is
+/// not a dependency.
+///
+/// `pub use` counts too: a re-export is how the dependency reaches callers, so exempting
+/// it would leave the widest hole in the guardrail.
+///
+/// Extracted from the test so the matching logic can itself be tested. A guardrail whose
+/// own correctness is unverified provides no guarantee.
+fn forbidden_imports_in<'need>(
+    content: &str,
+    forbidden: &[&'need str],
+) -> Vec<(usize, &'need str)> {
+    let mut found = Vec::new();
+    let mut statement = String::new();
+    let mut start_line = 0;
+
+    for (index, line) in content.lines().enumerate() {
+        let trimmed = line.trim();
+        if statement.is_empty() {
+            if !is_import_start(trimmed) {
+                continue;
+            }
+            start_line = index + 1;
+        }
+        // Joined with a space: concatenating bare would splice the tail of one path onto
+        // the head of the next (`my_infra::` + `github_helper`) and invent a match that
+        // no single path contains.
+        if !statement.is_empty() {
+            statement.push(' ');
+        }
+        statement.push_str(trimmed);
+
+        // A `use` statement ends at the first `;`; until then it continues across lines.
+        if !trimmed.ends_with(';') {
+            continue;
+        }
+        // A brace continues a path — `crate::infra::{` + `github::Registry` is one import —
+        // so the brace and the line break around it collapse away. A comma ends a path, so
+        // it survives as a separator that sibling entries cannot be spliced across.
+        let flattened = statement.replace(['{', '}'], "").replace(":: ", "::");
+        for &needle in forbidden {
+            if flattened.contains(needle) {
+                found.push((start_line, needle));
+            }
+        }
+        statement.clear();
+    }
+    found
+}
+
+/// Whether `trimmed` begins an import statement, counting `pub use` and its
+/// visibility-scoped forms (`pub(crate) use`).
+fn is_import_start(trimmed: &str) -> bool {
+    let rest = trimmed.strip_prefix("pub").map_or(trimmed, |after| {
+        // `pub use` or `pub(crate) use` — skip an optional visibility scope.
+        after
+            .trim_start()
+            .strip_prefix('(')
+            .and_then(|scoped| scoped.split_once(')'))
+            .map_or(after, |(_, tail)| tail)
+            .trim_start()
+    });
+    rest.starts_with("use ")
+}
+
+/// The layer guardrail's matcher must actually catch what it claims to.
+///
+/// The guardrail reads the real `src/` tree, so it can only be made to fail by editing a
+/// source file — a manual check that leaves no trace. This tests the matcher against
+/// synthetic content instead, so the enforcement's own correctness is verified in CI.
+#[test]
+fn forbidden_import_matcher_catches_real_import_shapes() {
+    let forbidden = &["reqwest", "infra::github"];
+
+    // Plain import.
+    assert_eq!(
+        forbidden_imports_in("use reqwest::blocking::Client;\n", forbidden),
+        vec![(1, "reqwest")]
+    );
+
+    // rustfmt-wrapped import: the needle sits on a continuation line, which a
+    // line-at-a-time scan would miss entirely.
+    let wrapped = "use crate::\n    infra::github::Registry;\n";
+    assert_eq!(
+        forbidden_imports_in(wrapped, forbidden),
+        vec![(1, "infra::github")],
+        "a wrapped import must still be caught"
+    );
+
+    // Braced multi-line group.
+    let braced = "use crate::infra::{\n    github::Registry,\n    lock::Store,\n};\n";
+    assert_eq!(forbidden_imports_in(braced, forbidden).len(), 1);
+
+    // A re-export is how the dependency reaches callers, so it counts as one.
+    assert_eq!(
+        forbidden_imports_in("pub use reqwest::blocking::Client;\n", forbidden),
+        vec![(1, "reqwest")],
+        "a `pub use` re-export must not escape the guardrail"
+    );
+    assert_eq!(
+        forbidden_imports_in("pub(crate) use reqwest::Client;\n", forbidden),
+        vec![(1, "reqwest")],
+        "a scoped-visibility re-export must not escape either"
+    );
+
+    // Sibling paths in one group must not splice into a needle no single path contains.
+    let siblings = "use crate::x::{\n    my_infra::Thing,\n    github_helper::Other,\n};\n";
+    assert!(
+        forbidden_imports_in(siblings, forbidden).is_empty(),
+        "adjacent group entries must not be concatenated into a phantom match"
+    );
+
+    // Prose naming the module is not a dependency.
+    assert!(
+        forbidden_imports_in("//! never import reqwest here\n", forbidden).is_empty(),
+        "a doc comment mentioning the module is not an import"
+    );
+
+    // An unrelated import is clean.
+    assert!(forbidden_imports_in("use std::path::Path;\n", forbidden).is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Duplicate private functions across command modules
 // ---------------------------------------------------------------------------
 
 /// Private (non-`pub`) functions with the same name across different command
@@ -384,7 +575,7 @@ fn no_duplicate_private_fns_across_command_modules() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let src_dir = manifest_dir.join("src");
 
-    let command_modules = &["tidy", "upgrade", "lint", "init"];
+    let command_modules = &["tidy", "upgrade", "lint", "init", "audit"];
 
     // Map: fn_name → list of (module_name, file_path)
     let mut fn_to_modules: HashMap<String, Vec<String>> = HashMap::new();
@@ -463,18 +654,14 @@ fn no_duplicate_private_fns_across_command_modules() {
 }
 
 // ---------------------------------------------------------------------------
-// Task 1.3 — File size budget
+// File size budget
 // ---------------------------------------------------------------------------
 
 /// No `.rs` file in `src/` should exceed the line budget.
 ///
-/// Current budget is set to the current maximum + margin while large files
-/// are being split. Target is 500 lines per file.
+/// Ratchet: lower this as files are split. Target 500.
 #[test]
 fn file_size_budget() {
-    // TODO: lower further once infra/github.rs and upgrade/mod.rs are split.
-    //       Domain splits (manifest.rs, lock.rs, identity.rs, resolution.rs) are done.
-    //       identity.rs grew with Repository, VersionComment, CommitDate newtypes.
     let max_lines: usize = 550;
 
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -500,7 +687,7 @@ fn file_size_budget() {
 }
 
 // ---------------------------------------------------------------------------
-// Task 1.4 — Folder file count budget
+// Folder file count budget
 // ---------------------------------------------------------------------------
 
 // Count only direct .rs files per directory (non-recursive)
@@ -631,7 +818,7 @@ fn folder_file_count_budget() {
 }
 
 // ---------------------------------------------------------------------------
-// Task 1.5 — Logic line budget
+// Logic line budget
 // ---------------------------------------------------------------------------
 
 /// No `.rs` file in `src/` should exceed the logic line budget.
@@ -640,8 +827,7 @@ fn folder_file_count_budget() {
 /// first `#[cfg(test)]` to EOF). Standalone `tests.rs` files are excluded
 /// entirely (they are 100% test code).
 ///
-/// Budget: 440 (current max: 438 in infra/github/resolve.rs).
-/// Target: 300 once large files are split.
+/// Ratchet: lower this as files are split. Target 300.
 #[test]
 fn logic_line_budget() {
     let max_logic_lines: usize = 440;
@@ -728,19 +914,16 @@ fn logic_line_budget() {
 }
 
 // ---------------------------------------------------------------------------
-// Task 1.6 — mod.rs reexports only
+// mod.rs reexports only
 // ---------------------------------------------------------------------------
 
-/// Every `mod.rs` should ideally contain only reexports, module declarations,
-/// attributes, and comments. Logic belongs in named files.
+/// Every `mod.rs` should contain only reexports, module declarations, attributes, and
+/// comments. Logic belongs in named files.
 ///
-/// Budget: 360 per file (current max: 354 in lint/mod.rs).
-/// Target: 0 (mod.rs should be reexports only).
+/// Ratchet: lower this as logic moves out. Target 0.
 #[test]
 fn mod_rs_reexports_only() {
     let max_mod_logic: usize = 360;
-    // Target: 0 (mod.rs should be reexports only).
-    // Current max: 354 (lint/mod.rs). Headroom for minor multi-line use edge cases.
 
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let src_dir = manifest_dir.join("src");
@@ -805,18 +988,13 @@ fn mod_rs_reexports_only() {
 }
 
 // ---------------------------------------------------------------------------
-// Task 1.7 — No generic file names
+// No generic file names
 // ---------------------------------------------------------------------------
 
 /// File names should describe what the code does, not what kind of code it is.
-///
-/// Budget: 1 (current: upgrade/types.rs).
-/// Target: 0.
 #[test]
 fn no_generic_file_names() {
-    let max_generic_names: usize = 1;
-    // Target: 0.
-    // Current violation: upgrade/types.rs
+    let max_generic_names: usize = 0;
 
     let denied = [
         "types.rs",

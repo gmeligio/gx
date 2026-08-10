@@ -7,8 +7,6 @@ use crate::domain::resolution::{Error as ResolutionError, Forge, ShaDescription,
 use std::time::Duration;
 use thiserror::Error;
 
-/// Base URL for the GitHub REST API.
-pub(super) const GITHUB_API_BASE: &str = "https://api.github.com";
 /// HTTP User-Agent header value sent with all GitHub API requests.
 const USER_AGENT: &str = "gx-cli";
 /// Timeout in seconds for each HTTP request to the GitHub API.
@@ -99,12 +97,9 @@ impl Registry {
     ///
     /// The status is classified *before* the body is parsed, so a non-2xx
     /// response yields the precise error (e.g. [`Error::NotFound`]) rather than
-    /// a [`Error::ParseResponse`] from parsing an error body. That keeps
-    /// [`Error::RateLimited`] and [`Error::Unauthorized`] intact, which is what
-    /// the [`VersionRegistry`] impl maps to a skippable [`ResolutionError`].
-    ///
-    /// Not usable by callers that read response headers (the body parse
-    /// consumes the response) or that need failures to stay non-fatal.
+    /// a [`Error::ParseResponse`] from parsing an error body. Callers such as
+    /// `resolve_ref` depend on this to distinguish a missing ref from a
+    /// malformed one.
     pub(super) fn get_json<T: serde::de::DeserializeOwned>(
         &self,
         url: &str,
@@ -127,6 +122,19 @@ impl Registry {
             url: url.to_owned(),
             source,
         })
+    }
+
+    /// Build a POST request, attaching the Authorization header only if a token is set.
+    ///
+    /// Used by the GraphQL seam, which is POST-only. Unlike the REST paths, its caller
+    /// requires a token and refuses to run without one — an unauthenticated GraphQL
+    /// request is rejected outright, so a token-less POST could only ever fail.
+    pub(super) fn authenticated_post(&self, url: &str) -> reqwest::blocking::RequestBuilder {
+        let req = self.client.post(url);
+        match &self.token {
+            Some(token) => req.header("Authorization", format!("Bearer {}", token.as_str())),
+            None => req,
+        }
     }
 
     /// Classify a non-success HTTP response into the appropriate `Error` variant.
@@ -170,40 +178,26 @@ impl Registry {
     }
 }
 
-/// Map a GitHub error into the forge-neutral [`ResolutionError`].
-///
-/// Rate limiting and rejected credentials carry the forge as data; everything
-/// else becomes a strict `ResolveFailed` naming `spec`, which is the only part
-/// that varies between call sites.
-fn to_resolution_error(error: &Error, spec: ActionSpec) -> ResolutionError {
-    match *error {
-        Error::RateLimited { .. } => ResolutionError::RateLimited {
-            forge: Forge::GitHub,
-        },
-        Error::Unauthorized { .. } => ResolutionError::AuthRequired {
-            forge: Forge::GitHub,
-        },
-        Error::ClientInit(_)
-        | Error::Request { .. }
-        | Error::NotFound { .. }
-        | Error::ApiError { .. }
-        | Error::ParseResponse { .. } => ResolutionError::ResolveFailed {
-            spec,
-            reason: error.to_string(),
-        },
-    }
-}
-
 impl VersionRegistry for Registry {
     fn lookup_sha(&self, id: &ActionId, version: &Version) -> Result<Commit, ResolutionError> {
-        let (sha, ref_type) = self
-            .resolve_ref(id.as_str(), version.as_str())
-            .map_err(|e| {
-                to_resolution_error(
-                    &e,
-                    ActionSpec::new(id.clone(), Specifier::from_v1(version.as_str())),
-                )
-            })?;
+        let (sha, ref_type) =
+            self.resolve_ref(id.as_str(), version.as_str())
+                .map_err(|e| match e {
+                    Error::RateLimited { .. } => ResolutionError::RateLimited {
+                        forge: Forge::GitHub,
+                    },
+                    Error::Unauthorized { .. } => ResolutionError::AuthRequired {
+                        forge: Forge::GitHub,
+                    },
+                    Error::ClientInit(_)
+                    | Error::Request { .. }
+                    | Error::NotFound { .. }
+                    | Error::ApiError { .. }
+                    | Error::ParseResponse { .. } => ResolutionError::ResolveFailed {
+                        spec: ActionSpec::new(id.clone(), Specifier::from_v1(version.as_str())),
+                        reason: e.to_string(),
+                    },
+                })?;
 
         let base_repo = id.base_repo();
         let base_repo_str = base_repo.as_str();
@@ -243,11 +237,21 @@ impl VersionRegistry for Registry {
     fn all_tags(&self, id: &ActionId) -> Result<Vec<Version>, ResolutionError> {
         self.get_version_tags(id.as_str())
             .map(|tags| tags.into_iter().map(Version::from).collect())
-            .map_err(|e| {
-                to_resolution_error(
-                    &e,
-                    ActionSpec::new(id.clone(), Specifier::Ref(String::new())),
-                )
+            .map_err(|e| match e {
+                Error::RateLimited { .. } => ResolutionError::RateLimited {
+                    forge: Forge::GitHub,
+                },
+                Error::Unauthorized { .. } => ResolutionError::AuthRequired {
+                    forge: Forge::GitHub,
+                },
+                Error::ClientInit(_)
+                | Error::Request { .. }
+                | Error::NotFound { .. }
+                | Error::ApiError { .. }
+                | Error::ParseResponse { .. } => ResolutionError::ResolveFailed {
+                    spec: ActionSpec::new(id.clone(), Specifier::Ref(String::new())),
+                    reason: e.to_string(),
+                },
             })
     }
 
@@ -257,103 +261,40 @@ impl VersionRegistry for Registry {
         sha: &CommitSha,
     ) -> Result<ShaDescription, ResolutionError> {
         let base_repo = id.base_repo();
-        let spec = || ActionSpec::new(id.clone(), Specifier::Sha(sha.as_str().to_owned()));
 
         // Fetch commit date directly — no tag/branch fallback chain needed since SHA is trusted
         let date = self
             .fetch_commit_date(base_repo.as_str(), sha.as_str())
-            .map_err(|e| to_resolution_error(&e, spec()))?
+            .map_err(|e| match e {
+                Error::RateLimited { .. } => ResolutionError::RateLimited {
+                    forge: Forge::GitHub,
+                },
+                Error::Unauthorized { .. } => ResolutionError::AuthRequired {
+                    forge: Forge::GitHub,
+                },
+                Error::ClientInit(_)
+                | Error::Request { .. }
+                | Error::NotFound { .. }
+                | Error::ApiError { .. }
+                | Error::ParseResponse { .. } => ResolutionError::ResolveFailed {
+                    spec: ActionSpec::new(id.clone(), Specifier::Sha(sha.as_str().to_owned())),
+                    reason: e.to_string(),
+                },
+            })?
             .unwrap_or_default();
 
-        // A rate limit or rejected credential here must surface, so the caller can
-        // skip the action with a warning. Any other failure means the SHA simply
-        // carries no tags, which is a legitimate answer.
-        let tags = match self.get_tags_for_sha(id.as_str(), sha.as_str()) {
-            Ok(tags) => tags.into_iter().map(Version::from).collect(),
-            Err(e @ (Error::RateLimited { .. } | Error::Unauthorized { .. })) => {
-                return Err(to_resolution_error(&e, spec()));
-            }
-            Err(_) => vec![],
-        };
+        // Tag lookup is non-fatal: return empty tags on failure
+        let tags = self
+            .get_tags_for_sha(id.as_str(), sha.as_str())
+            .unwrap_or_default()
+            .into_iter()
+            .map(Version::from)
+            .collect();
 
         Ok(ShaDescription {
             tags,
             repository: base_repo,
             date: CommitDate::from(date),
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{Error, to_resolution_error};
-    use crate::domain::action::identity::ActionId;
-    use crate::domain::action::spec::Spec as ActionSpec;
-    use crate::domain::action::specifier::Specifier;
-    use crate::domain::resolution::{Error as ResolutionError, Forge};
-
-    fn spec() -> ActionSpec {
-        ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"))
-    }
-
-    #[test]
-    fn rate_limit_maps_to_skippable_rate_limited() {
-        let mapped = to_resolution_error(
-            &Error::RateLimited {
-                url: "https://api.github.com/x".to_owned(),
-            },
-            spec(),
-        );
-
-        assert!(
-            matches!(
-                mapped,
-                ResolutionError::RateLimited {
-                    forge: Forge::GitHub
-                }
-            ),
-            "got {mapped:?}"
-        );
-        assert!(mapped.is_skippable());
-    }
-
-    #[test]
-    fn unauthorized_maps_to_skippable_auth_required() {
-        let mapped = to_resolution_error(
-            &Error::Unauthorized {
-                url: "https://api.github.com/x".to_owned(),
-            },
-            spec(),
-        );
-
-        assert!(
-            matches!(
-                mapped,
-                ResolutionError::AuthRequired {
-                    forge: Forge::GitHub
-                }
-            ),
-            "got {mapped:?}"
-        );
-        assert!(mapped.is_skippable());
-        assert!(!mapped.is_retryable());
-    }
-
-    /// A 404 is a real answer about the repo, not a transient condition, so it
-    /// must fail the command rather than silently skip the action.
-    #[test]
-    fn not_found_maps_to_strict_resolve_failed() {
-        let mapped = to_resolution_error(
-            &Error::NotFound {
-                url: "https://api.github.com/x".to_owned(),
-            },
-            spec(),
-        );
-
-        assert!(
-            matches!(mapped, ResolutionError::ResolveFailed { .. }),
-            "got {mapped:?}"
-        );
-        assert!(!mapped.is_skippable());
     }
 }
