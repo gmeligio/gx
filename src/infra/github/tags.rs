@@ -49,8 +49,7 @@ impl Registry {
     /// Dereference an annotated tag to check if it points to the given commit SHA.
     /// Returns `Some(tag_name)` if the tag's underlying commit matches, `None` otherwise.
     ///
-    /// Deliberately does not use `get_json`: a failed dereference must stay
-    /// non-fatal, yielding a missing tag rather than an error.
+    /// Not `get_json`: a failed dereference must stay non-fatal.
     pub(super) fn dereference_tag(
         &self,
         base_repo: &str,
@@ -82,8 +81,7 @@ impl Registry {
     /// results to tags starting with "v" (semver convention).
     /// Handles pagination via Link header.
     ///
-    /// Deliberately does not use `get_json`: the `Link` header must be read
-    /// before the body is parsed, and parsing consumes the response.
+    /// Not `get_json`: the `Link` header must be read before the body.
     ///
     /// # Errors
     ///

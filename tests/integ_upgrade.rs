@@ -1,6 +1,5 @@
 #![expect(
     clippy::unwrap_used,
-    clippy::string_slice,
     clippy::assertions_on_result_states,
     clippy::shadow_reuse,
     reason = "tests use unwrap, indexing, and other patterns freely"
@@ -8,7 +7,6 @@
 
 mod common;
 
-use common::registries::FakeRegistry;
 use common::setup::{
     create_test_repo, lock_path, manifest_path, write_composite_action, write_lock, write_manifest,
     write_workflow,
@@ -20,6 +18,7 @@ use gx::domain::action::specifier::Specifier;
 use gx::domain::action::uses_ref::RefType;
 use gx::domain::lock::Lock;
 use gx::domain::manifest::Manifest;
+use gx::domain::resolution::testutil::FakeRegistry;
 use gx::infra::lock::Store as LockStore;
 use gx::infra::manifest::patch::apply_manifest_diff;
 use gx::infra::manifest::{self};

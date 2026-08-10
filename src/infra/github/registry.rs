@@ -71,7 +71,7 @@ impl Registry {
     /// # Panics
     ///
     /// This method panics if called from within an async runtime. See docs on
-    /// [`reqwest::blocking`][crate::blocking] for details.
+    /// [`reqwest::blocking`] for details.
     pub fn new(token: Option<crate::config::GitHubToken>) -> Result<Self, Error> {
         let client = reqwest::blocking::Client::builder()
             .user_agent(USER_AGENT)
@@ -100,9 +100,6 @@ impl Registry {
     /// a [`Error::ParseResponse`] from parsing an error body. Callers such as
     /// `resolve_ref` depend on this to distinguish a missing ref from a
     /// malformed one.
-    ///
-    /// Not usable by callers that read response headers (the body parse
-    /// consumes the response) or that need failures to stay non-fatal.
     pub(super) fn get_json<T: serde::de::DeserializeOwned>(
         &self,
         url: &str,
@@ -125,6 +122,19 @@ impl Registry {
             url: url.to_owned(),
             source,
         })
+    }
+
+    /// Build a POST request, attaching the Authorization header only if a token is set.
+    ///
+    /// Used by the GraphQL seam, which is POST-only. Unlike the REST paths, its caller
+    /// requires a token and refuses to run without one — an unauthenticated GraphQL
+    /// request is rejected outright, so a token-less POST could only ever fail.
+    pub(super) fn authenticated_post(&self, url: &str) -> reqwest::blocking::RequestBuilder {
+        let req = self.client.post(url);
+        match &self.token {
+            Some(token) => req.header("Authorization", format!("Bearer {}", token.as_str())),
+            None => req,
+        }
     }
 
     /// Classify a non-success HTTP response into the appropriate `Error` variant.

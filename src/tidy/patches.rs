@@ -90,8 +90,7 @@ mod tests {
     use crate::domain::file::site::{JobId, StepIndex, WorkflowPath};
     use crate::domain::file::site::{Origin, Slot};
 
-    /// Task 4.2: SHA-only manifest version produces `@SHA` without trailing
-    /// `# SHA` comment in workflow output.
+    /// A SHA-only manifest version produces `@SHA` with no trailing `# SHA` comment.
     #[test]
     fn sha_only_version_no_trailing_comment() {
         let sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";

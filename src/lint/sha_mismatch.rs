@@ -27,7 +27,7 @@ impl ShaMismatchRule {
         }
 
         let msg = format!(
-            "action {} SHA {} not found in lock file",
+            "{} SHA {} not found in lock file",
             &action.action.id,
             sha.as_str()
         );

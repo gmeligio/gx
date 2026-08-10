@@ -124,31 +124,6 @@ fn load_unrecognized_content_returns_error() {
 // ========== Store::save tests ==========
 
 #[test]
-fn save_and_load_roundtrip() {
-    let file = NamedTempFile::new().unwrap();
-    let store = Store::new(file.path());
-
-    let mut lock = crate::domain::lock::Lock::default();
-    set_resolved(
-        &mut lock,
-        "actions/checkout",
-        "^4",
-        "abc123def456789012345678901234567890abcd",
-    );
-
-    store.save(&lock).unwrap();
-
-    let loaded = store.load().unwrap();
-    let result = loaded.get(&make_key("actions/checkout", "^4"));
-    assert!(result.is_some());
-    let entry = result.unwrap();
-    assert_eq!(
-        entry.commit.sha,
-        CommitSha::from("abc123def456789012345678901234567890abcd")
-    );
-}
-
-#[test]
 fn save_sorts_actions_alphabetically() {
     let file = NamedTempFile::new().unwrap();
     let store = Store::new(file.path());
@@ -188,25 +163,105 @@ fn save_sorts_actions_alphabetically() {
 }
 
 #[test]
-fn save_produces_two_tier_format() {
+fn two_specs_sharing_a_version_write_the_first_commit_in_sort_order() {
+    // Built in memory, not from a fixture: two specs loaded from disk share one
+    // `[actions]` row, so their commits can never disagree to begin with.
+    let mut lock = crate::domain::lock::Lock::default();
+    for (specifier, sha) in [
+        ("^4.2", "2222222222222222222222222222222222222222"),
+        ("^4", "1111111111111111111111111111111111111111"),
+    ] {
+        lock.set(
+            &make_key("actions/checkout", specifier),
+            ResolvedRef::Tag(Version::from("v4.2.1")),
+            Commit {
+                sha: CommitSha::from(sha),
+                repository: Repository::from("actions/checkout"),
+                ref_type: Some(RefType::Tag),
+                date: CommitDate::from("2026-01-01T00:00:00Z"),
+            },
+        );
+    }
+
     let file = NamedTempFile::new().unwrap();
     let store = Store::new(file.path());
+    store.save(&lock).unwrap();
+    let content = std::fs::read_to_string(file.path()).unwrap();
 
-    let mut lock = crate::domain::lock::Lock::default();
-    set_resolved(
-        &mut lock,
-        "actions/checkout",
-        "^4",
-        "abc123def456789012345678901234567890abcd",
+    assert!(
+        content.contains("sha = \"1111111111111111111111111111111111111111\""),
+        "`^4` sorts before `^4.2`, so its commit wins the dedup:\n{content}"
+    );
+    assert!(
+        !content.contains("2222222222222222222222222222222222222222"),
+        "the later spec's commit must not overwrite the first:\n{content}"
+    );
+}
+
+/// A canonical two-tier lock covering every ref kind gx writes: a semver tag,
+/// two specifiers sharing one commit, a branch pin, and a bare-commit pin.
+///
+/// Bare TOML keys (`main`, the SHA) are emitted unquoted by the document
+/// builder, so this fixture reproduces that exactly.
+const CANONICAL_LOCK: &str = concat!(
+    "[resolutions.\"actions/checkout\".\"^4\"]\nversion = \"v4.2.1\"\n\n",
+    "[resolutions.\"actions/checkout\".\"^4.2\"]\nversion = \"v4.2.1\"\n\n",
+    "[resolutions.\"actions/setup-node\".main]\nversion = \"main\"\n\n",
+    "[resolutions.\"docker/build-push-action\".0011223344556677889900aabbccddeeff001122]\nversion = \"0011223344556677889900aabbccddeeff001122\"\n\n",
+    "[actions.\"actions/checkout\".\"v4.2.1\"]\nsha = \"abc123def456789012345678901234567890abcd\"\nrepository = \"actions/checkout\"\nref_type = \"tag\"\ndate = \"2026-01-01T00:00:00Z\"\n\n",
+    "[actions.\"actions/setup-node\".main]\nsha = \"def456789012345678901234567890abcdef1234\"\nrepository = \"actions/setup-node\"\nref_type = \"branch\"\ndate = \"2026-02-02T00:00:00Z\"\n\n",
+    "[actions.\"docker/build-push-action\".0011223344556677889900aabbccddeeff001122]\nsha = \"0011223344556677889900aabbccddeeff001122\"\nrepository = \"docker/build-push-action\"\nref_type = \"commit\"\ndate = \"2026-03-03T00:00:00Z\"\n",
+);
+
+/// Load `content` through a `Store`, save it straight back, and return the bytes written.
+fn load_then_save(content: &str) -> String {
+    let mut file = NamedTempFile::new().unwrap();
+    file.write_all(content.as_bytes()).unwrap();
+    let store = Store::new(file.path());
+    let lock = store.load().unwrap();
+    store.save(&lock).unwrap();
+    std::fs::read_to_string(file.path()).unwrap()
+}
+
+#[test]
+fn two_tier_lock_roundtrips_byte_identically() {
+    assert_eq!(
+        load_then_save(CANONICAL_LOCK),
+        CANONICAL_LOCK,
+        "reading and rewriting an unchanged lock must not alter a single byte"
+    );
+}
+
+#[test]
+fn save_sorts_unsorted_input_into_canonical_order() {
+    // `Lock` stores rows in a `HashMap`, so loading already discards input
+    // order — this fixture is reverse-ordered to document the intent, not
+    // because the serializer ever sees that order. What the assertion proves is
+    // that output is sorted deterministically whatever order iteration yields.
+    let unsorted = concat!(
+        "[resolutions.\"docker/build-push-action\".\"^5\"]\nversion = \"v5.1.0\"\n\n",
+        "[resolutions.\"actions/checkout\".\"^4.2\"]\nversion = \"v4.2.1\"\n\n",
+        "[resolutions.\"actions/checkout\".\"^4\"]\nversion = \"v4.2.1\"\n\n",
+        "[actions.\"docker/build-push-action\".\"v5.1.0\"]\nsha = \"1111111111111111111111111111111111111111\"\nrepository = \"docker/build-push-action\"\nref_type = \"tag\"\ndate = \"2026-03-03T00:00:00Z\"\n\n",
+        "[actions.\"actions/checkout\".\"v4.2.1\"]\nsha = \"2222222222222222222222222222222222222222\"\nrepository = \"actions/checkout\"\nref_type = \"tag\"\ndate = \"2026-01-01T00:00:00Z\"\n",
+    );
+    let expected = concat!(
+        "[resolutions.\"actions/checkout\".\"^4\"]\nversion = \"v4.2.1\"\n\n",
+        "[resolutions.\"actions/checkout\".\"^4.2\"]\nversion = \"v4.2.1\"\n\n",
+        "[resolutions.\"docker/build-push-action\".\"^5\"]\nversion = \"v5.1.0\"\n\n",
+        "[actions.\"actions/checkout\".\"v4.2.1\"]\nsha = \"2222222222222222222222222222222222222222\"\nrepository = \"actions/checkout\"\nref_type = \"tag\"\ndate = \"2026-01-01T00:00:00Z\"\n\n",
+        "[actions.\"docker/build-push-action\".\"v5.1.0\"]\nsha = \"1111111111111111111111111111111111111111\"\nrepository = \"docker/build-push-action\"\nref_type = \"tag\"\ndate = \"2026-03-03T00:00:00Z\"\n",
     );
 
-    store.save(&lock).unwrap();
-
-    let content = std::fs::read_to_string(file.path()).unwrap();
-    assert!(!content.contains("version = \"1.4\""));
-    assert!(content.contains("[resolutions.\"actions/checkout\".\"^4\"]"));
-    assert!(content.contains("[actions.\"actions/checkout\""));
-    assert!(!content.contains("{ sha ="), "entries must NOT be inline");
+    assert_ne!(
+        unsorted, expected,
+        "expected output must be the sorted form, not a copy of the fixture"
+    );
+    assert_eq!(
+        load_then_save(unsorted),
+        expected,
+        "entries must be sorted by action ID then specifier/version"
+    );
 }
 
 #[test]

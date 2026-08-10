@@ -66,14 +66,14 @@ pub struct Rule {
 pub struct Lint {
     /// Per-rule configuration, keyed by rule name.
     #[serde(default)]
-    pub rules: BTreeMap<crate::lint::RuleName, Rule>,
+    pub rules: BTreeMap<crate::diagnostic::RuleName, Rule>,
 }
 
 impl Lint {
     /// Get the effective configuration for a rule, applying defaults if not explicitly configured.
     /// Each rule has its own default level; unconfigured rules use their defaults.
     #[must_use]
-    pub fn get_rule(&self, name: crate::lint::RuleName, default_level: Level) -> Rule {
+    pub fn get_rule(&self, name: crate::diagnostic::RuleName, default_level: Level) -> Rule {
         self.rules.get(&name).cloned().unwrap_or(Rule {
             level: default_level,
             ignore: Vec::new(),
@@ -117,12 +117,27 @@ pub struct Config {
     pub manifest_migrated: bool,
 }
 
+/// Interpret a raw `GITHUB_TOKEN` value, treating blank as absent.
+///
+/// Split out from [`Settings::from_env`] so it is testable without mutating process
+/// environment, which is global and makes parallel tests flaky.
+fn parse_token(raw: Option<String>) -> Option<GitHubToken> {
+    raw.filter(|token| !token.trim().is_empty())
+        .map(GitHubToken::from)
+}
+
 impl Settings {
     /// Load settings from environment variables.
+    ///
+    /// A blank `GITHUB_TOKEN` is treated as absent rather than as an empty credential.
+    /// CI commonly exports the variable unconditionally, so `GITHUB_TOKEN=""` is a
+    /// frequent accident; carrying it as `Some("")` would send an unusable `Bearer`
+    /// header and, for token-requiring commands, satisfy a presence check while
+    /// authenticating nothing.
     #[must_use]
     pub fn from_env() -> Self {
         Self {
-            github_token: env::var("GITHUB_TOKEN").ok().map(GitHubToken::from),
+            github_token: parse_token(env::var("GITHUB_TOKEN").ok()),
         }
     }
 }
@@ -133,8 +148,8 @@ impl Config {
     ///
     /// # Errors
     ///
-    /// Returns [`ConfigError::Manifest`] if the manifest file cannot be parsed.
-    /// Returns [`ConfigError::Lock`] if the lock file cannot be parsed.
+    /// Returns [`Error::Manifest`] if the manifest file cannot be parsed.
+    /// Returns [`Error::Lock`] if the lock file cannot be parsed.
     pub fn load(repo_root: &Path) -> Result<Self, Error> {
         let manifest_path = repo_root.join(".github").join(MANIFEST_FILE_NAME);
         let lock_path = repo_root.join(".github").join(LOCK_FILE_NAME);
@@ -174,6 +189,22 @@ mod tests {
     fn settings_default_has_no_token() {
         let settings = Settings::default();
         assert!(settings.github_token.is_none());
+    }
+
+    #[test]
+    fn blank_token_is_treated_as_absent() {
+        // CI often exports GITHUB_TOKEN unconditionally, so an empty value is a common
+        // accident. Carrying it as Some("") would satisfy a presence check while
+        // authenticating nothing — for `gx audit` that would mean a false "clean".
+        assert!(super::parse_token(Some(String::new())).is_none());
+        assert!(super::parse_token(Some("   ".to_owned())).is_none());
+        assert!(super::parse_token(None).is_none());
+    }
+
+    #[test]
+    fn real_token_is_kept_verbatim() {
+        let token = super::parse_token(Some("ghp_example".to_owned()));
+        assert_eq!(token.as_ref().map(GitHubToken::as_str), Some("ghp_example"));
     }
 
     #[test]
@@ -291,19 +322,21 @@ job = "build"
         let config: Lint = toml::from_str(toml_str).unwrap();
         assert_eq!(config.rules.len(), 3);
         assert_eq!(
-            config.rules[&crate::lint::RuleName::ShaMismatch].level,
+            config.rules[&crate::diagnostic::RuleName::ShaMismatch].level,
             Level::Error
         );
         assert_eq!(
-            config.rules[&crate::lint::RuleName::Unpinned].level,
+            config.rules[&crate::diagnostic::RuleName::Unpinned].level,
             Level::Error
         );
         assert_eq!(
-            config.rules[&crate::lint::RuleName::Unpinned].ignore.len(),
+            config.rules[&crate::diagnostic::RuleName::Unpinned]
+                .ignore
+                .len(),
             1
         );
         assert_eq!(
-            config.rules[&crate::lint::RuleName::StaleComment].level,
+            config.rules[&crate::diagnostic::RuleName::StaleComment].level,
             Level::Off
         );
     }
@@ -317,7 +350,7 @@ job = "build"
     #[test]
     fn lint_config_get_rule_uses_default_when_unconfigured() {
         let config = Lint::default();
-        let rule = config.get_rule(crate::lint::RuleName::ShaMismatch, Level::Error);
+        let rule = config.get_rule(crate::diagnostic::RuleName::ShaMismatch, Level::Error);
         assert_eq!(rule.level, Level::Error);
         assert!(rule.ignore.is_empty());
     }
@@ -326,7 +359,7 @@ job = "build"
     fn lint_config_get_rule_returns_configured_value() {
         let mut config = Lint::default();
         config.rules.insert(
-            crate::lint::RuleName::Unpinned,
+            crate::diagnostic::RuleName::Unpinned,
             Rule {
                 level: Level::Warn,
                 ignore: vec![IgnoreTarget {
@@ -336,7 +369,7 @@ job = "build"
                 }],
             },
         );
-        let rule = config.get_rule(crate::lint::RuleName::Unpinned, Level::Error);
+        let rule = config.get_rule(crate::diagnostic::RuleName::Unpinned, Level::Error);
         assert_eq!(rule.level, Level::Warn);
         assert_eq!(rule.ignore.len(), 1);
     }
@@ -345,13 +378,13 @@ job = "build"
     fn lint_config_get_rule_respects_off_level() {
         let mut config = Lint::default();
         config.rules.insert(
-            crate::lint::RuleName::StaleComment,
+            crate::diagnostic::RuleName::StaleComment,
             Rule {
                 level: Level::Off,
                 ignore: vec![],
             },
         );
-        let rule = config.get_rule(crate::lint::RuleName::StaleComment, Level::Warn);
+        let rule = config.get_rule(crate::diagnostic::RuleName::StaleComment, Level::Warn);
         assert_eq!(rule.level, Level::Off);
     }
 }

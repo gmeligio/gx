@@ -3,7 +3,9 @@ pub mod diff;
 pub mod event;
 pub mod file;
 pub mod lock;
+pub mod locked_action;
 pub mod manifest;
+pub mod remediation;
 pub mod resolution;
 
 /// Wraps a parsed value with a flag indicating whether format migration occurred.

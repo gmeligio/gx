@@ -4,7 +4,8 @@
 //! and unit-testable with no `shellcheck` binary on `PATH`.
 //!
 //! - [`ShellcheckCli`] is the real adapter: it spawns `shellcheck` and parses its JSON.
-//! - [`FakeChecker`] is the test double: it returns canned [`Finding`]s.
+//! - `FakeChecker` is the test double: it returns canned [`Finding`]s. Test-only,
+//!   so it is absent from these docs.
 //! - [`Availability`] models "is the binary present" as a type, probed once per lint run,
 //!   so a missing binary is a graceful skip rather than a hard error.
 

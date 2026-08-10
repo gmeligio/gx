@@ -66,7 +66,7 @@ pub struct ManifestData {
 pub struct LintData {
     /// Map of rule names to their configuration.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub rules: BTreeMap<crate::lint::RuleName, Rule>,
+    pub rules: BTreeMap<crate::diagnostic::RuleName, Rule>,
 }
 
 // ---- conversion ----

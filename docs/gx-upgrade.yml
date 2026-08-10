@@ -1,0 +1,85 @@
+# Scheduled, PR-based upgrades for your pinned GitHub Actions.
+#
+# Copy this file to .github/workflows/gx-upgrade.yml in your repository.
+# Prerequisite: your repo already has .github/gx.toml and .github/gx.lock
+# (run `gx init` once if it does not). See docs/upgrade-workflow.md.
+
+name: gx upgrade
+
+on:
+    schedule:
+        # Cron in GitHub Actions is always UTC.
+        - cron: "0 6 * * 1"
+    workflow_dispatch:
+
+# A manual run must not race the scheduled one onto the same branch. Not
+# cancel-in-progress: interrupting a push could leave gx/upgrade half-written.
+concurrency:
+    group: gx-upgrade
+    cancel-in-progress: false
+
+jobs:
+    upgrade:
+        name: Upgrade pinned actions
+        runs-on: ubuntu-24.04
+        timeout-minutes: 15
+        # Scoped to this job so a job added later does not inherit write access.
+        permissions:
+            contents: write
+            pull-requests: write
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+              with:
+                  # Keeps GITHUB_TOKEN out of .git/config, where every later
+                  # step could read it; create-pull-request authenticates on
+                  # its own.
+                  persist-credentials: false
+
+            # Installing from a tap trusts whoever controls it, and this runs
+            # before the write-scoped steps. Pin or vendor gx if that trust is
+            # not one you want to extend.
+            - name: Install gx
+              run: brew install gmeligio/tap/gx
+
+            - name: Upgrade actions
+              run: gx upgrade --json | tee upgrade.json
+              env:
+                  # Without a token gx falls back to unauthenticated GitHub API
+                  # calls, capped at 60 requests/hour.
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Check whether anything moved
+              id: report
+              # Safe only because up_to_date is a JSON boolean. Writing a
+              # string field here would let its contents add output keys.
+              run: jq -r '.up_to_date | "up_to_date=\(.)"' upgrade.json >> "$GITHUB_OUTPUT"
+
+            - name: Build the pull request body
+              if: steps.report.outputs.up_to_date == 'false'
+              run: |
+                  # `compare` is omitted from the JSON when either side is not a
+                  # real tag (e.g. a branch pin), so the link is conditional.
+                  jq -r '
+                    "`gx upgrade` advanced the lock to the newest versions your `gx.toml` ranges already allow.",
+                    "",
+                    (.upgrades[]
+                      | if has("compare")
+                        then "- **\(.action)** [`\(.from)` → `\(.to)`](\(.compare))"
+                        else "- **\(.action)** `\(.from)` → `\(.to)`"
+                        end),
+                    "",
+                    "\(.upgrades | length) action(s) upgraded across \(.workflows_updated) file(s)."
+                  ' upgrade.json > body.md
+
+            - name: Open a pull request
+              if: steps.report.outputs.up_to_date == 'false'
+              uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+              with:
+                  # upgrade.json is a build artifact, not part of the change.
+                  add-paths: |
+                      .github/
+                  branch: gx/upgrade
+                  commit-message: "chore(deps): upgrade pinned GitHub Actions"
+                  title: "chore(deps): upgrade pinned GitHub Actions"
+                  body-path: body.md
+                  delete-branch: true

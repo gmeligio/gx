@@ -11,8 +11,8 @@ use thiserror::Error;
 /// A code-hosting platform that a [`VersionRegistry`] resolves against.
 ///
 /// Carried as data on the failure variants that are inherently platform-specific,
-/// so [`Error`] grows only with failure semantics and never gains a variant per
-/// platform.
+/// so [`enum@Error`] grows only with failure semantics and never gains a variant
+/// per platform.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Forge {
@@ -89,10 +89,11 @@ impl Error {
 
     /// Returns `true` when repeating the identical request could plausibly succeed.
     ///
-    /// Only rate limiting qualifies. [`Self::AuthRequired`] is excluded even though
-    /// it is skippable: re-issuing a request with the same absent or rejected
-    /// credential cannot produce a different outcome, so retrying it only delays
-    /// the failure.
+    /// Only rate limiting qualifies. [`Self::AuthRequired`] is skippable but not
+    /// retryable: the same absent credential fails the same way, so retrying it
+    /// only delays the failure. That is why the two questions need two predicates
+    /// — [`Self::is_skippable`] picks warning over hard failure, this one decides
+    /// whether to try again at all.
     #[must_use]
     pub fn is_retryable(&self) -> bool {
         matches!(self, Self::RateLimited { .. })
@@ -194,9 +195,8 @@ impl<'reg, R: VersionRegistry> ActionResolver<'reg, R> {
     }
 }
 
-#[cfg(test)]
 #[path = "resolution_testutil.rs"]
-pub(crate) mod testutil;
+pub mod testutil;
 
 #[cfg(test)]
 #[expect(
@@ -205,49 +205,22 @@ pub(crate) mod testutil;
     reason = "tests use unwrap, indexing, and other patterns freely"
 )]
 mod tests {
+    use super::testutil::FakeRegistry;
     use super::{
         ActionId, ActionResolver, ActionSpec, Commit, CommitDate, CommitSha, Error, Forge, RefType,
-        Repository, ShaDescription, Version, VersionRegistry,
+        Repository, Version,
     };
     use crate::domain::action::resolved::ResolvedRef;
     use crate::domain::action::specifier::Specifier;
 
-    struct MockRegistry {
-        resolve_result: Result<Commit, Error>,
-        tags_result: Result<Vec<Version>, Error>,
-    }
-
-    impl VersionRegistry for MockRegistry {
-        fn lookup_sha(&self, _id: &ActionId, _version: &Version) -> Result<Commit, Error> {
-            self.resolve_result.clone()
-        }
-
-        fn all_tags(&self, _id: &ActionId) -> Result<Vec<Version>, Error> {
-            self.tags_result.clone()
-        }
-
-        fn describe_sha(&self, _id: &ActionId, _sha: &CommitSha) -> Result<ShaDescription, Error> {
-            let meta = self.resolve_result.clone()?;
-            let tags = self.tags_result.clone().unwrap_or_default();
-            Ok(ShaDescription {
-                tags,
-                repository: meta.repository,
-                date: meta.date,
-            })
-        }
-    }
-
     #[test]
     fn resolve_success() {
-        let mock_registry = MockRegistry {
-            resolve_result: Ok(Commit {
-                sha: CommitSha::from("abc123def456789012345678901234567890abcd"),
-                repository: Repository::from("actions/checkout"),
-                ref_type: Some(RefType::Tag),
-                date: CommitDate::from("2026-01-01T00:00:00Z"),
-            }),
-            tags_result: Ok(vec![]),
-        };
+        let mock_registry = FakeRegistry::new().with_lookup_result(Ok(Commit {
+            sha: CommitSha::from("abc123def456789012345678901234567890abcd"),
+            repository: Repository::from("actions/checkout"),
+            ref_type: Some(RefType::Tag),
+            date: CommitDate::from("2026-01-01T00:00:00Z"),
+        }));
         let service = ActionResolver::new(&mock_registry);
 
         let spec = ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
@@ -267,13 +240,10 @@ mod tests {
 
     #[test]
     fn resolve_failure() {
-        let registry = MockRegistry {
-            resolve_result: Err(Error::ResolveFailed {
-                spec: ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4")),
-                reason: "not found".to_owned(),
-            }),
-            tags_result: Ok(vec![]),
-        };
+        let registry = FakeRegistry::new().with_lookup_result(Err(Error::ResolveFailed {
+            spec: ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4")),
+            reason: "not found".to_owned(),
+        }));
         let service = ActionResolver::new(&registry);
 
         let spec = ActionSpec::new(ActionId::from("actions/checkout"), Specifier::from_v1("v4"));
@@ -285,19 +255,11 @@ mod tests {
     #[test]
     fn resolve_from_sha_with_tags() {
         let sha = CommitSha::from("abc123def456789012345678901234567890abcd");
-        let registry = MockRegistry {
-            resolve_result: Ok(Commit {
-                sha: sha.clone(),
-                repository: Repository::from("owner/repo"),
-                ref_type: Some(RefType::Commit),
-                date: CommitDate::from("2026-01-01T00:00:00Z"),
-            }),
-            tags_result: Ok(vec![
-                Version::from("v3"),
-                Version::from("v3.6"),
-                Version::from("v3.6.1"),
-            ]),
-        };
+        let registry = FakeRegistry::new().with_sha_tags(
+            "owner/repo",
+            sha.as_str(),
+            vec!["v3", "v3.6", "v3.6.1"],
+        );
         let service = ActionResolver::new(&registry);
         let id = ActionId::from("owner/repo");
 
@@ -314,15 +276,8 @@ mod tests {
     #[test]
     fn resolve_from_sha_no_tags() {
         let sha = CommitSha::from("abc123def456789012345678901234567890abcd");
-        let registry = MockRegistry {
-            resolve_result: Ok(Commit {
-                sha: sha.clone(),
-                repository: Repository::from("owner/repo"),
-                ref_type: Some(RefType::Commit),
-                date: CommitDate::from("2026-01-01T00:00:00Z"),
-            }),
-            tags_result: Ok(vec![]),
-        };
+        // No `with_sha_tags` call: no tag points at this SHA.
+        let registry = FakeRegistry::new();
         let service = ActionResolver::new(&registry);
         let id = ActionId::from("owner/repo");
 
@@ -339,12 +294,9 @@ mod tests {
 
     #[test]
     fn resolve_from_sha_describe_error_propagates() {
-        let registry = MockRegistry {
-            resolve_result: Err(Error::AuthRequired {
-                forge: Forge::GitHub,
-            }),
-            tags_result: Ok(vec![]),
-        };
+        let registry = FakeRegistry::new().failing_describe(Error::AuthRequired {
+            forge: Forge::GitHub,
+        });
         let service = ActionResolver::new(&registry);
         let id = ActionId::from("owner/repo");
         let sha = CommitSha::from("abc123def456789012345678901234567890abcd");
@@ -408,8 +360,8 @@ mod tests {
 
     #[test]
     fn auth_required_is_not_retryable() {
-        // Skippable but never retryable: repeating a request with the same
-        // absent credential cannot succeed, so a retrying caller must not.
+        // The one variant where the two predicates disagree — collapsing them
+        // into one bit would make the retry loop spin on a missing token.
         assert!(
             !Error::AuthRequired {
                 forge: Forge::GitHub

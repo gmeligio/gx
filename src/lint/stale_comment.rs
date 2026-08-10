@@ -31,7 +31,7 @@ impl StaleCommentRule {
         }
 
         let msg = format!(
-            "action {} version {} has stale comment (SHA {} does not match lock SHA {})",
+            "{} version {} has stale comment (SHA {} does not match lock SHA {})",
             &action.action.id,
             comment.as_str(),
             sha.as_str(),

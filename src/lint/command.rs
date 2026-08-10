@@ -1,6 +1,5 @@
-use super::report::Report;
 use super::rule::{
-    Context, Diagnostic, Rule as _, RuleName, format_and_report, is_ignored, matches_ignore,
+    Context, Diagnostic, Report, Rule as _, RuleName, format_and_report, is_ignored,
     run_workflow_rule,
 };
 use super::run_shellcheck::RunShellcheckRule;
@@ -15,6 +14,7 @@ use super::workflow_security::{
 use super::workflow_validity::{DanglingReferenceRule, InvalidExpressionRule};
 use crate::command::Command;
 use crate::config::{Config, Level, Lint as LintConfig};
+use crate::diagnostic::matches_ignore;
 use crate::domain::file::actions::ActionSet as WorkflowActionSet;
 use crate::domain::file::parsed::Parsed;
 use crate::domain::file::scan::{Error as WorkflowError, Scanner as WorkflowScanner};

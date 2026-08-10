@@ -111,21 +111,22 @@ pub(super) fn write(lock: &Lock) -> String {
 fn build_lock_document(lock: &Lock) -> DocumentMut {
     let mut doc = DocumentMut::new();
 
-    // Collect entries sorted by action ID then specifier.
-    let mut sorted_entries: Vec<_> = lock.entries().collect();
-    sorted_entries.sort_by(|(a, _), (b, _)| {
-        a.id.as_str()
-            .cmp(b.id.as_str())
-            .then_with(|| a.specifier.as_str().cmp(b.specifier.as_str()))
+    // Collect rows sorted by action ID then specifier.
+    let mut sorted_actions: Vec<_> = lock.entries().collect();
+    sorted_actions.sort_by(|a, b| {
+        a.id()
+            .as_str()
+            .cmp(b.id().as_str())
+            .then_with(|| a.specifier().as_str().cmp(b.specifier().as_str()))
     });
 
     // --- [resolutions] tier ---
     let mut resolutions = toml_edit::Table::new();
     resolutions.set_implicit(true);
 
-    for (spec, entry) in &sorted_entries {
-        let id_str = spec.id.as_str();
-        let specifier_str = spec.specifier.as_str();
+    for action in &sorted_actions {
+        let id_str = action.id().as_str();
+        let specifier_str = action.specifier().as_str();
 
         ensure_implicit_table(&mut resolutions, id_str);
 
@@ -137,7 +138,7 @@ fn build_lock_document(lock: &Lock) -> DocumentMut {
         };
 
         let mut entry_table = toml_edit::Table::new();
-        entry_table.insert("version", toml_edit::value(entry.version_label()));
+        entry_table.insert("version", toml_edit::value(action.version_label()));
         id_table.insert(specifier_str, toml_edit::Item::Table(entry_table));
     }
 
@@ -150,10 +151,10 @@ fn build_lock_document(lock: &Lock) -> DocumentMut {
 
     // Collect unique (id, version) -> commit, sorted.
     let mut action_map: HashMap<(&str, &str), &Commit> = HashMap::new();
-    for (spec, entry) in &sorted_entries {
+    for action in &sorted_actions {
         action_map
-            .entry((spec.id.as_str(), entry.version_label()))
-            .or_insert(&entry.commit);
+            .entry((action.id().as_str(), action.version_label()))
+            .or_insert(action.commit());
     }
 
     let mut action_keys: Vec<_> = action_map.keys().copied().collect();
