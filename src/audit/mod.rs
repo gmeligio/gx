@@ -18,7 +18,7 @@ pub use check_name::CheckName;
 pub use report::{Finding, Report};
 
 use crate::command::Command;
-use crate::config::Config;
+use crate::config::{Config, Settings};
 use crate::domain::resolution::Forge;
 use std::path::Path;
 use thiserror::Error;
@@ -58,8 +58,16 @@ pub fn collect_findings(config: &Config, on_progress: &mut dyn FnMut(&str)) -> V
 }
 
 /// Fail before any check runs, so no run reports findings it could not have gathered.
-fn require_token(config: &Config) -> Result<(), Error> {
-    if config.settings.github_token.is_none() {
+///
+/// Public because the token requirement is a property of the command, not of one code path
+/// through it: a run that never reaches [`Audit::run`] — no `.github` folder, so no repo
+/// root — must still refuse rather than emit an empty report that reads as "clean".
+///
+/// # Errors
+///
+/// Returns [`Error::MissingToken`] when no forge credential is configured.
+pub fn require_token(settings: &Settings) -> Result<(), Error> {
+    if settings.github_token.is_none() {
         return Err(Error::MissingToken {
             forge: Forge::GitHub,
         });
@@ -80,7 +88,7 @@ impl Command for Audit {
         config: Config,
         on_progress: &mut dyn FnMut(&str),
     ) -> Result<Report, Error> {
-        require_token(&config)?;
+        require_token(&config.settings)?;
         Ok(Report::from_diagnostics(collect_findings(
             &config,
             on_progress,

@@ -256,6 +256,45 @@ fn json_mode_without_a_token_writes_nothing_to_stdout() {
 }
 
 #[test]
+fn a_repo_without_github_still_requires_a_token() {
+    // The token guard lives on the command, but a missing `.github` short-circuits before
+    // the command runs. Without an explicit guard on that path, `gx audit --json` outside a
+    // gx repo emitted `{"findings": []}` and exited 0 — a CI consumer reads that as
+    // "audited, clean" for a run that never audited anything.
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    git_init(root);
+
+    let (stdout, stderr, code) = run_gx(root, None, &["audit", "--json"]);
+
+    assert_eq!(code, Some(1), "a token failure must exit non-zero");
+    assert!(
+        stdout.trim().is_empty(),
+        "no document may be emitted for a run that never audited, got: {stdout}"
+    );
+    assert!(
+        stderr.contains("GITHUB_TOKEN"),
+        "the error must name the variable, got: {stderr}"
+    );
+}
+
+#[test]
+fn a_repo_without_github_is_clean_once_a_token_is_present() {
+    // The counterpart: the guard must gate on the token, not turn "nothing to audit" into
+    // a failure. With a token, an empty document and exit 0 remain correct.
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    git_init(root);
+
+    let (stdout, _stderr, code) = run_gx(root, Some("token"), &["audit", "--json"]);
+
+    assert_eq!(code, Some(0));
+    let value: serde_json::Value =
+        serde_json::from_str(&stdout).expect("stdout must be exactly one JSON document");
+    assert_eq!(value["findings"], serde_json::json!([]));
+}
+
+#[test]
 fn json_mode_writes_one_document_and_no_progress_output() {
     let temp = TempDir::new().unwrap();
     let root = repo_with_lock(&temp, Some(BRANCH_LOCK));

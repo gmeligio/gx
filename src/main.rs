@@ -6,7 +6,7 @@
 use clap::{Parser, Subcommand};
 use gx::audit::Error as AuditError;
 use gx::command::{Command as _, CommandReport as _};
-use gx::config::{Config, Error as ConfigError};
+use gx::config::{Config, Error as ConfigError, Settings};
 use gx::infra::{repo, repo::Error as RepoError};
 use gx::init::Error as InitError;
 use gx::lint::Error as LintError;
@@ -351,6 +351,13 @@ fn run() -> Result<(), GxError> {
     let repo_root = match repo::find_root(&cwd) {
         Ok(root) => root,
         Err(RepoError::GithubFolder) => {
+            // A missing `.github` means there is nothing to audit, but it must not become a
+            // way to skip the token check: without the guard here, `gx audit --json` outside
+            // a gx repo prints an empty findings document and exits 0, which a CI consumer
+            // reads as "audited, clean" on a run that never audited anything.
+            if matches!(cli.command, Commands::Audit { .. }) {
+                audit::require_token(&Settings::from_env())?;
+            }
             if json_mode {
                 // Emit a valid, empty JSON document so a consumer's parser never breaks.
                 // Each command has its own document shape, so the right one must be
