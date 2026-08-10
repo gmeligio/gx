@@ -438,9 +438,12 @@ fn offline_and_networked_command_layers_stay_separate() {
 ///
 /// Accumulates a whole `use` statement before matching, because rustfmt wraps a long
 /// import across lines and a line-at-a-time scan would miss the wrapped remainder — the
-/// exact shape a forbidden import is most likely to take. Only `use` statements count:
+/// exact shape a forbidden import is most likely to take. Only import statements count:
 /// prose in a doc comment naming a forbidden module (as these modules' own docs do) is
 /// not a dependency.
+///
+/// `pub use` counts too: a re-export is how the dependency reaches callers, so exempting
+/// it would leave the widest hole in the guardrail.
 ///
 /// Extracted from the test so the matching logic can itself be tested. A guardrail whose
 /// own correctness is unverified provides no guarantee.
@@ -455,10 +458,16 @@ fn forbidden_imports_in<'need>(
     for (index, line) in content.lines().enumerate() {
         let trimmed = line.trim();
         if statement.is_empty() {
-            if !trimmed.starts_with("use ") {
+            if !is_import_start(trimmed) {
                 continue;
             }
             start_line = index + 1;
+        }
+        // Joined with a space: concatenating bare would splice the tail of one path onto
+        // the head of the next (`my_infra::` + `github_helper`) and invent a match that
+        // no single path contains.
+        if !statement.is_empty() {
+            statement.push(' ');
         }
         statement.push_str(trimmed);
 
@@ -466,9 +475,10 @@ fn forbidden_imports_in<'need>(
         if !trimmed.ends_with(';') {
             continue;
         }
-        // Drop the grouping braces before matching, so a needle spanning a brace
-        // (`use crate::infra::{` + `github::Registry`) still reads as one path.
-        let flattened = statement.replace(['{', '}'], "");
+        // A brace continues a path — `crate::infra::{` + `github::Registry` is one import —
+        // so the brace and the line break around it collapse away. A comma ends a path, so
+        // it survives as a separator that sibling entries cannot be spliced across.
+        let flattened = statement.replace(['{', '}'], "").replace(":: ", "::");
         for &needle in forbidden {
             if flattened.contains(needle) {
                 found.push((start_line, needle));
@@ -477,6 +487,21 @@ fn forbidden_imports_in<'need>(
         statement.clear();
     }
     found
+}
+
+/// Whether `trimmed` begins an import statement, counting `pub use` and its
+/// visibility-scoped forms (`pub(crate) use`).
+fn is_import_start(trimmed: &str) -> bool {
+    let rest = trimmed.strip_prefix("pub").map_or(trimmed, |after| {
+        // `pub use` or `pub(crate) use` — skip an optional visibility scope.
+        after
+            .trim_start()
+            .strip_prefix('(')
+            .and_then(|scoped| scoped.split_once(')'))
+            .map_or(after, |(_, tail)| tail)
+            .trim_start()
+    });
+    rest.starts_with("use ")
 }
 
 /// The layer guardrail's matcher must actually catch what it claims to.
@@ -506,6 +531,25 @@ fn forbidden_import_matcher_catches_real_import_shapes() {
     // Braced multi-line group.
     let braced = "use crate::infra::{\n    github::Registry,\n    lock::Store,\n};\n";
     assert_eq!(forbidden_imports_in(braced, forbidden).len(), 1);
+
+    // A re-export is how the dependency reaches callers, so it counts as one.
+    assert_eq!(
+        forbidden_imports_in("pub use reqwest::blocking::Client;\n", forbidden),
+        vec![(1, "reqwest")],
+        "a `pub use` re-export must not escape the guardrail"
+    );
+    assert_eq!(
+        forbidden_imports_in("pub(crate) use reqwest::Client;\n", forbidden),
+        vec![(1, "reqwest")],
+        "a scoped-visibility re-export must not escape either"
+    );
+
+    // Sibling paths in one group must not splice into a needle no single path contains.
+    let siblings = "use crate::x::{\n    my_infra::Thing,\n    github_helper::Other,\n};\n";
+    assert!(
+        forbidden_imports_in(siblings, forbidden).is_empty(),
+        "adjacent group entries must not be concatenated into a phantom match"
+    );
 
     // Prose naming the module is not a dependency.
     assert!(
