@@ -10,16 +10,20 @@ use std::time::Duration;
 
 /// Total attempts per request, counting the first.
 ///
-/// Two retries covers a quota window that ticks over within a few seconds. With
-/// the backoff below that is at most 3s of waiting; a limit that has not lifted
-/// by then, and stated no reset time, is not lifting on this run's timescale.
+/// Two retries covers a quota window that ticks over within a few seconds. A
+/// limit still held after them is not lifting on this run's timescale. Worst
+/// case is two waits of [`MAX_RETRY_WAIT_SECS`], reached only when the forge
+/// states a reset at the cap twice; an unstated reset takes the backoff below.
 const MAX_ATTEMPTS: usize = 3;
 
-/// Waits used when the forge stated no reset time, indexed by retry number.
+/// Minimum wait before each retry, indexed by retry number.
 ///
 /// Increasing, and every value within the cap a stated reset is clamped to — so
 /// an unstated reset never waits longer than a stated one would be allowed to.
 /// Enforced by the assertion below rather than left to this comment.
+///
+/// Its length also bounds the retry budget: a step must exist for a retry to
+/// happen, so `wait_for` stops once the schedule runs out.
 const BACKOFF: [Duration; 2] = [Duration::from_secs(1), Duration::from_secs(2)];
 
 // Fails the build if BACKOFF ever outgrows the cap it claims to respect. The
@@ -118,15 +122,23 @@ impl<'notify, R: VersionRegistry, W: Waiter> Retrying<'notify, R, W> {
     /// `TooDistant` yields `None`: the forge's quota resets further out than any
     /// wait worth taking, so backing off would only delay the same failure while
     /// holding the user's terminal.
+    ///
+    /// A stated reset is a floor, not the whole answer: it is taken as the larger
+    /// of itself and the backoff step. GitHub reports its reset as a whole-second
+    /// epoch, so a limit hit just before the boundary — or read by a clock running
+    /// ahead of the forge's — states 0s, which alone would retry with no pause at
+    /// all. Taking the maximum also keeps a repeated reset increasing rather than
+    /// re-waiting the same value, so the schedule below bounds both paths.
     fn wait_for(error: &ResolutionError, retry_index: usize) -> Option<Duration> {
         // Only `RateLimited` states a reset; every other variant reaches here
         // solely because `is_retryable` let it through, which it does not.
         let ResolutionError::RateLimited { retry_after, .. } = error else {
             return None;
         };
+        let backoff = BACKOFF.get(retry_index).copied();
         match retry_after {
-            RetryAfter::After(duration) => Some(*duration),
-            RetryAfter::Unstated => BACKOFF.get(retry_index).copied(),
+            RetryAfter::After(stated) => Some(backoff?.max(*stated)),
+            RetryAfter::Unstated => backoff,
             RetryAfter::TooDistant => None,
         }
     }

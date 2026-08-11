@@ -201,7 +201,45 @@ fn stated_reset_time_is_waited_out_exactly() {
     assert_eq!(
         *waiter.waits.borrow(),
         vec![Duration::from_secs(3)],
-        "the forge's stated reset wins over the backoff schedule"
+        "a stated reset above the backoff step wins over the schedule"
+    );
+}
+
+#[test]
+fn zero_stated_reset_still_pauses_before_retrying() {
+    let waiter = RecordingWaiter::default();
+    // GitHub reports its reset as a whole-second epoch, so a limit hit just
+    // before the boundary states 0s. Taken literally that retries instantly.
+    let registry = retrying(
+        vec![Err(rate_limited(RetryAfter::After(Duration::from_secs(0))))],
+        &waiter,
+    );
+
+    let result = registry.lookup_sha(&id(), &version());
+
+    result.unwrap_err();
+    assert_eq!(
+        *waiter.waits.borrow(),
+        vec![Duration::from_secs(1), Duration::from_secs(2)],
+        "a 0s reset is floored to the backoff, never hammering the forge"
+    );
+}
+
+#[test]
+fn repeated_stated_reset_increases_rather_than_repeating() {
+    let waiter = RecordingWaiter::default();
+    let registry = retrying(
+        vec![Err(rate_limited(RetryAfter::After(Duration::from_secs(1))))],
+        &waiter,
+    );
+
+    let result = registry.lookup_sha(&id(), &version());
+
+    result.unwrap_err();
+    assert_eq!(
+        *waiter.waits.borrow(),
+        vec![Duration::from_secs(1), Duration::from_secs(2)],
+        "a reset restated every attempt escalates instead of re-waiting 1s"
     );
 }
 
