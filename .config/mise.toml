@@ -4,7 +4,7 @@
 # Every mise version writes .config/mise.lock slightly differently, so local and
 # CI runs have to agree on one. This is where that version is chosen; `mise run
 # mise-version` pins CI to it.
-min_version = "2026.7.13"
+min_version = "2026.8.5"
 
 [tools]
 "github:axodotdev/cargo-dist" = "0.31.0"

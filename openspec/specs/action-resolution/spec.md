@@ -281,6 +281,110 @@ The memory SHALL be discarded when the command finishes, so every run observes c
 
 ---
 
+### Requirement: Rate-limited resolution is retried automatically within a bounded budget
+
+The system SHALL retry a resolution request that failed because the forge's request quota was exhausted, and SHALL NOT retry any other failure.
+
+A user running `gx tidy`, `gx init`, or `gx upgrade` without a token has 60 GitHub requests per hour. When that quota is exhausted mid-run, the action being resolved is dropped from the lock and the user must notice the warning and rerun by hand — even when the quota window was about to roll over.
+
+The retry budget SHALL be bounded: after a fixed maximum number of additional attempts, the rate-limit error is returned to the caller and handled exactly as it is today (warning, action skipped). A genuinely exhausted quota therefore fails promptly rather than hanging.
+
+Only quota exhaustion is retried. A rejected or absent credential SHALL NOT be retried: reissuing the identical request cannot produce a different outcome, so retrying it only delays a failure the user must fix themselves.
+
+#### Scenario: A transient rate limit resolves without user intervention
+
+- **GIVEN** a resolution request that fails with a rate-limit error and would succeed on the next attempt
+- **WHEN** the user runs a command that resolves that action
+- **THEN** the action resolves successfully and is written to the lock
+- **AND** the user is not asked to rerun the command
+
+#### Scenario: A persistently exhausted quota fails after a bounded number of attempts
+
+- **GIVEN** a resolution request that fails with a rate-limit error on every attempt
+- **WHEN** the user runs a command that resolves that action
+- **THEN** the number of requests issued for that resolution is bounded by a fixed maximum
+- **AND** the rate-limit error is returned, producing the existing warning and skip
+
+#### Scenario: A missing credential is not retried
+
+- **GIVEN** a resolution request that fails because no usable credential is configured
+- **WHEN** the user runs a command that resolves that action
+- **THEN** exactly one request is issued
+- **AND** the auth error is returned immediately, producing the existing warning and skip
+
+#### Scenario: A non-retryable failure is not retried
+
+- **GIVEN** a resolution request that fails because the action does not exist
+- **WHEN** the user runs a command that resolves that action
+- **THEN** exactly one request is issued
+- **AND** the command fails as it does today
+
+---
+
+### Requirement: The wait before a retry honors the forge's reset time but is capped
+
+The system SHALL derive the wait from the forge's reported reset time when that time is available, and SHALL clamp every wait to a fixed maximum. When the reported reset time exceeds that maximum, the system SHALL NOT wait — the rate-limit error is returned immediately so the user gets their partial result and a warning now, rather than a stalled terminal.
+
+The forge reports when its quota resets. Waiting exactly that long recovers a window that is about to roll over; but an exhausted unauthenticated quota can reset up to an hour out, and blocking a user's terminal for an hour is worse than failing.
+
+When no reset time is available, the system SHALL fall back to a fixed backoff schedule that increases between attempts.
+
+A reported reset time SHALL be treated as a floor on the wait rather than its exact value: the system SHALL wait at least the backoff schedule's step for that attempt. A forge reporting whole-second resets states a reset of zero whenever the quota window is about to turn over, and a local clock running ahead of the forge's reports one that has already passed. Taken literally, either would reissue the request instantly against a forge that is still rate limiting. Treating the reported time as a floor also keeps a reset restated on every attempt increasing rather than repeating the same wait.
+
+#### Scenario: A near reset time is waited out
+
+- **GIVEN** the forge reports its quota resets a few seconds from now, beyond the backoff step for this attempt
+- **WHEN** a rate-limited request is retried
+- **THEN** the retry waits approximately until that reset time before reissuing the request
+
+#### Scenario: A distant reset time is not waited on
+
+- **GIVEN** the forge reports its quota resets an hour from now
+- **WHEN** a request fails with a rate-limit error
+- **THEN** no wait occurs and the rate-limit error is returned immediately
+- **AND** the user gets their partial lock and warning without a stalled terminal
+
+#### Scenario: A reset time in the past does not retry without pausing
+
+- **GIVEN** the forge reports a reset time at or earlier than the local clock's current time
+- **WHEN** a rate-limited request is retried
+- **THEN** the retry still waits the backoff step for that attempt rather than reissuing the request immediately
+
+#### Scenario: A reset time restated on every attempt still increases the wait
+
+- **GIVEN** the forge reports the same short reset time on each successive rate-limit response
+- **WHEN** a request is retried more than once
+- **THEN** each successive wait is longer than the previous one rather than repeating it
+
+#### Scenario: A missing reset time falls back to increasing backoff
+
+- **GIVEN** the forge reports no reset time with its rate-limit response
+- **WHEN** a request is retried more than once
+- **THEN** each successive wait is at least as long as the previous one
+- **AND** every wait remains within the fixed maximum
+
+---
+
+### Requirement: A retry wait is announced to the user
+
+The system SHALL report each retry wait through the same progress channel that carries other resolution progress, stating that the run is waiting on the forge's rate limit and for how long. A command that pauses for several seconds with no explanation reads as a hang.
+
+The announcement SHALL travel the existing progress channel rather than a new one, so it inherits that channel's existing suppression in `--json` mode and cannot corrupt the single JSON document on stdout.
+
+#### Scenario: The user sees why the command paused
+
+- **GIVEN** a rate-limited request that will be retried after a wait
+- **WHEN** the wait begins
+- **THEN** a progress message naming the rate limit and the wait duration is emitted before the process sleeps
+
+#### Scenario: The announcement precedes the wait rather than following it
+
+- **GIVEN** a rate-limited request that will be retried after a wait
+- **WHEN** the user watches the command
+- **THEN** the explanation appears before the pause, not after it, so the pause is never an unexplained stall
+
+---
+
 ## Guardrail: Error classification (skippable and retryable)
 
 This classification is load-bearing because it determines whether a user sees a warning they can act on later, or a hard failure that blocks their workflow — and, separately, whether a caller may re-issue the request at all.
@@ -296,10 +400,12 @@ Classification is two-dimensional. A single "recoverable" bit cannot express bot
 
 | Error condition | Skippable | Retryable | User experience |
 |---|---|---|---|
-| Rate limited | Yes | Yes | Warning; action skipped, lock written without it |
-| Auth required | Yes | No | Warning; action skipped, lock written without it |
+| Rate limited | Yes | Yes | Retried within a bounded budget (unless the forge reports a reset beyond the cap, in which case it is not retried at all); if still failing, warning and action skipped, lock written without it |
+| Auth required | Yes | No | Warning; action skipped, lock written without it — never retried |
 | Action not found (404) | No | No | Hard failure; command exits with error |
 | Server error (5xx) | No | No | Hard failure; command exits with error |
+
+Because rate limiting is the only retryable condition, it is the only one whose user experience begins with a retry. A rate-limited request is retried first and, only after the retry budget is spent, classified as skippable and skipped.
 
 #### Scenario: Rate limiting is both skippable and retryable
 

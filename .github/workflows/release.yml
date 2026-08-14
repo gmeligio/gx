@@ -41,7 +41,7 @@ on:
 
 # Generated from min_version in .config/mise.toml; edit it there instead.
 env:
-    MISE_VERSION: 2026.7.13
+    MISE_VERSION: 2026.8.5
 
 jobs:
     # Run 'dist plan' (or host) to determine what tasks we need to do

@@ -11,7 +11,7 @@ use crate::domain::lock::Lock;
 use crate::infra::github::Registry;
 use crate::infra::lock::Error as LockFileError;
 use crate::infra::manifest::Error as ManifestError;
-use crate::infra::registry::Caching;
+use crate::infra::registry::caching_retrying;
 use crate::infra::workflow_update::WorkflowWriter;
 use thiserror::Error;
 
@@ -89,16 +89,24 @@ impl Command for Upgrade {
         on_progress: &mut dyn FnMut(&str),
     ) -> Result<UpgradeReport, RunError> {
         let has_manifest = config.manifest_path.exists();
-        let registry = Caching::new(Registry::new(config.settings.github_token)?);
+        let github = Registry::new(config.settings.github_token)?;
         let updater = WorkflowWriter::new(repo_root);
 
-        let upgrade_plan = plan::plan(
-            &config.manifest,
-            &config.lock,
-            &registry,
-            &self.request,
-            &mut *on_progress,
-        )?;
+        // Scoped so the registry's borrow of `on_progress` ends with planning,
+        // leaving the callback free for the reporting below.
+        let upgrade_plan = {
+            // A retry wait is announced through the progress channel; in `--json`
+            // mode that channel is already suppressed, so the single JSON document
+            // on stdout stays intact.
+            let (registry, progress) = caching_retrying(github, &mut *on_progress);
+            plan::plan(
+                &config.manifest,
+                &config.lock,
+                &registry,
+                &self.request,
+                progress,
+            )?
+        };
 
         if upgrade_plan.is_empty() {
             return Ok(UpgradeReport {

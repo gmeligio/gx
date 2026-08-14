@@ -6,6 +6,7 @@ use super::action::specifier::Specifier;
 use super::action::tag_selection::select_most_specific_tag;
 use super::action::uses_ref::RefType;
 use std::fmt;
+use std::time::Duration;
 use thiserror::Error;
 
 /// A code-hosting platform that a [`VersionRegistry`] resolves against.
@@ -41,6 +42,36 @@ impl fmt::Display for Forge {
     }
 }
 
+/// Longest reset delay still worth waiting out, in seconds.
+///
+/// An exhausted unauthenticated quota can reset nearly an hour out; blocking a
+/// terminal that long is worse than failing, so anything beyond this becomes
+/// [`RetryAfter::TooDistant`].
+///
+/// A policy about how long a user's terminal may block, not a fact about any one
+/// forge — so it lives beside [`RetryAfter`], whose `TooDistant` variant it
+/// defines, and both the forge that reads a reset header and the retry layer that
+/// waits import it downward from here.
+pub const MAX_RETRY_WAIT_SECS: u64 = 5;
+
+/// What a forge said about when its exhausted quota resets, normalized against
+/// the local clock and clamped to a wait worth taking.
+///
+/// Three states, not an `Option<Duration>`: "no reset stated" and "reset stated
+/// but too far out" demand opposite responses. The first means back off and try
+/// again; the second means stop, because waiting out a quota that resets an hour
+/// from now is worse for the user than failing immediately.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RetryAfter {
+    /// The forge stated no reset time, or one that could not be read.
+    Unstated,
+    /// The quota is expected to be usable again after this duration.
+    After(Duration),
+    /// The reset is further out than any wait worth taking; do not retry.
+    TooDistant,
+}
+
 /// Errors that can occur during version resolution.
 ///
 /// Variants describe *what went wrong*, never which backend produced it: the
@@ -54,12 +85,16 @@ pub enum Error {
 
     /// The forge's request quota is exhausted.
     ///
-    /// The reset time is never read from the response, so stating one would be
-    /// a guess.
+    /// The reset time *is* read from the response and carried in `retry_after`
+    /// for a retrying caller to act on, but the message deliberately still omits
+    /// it: a wait that is never taken (because it exceeds the cap) would only
+    /// misinform an unauthenticated user whose window can be nearly an hour.
     #[error("{forge} rate limit exhausted; set {} to raise the limit", forge.token_env())]
     RateLimited {
         /// The forge whose quota was exhausted.
         forge: Forge,
+        /// When the forge said its quota resets, normalized and clamped.
+        retry_after: RetryAfter,
     },
 
     /// The forge rejected the request for lack of a usable credential.
@@ -93,7 +128,8 @@ impl Error {
     /// retryable: the same absent credential fails the same way, so retrying it
     /// only delays the failure. That is why the two questions need two predicates
     /// — [`Self::is_skippable`] picks warning over hard failure, this one decides
-    /// whether to try again at all.
+    /// whether to try again at all, and gates the retry loop in
+    /// `infra::registry::retrying`.
     #[must_use]
     pub fn is_retryable(&self) -> bool {
         matches!(self, Self::RateLimited { .. })
@@ -207,8 +243,8 @@ pub mod testutil;
 mod tests {
     use super::testutil::FakeRegistry;
     use super::{
-        ActionId, ActionResolver, ActionSpec, Commit, CommitDate, CommitSha, Error, Forge, RefType,
-        Repository, Version,
+        ActionId, ActionResolver, ActionSpec, Commit, CommitDate, CommitSha, Duration, Error,
+        Forge, RefType, Repository, RetryAfter, Version,
     };
     use crate::domain::action::resolved::ResolvedRef;
     use crate::domain::action::specifier::Specifier;
@@ -325,7 +361,8 @@ mod tests {
     fn rate_limited_is_skippable() {
         assert!(
             Error::RateLimited {
-                forge: Forge::GitHub
+                forge: Forge::GitHub,
+                retry_after: RetryAfter::Unstated,
             }
             .is_skippable()
         );
@@ -352,7 +389,8 @@ mod tests {
     fn rate_limited_is_retryable() {
         assert!(
             Error::RateLimited {
-                forge: Forge::GitHub
+                forge: Forge::GitHub,
+                retry_after: RetryAfter::Unstated,
             }
             .is_retryable()
         );
@@ -379,6 +417,7 @@ mod tests {
     fn rate_limited_message_names_forge_and_remedy() {
         let message = Error::RateLimited {
             forge: Forge::GitHub,
+            retry_after: RetryAfter::After(Duration::from_secs(3)),
         }
         .to_string();
 
