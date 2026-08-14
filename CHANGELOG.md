@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.5](https://github.com/gmeligio/gx/compare/v0.8.4...v0.8.5) - 2026-08-14
+
+### Added
+
+- *(registry)* retry rate-limited resolution with bounded backoff ([#199](https://github.com/gmeligio/gx/pull/199))
+- *(domain)* decide when a vulnerability fix is provably reachable ([#194](https://github.com/gmeligio/gx/pull/194))
+- *(audit)* add gx audit command shell and GitHub advisory network seam ([#200](https://github.com/gmeligio/gx/pull/200))
+
+### Other
+
+- *(lint)* lift the diagnostics framework out of the lint command ([#197](https://github.com/gmeligio/gx/pull/197))
+- *(output)* make the render boundary own user-facing vocabulary ([#193](https://github.com/gmeligio/gx/pull/193))
+- *(domain)* model a lock row so audit checks share one dependency view ([#192](https://github.com/gmeligio/gx/pull/192))
+- collapse eight registry doubles into one configurable fake ([#198](https://github.com/gmeligio/gx/pull/198))
+- *(domain)* carry the forge as data instead of naming it in messages ([#196](https://github.com/gmeligio/gx/pull/196))
+- *(infra)* split resolve.rs, unblocking three queued issues ([#191](https://github.com/gmeligio/gx/pull/191))
+- *(upgrade)* ship a reference gx-upgrade.yml consuming gx upgrade --json ([#190](https://github.com/gmeligio/gx/pull/190))
+
 ## [0.8.4](https://github.com/gmeligio/gx/compare/v0.8.3...v0.8.4) - 2026-08-05
 
 ### Added
