@@ -42,6 +42,18 @@ impl fmt::Display for Forge {
     }
 }
 
+/// Longest reset delay still worth waiting out, in seconds.
+///
+/// An exhausted unauthenticated quota can reset nearly an hour out; blocking a
+/// terminal that long is worse than failing, so anything beyond this becomes
+/// [`RetryAfter::TooDistant`].
+///
+/// A policy about how long a user's terminal may block, not a fact about any one
+/// forge — so it lives beside [`RetryAfter`], whose `TooDistant` variant it
+/// defines, and both the forge that reads a reset header and the retry layer that
+/// waits import it downward from here.
+pub const MAX_RETRY_WAIT_SECS: u64 = 5;
+
 /// What a forge said about when its exhausted quota resets, normalized against
 /// the local clock and clamped to a wait worth taking.
 ///

@@ -4,7 +4,8 @@ use crate::domain::action::resolved::Commit;
 use crate::domain::action::spec::Spec as ActionSpec;
 use crate::domain::action::specifier::Specifier;
 use crate::domain::resolution::{
-    Error as ResolutionError, Forge, RetryAfter, ShaDescription, VersionRegistry,
+    Error as ResolutionError, Forge, MAX_RETRY_WAIT_SECS, RetryAfter, ShaDescription,
+    VersionRegistry,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -142,7 +143,7 @@ fn persistent_rate_limit_fails_after_bounded_attempts() {
     assert_eq!(
         registry.inner.calls(),
         3,
-        "bounded at MAX_ATTEMPTS, and greater than 1 so retry actually happened"
+        "bounded by the BACKOFF schedule, and greater than 1 so retry actually happened"
     );
 }
 
@@ -222,6 +223,30 @@ fn zero_stated_reset_still_pauses_before_retrying() {
         *waiter.waits.borrow(),
         vec![Duration::from_secs(1), Duration::from_secs(2)],
         "a 0s reset is floored to the backoff, never hammering the forge"
+    );
+}
+
+#[test]
+fn stated_reset_beyond_the_cap_is_clamped_rather_than_slept_through() {
+    let waiter = RecordingWaiter::default();
+    // The GitHub registry caps before building an `After`, so this shape can only
+    // come from a second forge. This layer is generic over any registry, so it
+    // clamps rather than trusting the value to arrive pre-capped.
+    let registry = retrying(
+        vec![Err(rate_limited(RetryAfter::After(Duration::from_hours(
+            1,
+        ))))],
+        &waiter,
+    );
+
+    let result = registry.lookup_sha(&id(), &version());
+
+    result.unwrap_err();
+    let cap = Duration::from_secs(MAX_RETRY_WAIT_SECS);
+    assert_eq!(
+        *waiter.waits.borrow(),
+        vec![cap, cap],
+        "an hour-long stated reset never becomes an hour-long sleep"
     );
 }
 

@@ -3,34 +3,22 @@
 use crate::domain::action::identity::{ActionId, CommitSha, Version};
 use crate::domain::action::resolved::Commit;
 use crate::domain::resolution::{
-    Error as ResolutionError, RetryAfter, ShaDescription, VersionRegistry,
+    Error as ResolutionError, MAX_RETRY_WAIT_SECS, RetryAfter, ShaDescription, VersionRegistry,
 };
-use crate::infra::github::MAX_RETRY_WAIT_SECS;
 use std::time::Duration;
-
-/// Total attempts per request, counting the first.
-///
-/// Two retries covers a quota window that ticks over within a few seconds. A
-/// limit still held after them is not lifting on this run's timescale. Worst
-/// case is two waits of [`MAX_RETRY_WAIT_SECS`], reached only when the forge
-/// states a reset at the cap twice; an unstated reset takes the backoff below.
-const MAX_ATTEMPTS: usize = 3;
 
 /// Minimum wait before each retry, indexed by retry number.
 ///
 /// Increasing, and every value within the cap a stated reset is clamped to — so
 /// an unstated reset never waits longer than a stated one would be allowed to.
-/// Enforced by the assertion below rather than left to this comment.
 ///
-/// Its length also bounds the retry budget: a step must exist for a retry to
-/// happen, so `wait_for` stops once the schedule runs out.
+/// Its length is the retry budget: a step must exist for a retry to happen, so
+/// `wait_for` stops once the schedule runs out. Two retries covers a quota window
+/// that ticks over within a few seconds; a limit still held after them is not
+/// lifting on this run's timescale.
 const BACKOFF: [Duration; 2] = [Duration::from_secs(1), Duration::from_secs(2)];
 
-// Fails the build if BACKOFF ever outgrows the cap it claims to respect. The
-// two constants live in different modules — the cap beside the header parsing
-// that applies it, the schedule beside the loop that uses it — so nothing but
-// this binds them. Without it, raising a backoff value past the cap would leave
-// the doc comment above quietly false.
+// Enforces the "within the cap" claim above, which is otherwise only prose.
 // Destructured rather than indexed, so adding a backoff step is a compile error
 // here until it is covered too.
 const _: () = {
@@ -129,6 +117,12 @@ impl<'notify, R: VersionRegistry, W: Waiter> Retrying<'notify, R, W> {
     /// ahead of the forge's — states 0s, which alone would retry with no pause at
     /// all. Taking the maximum also keeps a repeated reset increasing rather than
     /// re-waiting the same value, so the schedule below bounds both paths.
+    ///
+    /// The result is clamped to [`MAX_RETRY_WAIT_SECS`] rather than trusting the
+    /// stated value to arrive pre-clamped. Today only the GitHub registry builds
+    /// an `After`, and it caps before doing so — but this layer is generic over
+    /// any registry, and a second forge stating an hour would otherwise sleep for
+    /// an hour, which is the stall `TooDistant` exists to prevent.
     fn wait_for(error: &ResolutionError, retry_index: usize) -> Option<Duration> {
         // Only `RateLimited` states a reset; every other variant reaches here
         // solely because `is_retryable` let it through, which it does not.
@@ -136,8 +130,9 @@ impl<'notify, R: VersionRegistry, W: Waiter> Retrying<'notify, R, W> {
             return None;
         };
         let backoff = BACKOFF.get(retry_index).copied();
+        let cap = Duration::from_secs(MAX_RETRY_WAIT_SECS);
         match retry_after {
-            RetryAfter::After(stated) => Some(backoff?.max(*stated)),
+            RetryAfter::After(stated) => Some(backoff?.max(*stated).min(cap)),
             RetryAfter::Unstated => backoff,
             RetryAfter::TooDistant => None,
         }
@@ -155,9 +150,11 @@ impl<'notify, R: VersionRegistry, W: Waiter> Retrying<'notify, R, W> {
                 Err(error) => error,
             };
 
-            if !error.is_retryable() || retry_index.saturating_add(1) >= MAX_ATTEMPTS {
+            if !error.is_retryable() {
                 return Err(error);
             }
+            // `wait_for` returns `None` once the backoff schedule runs out, which
+            // is what bounds the retry budget.
             let Some(duration) = Self::wait_for(&error, retry_index) else {
                 return Err(error);
             };

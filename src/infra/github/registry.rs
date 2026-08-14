@@ -4,7 +4,8 @@ use crate::domain::action::spec::Spec as ActionSpec;
 use crate::domain::action::specifier::Specifier;
 use crate::domain::action::uses_ref::RefType;
 use crate::domain::resolution::{
-    Error as ResolutionError, Forge, RetryAfter, ShaDescription, VersionRegistry,
+    Error as ResolutionError, Forge, MAX_RETRY_WAIT_SECS, RetryAfter, ShaDescription,
+    VersionRegistry,
 };
 use std::time::Duration;
 use thiserror::Error;
@@ -13,15 +14,6 @@ use thiserror::Error;
 const USER_AGENT: &str = "gx-cli";
 /// Timeout in seconds for each HTTP request to the GitHub API.
 const REQUEST_TIMEOUT_SECS: u64 = 30;
-/// Longest reset delay still worth waiting out, in seconds.
-///
-/// An exhausted unauthenticated quota can reset nearly an hour out; blocking a
-/// terminal that long is worse than failing, so anything beyond this becomes
-/// [`RetryAfter::TooDistant`].
-///
-/// The retry layer's backoff schedule must stay under this, which
-/// `infra::registry::retrying` asserts against at compile time.
-pub const MAX_RETRY_WAIT_SECS: u64 = 5;
 
 /// Reduce GitHub's absolute `x-ratelimit-reset` epoch to a wait worth taking.
 ///
