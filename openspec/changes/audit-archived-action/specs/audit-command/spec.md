@@ -112,8 +112,12 @@ would be most users' first experience of the command.
 
 The system SHALL surface an error-level finding, naming the action and the reason, whenever
 repository metadata cannot be retrieved — because the request failed, was rejected, was rate
-limited, or could not be parsed. It SHALL NOT treat such a failure as evidence that the
-repository is not archived.
+limited, was not found, or could not be parsed. It SHALL NOT treat such a failure as
+evidence that the repository is not archived.
+
+A repository that has been renamed or deleted answers with not-found, and is reported the
+same way. gx does not follow a rename: a lock naming a repository that is no longer there
+is itself worth the user's attention.
 
 **User value:** the same principle that makes a missing token a hard failure rather than an
 empty report. "We could not check" and "we checked and it is fine" are different statements,
@@ -134,6 +138,13 @@ in trouble — the moments a user is most likely to be relying on a green result
 - **WHEN** the user runs `gx audit`
 - **THEN** both the error-level lookup failure and the warning-level archived finding are
   reported
+- **AND** this holds whichever of the two entries is checked first
+
+#### Scenario: A repository that no longer exists is an error, not a clean result
+- **GIVEN** a `gx.lock` entry whose repository has been renamed or deleted, so the lookup
+  answers not-found
+- **WHEN** the user runs `gx audit`
+- **THEN** an error-level finding is produced naming the action and the not-found reason
 
 ---
 

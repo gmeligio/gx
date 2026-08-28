@@ -1,15 +1,16 @@
 ## 1. Repository-metadata seam
 
-- [ ] 1.1 Add `src/infra/github/repo_meta.rs`: the `RepoMeta` struct (`archived`,
+- [x] 1.1 Add `src/infra/github/repo_meta.rs`: the `RepoMeta` struct (`archived`,
       `pushed_at`), the `RepoMetadata` trait, and `RestRepoMetadata`, the real adapter
-      wrapping `Registry` and calling `GET /repos/{owner}/{repo}` via `authenticated_get`
-      + `check_status`. No new dependency.
-- [ ] 1.2 Add `src/infra/github/repo_meta_fake.rs`: a `#[cfg(test)]` `FakeRepoMetadata`
-      returning a canned `RepoMeta` or a canned failure, recording every repository slug it
-      was asked about so tests can assert which lookups happened.
-- [ ] 1.3 Register both modules in `src/infra/github/mod.rs` and re-export the public
+      wrapping `Registry` and calling `GET /repos/{owner}/{repo}` via `Registry::get_json`,
+      which already sequences authenticate, classify status, then decode. No new dependency.
+- [x] 1.2 Add `FakeRepoMetadata` inside `repo_meta.rs`, under `#[cfg(test)]` — **not** a
+      `repo_meta_fake.rs` of its own, per design Decision 2. It returns a canned `RepoMeta`
+      or a canned failure, recording every repository slug it was asked about so tests can
+      assert which lookups happened.
+- [x] 1.3 Register the one new module in `src/infra/github/mod.rs` and re-export the public
       names.
-- [ ] 1.4 Unit-test the adapter's decoding against a literal payload in GitHub's documented
+- [x] 1.4 Unit-test the adapter's decoding against a literal payload in GitHub's documented
       response shape, including the field names, so a rename fails a test.
 
 ## 2. The check
@@ -39,15 +40,20 @@
 - [ ] 3.4 Subpath action in an archived repository is reported under its full action name
       including the subpath.
 - [ ] 3.5 Failed lookup produces an `error` finding naming the action and the reason.
-- [ ] 3.6 A failed lookup for one entry does not suppress a finding for another entry.
-- [ ] 3.7 `archived-action` round-trips through its literal string and appears in
+- [ ] 3.6 A failed lookup for one entry does not suppress a finding for another entry,
+      whichever order they are processed in — assert with the failing entry both before and
+      after the archived one, so the test cannot pass on a lucky ordering.
+- [ ] 3.7 A `pushed_at` with no `T` is shown whole rather than blanked, per design
+      Decision 8.
+- [ ] 3.8 `archived-action` round-trips through its literal string and appears in
       `CheckName::ALL`.
 
 ## 4. Verification
 
 - [ ] 4.1 Mutation-test every scenario in section 3: break the behavior, confirm the test
       fails, restore. Record which mutations were run and their results.
-- [ ] 4.2 Confirm `src/audit/*.rs` is at 5 files, leaving 3 of the 8-file budget.
+- [ ] 4.2 Confirm `src/audit/*.rs` is at 5 files and `src/infra/github/*.rs` at 8 — the
+      latter exactly at the 8-file budget, which is why the fake must not be a second file.
 - [ ] 4.3 `mise run test` passes with no numeric budget in `tests/code_health.rs` raised.
 - [ ] 4.4 `mise run integ` passes.
 - [ ] 4.5 Clippy strict gate passes — pedantic, private-item and field docs, `#[expect]`

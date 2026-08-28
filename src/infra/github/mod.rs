@@ -6,6 +6,8 @@ mod advisory;
 mod dates;
 /// GitHub API client, error types, and `VersionRegistry` implementation.
 mod registry;
+/// Repository state lookups: whether a repo is archived, and when it was last pushed.
+mod repo_meta;
 /// Ref resolution: the tag, release, branch, and commit fallback chain.
 mod resolve;
 /// GitHub API response deserialization types.
@@ -15,3 +17,4 @@ mod tags;
 
 pub use advisory::{Advisory, AdvisoryQuery, GraphQlAdvisories, Severity as AdvisorySeverity};
 pub use registry::{Error, Registry};
+pub use repo_meta::{RepoMeta, RepoMetadata, RestRepoMetadata};

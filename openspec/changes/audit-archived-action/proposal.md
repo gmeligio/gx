@@ -57,10 +57,10 @@ None. This change adds requirements to `audit-command`, the capability introduce
 - New `src/audit/archived.rs`: the check itself (one new file; `src/audit/` moves 4 → 5 of
   its 8-file budget).
 - New `src/infra/github/repo_meta.rs`: the metadata seam, its REST adapter, and its test
-  double. **One file, not two** — `src/infra/github/` holds 6 files against an 8-file
-  budget, and the advisory-consuming check developed in parallel is likely to want a slot
-  there. Adding one file leaves 7/8; adding a separate `repo_meta_fake.rs` would leave 8/8
-  with no headroom. See design Decision 2.
+  double. **One file, not two** — `src/infra/github/` holds 7 files against an 8-file
+  budget, so one new file lands exactly at 8 and a separate `repo_meta_fake.rs` would break
+  the budget. `advisory.rs` already keeps its own fake inline for the same reason. See
+  design Decision 2.
 - `src/audit/mod.rs`: the check is wired into the run, and the command constructs the real
   adapter.
 - `src/audit/target.rs`: **no change.** The repository is derived from the action id via

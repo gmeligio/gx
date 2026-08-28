@@ -16,7 +16,7 @@ The relevant existing pieces:
   header, and `check_status`, which classifies a non-2xx response into `Error::RateLimited`
   / `Unauthorized` / `NotFound` / `ApiError`.
 - `advisory.rs` is the precedent for a seam: a trait checks depend on, a real adapter
-  wrapping `Registry`, and a `#[cfg(test)]` fake.
+  wrapping `Registry`, and a `#[cfg(test)]` fake in the same file.
 - `ActionId::base_repo()` (`src/domain/action/identity.rs:17`) takes the first two
   slash-separated segments and returns a `Repository`.
 
@@ -99,22 +99,22 @@ Normalizing at the integration edge — a two-field struct rather than raw JSON 
 logic never touches a `serde_json::Value`, matching how `Advisory` is normalized.
 
 **The fake lives in `repo_meta.rs` under `#[cfg(test)]`, not in a `repo_meta_fake.rs` of its
-own.** This departs from `advisory.rs` / `advisory_fake.rs`, and the reason is the directory
-budget: `src/infra/github/` holds 6 files against a limit of 8 (`tests/code_health.rs`,
-`folder_file_count_budget`). Two new files would land it at exactly 8 — passing, but with
-zero headroom, in a directory the parallel advisory-consuming check is the most likely of
-the three to need a slot in. One file leaves 7/8. The fake is small and is the same module's
-test double, so co-locating it costs nothing in clarity.
+own.** The reason is the directory budget: `src/infra/github/` holds **7** files against a limit of 8
+(`tests/code_health.rs`, `folder_file_count_budget`). One new file lands it at exactly 8 —
+passing, with zero headroom. Two would break the budget outright and force it to be raised.
+The fake is small and is the same module's test double, so co-locating it costs nothing in
+clarity.
 
-The brief said to reuse a shared `get_json<T>` helper in `src/infra/github/`. **No such
-function exists.** Verified by `grep -rn "get_json" src/` — zero hits anywhere in the tree.
-The brief also described a P1 file split into `registry.rs` / `resolve.rs` / `tags.rs` /
-`dates.rs`; the actual files are `advisory.rs`, `advisory_fake.rs`, `mod.rs`, `registry.rs`,
-`resolve.rs`, `responses.rs` — no `tags.rs`, no `dates.rs`. The reusable plumbing that *does*
-exist is `Registry::authenticated_get` + `Registry::check_status`, which is exactly what
-`advisory.rs` uses (via `authenticated_post`), and is what this adapter uses. The
-"two call sites deliberately exempt from `get_json`" the brief mentions could not be
-located and appear to belong to the same mistaken premise.
+`Registry::get_json<T>` **does** exist (`registry.rs:141`) and is the right tool here: it
+sends an authenticated GET, classifies a non-2xx response through `check_status` *before*
+parsing, and decodes the body — exactly the three steps this adapter needs. The adapter uses
+it rather than hand-rolling the sequence. (`advisory.rs` does not, because GraphQL is POST
+and reports failures in a 200 body.)
+
+The directory's actual contents are `advisory.rs`, `dates.rs`, `mod.rs`, `registry.rs`,
+`resolve.rs`, `responses.rs`, `tags.rs`. There is no `advisory_fake.rs` — the advisory fake
+already lives inside `advisory.rs` under `#[cfg(test)]`, for this same budget reason. So
+co-locating this fake follows the directory's precedent rather than departing from it.
 
 `pushed_at` is kept as `String`, not parsed into a date type. It is never compared or
 sorted — only displayed — so a real date type would buy nothing behavioral. `CommitDate`
