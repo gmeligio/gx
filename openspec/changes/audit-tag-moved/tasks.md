@@ -88,8 +88,9 @@
         Recorded rather than papered over — see the report.
 - [x] 5.2 `mise run test` passes.
 - [x] 5.3 `mise run integ` passes.
-- [ ] 5.4 Run the built binary against this repository's own `.github/gx.lock` with a real
-      token. First confirm every entry is still tag- or release-resolved (8 entries: 7 tag,
-      1 release at the time of writing), so every one exercises a live lookup; then confirm
-      all report clean.
+- [x] 5.4 Ran against this repository's own `.github/gx.lock`: 8 entries, 7 tag + 1 release,
+      so every one issued a live lookup. All clean, exit 0. Negative control with an invalid
+      token produced 8 `tag-unverified` errors and exit 1, proving the clean run actually
+      reached the network rather than skipping — a false clean was the failure mode this
+      whole change exists to prevent.
 - [x] 5.5 Confirm no numeric budget in `tests/code_health.rs` was raised.
