@@ -40,16 +40,25 @@ impl GitTags {
     }
 }
 
+/// The ref endpoint for `tag` in `action`'s repository.
+///
+/// Tags belong to the repository, not to a directory inside it, so a subpath action resolves
+/// against its root — otherwise the request names a repository that does not exist and a
+/// healthy dependency is reported as unverifiable.
+fn tag_ref_url(action: &ActionId, tag: &str) -> String {
+    format!(
+        "{GITHUB_API_BASE}/repos/{}/git/ref/tags/{tag}",
+        action.base_repo()
+    )
+}
+
 impl TagResolver for GitTags {
     fn tag_commit(&self, action: &ActionId, tag: &str) -> Result<CommitSha, Error> {
-        // Tags belong to the repository, not to a directory inside it, so a subpath action
-        // resolves against its root — otherwise the request names a repository that does not
-        // exist and a healthy dependency is reported as unverifiable.
-        let repo = action.base_repo();
-        let url = format!("{GITHUB_API_BASE}/repos/{repo}/git/ref/tags/{tag}");
         // fetch_ref_commit dereferences annotated tags. Reimplementing that here would put a
         // second copy of the logic that prevents this check's worst failure mode.
-        self.registry.fetch_ref_commit(&url).map(CommitSha::from)
+        self.registry
+            .fetch_ref_commit(&tag_ref_url(action, tag))
+            .map(CommitSha::from)
     }
 }
 
@@ -109,5 +118,49 @@ impl TagResolver for FakeTags {
             .ok_or_else(|| Error::NotFound {
                 url: format!("{GITHUB_API_BASE}/repos/{}/git/ref/tags/{tag}", key.0),
             })
+    }
+}
+
+#[cfg(test)]
+#[expect(
+    clippy::unwrap_used,
+    reason = "tests use unwrap, indexing, and other patterns freely"
+)]
+mod tests {
+    use super::{FakeTags, TagResolver as _, tag_ref_url};
+    use crate::domain::action::identity::ActionId;
+
+    #[test]
+    fn tag_url_targets_the_git_ref_endpoint() {
+        assert_eq!(
+            tag_ref_url(&ActionId::from("actions/checkout"), "v4.2.1"),
+            "https://api.github.com/repos/actions/checkout/git/ref/tags/v4.2.1"
+        );
+    }
+
+    #[test]
+    fn subpath_action_resolves_against_its_repository_root() {
+        // The full path names no repository, so the request would 404 and the check would
+        // report a healthy action as unverifiable.
+        assert_eq!(
+            tag_ref_url(&ActionId::from("github/codeql-action/upload-sarif"), "v3"),
+            "https://api.github.com/repos/github/codeql-action/git/ref/tags/v3"
+        );
+    }
+
+    #[test]
+    fn the_fake_answers_for_a_seeded_tag_and_fails_otherwise() {
+        let fake = FakeTags::failing().with("actions/checkout", "v4", "abc");
+        let id = ActionId::from("actions/checkout");
+
+        assert_eq!(fake.tag_commit(&id, "v4").unwrap().as_str(), "abc");
+        fake.tag_commit(&id, "v5").unwrap_err();
+        assert_eq!(
+            fake.lookups(),
+            vec![
+                ("actions/checkout".to_owned(), "v4".to_owned()),
+                ("actions/checkout".to_owned(), "v5".to_owned())
+            ]
+        );
     }
 }

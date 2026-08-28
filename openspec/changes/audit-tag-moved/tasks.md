@@ -75,9 +75,17 @@
 
 ## 5. Verification
 
-- [ ] 5.1 Run each mutation and record the result: invert the eligibility check so branches are
-      looked up; make the adapter return the tag object's SHA instead of dereferencing; make a
-      failed lookup produce no finding. Each must turn a test red. Restore after each.
+- [x] 5.1 Mutations run, each restored afterwards:
+      - eligibility inverted so branches are looked up → 2 red
+        (`ineligible_entries_are_skipped_without_a_lookup`, `branch_entry_produces_a_finding`)
+      - adapter resolves the full subpath instead of the repo root → 1 red
+        (`subpath_action_resolves_against_its_repository_root`)
+      - failed lookup produces no finding → 3 red (2 unit, 1 integ)
+      - real adapter stops dereferencing annotated tags → **0 red**. `fetch_ref_commit` needs
+        HTTP, so no offline test covers it; the existing `resolve.rs` tests only reach the
+        SHA-passthrough path. Task 4.8 now asserts the URL the adapter builds, which is the
+        part it owns; the dereference itself is covered only by 5.4 against the live API.
+        Recorded rather than papered over — see the report.
 - [x] 5.2 `mise run test` passes.
 - [x] 5.3 `mise run integ` passes.
 - [ ] 5.4 Run the built binary against this repository's own `.github/gx.lock` with a real
