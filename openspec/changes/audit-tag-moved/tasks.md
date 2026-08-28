@@ -1,22 +1,22 @@
 ## 1. The tag-resolution seam
 
-- [ ] 1.1 Add `src/infra/github/tag_ref.rs` defining a `TagResolver` trait with one method
+- [x] 1.1 Add `src/infra/github/tag_ref.rs` defining a `TagResolver` trait with one method
       resolving `(action, tag)` to a commit SHA, returning `Result<CommitSha, Error>`.
-- [ ] 1.2 Implement the real adapter in the same file, building the
+- [x] 1.2 Implement the real adapter in the same file, building the
       `GET /repos/{owner}/{repo}/git/ref/tags/{tag}` URL and delegating to the existing
       `Registry::fetch_ref_commit`, which already dereferences annotated tags. Keep this out
       of `resolve.rs`: that file owns the tag/branch/commit fallback chain, and "resolve
       exactly this tag" is a different question.
-- [ ] 1.3 Handle subpath actions (`github/codeql-action/upload-sarif`) by taking the first two
+- [x] 1.3 Handle subpath actions (`github/codeql-action/upload-sarif`) by taking the first two
       path segments, matching what `resolve_ref` does.
-- [ ] 1.4 Add a fake implementation returning canned commits or a canned failure, and
+- [x] 1.4 Add a fake implementation returning canned commits or a canned failure, and
       recording which `(action, tag)` lookups it was asked for. It must NOT be `#[cfg(test)]`:
       `tests/integ_audit.rs` compiles against the non-test lib, so a gated fake is invisible
       there and tasks 4.9/4.10 cannot inject it. Follow the precedent that already solves
       this — `pub mod testutil` in `src/domain/resolution.rs`, exported ungated — rather than
       `FakeAdvisories`/`FakeChecker`, which are gated and unreachable from `tests/`.
-- [ ] 1.5 Export the trait, the real adapter, and the fake from `src/infra/github/mod.rs`.
-- [ ] 1.6 Confirm `src/infra/github/` is within its 8-file budget. It holds 7 files today, so
+- [x] 1.5 Export the trait, the real adapter, and the fake from `src/infra/github/mod.rs`.
+- [x] 1.6 Confirm `src/infra/github/` is within its 8-file budget. It holds 7 files today, so
       `tag_ref.rs` lands at exactly 8/8 — no slack, and adding another file there forces a
       split.
 
