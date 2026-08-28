@@ -98,6 +98,14 @@ pub struct RestRepoMetadata { registry: Registry }
 Normalizing at the integration edge — a two-field struct rather than raw JSON — means check
 logic never touches a `serde_json::Value`, matching how `Advisory` is normalized.
 
+**The fake lives in `repo_meta.rs` under `#[cfg(test)]`, not in a `repo_meta_fake.rs` of its
+own.** This departs from `advisory.rs` / `advisory_fake.rs`, and the reason is the directory
+budget: `src/infra/github/` holds 6 files against a limit of 8 (`tests/code_health.rs`,
+`folder_file_count_budget`). Two new files would land it at exactly 8 — passing, but with
+zero headroom, in a directory the parallel advisory-consuming check is the most likely of
+the three to need a slot in. One file leaves 7/8. The fake is small and is the same module's
+test double, so co-locating it costs nothing in clarity.
+
 The brief said to reuse a shared `get_json<T>` helper in `src/infra/github/`. **No such
 function exists.** Verified by `grep -rn "get_json" src/` — zero hits anywhere in the tree.
 The brief also described a P1 file split into `registry.rs` / `resolve.rs` / `tags.rs` /
@@ -108,10 +116,13 @@ exist is `Registry::authenticated_get` + `Registry::check_status`, which is exac
 "two call sites deliberately exempt from `get_json`" the brief mentions could not be
 located and appear to belong to the same mistaken premise.
 
-`pushed_at` is kept as `String`, not parsed into a date type. It is displayed verbatim and
-never compared or sorted, so parsing would add a dependency-shaped decision (which date
-type? what on malformed input?) for no behavioral gain. `CommitDate` elsewhere in gx is
-likewise a newtype over `String`.
+`pushed_at` is kept as `String`, not parsed into a date type. It is never compared or
+sorted — only displayed — so a real date type would buy nothing behavioral. `CommitDate`
+elsewhere in gx is likewise a newtype over `String`.
+
+It is not displayed *verbatim*, though: see Decision 8 for the truncation, and for what is
+shown when the value is not the shape GitHub documents. The truncation is a display choice
+made at the point of formatting, which is why it does not argue for parsing at the seam.
 
 ### Decision 3: The check owns its errors as findings, not as a command-level `Err`
 
@@ -192,6 +203,14 @@ because upgrading is the thing that cannot work here.
 `pushed_at` arrives as an ISO-8601 timestamp (`2021-04-14T18:22:31Z`). Only the date part is
 shown; the time of day is noise at the granularity of "how many years frozen".
 
+Truncation is by splitting on `T` and taking the first segment, **falling back to the whole
+string when there is no `T`**. Nothing validates the shape before this point — `pushed_at`
+is an unparsed `String` (Decision 2) — so a value GitHub returns in some other form must not
+panic or silently blank the date. The fallback shows whatever arrived, which is strictly
+more informative than dropping it and keeps a malformed timestamp from turning a real
+archived-repository finding into a misleading one. This is a display-level fallback, not an
+error path: the finding is still correct and still actionable, only its date reads oddly.
+
 The failure finding is a different message on the same check:
 
 ```
@@ -200,7 +219,11 @@ for https://api.github.com/repos/actions/checkout
 ```
 
 It leads with the uncertainty rather than the cause, so a user skimming a report cannot read
-it as a verdict about the action.
+it as a verdict about the action. The trailing reason is `Error`'s own `Display`, so
+`Registry::check_status`'s existing classification — `NotFound` vs `RateLimited` vs
+`Unauthorized` — reaches the user without this check restating it. That is what makes a
+rename ("not found") distinguishable from a blip ("rate limit exceeded") despite the shared
+opening clause.
 
 ## Automated Test Strategy
 

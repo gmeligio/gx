@@ -56,12 +56,15 @@ None. This change adds requirements to `audit-command`, the capability introduce
 - `src/audit/check_name.rs`: one line added to the `rule_ids!` list.
 - New `src/audit/archived.rs`: the check itself (one new file; `src/audit/` moves 4 → 5 of
   its 8-file budget).
-- New `src/infra/github/repo_meta.rs` and `repo_meta_fake.rs`: the metadata seam and its
-  test double.
+- New `src/infra/github/repo_meta.rs`: the metadata seam, its REST adapter, and its test
+  double. **One file, not two** — `src/infra/github/` holds 6 files against an 8-file
+  budget, and the advisory-consuming check developed in parallel is likely to want a slot
+  there. Adding one file leaves 7/8; adding a separate `repo_meta_fake.rs` would leave 8/8
+  with no headroom. See design Decision 2.
 - `src/audit/mod.rs`: the check is wired into the run, and the command constructs the real
   adapter.
-- `src/audit/target.rs`: at most one field added to `AuditTarget` and one line to its
-  adapter — no new row type.
+- `src/audit/target.rs`: **no change.** The repository is derived from the action id via
+  `ActionId::base_repo()` rather than carried as a new field — see design Decision 1.
 - No changes to `Cargo.toml`, `Cargo.lock`, or `deny.toml` — no new dependency. The check
   reuses the existing `reqwest` blocking client through `Registry`.
 - No numeric budget in `tests/code_health.rs` is raised.
