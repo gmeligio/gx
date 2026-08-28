@@ -99,7 +99,9 @@ impl Default for FakeTags {
 
 impl TagResolver for FakeTags {
     fn tag_commit(&self, action: &ActionId, tag: &str) -> Result<CommitSha, Error> {
-        let key = (action.as_str().to_owned(), tag.to_owned());
+        // Keyed on the repository root, mirroring the real adapter: a fake that answered
+        // for the full subpath would let a broken adapter pass.
+        let key = (action.base_repo().to_string(), tag.to_owned());
         self.seen.borrow_mut().push(key.clone());
         self.targets
             .get(&key)

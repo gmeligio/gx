@@ -11,6 +11,8 @@
 mod check_name;
 /// Findings, report rendering, and the `--json` contract.
 mod report;
+/// The `tag-moved` and `tag-unverified` checks.
+mod tag_moved;
 /// The per-lock-row view checks consume, and the `mutable-ref` check.
 mod target;
 
@@ -20,6 +22,7 @@ pub use report::{Finding, Report};
 use crate::command::Command;
 use crate::config::{Config, Settings};
 use crate::domain::resolution::Forge;
+use crate::infra::github::{GitTags, Registry, TagResolver};
 use std::path::Path;
 use thiserror::Error;
 
@@ -39,21 +42,34 @@ pub enum Error {
         /// The forge whose credential is missing.
         forge: Forge,
     },
+
+    /// The HTTP client could not be built, so no tag could be verified.
+    #[error("could not build the GitHub client")]
+    Client(#[source] crate::infra::github::Error),
 }
 
-/// Every check audit runs. Adding one is a line here.
+/// Every offline check audit runs. Adding one is a line here.
 const CHECKS: &[fn(&target::AuditTarget<'_>) -> Option<Finding>] = &[target::mutable_ref];
 
 /// Run every check over the locked action set.
 ///
-/// Reads only the lock — no network — so tests drive it with a fixture lock.
+/// Takes the tag resolver rather than building one, so tests exercise every path offline.
 #[must_use]
-pub fn collect_findings(config: &Config, on_progress: &mut dyn FnMut(&str)) -> Vec<Finding> {
+pub fn collect_findings(
+    config: &Config,
+    resolver: &dyn TagResolver,
+    on_progress: &mut dyn FnMut(&str),
+) -> Vec<Finding> {
     on_progress("Auditing locked actions...");
     let targets = target::targets(&config.lock);
     targets
         .iter()
-        .flat_map(|target| CHECKS.iter().filter_map(move |check| check(target)))
+        .flat_map(|target| {
+            CHECKS
+                .iter()
+                .filter_map(move |check| check(target))
+                .chain(tag_moved::tag_moved(target, resolver))
+        })
         .collect()
 }
 
@@ -76,9 +92,33 @@ pub fn require_token(settings: &Settings) -> Result<(), Error> {
 }
 
 /// The audit command.
-pub struct Audit;
+pub struct Audit<Tags: TagResolver> {
+    /// Resolves tags to the commits they point at now.
+    resolver: Tags,
+}
 
-impl Command for Audit {
+impl Audit<GitTags> {
+    /// The command as it runs for a user, resolving tags against the live API.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::MissingToken`] when no forge credential is configured, and the
+    /// client cannot be built without one.
+    pub fn from_settings(settings: &Settings) -> Result<Self, Error> {
+        require_token(settings)?;
+        let registry = Registry::new(settings.github_token.clone()).map_err(Error::Client)?;
+        Ok(Self::new(GitTags::new(registry)))
+    }
+}
+
+impl<Tags: TagResolver> Audit<Tags> {
+    /// Build the command around a tag resolver.
+    pub const fn new(resolver: Tags) -> Self {
+        Self { resolver }
+    }
+}
+
+impl<Tags: TagResolver> Command for Audit<Tags> {
     type Report = Report;
     type Error = Error;
 
@@ -91,6 +131,7 @@ impl Command for Audit {
         require_token(&config.settings)?;
         Ok(Report::from_diagnostics(collect_findings(
             &config,
+            &self.resolver,
             on_progress,
         )))
     }
@@ -111,7 +152,14 @@ mod tests {
     use crate::domain::action::uses_ref::RefType;
     use crate::domain::lock::Lock;
     use crate::domain::manifest::Manifest;
+    use crate::infra::github::FakeTags;
     use std::path::{Path, PathBuf};
+
+    /// Run the command with a resolver that fails every lookup. These fixtures pin
+    /// branches or nothing at all, so an eligible entry would be a bug in the fixture.
+    fn audit_with_fake(config: Config) -> Result<super::Report, Error> {
+        Audit::new(FakeTags::failing()).run(Path::new("/nonexistent"), config, &mut |_| {})
+    }
 
     fn config_with(lock: Lock, token: Option<&str>) -> Config {
         Config {
@@ -146,7 +194,7 @@ mod tests {
     #[test]
     fn missing_token_is_an_error_not_a_clean_report() {
         let config = config_with(Lock::default(), None);
-        let result = Audit.run(Path::new("/nonexistent"), config, &mut |_| {});
+        let result = audit_with_fake(config);
 
         // Structurally an Err, so it cannot be rendered or serialized as "clean".
         assert!(matches!(result, Err(Error::MissingToken { .. })));
@@ -173,16 +221,14 @@ mod tests {
         // A lock that would produce a finding still yields MissingToken, proving the
         // guard runs first rather than after a partial audit.
         let config = config_with(branch_lock(), None);
-        let result = Audit.run(Path::new("/nonexistent"), config, &mut |_| {});
+        let result = audit_with_fake(config);
         assert!(matches!(result, Err(Error::MissingToken { .. })));
     }
 
     #[test]
     fn branch_entry_produces_a_finding() {
         let config = config_with(branch_lock(), Some("token"));
-        let report = Audit
-            .run(Path::new("/nonexistent"), config, &mut |_| {})
-            .unwrap();
+        let report = audit_with_fake(config).unwrap();
 
         assert_eq!(report.diagnostics.len(), 1);
         assert_eq!(report.warning_count, 1);
@@ -192,9 +238,7 @@ mod tests {
     #[test]
     fn empty_lock_is_clean() {
         let config = config_with(Lock::default(), Some("token"));
-        let report = Audit
-            .run(Path::new("/nonexistent"), config, &mut |_| {})
-            .unwrap();
+        let report = audit_with_fake(config).unwrap();
 
         assert!(report.diagnostics.is_empty());
     }

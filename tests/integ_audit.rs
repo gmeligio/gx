@@ -17,6 +17,7 @@ use gx::command::{Command as _, CommandReport};
 use gx::config::{Config, GitHubToken, Level, Lint};
 use gx::domain::lock::Lock;
 use gx::domain::manifest::Manifest;
+use gx::infra::github::FakeTags;
 use gx::infra::lock::Store as LockStore;
 use std::fs;
 use std::path::Path;
@@ -42,6 +43,27 @@ version = "v4.2.1"
 [actions."actions/checkout"."v4.2.1"]
 sha = "abc123def456789012345678901234567890abcd"
 repository = "actions/checkout"
+ref_type = "tag"
+date = "2026-01-01T00:00:00Z"
+"#;
+
+/// A lock with two tag pins, for asserting that one entry's failure does not hide another.
+const TWO_TAG_LOCK: &str = r#"
+[resolutions."actions/checkout"."^4"]
+version = "v4.2.1"
+
+[resolutions."actions/setup-node"."^4"]
+version = "v4.0.0"
+
+[actions."actions/checkout"."v4.2.1"]
+sha = "abc123def456789012345678901234567890abcd"
+repository = "actions/checkout"
+ref_type = "tag"
+date = "2026-01-01T00:00:00Z"
+
+[actions."actions/setup-node"."v4.0.0"]
+sha = "abc123def456789012345678901234567890abcd"
+repository = "actions/setup-node"
 ref_type = "tag"
 date = "2026-01-01T00:00:00Z"
 "#;
@@ -76,8 +98,21 @@ fn config_at(root: &Path, token: Option<&str>) -> Config {
     }
 }
 
+/// The SHA every fixture lock records.
+const LOCKED_SHA: &str = "abc123def456789012345678901234567890abcd";
+
+/// A commit that is not [`LOCKED_SHA`], for the moved-tag fixtures.
+const OTHER_SHA: &str = "0e58ed86baaa5f0e5e5e5e5e5e5e5e5e5e5e5e5e";
+
+/// Audit with a tag resolver that answers from canned data, so no test reaches the network.
+fn audit_with(root: &Path, token: Option<&str>, resolver: FakeTags) -> Result<Report, AuditError> {
+    Audit::new(resolver).run(root, config_at(root, token), &mut |_| {})
+}
+
+/// Audit with every tag still pointing where the lock recorded — the clean case.
 fn audit(root: &Path, token: Option<&str>) -> Result<Report, AuditError> {
-    Audit.run(root, config_at(root, token), &mut |_| {})
+    let resolver = FakeTags::failing().with("actions/checkout", "v4.2.1", LOCKED_SHA);
+    audit_with(root, token, resolver)
 }
 
 #[test]
@@ -315,7 +350,9 @@ fn json_mode_writes_one_document_and_no_progress_output() {
 #[test]
 fn json_mode_writes_no_local_log_file() {
     let temp = TempDir::new().unwrap();
-    let root = repo_with_lock(&temp, Some(TAG_LOCK));
+    // A branch pin: the spawned binary cannot take a fake resolver, and branches are
+    // skipped, so this fixture makes no request.
+    let root = repo_with_lock(&temp, Some(BRANCH_LOCK));
     git_init(&root);
 
     let (stdout, _stderr, _code) = run_gx(&root, Some("token"), &["audit", "--json"]);
@@ -379,4 +416,49 @@ fn only_the_lock_decides_what_is_audited() {
         "audit must ignore actions that appear only in workflows, got: {:?}",
         report.diagnostics
     );
+}
+
+#[test]
+fn a_moved_tag_exits_one_and_names_the_check_in_json() {
+    // The whole point of the command: a tag repointed since it was pinned must fail the
+    // build and say so in the machine-readable contract CI filters on.
+    let temp = TempDir::new().unwrap();
+    let root = repo_with_lock(&temp, Some(TAG_LOCK));
+    let resolver = FakeTags::failing().with("actions/checkout", "v4.2.1", OTHER_SHA);
+
+    let report = audit_with(&root, Some("token"), resolver).unwrap();
+
+    assert_eq!(CommandReport::exit_code(&report), 1);
+    let value: serde_json::Value = serde_json::from_str(&report.to_json()).unwrap();
+    assert_eq!(value["findings"][0]["check"], "tag-moved");
+    assert_eq!(value["findings"][0]["level"], "error");
+    // A finding that rendered as an error without counting as one would satisfy the
+    // assertions above and still break the published contract.
+    assert_eq!(value["error_count"], 1);
+    assert_eq!(value["warning_count"], 0);
+}
+
+#[test]
+fn tampering_and_unreachability_carry_different_check_names() {
+    // A CI consumer must tell "your dependency was tampered with" from "GitHub rate-limited
+    // us" without parsing prose: the first pages a human, the second retries the job.
+    let temp = TempDir::new().unwrap();
+    let root = repo_with_lock(&temp, Some(TWO_TAG_LOCK));
+    // checkout resolves and has moved; setup-node's lookup fails.
+    let resolver = FakeTags::failing().with("actions/checkout", "v4.2.1", OTHER_SHA);
+
+    let report = audit_with(&root, Some("token"), resolver).unwrap();
+
+    assert_eq!(CommandReport::exit_code(&report), 1);
+    let value: serde_json::Value = serde_json::from_str(&report.to_json()).unwrap();
+    let checks: Vec<&str> = value["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|finding| finding["check"].as_str().unwrap())
+        .collect();
+
+    assert!(checks.contains(&"tag-moved"), "got {checks:?}");
+    assert!(checks.contains(&"tag-unverified"), "got {checks:?}");
+    assert_eq!(value["error_count"], 2);
 }
