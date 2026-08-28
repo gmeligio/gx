@@ -14,4 +14,8 @@ mod responses;
 mod tags;
 
 pub use advisory::{Advisory, AdvisoryQuery, GraphQlAdvisories, Severity as AdvisorySeverity};
+
+/// The [`AdvisoryQuery`] test double, so advisory-consuming checks are testable offline.
+#[cfg(test)]
+pub use advisory::fake::FakeAdvisories;
 pub use registry::{Error, Registry};

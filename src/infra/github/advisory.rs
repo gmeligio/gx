@@ -22,18 +22,26 @@ const GRAPHQL_URL: &str = "https://api.github.com/graphql";
 /// successful one by status alone. Every failure below therefore carries this status.
 const GRAPHQL_ERROR_STATUS: u16 = 200;
 
-/// The advisory query, parameterized by the action's repository slug.
+/// The advisory query: the whole `ACTIONS` ecosystem in one request.
 ///
-/// `ACTIONS` is GitHub's ecosystem name for GitHub Actions. Note that filtering by version
-/// is deliberately NOT done server-side: the caller compares the locked version against
-/// `vulnerableVersionRange` itself, because the API's version filter has a history of
-/// returning empty results — a false-negative that would silently report "clean".
+/// Wholesale rather than per package because the set is small — 63 advisories over 47
+/// packages when measured — so asking per action would cost 47 requests to learn the same
+/// 63 facts, and scale with lock size for nothing.
+///
+/// Filtering by version is deliberately NOT done server-side: the caller compares the
+/// locked version against `vulnerableVersionRange` itself, because the API's version
+/// filter has a history of returning empty results — a false-negative that would silently
+/// report "clean".
+///
+/// `totalCount` is selected so a page that could not hold the whole set is detectable.
 const ADVISORY_QUERY: &str = "\
-query($package: String!) {
-  securityVulnerabilities(ecosystem: ACTIONS, package: $package, first: 100) {
+query {
+  securityVulnerabilities(ecosystem: ACTIONS, first: 100) {
+    totalCount
     nodes {
       vulnerableVersionRange
       firstPatchedVersion { identifier }
+      package { name }
       advisory { ghsaId summary severity permalink }
     }
   }
@@ -53,6 +61,9 @@ pub enum Severity {
 /// never touches raw GraphQL JSON.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Advisory {
+    /// The package the advisory is published against, e.g. `tj-actions/changed-files`.
+    /// Mixed case as GitHub returns it; callers match case-insensitively.
+    pub package: String,
     /// The GHSA identifier, e.g. `GHSA-mrrh-fwg8-r2c3`.
     pub ghsa_id: String,
     /// One-line description of the vulnerability.
@@ -72,7 +83,7 @@ pub struct Advisory {
 ///
 /// Implemented by [`GraphQlAdvisories`] (real) and `FakeAdvisories` (tests).
 pub trait AdvisoryQuery {
-    /// All advisories affecting `package`, a `owner/repo` slug.
+    /// Every advisory published against the `ACTIONS` ecosystem.
     ///
     /// An empty vec means "no known advisories" — a positive statement that the lookup
     /// happened and found nothing. Any failure to establish that is an `Err`, never an
@@ -81,23 +92,15 @@ pub trait AdvisoryQuery {
     /// # Errors
     ///
     /// Returns [`Error`] if the request fails, is rejected, or cannot be parsed.
-    fn advisories(&self, package: &str) -> Result<Vec<Advisory>, Error>;
+    fn all_actions_advisories(&self) -> Result<Vec<Advisory>, Error>;
 }
 
-/// The GraphQL request body: a query plus its variables.
+/// The GraphQL request body. The query takes no variables — it asks for the whole
+/// ecosystem.
 #[derive(Serialize)]
 struct Request<'req> {
     /// The GraphQL query document.
     query: &'req str,
-    /// Bound variables for the query.
-    variables: Variables<'req>,
-}
-
-/// Variables bound into [`ADVISORY_QUERY`].
-#[derive(Serialize)]
-struct Variables<'vars> {
-    /// The `owner/repo` slug to look up.
-    package: &'vars str,
 }
 
 /// Top-level GraphQL response envelope.
@@ -129,6 +132,9 @@ struct ResponseData {
 /// A GraphQL connection wrapping the vulnerability list.
 #[derive(Deserialize)]
 struct Vulnerabilities {
+    /// How many advisories the server holds, which may exceed what one page returns.
+    #[serde(rename = "totalCount")]
+    total_count: usize,
     /// The vulnerabilities themselves.
     nodes: Vec<VulnerabilityNode>,
 }
@@ -142,8 +148,17 @@ struct VulnerabilityNode {
     /// The first fixed version, when one exists.
     #[serde(rename = "firstPatchedVersion")]
     first_patched_version: Option<PatchedVersion>,
+    /// The package this vulnerability is published against.
+    package: PackageNode,
     /// The advisory this vulnerability belongs to.
     advisory: AdvisoryNode,
+}
+
+/// The `package` object.
+#[derive(Deserialize)]
+struct PackageNode {
+    /// The package name, an `owner/repo` slug for all but a few oddly-published entries.
+    name: String,
 }
 
 /// The `firstPatchedVersion` object.
@@ -197,11 +212,27 @@ impl GraphQlAdvisories {
                 url: format!("{GRAPHQL_URL} (response contained no data)"),
             });
         };
-        Ok(data
-            .security_vulnerabilities
+        let connection = data.security_vulnerabilities;
+
+        // A page that could not hold the whole set would leave the missing advisories
+        // looking like advisories that do not exist — the same silent false-clean, arriving
+        // through pagination instead of a rejected query.
+        if connection.total_count > connection.nodes.len() {
+            return Err(Error::ApiError {
+                status: GRAPHQL_ERROR_STATUS,
+                url: format!(
+                    "{GRAPHQL_URL} (returned {} of {} advisories; the set no longer fits one page)",
+                    connection.nodes.len(),
+                    connection.total_count
+                ),
+            });
+        }
+
+        Ok(connection
             .nodes
             .into_iter()
             .map(|node| Advisory {
+                package: node.package.name,
                 ghsa_id: node.advisory.ghsa_id,
                 summary: node.advisory.summary,
                 severity: node.advisory.severity,
@@ -214,10 +245,9 @@ impl GraphQlAdvisories {
 }
 
 impl AdvisoryQuery for GraphQlAdvisories {
-    fn advisories(&self, package: &str) -> Result<Vec<Advisory>, Error> {
+    fn all_actions_advisories(&self) -> Result<Vec<Advisory>, Error> {
         let body = Request {
             query: ADVISORY_QUERY,
-            variables: Variables { package },
         };
 
         let request = self.registry.authenticated_post(GRAPHQL_URL).json(&body);
@@ -248,9 +278,9 @@ impl AdvisoryQuery for GraphQlAdvisories {
 /// `#[cfg(test)] mod` satisfies the cfg-at-bottom invariant, which forbids top-level public
 /// items after the first `#[cfg(test)]`, not a test module itself.
 #[cfg(test)]
-mod fake {
+pub(crate) mod fake {
     use super::{Advisory, AdvisoryQuery, Error, GRAPHQL_URL};
-    use std::cell::RefCell;
+    use std::cell::Cell;
 
     /// Returns pre-seeded advisories without issuing any request, so checks that judge
     /// whether an action is vulnerable can be unit-tested with no network and fully
@@ -260,32 +290,39 @@ mod fake {
         /// tested on the path where the lookup did not succeed — the path where
         /// reporting "clean" would be a lie.
         result: Result<Vec<Advisory>, ()>,
-        /// Packages passed to `advisories`, in call order, so a test can assert which
-        /// actions were actually looked up.
-        pub seen: RefCell<Vec<String>>,
+        /// How many lookups were issued. The whole point of fetching wholesale is that
+        /// this stays at one however large the lock, and at zero when it is empty.
+        calls: Cell<usize>,
     }
 
     impl FakeAdvisories {
         /// A source that returns `advisories` for every lookup.
+        #[must_use] 
         pub fn new(advisories: Vec<Advisory>) -> Self {
             Self {
                 result: Ok(advisories),
-                seen: RefCell::new(Vec::new()),
+                calls: Cell::new(0),
             }
         }
 
         /// A source whose every lookup fails.
+        #[must_use] 
         pub fn failing() -> Self {
             Self {
                 result: Err(()),
-                seen: RefCell::new(Vec::new()),
+                calls: Cell::new(0),
             }
+        }
+
+        /// How many lookups have been issued so far.
+        pub fn calls(&self) -> usize {
+            self.calls.get()
         }
     }
 
     impl AdvisoryQuery for FakeAdvisories {
-        fn advisories(&self, package: &str) -> Result<Vec<Advisory>, Error> {
-            self.seen.borrow_mut().push(package.to_owned());
+        fn all_actions_advisories(&self) -> Result<Vec<Advisory>, Error> {
+            self.calls.set(self.calls.get() + 1);
             self.result.clone().map_err(|()| Error::Unauthorized {
                 url: GRAPHQL_URL.to_owned(),
             })
@@ -303,29 +340,26 @@ mod tests {
     use super::fake::FakeAdvisories;
     use super::{
         ADVISORY_QUERY, Advisory, AdvisoryQuery as _, GraphQlAdvisories, Request, Response,
-        Severity, Variables,
+        Severity,
     };
 
     #[test]
-    fn request_body_carries_query_and_variables() {
+    fn request_body_asks_for_the_whole_ecosystem() {
         let body = Request {
             query: ADVISORY_QUERY,
-            variables: Variables {
-                package: "actions/checkout",
-            },
         };
         let json: serde_json::Value = serde_json::to_value(&body).unwrap();
+        let query = json["query"].as_str().unwrap();
 
-        // The two keys GitHub's GraphQL endpoint requires.
-        assert!(json.get("query").is_some());
-        assert_eq!(json["variables"]["package"], "actions/checkout");
         // The ecosystem filter is what scopes this to GitHub Actions at all.
-        assert!(
-            json["query"]
-                .as_str()
-                .unwrap()
-                .contains("ecosystem: ACTIONS")
-        );
+        assert!(query.contains("ecosystem: ACTIONS"));
+        // No package variable: one request covers every action, however many are locked.
+        assert!(json.get("variables").is_none());
+        assert!(!query.contains("$package"));
+        // Without totalCount a truncated page is indistinguishable from a complete one.
+        assert!(query.contains("totalCount"));
+        // The package name is what a finding is matched against.
+        assert!(query.contains("package { name }"));
     }
 
     #[test]
@@ -333,9 +367,11 @@ mod tests {
         let raw = r#"{
           "data": {
             "securityVulnerabilities": {
+              "totalCount": 1,
               "nodes": [{
                 "vulnerableVersionRange": "< 45.0.7",
                 "firstPatchedVersion": { "identifier": "45.0.7" },
+                "package": { "name": "tj-actions/changed-files" },
                 "advisory": {
                   "ghsaId": "GHSA-mrrh-fwg8-r2c3",
                   "summary": "tj-actions/changed-files leaks secrets",
@@ -350,6 +386,7 @@ mod tests {
         let advisories = GraphQlAdvisories::interpret(decoded).unwrap();
 
         assert_eq!(advisories.len(), 1);
+        assert_eq!(advisories[0].package, "tj-actions/changed-files");
         assert_eq!(advisories[0].ghsa_id, "GHSA-mrrh-fwg8-r2c3");
         assert_eq!(advisories[0].severity, Severity::High);
         assert_eq!(advisories[0].vulnerable_range, "< 45.0.7");
@@ -358,7 +395,7 @@ mod tests {
 
     #[test]
     fn parses_an_empty_result_as_no_advisories() {
-        let raw = r#"{"data": {"securityVulnerabilities": {"nodes": []}}}"#;
+        let raw = r#"{"data": {"securityVulnerabilities": {"totalCount": 0, "nodes": []}}}"#;
         let decoded: Response = serde_json::from_str(raw).unwrap();
         assert!(GraphQlAdvisories::interpret(decoded).unwrap().is_empty());
     }
@@ -368,9 +405,11 @@ mod tests {
         let raw = r#"{
           "data": {
             "securityVulnerabilities": {
+              "totalCount": 1,
               "nodes": [{
                 "vulnerableVersionRange": ">= 0",
                 "firstPatchedVersion": null,
+                "package": { "name": "some/action" },
                 "advisory": {
                   "ghsaId": "GHSA-xxxx-yyyy-zzzz",
                   "summary": "no fix available",
@@ -408,10 +447,42 @@ mod tests {
     }
 
     #[test]
+    fn a_truncated_page_is_not_a_clean_result() {
+        // The set outgrowing one page would otherwise make the advisories that did not
+        // fit look like advisories that do not exist — the same false-clean, arriving
+        // through pagination rather than a rejected query.
+        let raw = r#"{
+          "data": {
+            "securityVulnerabilities": {
+              "totalCount": 120,
+              "nodes": [{
+                "vulnerableVersionRange": "< 1.0.0",
+                "firstPatchedVersion": null,
+                "package": { "name": "some/action" },
+                "advisory": {
+                  "ghsaId": "GHSA-xxxx-yyyy-zzzz",
+                  "summary": "one of many",
+                  "severity": "LOW",
+                  "permalink": "https://example.invalid"
+                }
+              }]
+            }
+          }
+        }"#;
+        let decoded: Response = serde_json::from_str(raw).unwrap();
+        let err = GraphQlAdvisories::interpret(decoded).unwrap_err();
+        assert!(
+            format!("{err}").contains("120"),
+            "the error must say how much was withheld: {err}"
+        );
+    }
+
+    #[test]
     fn fake_satisfies_the_trait_without_network() {
         // The seam's whole purpose: an advisory-consuming check can be exercised with no
         // network and fully deterministic data.
         let advisory = Advisory {
+            package: "actions/checkout".to_owned(),
             ghsa_id: "GHSA-test".to_owned(),
             summary: "test".to_owned(),
             severity: Severity::High,
@@ -421,10 +492,10 @@ mod tests {
         };
         let fake = FakeAdvisories::new(vec![advisory.clone()]);
 
-        let got = fake.advisories("actions/checkout").unwrap();
+        let got = fake.all_actions_advisories().unwrap();
 
         assert_eq!(got, vec![advisory]);
-        assert_eq!(fake.seen.borrow().as_slice(), ["actions/checkout"]);
+        assert_eq!(fake.calls(), 1);
     }
 
     #[test]
@@ -432,6 +503,6 @@ mod tests {
         // Checks must be able to test their behavior when the lookup fails, not only
         // when it succeeds.
         let fake = FakeAdvisories::failing();
-        fake.advisories("actions/checkout").unwrap_err();
+        fake.all_actions_advisories().unwrap_err();
     }
 }

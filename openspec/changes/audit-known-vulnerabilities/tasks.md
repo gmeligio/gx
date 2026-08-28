@@ -1,11 +1,11 @@
 ## 1. Reshape the advisory seam to wholesale
 
-- [ ] 1.1 Add `package: String` to `Advisory` in `src/infra/github/advisory.rs`, populated from `package { name }`.
-- [ ] 1.2 Replace `ADVISORY_QUERY` with the unparameterized ecosystem query selecting `totalCount` and `package { name }`; drop the `$package` variable and the `Variables` struct.
-- [ ] 1.3 Change the `AdvisoryQuery` trait method to `all_actions_advisories(&self) -> Result<Vec<Advisory>, Error>`; update `GraphQlAdvisories`.
-- [ ] 1.4 In `interpret`, error when `totalCount` is greater than the number of returned nodes, so a truncated page can never read as a complete clean result. (Only this direction: fewer advisories than `totalCount` means data was withheld; the reverse cannot occur and is not worth an error path.)
-- [ ] 1.5 Update `FakeAdvisories` to the new method, keeping `new(...)` and `failing()`, and add a call counter so tests can assert how many queries were issued.
-- [ ] 1.6 Update the existing advisory unit tests to the new shape; add one asserting the `totalCount` guard errors rather than returning a short list.
+- [x] 1.1 Add `package: String` to `Advisory` in `src/infra/github/advisory.rs`, populated from `package { name }`.
+- [x] 1.2 Replace `ADVISORY_QUERY` with the unparameterized ecosystem query selecting `totalCount` and `package { name }`; drop the `$package` variable and the `Variables` struct.
+- [x] 1.3 Change the `AdvisoryQuery` trait method to `all_actions_advisories(&self) -> Result<Vec<Advisory>, Error>`; update `GraphQlAdvisories`.
+- [x] 1.4 In `interpret`, error when `totalCount` is greater than the number of returned nodes, so a truncated page can never read as a complete clean result. (Only this direction: fewer advisories than `totalCount` means data was withheld; the reverse cannot occur and is not worth an error path.)
+- [x] 1.5 Update `FakeAdvisories` to the new method, keeping `new(...)` and `failing()`, and add a call counter so tests can assert how many queries were issued.
+- [x] 1.6 Update the existing advisory unit tests to the new shape; add one asserting the `totalCount` guard errors rather than returning a short list.
 
 ## 2. Add `repository` to the audit target
 
