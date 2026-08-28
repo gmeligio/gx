@@ -8,11 +8,16 @@ with the SHA the lock recorded. When the two differ, the system SHALL produce a 
 **error** severity that names the action, the version label, the SHA recorded in the lock, and
 the SHA the tag points at now.
 
+The tag resolved SHALL be the version label the lock records for the entry — the same string
+gx wrote when it pinned the action.
+
 Annotated tags SHALL be dereferenced to their target commit before comparison. An annotated
 tag that has not moved SHALL NOT produce a finding.
 
 Entries resolved to a branch, or to a bare commit with no version, SHALL be skipped. Neither
-names a tag whose movement could be measured.
+names a tag whose movement could be measured. An entry SHALL likewise be skipped when its
+version label is itself a commit SHA, whatever its recorded reference kind, because such a
+label names no tag to resolve.
 
 **User value:** every major Actions supply-chain compromise — `tj-actions/changed-files`
 (CVE-2025-30066, 23,000+ repositories), `aquasecurity/trivy-action` (GHSA-69fq-xp46-6x23, 75 of
@@ -41,15 +46,23 @@ entries are skipped rather than guessed at.
 - **GIVEN** a `gx.lock` entry resolved to a tag, recording SHA `aaa…`
 - **AND** that tag still points at commit `aaa…` on GitHub
 - **WHEN** the user runs `gx audit`
-- **THEN** no `tag-moved` finding is produced
+- **THEN** a lookup IS issued for that tag
+- **AND** no `tag-moved` finding is produced
 
 #### Scenario: An unmoved annotated tag produces no finding
 - **GIVEN** a `gx.lock` entry resolved to an annotated tag, recording the SHA of the commit
   the tag object targets
-- **AND** the live lookup returns a tag object whose own SHA differs from the recorded commit
+- **AND** the lookup resolves that tag to the commit the tag object targets, not to the tag
+  object's own SHA
 - **WHEN** the user runs `gx audit`
-- **THEN** the tag object is dereferenced to its target commit
-- **AND** because that commit matches the lock, no finding is produced
+- **THEN** no finding is produced
+
+#### Scenario: An entry whose version label is a commit SHA is skipped
+- **GIVEN** a `gx.lock` entry recording `ref_type` of `tag` but whose version label is a
+  40-character commit SHA rather than a tag name
+- **WHEN** the user runs `gx audit`
+- **THEN** no finding is produced for it
+- **AND** no tag lookup is issued for it, so a nonexistent tag is never reported as missing
 
 #### Scenario: A release-resolved entry is checked like a tag
 - **GIVEN** a `gx.lock` entry whose resolved reference is a release
@@ -76,41 +89,56 @@ entries are skipped rather than guessed at.
 
 ---
 
-### Requirement: A tag lookup that fails is reported, never silently treated as unchanged
+### Requirement: A tag that could not be verified is reported under its own check name
 
 When the live lookup for an entry's tag fails — network error, rate limit, rejected
-credentials, or a malformed response — the system SHALL produce a finding for that entry
-rather than omitting it, and that finding SHALL be error severity so the command exits
+credentials, a malformed response, or a tag absent upstream — the system SHALL produce a
+finding for that entry rather than omitting it, at **error** severity so the command exits
 non-zero.
 
-A tag that no longer exists upstream SHALL likewise be reported rather than skipped: a
-deleted tag is a change to the world the user pinned against, and cannot be distinguished
-from a hostile deletion.
+That finding SHALL carry the check name `tag-unverified`, distinct from `tag-moved`. A
+`tag-moved` finding SHALL mean the tag was resolved and had moved; it SHALL NOT be used for an
+entry gx could not resolve.
 
-**User value:** for a security check, "I could not look" and "I looked and it is fine" must
-never render the same. A user reading a clean `gx audit` needs it to mean every locked tag was
-actually resolved. Silently dropping unreachable entries would convert a rate-limited run into
-a false all-clear — the exact failure `gx audit` refuses a missing token to avoid.
+**User value:** two things. First, for a security check "I could not look" and "I looked and it
+is fine" must never render the same — silently dropping unreachable entries would convert a
+rate-limited run into a false all-clear, the exact failure `gx audit` refuses a missing token to
+avoid. Second, the CI engineer filtering `--json` on `check` must be able to tell "an action you
+depend on was tampered with" from "GitHub rate-limited us". Those warrant completely different
+responses — page someone versus retry the job — and collapsing them into one name would force
+consumers to parse human-readable prose to tell them apart.
 
-#### Scenario: A failed lookup produces an error-level finding
+A tag absent upstream is reported rather than skipped for the same reason a failed request is:
+gx cannot distinguish a maintainer cleaning up tags from an attacker deleting evidence, and a
+tag vanishing from under a pin is a change to the world the user pinned against either way.
+
+#### Scenario: A failed lookup produces an error-level finding under its own name
 - **GIVEN** a `gx.lock` entry resolved to a tag
 - **AND** the live lookup for that tag fails
 - **WHEN** the user runs `gx audit`
-- **THEN** a `tag-moved` finding is produced at error severity
+- **THEN** a `tag-unverified` finding is produced at error severity
 - **AND** the message states the tag could not be verified, and why
+- **AND** no `tag-moved` finding is produced for that entry
 - **AND** the command exits with code 1
 
 #### Scenario: A tag that no longer exists upstream is reported
 - **GIVEN** a `gx.lock` entry resolved to a tag
 - **AND** that tag is absent from the upstream repository
 - **WHEN** the user runs `gx audit`
-- **THEN** an error-level finding is produced naming the action and tag
+- **THEN** a `tag-unverified` finding is produced at error severity naming the action and tag
 
 #### Scenario: One entry's failure does not suppress other entries' findings
 - **GIVEN** a `gx.lock` with two tag-resolved entries
 - **AND** the lookup for the first fails while the second's tag has moved
 - **WHEN** the user runs `gx audit`
 - **THEN** both entries produce findings
+- **AND** the first is `tag-unverified` while the second is `tag-moved`
+
+#### Scenario: A consumer can separate tampering from unreachability in JSON
+- **GIVEN** a run producing one moved tag and one unreachable tag
+- **WHEN** the user runs `gx audit --json`
+- **THEN** the two findings carry different `check` values
+- **AND** neither requires parsing `message` to tell them apart
 
 ---
 

@@ -52,8 +52,37 @@ check to the most commonly pinned actions.
 hand-edited; gx cannot establish the entry names a tag, and a check whose severity is `error`
 must not act on an unestablished premise.
 
+**This deliberately diverges from the domain layer, and the divergence must not be "fixed".**
+`ResolvedRef::from_stored` (`src/domain/action/resolved.rs`) maps `ref_type: None` to
+`Self::Tag`, commented "Tag, Release, or unknown legacy values are all real version tags". That
+is right for its callers: resolution and upgrade want a best-effort version to work with, and
+guessing wrong there costs a failed lookup. It is wrong here, where guessing wrong costs an
+error-level finding telling a user their dependency may have been compromised. Audit reads
+`ref_type` directly off `AuditTarget` rather than going through `ResolvedRef` precisely so it
+can be stricter. A future reader reconciling the two paths should make the domain stricter, not
+audit looser.
+
+### The tag looked up is the lock's version label, guarded against SHA-shaped labels
+
+`AuditTarget.version` is the version label the lock records — the string gx itself wrote when it
+pinned the action. For a tag- or release-resolved entry that string *is* the tag name, so it is
+what gets resolved.
+
+One case breaks that identity: `ResolvedRef::label` returns the **SHA** when the reference is a
+`Commit`, so a lock row's version slot is not universally a tag name. `ref_type` already screens
+those out — `Commit` is skipped — but the two fields are written independently and a hand-edited
+or legacy row could pair `ref_type = "tag"` with a SHA-shaped label. Left unguarded, that row
+would produce a lookup for a tag named `abc123…`, get a 404, and yield an error-level finding
+accusing the user of something that never happened.
+
+So eligibility carries a second, cheap condition: skip any entry whose version label is a valid
+commit SHA, whatever its `ref_type`. `CommitSha::is_valid` already exists and `resolve_ref` uses
+it for the same purpose. This is not version-string *parsing* — the rejected heuristic — it is a
+single unambiguous exclusion in the safe direction: the worst case is failing to check an entry
+that was never checkable, never a false accusation.
+
 **Consequence for `AuditTarget`:** no new field. The brief anticipated one might be needed;
-`ref_type` is sufficient, so nothing in `target.rs` changes.
+`ref_type` and `version` together are sufficient, so nothing in `target.rs` changes.
 
 ### The seam is a trait over "resolve this tag to a commit", not over HTTP
 
@@ -106,14 +135,25 @@ findings for every other entry, including real moved tags already detected. A us
 genuine compromise and one flaky lookup should see the compromise.
 
 *Report it as a finding.* Chosen. The user sees exactly which entries could not be verified and
-why, the exit code is non-zero so CI does not go green, and other entries still report. The
-finding carries the same `tag-moved` check name, because it is a statement about the same
-question — "does this tag still point where it was pinned?" — answered with "unknown" rather
-than "no".
+why, the exit code is non-zero so CI does not go green, and other entries still report.
 
-A tag that returns 404 is reported for the same reason. gx cannot distinguish a maintainer
-cleaning up tags from an attacker deleting evidence, and a tag vanishing from under a pin is a
-change to the world the user pinned against either way.
+**Under its own check name, `tag-unverified`.** Reusing `tag-moved` was the first instinct —
+same question, answered "unknown" instead of "no" — and it is wrong. #129 fixed `check` as the
+machine-readable contract CI consumers filter on, and "an action you depend on was tampered
+with" and "GitHub rate-limited us" demand different responses: page a human versus retry the
+job. One name would force consumers to regex the prose message to tell them apart, and would
+make the two indistinguishable in any test asserting on `check` and `level` alone. Two names
+cost one more `rule_ids!` line — the macro exists exactly so that is cheap.
+
+A tag that returns 404 is `tag-unverified` for the same reason a network failure is: gx cannot
+distinguish a maintainer cleaning up tags from an attacker deleting evidence, and either way it
+has not established where the tag points. Claiming "moved" would assert more than gx knows.
+
+**This diverges from `action-resolution`'s error table**, which classifies rate-limited and
+auth-required as recoverable — warn and skip. That classification is right for resolution, where
+skipping means "try again later" and the user still has a working lock. It is wrong for audit,
+whose entire premise is that a false clean is the worst possible output. The divergence is
+deliberate and local to audit; `action-resolution`'s table is unchanged.
 
 ### The command owns the resolver; `collect_findings` takes it as a parameter
 
