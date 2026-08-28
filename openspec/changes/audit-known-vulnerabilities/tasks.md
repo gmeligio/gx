@@ -51,7 +51,7 @@
 
 ## 8. Verify
 
-- [ ] 8.1 Mutation-test each scenario: break the behavior, confirm the test fails, restore. Record which mutations were run and their results.
-- [ ] 8.2 Grep `src/` to prove no code path passes a version to an OSV query and that no OSV endpoint is referenced in code. (Prose references to OSV in the planning artifacts are expected and do not count.)
-- [ ] 8.3 Confirm `src/audit/` holds 5 `.rs` files and that no numeric budget in `tests/code_health.rs` was raised.
-- [ ] 8.4 Run `mise run test` and `mise run integ`; both must pass.
+- [x] 8.1 Mutation-test each scenario: break the behavior, confirm the test fails, restore. Record which mutations were run and their results.
+- [x] 8.2 Grep `src/` to prove no code path passes a version to an OSV query and that no OSV endpoint is referenced in code. (Prose references to OSV in the planning artifacts are expected and do not count.)
+- [x] 8.3 Confirm `src/audit/` holds 5 `.rs` files and that no numeric budget in `tests/code_health.rs` was raised.
+- [x] 8.4 Run `mise run test` and `mise run integ`; both must pass.

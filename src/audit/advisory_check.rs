@@ -428,9 +428,11 @@ mod tests {
     #[test]
     fn a_mixed_case_package_name_still_matches() {
         // GitHub slugs are case-insensitive and published names are mixed case, so a
-        // literal comparison would miss a real advisory.
-        let lock = lock_with("azure/setup-kubectl", "v3.0.0", RefType::Tag);
-        let found = findings_for(&lock, &[advisory("Azure/setup-kubectl", "<= 3.0.0")]);
+        // literal comparison would miss a real advisory. The two sides are cased
+        // differently from each other and neither is already lowercase, so a match
+        // requires normalizing both — dropping it on either side loses the finding.
+        let lock = lock_with("AZURE/setup-kubectl", "v3.0.0", RefType::Tag);
+        let found = findings_for(&lock, &[advisory("Azure/Setup-Kubectl", "<= 3.0.0")]);
 
         assert_eq!(found.len(), 1);
     }
