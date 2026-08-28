@@ -25,10 +25,10 @@ None. The `audit` capability's spec is introduced by the in-flight `audit-comman
 
 ## Impact
 
-- **New file** `src/audit/advisory_check.rs` — the check plus local range matching. Takes one of the four remaining `src/audit/` file slots (4 of 8 used).
+- **New file** `src/audit/advisory_check.rs` — the check plus local range matching. Takes `src/audit/` from 4 files to 5, against a budget of 8.
 - **Modified** `src/audit/check_name.rs` — one line inside `rule_ids!`.
 - **Modified** `src/audit/mod.rs` — `collect_findings` gains an `&dyn AdvisoryQuery` parameter; `Audit::run` constructs the real adapter; a new `Error` variant for a failed lookup.
-- **Modified** `src/audit/target.rs` — re-adds the `repository` field that `audit-command-shell` dropped as unused, plus its one adapter line.
+- **Modified** `src/audit/target.rs` — adds a `repository` field to `AuditTarget` (which today carries `id`, `version`, `sha`, `ref_type`) plus the one adapter line that populates it.
 - **Modified** `src/infra/github/advisory.rs` and `advisory_fake.rs` — the seam becomes a wholesale `all_actions_advisories()` returning `Advisory` records that carry their package name.
 - **Dependencies**: none added. `semver = "1"` is already a direct dependency.
 - **Not in scope**: remediation wording (`gx upgrade <action>`), which is a separate change. This change reports `firstPatchedVersion` and stops there.

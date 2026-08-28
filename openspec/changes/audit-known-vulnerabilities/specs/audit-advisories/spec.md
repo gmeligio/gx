@@ -24,12 +24,14 @@ The comparison SHALL be keyed on the action's repository and its recorded **vers
 
 ### Requirement: A finding identifies the advisory actionably
 
-A `known-vulnerability` finding SHALL name the affected action, the locked version, the GHSA identifier, the severity as GitHub classifies it, and the affected version range. When the advisory names a first patched version, the finding SHALL include it.
+A `known-vulnerability` finding SHALL name the affected action, the locked version, the GHSA identifier, the severity as GitHub classifies it, the affected version range, and a link to the advisory. When the advisory names a first patched version, the finding SHALL include it.
+
+The link is required, not decorative: a security finding a user cannot independently verify is one they must either take on faith or ignore, and both are failures. It lets a user confirm the claim against the published advisory rather than trusting gx's range arithmetic.
 
 #### Scenario: The finding carries advisory identity
 
 - **WHEN** a `known-vulnerability` finding is produced for `tj-actions/changed-files` at `45.0.7` from `GHSA-mrrh-fwg8-r2c3` (HIGH, `<= 45.0.7`, first patched `46.0.1`)
-- **THEN** the message contains `tj-actions/changed-files`, `45.0.7`, `GHSA-mrrh-fwg8-r2c3`, the severity, the range `<= 45.0.7`, and `46.0.1`
+- **THEN** the message contains `tj-actions/changed-files`, `45.0.7`, `GHSA-mrrh-fwg8-r2c3`, the severity, the range `<= 45.0.7`, `46.0.1`, and the advisory permalink
 
 #### Scenario: An advisory with no fix is still reported
 
@@ -69,19 +71,33 @@ Matching SHALL treat a leading `v` as insignificant on either side, since gx rec
 
 ### Requirement: An unusable version or range never silently passes
 
-A locked version that cannot be parsed as a version, or an advisory range gx cannot interpret, SHALL NOT be treated as "not affected" without the user learning of it. gx SHALL report such a case as a finding rather than dropping it.
+When an action **has published advisories** but gx cannot decide whether they apply — the locked version does not parse as a version, the advisory range does not parse, or the locked version is too imprecise to place against the range — gx SHALL NOT treat it as "not affected". gx SHALL emit a `known-vulnerability` finding at **warn** level stating that applicability could not be determined.
 
-This exists because the failure mode being guarded against is a security check that reports "clean" for a reason the user never sees.
+Warn rather than error: the action may well be unaffected, and failing a build on an unknown is the false alarm that costs a security tool its credibility. Silence would be the opposite and worse failure — a check reporting "clean" for a reason the user never sees. Warn is the honest middle, visible without being fatal.
+
+This is deliberately narrow. An action with no advisories at all is not reported however imprecise its version, because there is nothing whose applicability is in question.
 
 #### Scenario: A branch-pinned entry cannot be range-matched
 
 - **WHEN** `gx.lock` records a locked version of `main` for an action that has published advisories
-- **THEN** `gx audit` reports that the action has advisories whose applicability could not be determined, rather than omitting it silently
+- **THEN** `gx audit` emits a warn-level finding that the action has advisories whose applicability could not be determined
+- **AND** the run does not fail on that finding alone
 
 #### Scenario: An uninterpretable advisory range is surfaced
 
 - **WHEN** an advisory's affected range cannot be parsed
 - **THEN** `gx audit` reports the advisory as undetermined for the locked action rather than treating it as not applicable
+
+#### Scenario: A partial version cannot be placed against a lower bound
+
+- **WHEN** `gx.lock` records `v2` and an advisory declares that package affected in `>= 2.5.0, < 3.0.0`
+- **THEN** `gx audit` reports the action as undetermined, because the `v2` tag may resolve above or below `2.5.0`
+- **AND** it does NOT report the action as unaffected
+
+#### Scenario: An unparseable version on an action with no advisories stays silent
+
+- **WHEN** `gx.lock` records a locked version of `main` for an action with no published advisories
+- **THEN** `gx audit` emits no `known-vulnerability` finding for it
 
 ### Requirement: A failed advisory lookup fails the command
 
@@ -102,7 +118,15 @@ When the advisory lookup does not succeed — network failure, rejected credenti
 
 `gx audit` SHALL retrieve the `ACTIONS` ecosystem advisory set in a single query rather than one query per locked action. The set is small enough to fetch wholesale — measured at 63 advisories across 47 packages on one page — so per-action querying would multiply requests without adding information.
 
+When no actions are locked there is nothing to check, so gx SHALL issue no advisory query at all. This keeps `gx audit` on an empty lock from failing for a network reason when it has no work to do.
+
 #### Scenario: Request count does not scale with lock size
 
 - **WHEN** `gx audit` runs against a lock containing many actions
 - **THEN** exactly one advisory query is issued regardless of how many actions are locked
+
+#### Scenario: An empty lock issues no query
+
+- **WHEN** `gx audit` runs against a lock with no entries
+- **THEN** no advisory query is issued
+- **AND** the command reports no findings and exits zero
