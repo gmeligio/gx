@@ -84,6 +84,19 @@ that was never checkable, never a false accusation.
 **Consequence for `AuditTarget`:** no new field. The brief anticipated one might be needed;
 `ref_type` and `version` together are sufficient, so nothing in `target.rs` changes.
 
+### A subpath action resolves against its repository root
+
+`ActionId` may name a directory inside a repository — `github/codeql-action/upload-sarif`. Tags
+belong to the repository, so the lookup takes the first two path segments, exactly as
+`resolve_ref` does (`src/infra/github/resolve.rs`, `owner_repo.split('/').take(2)`).
+
+This is eligibility's third condition in effect, and it is not cosmetic. Resolving the full
+identifier would request a repository that does not exist, get a 404, and — by the rule two
+sections down — report `tag-unverified` at error severity against a dependency that is
+perfectly healthy. That is the same false accusation the SHA-shaped-label guard exists to
+prevent, reached by a different route, so the spec states it as a requirement rather than
+leaving it to the adapter's implementation.
+
 ### The seam is a trait over "resolve this tag to a commit", not over HTTP
 
 ```rust
@@ -112,10 +125,16 @@ Two constraints shaped this:
 
 1. `fetch_ref_commit` is `pub(super)` — visible only inside `src/infra/github/`. The adapter
    therefore lives in that module, and `src/audit/` depends on the trait.
-2. `resolve.rs` is at **438 logic lines against a 440 budget** (`tests/code_health.rs`). It
-   cannot absorb new code, and the budget must not be raised. So the trait and its adapter go
-   in a new file, `src/infra/github/tag_ref.rs`, which calls `fetch_ref_commit`. The directory
-   holds 6 `.rs` files against its 8 budget, so this fits.
+2. A new file is still the right home, but not because `resolve.rs` is full — it is at
+   **105 logic lines against a 440 budget**, with room to spare. The reason is cohesion:
+   `resolve.rs` owns the tag/branch/commit fallback chain, and audit's "resolve exactly this
+   tag" is a different question that would blur it. So the trait and its adapter go in a new
+   file, `src/infra/github/tag_ref.rs`, which calls `fetch_ref_commit`.
+
+   That file is not free. The directory already holds **7** `.rs` files against its 8 budget,
+   so `tag_ref.rs` lands at exactly **8/8** and the next file added there forces a split. The
+   file to watch for the wiring task is `src/main.rs`, at **435 of 440 logic lines** — the
+   `run_audit` change must stay small or it breaks the budget.
 
 Reimplementing the dereference in `src/audit/` was rejected outright: a second copy of the
 logic that prevents this check's worst failure mode is the last thing that should be

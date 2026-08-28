@@ -11,6 +11,12 @@ the SHA the tag points at now.
 The tag resolved SHALL be the version label the lock records for the entry — the same string
 gx wrote when it pinned the action.
 
+An action identified by a subpath, such as `github/codeql-action/upload-sarif`, SHALL have its
+tag resolved against the repository named by the first two path segments. Tags belong to a
+repository, not to a directory inside it, so resolving against the full identifier would name a
+repository that does not exist — and under the rule below that miss would be reported as an
+unverifiable tag, accusing a healthy dependency.
+
 Annotated tags SHALL be dereferenced to their target commit before comparison. An annotated
 tag that has not moved SHALL NOT produce a finding.
 
@@ -64,6 +70,13 @@ entries are skipped rather than guessed at.
 - **THEN** no finding is produced for it
 - **AND** no tag lookup is issued for it, so a nonexistent tag is never reported as missing
 
+#### Scenario: A subpath action resolves against its repository root
+- **GIVEN** a `gx.lock` entry for `github/codeql-action/upload-sarif` resolved to a tag
+- **AND** that tag still points at the SHA the lock recorded
+- **WHEN** the user runs `gx audit`
+- **THEN** the tag is looked up against `github/codeql-action`
+- **AND** no finding is produced, neither `tag-moved` nor `tag-unverified`
+
 #### Scenario: A release-resolved entry is checked like a tag
 - **GIVEN** a `gx.lock` entry whose resolved reference is a release
 - **AND** the underlying tag now points at a different commit
@@ -91,10 +104,9 @@ entries are skipped rather than guessed at.
 
 ### Requirement: A tag that could not be verified is reported under its own check name
 
-When the live lookup for an entry's tag fails — network error, rate limit, rejected
-credentials, a malformed response, or a tag absent upstream — the system SHALL produce a
-finding for that entry rather than omitting it, at **error** severity so the command exits
-non-zero.
+The system SHALL produce a finding for an entry whose live tag lookup fails — network error,
+rate limit, rejected credentials, a malformed response, or a tag absent upstream — rather than
+omitting it, at **error** severity so the command exits non-zero.
 
 That finding SHALL carry the check name `tag-unverified`, distinct from `tag-moved`. A
 `tag-moved` finding SHALL mean the tag was resolved and had moved; it SHALL NOT be used for an

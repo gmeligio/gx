@@ -20,6 +20,9 @@ it is invisible to it.
   the lock recorded. A mismatch is reported at **error** severity, naming both SHAs.
 - Annotated tags are dereferenced to their target commit before comparing, so a legitimate
   annotated tag never produces a finding.
+- A subpath action (`github/codeql-action/upload-sarif`) resolves against its repository root,
+  since tags belong to the repository — otherwise a healthy dependency would 404 and be
+  reported as unverifiable.
 - Entries resolved to a branch or a bare commit are skipped: neither has a tag whose movement
   could be measured, and reporting on them would be a false accusation.
 - Introduce a substitutable seam for live tag resolution, mirroring the advisory seam from
@@ -36,9 +39,9 @@ None. This extends the `audit-command` capability introduced by `audit-command-s
 
 ### Modified Capabilities
 
-- `audit-command`: adds the `tag-moved` check requirement, and a requirement that live tag
-  resolution goes through a substitutable seam whose failures surface as findings rather than
-  as silence. Both are user-facing: they add a new finding a user can see, a new reason the
+- `audit-command`: adds the `tag-moved` check requirement, a `tag-unverified` requirement for
+  entries gx could not resolve, and a requirement that live tag resolution goes through a
+  substitutable seam whose failures surface as findings rather than as silence. Both are user-facing: they add a new finding a user can see, a new reason the
   command exits non-zero, and a new guarantee about what a clean run means.
 
 **Relevance gate:** this adds user-facing behavior — a new check with its own name, severity,
@@ -46,7 +49,8 @@ message, and exit-code consequence — so it requires a spec.
 
 ## Impact
 
-- `src/audit/check_name.rs`: one entry added to the `rule_ids!` list.
+- `src/audit/check_name.rs`: two entries added to the `rule_ids!` list — `tag-moved` and
+  `tag-unverified`.
 - `src/audit/`: one new file holding the check and its tag-resolution seam. The directory is
   at 4 of its 8-file budget; this takes one slot.
 - `src/audit/target.rs`: `AuditTarget` gains nothing; `ref_type` already distinguishes tag,
@@ -54,5 +58,6 @@ message, and exit-code consequence — so it requires a spec.
 - `src/audit/mod.rs`: the check is wired into `collect_findings`, which gains a tag-resolver
   argument. `Audit::run` constructs the real resolver from the token it already requires.
 - `src/infra/github/`: reuses the existing annotated-tag dereferencing rather than
-  reimplementing it. No new dependency.
+  reimplementing it. No new dependency. The new `tag_ref.rs` brings the directory from 7 to
+  8 files, exactly its budget.
 - Network cost: one request per tag-or-release lock entry, plus one more per annotated tag.
