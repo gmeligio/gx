@@ -17,4 +17,7 @@ mod tags;
 
 pub use advisory::{Advisory, AdvisoryQuery, GraphQlAdvisories, Severity as AdvisorySeverity};
 pub use registry::{Error, Registry};
+/// The repository-metadata test double, for checks in other modules that consume the seam.
+#[cfg(test)]
+pub use repo_meta::fake::CannedRepos;
 pub use repo_meta::{RepoMeta, RepoMetadata, RestRepoMetadata};

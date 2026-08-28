@@ -15,37 +15,37 @@
 
 ## 2. The check
 
-- [ ] 2.1 Add `ArchivedAction => "archived-action"` to the `rule_ids!` list in
+- [x] 2.1 Add `ArchivedAction => "archived-action"` to the `rule_ids!` list in
       `src/audit/check_name.rs`. Confirm this is the only edit that file needs.
-- [ ] 2.2 Add `src/audit/archived.rs` with the check: takes an `&AuditTarget` and a
+- [x] 2.2 Add `src/audit/archived.rs` with the check: takes an `&AuditTarget` and a
       `&dyn RepoMetadata`, derives the repository via `ActionId::base_repo()`, and returns
       `Option<Finding>`.
-- [ ] 2.3 Implement the archived case — `warn`, message naming the action, the date part of
+- [x] 2.3 Implement the archived case — `warn`, message naming the action, the date part of
       `pushed_at`, and migration as the remedy.
-- [ ] 2.4 Implement the failure case — `error`, message leading with the uncertainty and
+- [x] 2.4 Implement the failure case — `error`, message leading with the uncertainty and
       naming the underlying reason.
-- [ ] 2.5 Confirm the not-archived case is the only path returning `None`.
-- [ ] 2.6 Wire the check into `collect_findings` in `src/audit/mod.rs`, and construct
+- [x] 2.5 Confirm the not-archived case is the only path returning `None`.
+- [x] 2.6 Wire the check into `collect_findings` in `src/audit/mod.rs`, and construct
       `RestRepoMetadata` from the token-bearing `Registry` in `Audit::run`.
-- [ ] 2.7 Verify `src/audit/target.rs` needs no change, per design Decision 1.
+- [x] 2.7 Verify `src/audit/target.rs` needs no change, per design Decision 1.
 
 ## 3. Tests
 
-- [ ] 3.1 Archived repository produces a `warn` finding; assert the message contains the
+- [x] 3.1 Archived repository produces a `warn` finding; assert the message contains the
       action name, the date, and migration guidance.
-- [ ] 3.2 Non-archived repository produces no finding; assert the fake recorded the lookup,
+- [x] 3.2 Non-archived repository produces no finding; assert the fake recorded the lookup,
       so the test cannot pass by the check never running.
-- [ ] 3.3 Subpath action is looked up by its base repository; assert on the slug the fake
+- [x] 3.3 Subpath action is looked up by its base repository; assert on the slug the fake
       recorded.
-- [ ] 3.4 Subpath action in an archived repository is reported under its full action name
+- [x] 3.4 Subpath action in an archived repository is reported under its full action name
       including the subpath.
-- [ ] 3.5 Failed lookup produces an `error` finding naming the action and the reason.
-- [ ] 3.6 A failed lookup for one entry does not suppress a finding for another entry,
+- [x] 3.5 Failed lookup produces an `error` finding naming the action and the reason.
+- [x] 3.6 A failed lookup for one entry does not suppress a finding for another entry,
       whichever order they are processed in — assert with the failing entry both before and
       after the archived one, so the test cannot pass on a lucky ordering.
-- [ ] 3.7 A `pushed_at` with no `T` is shown whole rather than blanked, per design
+- [x] 3.7 A `pushed_at` with no `T` is shown whole rather than blanked, per design
       Decision 8.
-- [ ] 3.8 `archived-action` round-trips through its literal string and appears in
+- [x] 3.8 `archived-action` round-trips through its literal string and appears in
       `CheckName::ALL`.
 
 ## 4. Verification

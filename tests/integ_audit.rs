@@ -12,11 +12,12 @@
 //! because process environment is global and would make these flaky under the parallel
 //! test runner.
 
-use gx::audit::{Audit, Error as AuditError, Report};
-use gx::command::{Command as _, CommandReport};
+use gx::audit::{Error as AuditError, Report, collect_findings, require_token};
+use gx::command::CommandReport;
 use gx::config::{Config, GitHubToken, Level, Lint};
 use gx::domain::lock::Lock;
 use gx::domain::manifest::Manifest;
+use gx::infra::github::{Error as GithubError, RepoMeta, RepoMetadata};
 use gx::infra::lock::Store as LockStore;
 use std::fs;
 use std::path::Path;
@@ -76,8 +77,32 @@ fn config_at(root: &Path, token: Option<&str>) -> Config {
     }
 }
 
+/// Reports every repository as active, without a request.
+///
+/// These tests assert what audit does with a lock on disk, not what GitHub says about the
+/// repositories in it — and a suite that reached the real API would be slow, rate-limited,
+/// and red whenever a repository's state changed under it.
+struct ActiveRepos;
+
+impl RepoMetadata for ActiveRepos {
+    fn metadata(&self, _repo: &str) -> Result<RepoMeta, GithubError> {
+        Ok(RepoMeta {
+            archived: false,
+            pushed_at: "2026-08-01T00:00:00Z".to_owned(),
+        })
+    }
+}
+
+/// The command's own sequence — the token guard, then every check — with the network
+/// adapter `Audit::run` would build swapped for [`ActiveRepos`].
 fn audit(root: &Path, token: Option<&str>) -> Result<Report, AuditError> {
-    Audit.run(root, config_at(root, token), &mut |_| {})
+    let config = config_at(root, token);
+    require_token(&config.settings)?;
+    Ok(Report::from_diagnostics(collect_findings(
+        &config,
+        &ActiveRepos,
+        &mut |_| {},
+    )))
 }
 
 #[test]
@@ -300,13 +325,22 @@ fn json_mode_writes_one_document_and_no_progress_output() {
     let root = repo_with_lock(&temp, Some(BRANCH_LOCK));
     git_init(&root);
 
-    let (stdout, _stderr, code) = run_gx(&root, Some("token"), &["audit", "--json"]);
+    let (stdout, _stderr, _code) = run_gx(&root, Some("token"), &["audit", "--json"]);
 
-    assert_eq!(code, Some(0), "a warning-only run exits zero");
-    // Parses whole, so nothing was interleaved with it.
+    // Parses whole, so nothing was interleaved with it. The exit code is deliberately not
+    // asserted: the token is a placeholder, so the networked check's lookup fails and
+    // contributes an error-level finding. What this test is about is the document's
+    // integrity, which holds either way.
     let value: serde_json::Value =
         serde_json::from_str(&stdout).expect("stdout must be exactly one JSON document");
-    assert_eq!(value["findings"][0]["check"], "mutable-ref");
+    assert!(
+        value["findings"]
+            .as_array()
+            .expect("findings is always an array")
+            .iter()
+            .any(|finding| finding["check"] == "mutable-ref"),
+        "the branch pin must still be reported: {stdout}"
+    );
     // The human-facing lines that would corrupt the document.
     assert!(!stdout.contains("📋"), "log path must be suppressed");
     assert!(!stdout.contains('✓'), "summary must be suppressed");
@@ -337,9 +371,8 @@ fn human_mode_still_prints_a_summary() {
     let root = repo_with_lock(&temp, Some(BRANCH_LOCK));
     git_init(&root);
 
-    let (stdout, _stderr, code) = run_gx(&root, Some("token"), &["audit"]);
+    let (stdout, _stderr, _code) = run_gx(&root, Some("token"), &["audit"]);
 
-    assert_eq!(code, Some(0));
     assert!(
         stdout.contains("mutable-ref"),
         "human output must name the check, got: {stdout}"

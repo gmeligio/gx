@@ -2,7 +2,7 @@
 //!
 //! A check deciding "archived or not" must be testable offline, hence the seam:
 //! [`RepoMetadata`] is what checks depend on, [`RestRepoMetadata`] is the real adapter, and
-//! `FakeRepoMetadata` below is the double. Same shape as [`super::advisory`].
+//! `CannedRepos` below is the double. Same shape as [`super::advisory`].
 //!
 //! Separate from the advisory seam because it answers a different question against a
 //! different endpoint: merging them would force each caller to depend on the half it never
@@ -29,7 +29,7 @@ pub struct RepoMeta {
 
 /// Source of repository state for an action.
 ///
-/// Implemented by [`RestRepoMetadata`] (real) and `FakeRepoMetadata` (tests).
+/// Implemented by [`RestRepoMetadata`] (real) and `CannedRepos` (tests).
 pub trait RepoMetadata {
     /// The state of `repo`, an `owner/repo` slug.
     ///
@@ -69,13 +69,13 @@ impl RepoMetadata for RestRepoMetadata {
 /// Lives in this file rather than its own because `src/infra/github/` is at its 8-file
 /// budget, which is also why [`super::advisory`] keeps its fake inline.
 #[cfg(test)]
-mod fake {
+pub mod fake {
     use super::{Error, GITHUB_API_BASE, RepoMeta, RepoMetadata};
     use std::cell::RefCell;
 
     /// Returns pre-seeded repository state without issuing any request, so the check that
     /// judges whether an action is archived can be unit-tested with no network.
-    pub struct FakeRepoMetadata {
+    pub struct CannedRepos {
         /// What every lookup returns. `Err` models a failed request so callers can be
         /// tested on the path where reporting "not archived" would be a lie.
         result: Result<RepoMeta, ()>,
@@ -84,8 +84,9 @@ mod fake {
         pub seen: RefCell<Vec<String>>,
     }
 
-    impl FakeRepoMetadata {
+    impl CannedRepos {
         /// A source reporting every repository as archived at `pushed_at`.
+        #[must_use]
         pub fn archived(pushed_at: &str) -> Self {
             Self::returning(RepoMeta {
                 archived: true,
@@ -94,6 +95,7 @@ mod fake {
         }
 
         /// A source reporting every repository as active.
+        #[must_use]
         pub fn active() -> Self {
             Self::returning(RepoMeta {
                 archived: false,
@@ -102,6 +104,7 @@ mod fake {
         }
 
         /// A source returning `meta` for every lookup.
+        #[must_use]
         pub fn returning(meta: RepoMeta) -> Self {
             Self {
                 result: Ok(meta),
@@ -110,6 +113,7 @@ mod fake {
         }
 
         /// A source whose every lookup fails.
+        #[must_use]
         pub fn failing() -> Self {
             Self {
                 result: Err(()),
@@ -118,7 +122,7 @@ mod fake {
         }
     }
 
-    impl RepoMetadata for FakeRepoMetadata {
+    impl RepoMetadata for CannedRepos {
         fn metadata(&self, repo: &str) -> Result<RepoMeta, Error> {
             self.seen.borrow_mut().push(repo.to_owned());
             self.result.clone().map_err(|()| Error::NotFound {
