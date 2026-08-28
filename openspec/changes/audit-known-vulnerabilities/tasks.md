@@ -9,45 +9,45 @@
 
 ## 2. Add `repository` to the audit target
 
-- [ ] 2.1 Add a `repository: &'lock Repository` field to `AuditTarget` in `src/audit/target.rs`. `AuditTarget` today has four fields (`id`, `version`, `sha`, `ref_type`) and no `repository` — this is a new field, not a restoration.
-- [ ] 2.2 Populate it in `targets()` from `entry.commit.repository`, one added line in the existing map closure.
-- [ ] 2.3 Confirm no other check's file is touched and `mutable_ref` is unchanged.
+- [x] 2.1 Add a `repository: &'lock Repository` field to `AuditTarget` in `src/audit/target.rs`. `AuditTarget` today has four fields (`id`, `version`, `sha`, `ref_type`) and no `repository` — this is a new field, not a restoration.
+- [x] 2.2 Populate it in `targets()` from `entry.commit.repository`, one added line in the existing map closure.
+- [x] 2.3 Confirm no other check's file is touched and `mutable_ref` is unchanged.
 
 ## 3. Register the check name
 
-- [ ] 3.1 Add `KnownVulnerability => "known-vulnerability",` as a single line inside the `rule_ids!` invocation in `src/audit/check_name.rs`. No hand-written `Display`/`FromStr`/serde.
+- [x] 3.1 Add `KnownVulnerability => "known-vulnerability",` as a single line inside the `rule_ids!` invocation in `src/audit/check_name.rs`. No hand-written `Display`/`FromStr`/serde.
 
 ## 4. Implement range matching
 
-- [ ] 4.1 Create `src/audit/advisory_check.rs` (taking `src/audit/` from 4 files to 5, against a budget of 8).
-- [ ] 4.2 Implement local range matching returning a three-way outcome — affected, unaffected, undetermined — using `semver::VersionReq` for the range and `semver::Version` for the locked version.
-- [ ] 4.3 Normalize the locked version before parsing: strip a leading `v`/`V`, zero-pad partial versions (`41` → `41.0.0`, `4.2` → `4.2.0`), following the convention `Version::precision()` already sets.
-- [ ] 4.4 Return undetermined — never unaffected — when the locked version is partial and the range carries a lower bound inside that version's own line (locked `v2` vs `>= 2.5.0, < 3.0.0`), since the tag may resolve either side of the bound.
-- [ ] 4.5 Return undetermined when the locked version or the advisory range fails to parse.
+- [x] 4.1 Create `src/audit/advisory_check.rs` (taking `src/audit/` from 4 files to 5, against a budget of 8).
+- [x] 4.2 Implement local range matching returning a three-way outcome — affected, unaffected, undetermined — using `semver::VersionReq` for the range and `semver::Version` for the locked version.
+- [x] 4.3 Normalize the locked version before parsing: strip a leading `v`/`V`, zero-pad partial versions (`41` → `41.0.0`, `4.2` → `4.2.0`), following the convention `Version::precision()` already sets.
+- [x] 4.4 Return undetermined — never unaffected — when the locked version is partial and the range carries a lower bound inside that version's own line (locked `v2` vs `>= 2.5.0, < 3.0.0`), since the tag may resolve either side of the bound.
+- [x] 4.5 Return undetermined when the locked version or the advisory range fails to parse.
 
 ## 5. Implement the check
 
-- [ ] 5.1 Index advisories once into a map keyed on the lowercased package name; look up by the target's `repository`, case-insensitively.
-- [ ] 5.2 Emit an error-level finding naming action, locked version, GHSA id, severity, affected range, advisory permalink, and first patched version when present.
-- [ ] 5.3 Emit a `warn`-level undetermined finding only when the action has advisories whose applicability could not be decided; stay silent for actions with no advisories.
+- [x] 5.1 Index advisories once into a map keyed on the lowercased package name; look up by the target's `repository`, case-insensitively.
+- [x] 5.2 Emit an error-level finding naming action, locked version, GHSA id, severity, affected range, advisory permalink, and first patched version when present.
+- [x] 5.3 Emit a `warn`-level undetermined finding only when the action has advisories whose applicability could not be decided; stay silent for actions with no advisories.
 
 ## 6. Wire the check into the command
 
-- [ ] 6.1 Thread `&dyn AdvisoryQuery` through `collect_findings` in `src/audit/mod.rs` and register the check with one line.
-- [ ] 6.2 Skip the advisory query entirely when the lock has no entries, so an empty lock cannot fail for a network reason.
-- [ ] 6.3 Add the `Error` variant for a failed lookup; construct `GraphQlAdvisories` in `Audit::run` after the existing token guard.
-- [ ] 6.4 Report the advisory fetch through the existing `on_progress` callback.
+- [x] 6.1 Thread `&dyn AdvisoryQuery` through `collect_findings` in `src/audit/mod.rs` and register the check with one line.
+- [x] 6.2 Skip the advisory query entirely when the lock has no entries, so an empty lock cannot fail for a network reason.
+- [x] 6.3 Add the `Error` variant for a failed lookup; construct `GraphQlAdvisories` in `Audit::run` after the existing token guard.
+- [x] 6.4 Report the advisory fetch through the existing `on_progress` callback.
 
 ## 7. Test
 
-- [ ] 7.1 Table-test range matching over every boundary in the design's table, asserting both sides of each: `< 46.0.1`, `>= 2.25.0, < 2.37.1`, `<= 0.24.0`, `<= 45.0.7`, `< 41`, `>= 87, < 90`.
-- [ ] 7.2 Assert the `v` prefix in both directions, including that `45.0.7` and `v45.0.7` reach the same verdict.
-- [ ] 7.3 Test via `FakeAdvisories`: affected yields one error finding carrying every required element including the permalink; unaffected yields nothing; an advisory for an unlocked package yields nothing; a mixed-case package name still matches.
-- [ ] 7.4 Test that a branch-pinned action with advisories yields an undetermined `warn` finding, and that one with no advisories yields nothing.
-- [ ] 7.5 Test that locked `v2` against `>= 2.5.0, < 3.0.0` is undetermined rather than unaffected.
-- [ ] 7.6 Test that an advisory with no `firstPatchedVersion` still produces a finding.
-- [ ] 7.7 Test that `FakeAdvisories::failing()` makes `Audit::run` return `Err`, that a multi-action lock issues exactly one query, and that an empty lock issues zero.
-- [ ] 7.8 Pair every "yields nothing" assertion with a positive assertion over the same fixture, so an inert check cannot satisfy both.
+- [x] 7.1 Table-test range matching over every boundary in the design's table, asserting both sides of each: `< 46.0.1`, `>= 2.25.0, < 2.37.1`, `<= 0.24.0`, `<= 45.0.7`, `< 41`, `>= 87, < 90`.
+- [x] 7.2 Assert the `v` prefix in both directions, including that `45.0.7` and `v45.0.7` reach the same verdict.
+- [x] 7.3 Test via `FakeAdvisories`: affected yields one error finding carrying every required element including the permalink; unaffected yields nothing; an advisory for an unlocked package yields nothing; a mixed-case package name still matches.
+- [x] 7.4 Test that a branch-pinned action with advisories yields an undetermined `warn` finding, and that one with no advisories yields nothing.
+- [x] 7.5 Test that locked `v2` against `>= 2.5.0, < 3.0.0` is undetermined rather than unaffected.
+- [x] 7.6 Test that an advisory with no `firstPatchedVersion` still produces a finding.
+- [x] 7.7 Test that `FakeAdvisories::failing()` makes `Audit::run` return `Err`, that a multi-action lock issues exactly one query, and that an empty lock issues zero.
+- [x] 7.8 Pair every "yields nothing" assertion with a positive assertion over the same fixture, so an inert check cannot satisfy both.
 
 ## 8. Verify
 

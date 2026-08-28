@@ -297,7 +297,7 @@ pub(crate) mod fake {
 
     impl FakeAdvisories {
         /// A source that returns `advisories` for every lookup.
-        #[must_use] 
+        #[must_use]
         pub fn new(advisories: Vec<Advisory>) -> Self {
             Self {
                 result: Ok(advisories),
@@ -306,7 +306,7 @@ pub(crate) mod fake {
         }
 
         /// A source whose every lookup fails.
-        #[must_use] 
+        #[must_use]
         pub fn failing() -> Self {
             Self {
                 result: Err(()),
@@ -322,7 +322,7 @@ pub(crate) mod fake {
 
     impl AdvisoryQuery for FakeAdvisories {
         fn all_actions_advisories(&self) -> Result<Vec<Advisory>, Error> {
-            self.calls.set(self.calls.get() + 1);
+            self.calls.set(self.calls.get().saturating_add(1));
             self.result.clone().map_err(|()| Error::Unauthorized {
                 url: GRAPHQL_URL.to_owned(),
             })
