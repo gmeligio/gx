@@ -50,11 +50,23 @@
 
 ## 4. Verification
 
-- [ ] 4.1 Mutation-test every scenario in section 3: break the behavior, confirm the test
-      fails, restore. Record which mutations were run and their results.
-- [ ] 4.2 Confirm `src/audit/*.rs` is at 5 files and `src/infra/github/*.rs` at 8 — the
+- [x] 4.1 Mutation-test every scenario in section 3: break the behavior, confirm the test
+      fails, restore. Nine mutations run, all caught:
+
+      | Mutation | Caught by |
+      |---|---|
+      | `if !meta.archived` never returns `None` | `active_repository_is_not_reported_but_is_still_looked_up`, `branch_entry_produces_a_finding` |
+      | failed lookup returns `None` | `failed_lookup_is_an_error_naming_the_action_and_the_reason`, `a_failed_lookup_does_not_suppress_other_entries` |
+      | failed lookup downgraded to `warn` | same two |
+      | archived escalated to `error` | `archived_repository_is_reported_as_a_warning`, `every_check_runs_over_every_entry` |
+      | `day_of` never truncates | `archived_repository_is_reported_as_a_warning`, `a_timestamp_without_a_time_is_shown_whole` |
+      | lookup uses the full action id | `subpath_action_is_looked_up_by_its_base_repository` |
+      | finding names the base repo | `subpath_action_is_reported_under_its_full_name` |
+      | `archived` gains `#[serde(default)]` | `a_payload_missing_archived_does_not_decode_as_not_archived` |
+      | check unwired from `collect_findings` | compile error — the seam parameter cannot go unused |
+- [x] 4.2 Confirm `src/audit/*.rs` is at 5 files and `src/infra/github/*.rs` at 8 — the
       latter exactly at the 8-file budget, which is why the fake must not be a second file.
-- [ ] 4.3 `mise run test` passes with no numeric budget in `tests/code_health.rs` raised.
-- [ ] 4.4 `mise run integ` passes.
-- [ ] 4.5 Clippy strict gate passes — pedantic, private-item and field docs, `#[expect]`
+- [x] 4.3 `mise run test` passes with no numeric budget in `tests/code_health.rs` raised.
+- [x] 4.4 `mise run integ` passes.
+- [x] 4.5 Clippy strict gate passes — pedantic, private-item and field docs, `#[expect]`
       fulfilled, `#[cfg(test)]` at file bottom.
