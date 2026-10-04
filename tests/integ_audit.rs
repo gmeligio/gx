@@ -12,11 +12,12 @@
 //! because process environment is global and would make these flaky under the parallel
 //! test runner.
 
-use gx::audit::{Audit, Error as AuditError, Report};
-use gx::command::{Command as _, CommandReport};
+use gx::audit::{Error as AuditError, Report, collect_findings, require_token};
+use gx::command::CommandReport;
 use gx::config::{Config, GitHubToken, Level, Lint};
 use gx::domain::lock::Lock;
 use gx::domain::manifest::Manifest;
+use gx::infra::github::{Advisory, AdvisoryQuery, Error as GitHubError};
 use gx::infra::lock::Store as LockStore;
 use std::fs;
 use std::path::Path;
@@ -31,6 +32,18 @@ version = "main"
 sha = "abc123def456789012345678901234567890abcd"
 repository = "actions/checkout"
 ref_type = "branch"
+date = "2026-01-01T00:00:00Z"
+"#;
+
+/// A lock pinning the action from the tj-actions compromise at an affected version.
+const VULNERABLE_LOCK: &str = r#"
+[resolutions."tj-actions/changed-files"."^45"]
+version = "v45.0.7"
+
+[actions."tj-actions/changed-files"."v45.0.7"]
+sha = "abc123def456789012345678901234567890abcd"
+repository = "tj-actions/changed-files"
+ref_type = "tag"
 date = "2026-01-01T00:00:00Z"
 "#;
 
@@ -76,8 +89,39 @@ fn config_at(root: &Path, token: Option<&str>) -> Config {
     }
 }
 
+/// An advisory source that answers from memory.
+///
+/// These tests are about the lock, the command, and the report — not about the advisory
+/// API — so the seam is filled locally. A test that queried GitHub would change verdict
+/// whenever the advisory database changed, which is exactly the property `gx audit` exists
+/// to have and a test must not have.
+struct CannedAdvisories(Vec<Advisory>);
+
+impl AdvisoryQuery for CannedAdvisories {
+    fn all_actions_advisories(&self) -> Result<Vec<Advisory>, GitHubError> {
+        Ok(self.0.clone())
+    }
+}
+
+/// Run the command's whole pipeline — token guard, then every check — against canned
+/// advisories. Mirrors `Audit::run`, whose only extra step is constructing the real
+/// advisory adapter.
+fn audit_against(
+    root: &Path,
+    token: Option<&str>,
+    advisories: Vec<Advisory>,
+) -> Result<Report, AuditError> {
+    let config = config_at(root, token);
+    require_token(&config.settings)?;
+    Ok(Report::from_diagnostics(collect_findings(
+        &config,
+        &CannedAdvisories(advisories),
+        &mut |_| {},
+    )?))
+}
+
 fn audit(root: &Path, token: Option<&str>) -> Result<Report, AuditError> {
-    Audit.run(root, config_at(root, token), &mut |_| {})
+    audit_against(root, token, Vec::new())
 }
 
 #[test]
@@ -296,17 +340,20 @@ fn a_repo_without_github_is_clean_once_a_token_is_present() {
 
 #[test]
 fn json_mode_writes_one_document_and_no_progress_output() {
+    // Driven through an empty lock, the one fixture that reaches rendering without an
+    // advisory query. The rendering path is the same whatever produced the findings, and
+    // a non-empty lock here would mean a real request to GitHub.
     let temp = TempDir::new().unwrap();
-    let root = repo_with_lock(&temp, Some(BRANCH_LOCK));
+    let root = repo_with_lock(&temp, Some(""));
     git_init(&root);
 
     let (stdout, _stderr, code) = run_gx(&root, Some("token"), &["audit", "--json"]);
 
-    assert_eq!(code, Some(0), "a warning-only run exits zero");
+    assert_eq!(code, Some(0), "a clean run exits zero");
     // Parses whole, so nothing was interleaved with it.
     let value: serde_json::Value =
         serde_json::from_str(&stdout).expect("stdout must be exactly one JSON document");
-    assert_eq!(value["findings"][0]["check"], "mutable-ref");
+    assert_eq!(value["findings"], serde_json::json!([]));
     // The human-facing lines that would corrupt the document.
     assert!(!stdout.contains("📋"), "log path must be suppressed");
     assert!(!stdout.contains('✓'), "summary must be suppressed");
@@ -315,7 +362,7 @@ fn json_mode_writes_one_document_and_no_progress_output() {
 #[test]
 fn json_mode_writes_no_local_log_file() {
     let temp = TempDir::new().unwrap();
-    let root = repo_with_lock(&temp, Some(TAG_LOCK));
+    let root = repo_with_lock(&temp, Some(""));
     git_init(&root);
 
     let (stdout, _stderr, _code) = run_gx(&root, Some("token"), &["audit", "--json"]);
@@ -334,20 +381,85 @@ fn human_mode_still_prints_a_summary() {
     // The counterpart to the suppression tests: without --json the human lines DO appear,
     // so the assertions above are detecting suppression rather than absence.
     let temp = TempDir::new().unwrap();
-    let root = repo_with_lock(&temp, Some(BRANCH_LOCK));
+    let root = repo_with_lock(&temp, Some(""));
     git_init(&root);
 
     let (stdout, _stderr, code) = run_gx(&root, Some("token"), &["audit"]);
 
     assert_eq!(code, Some(0));
     assert!(
-        stdout.contains("mutable-ref"),
-        "human output must name the check, got: {stdout}"
+        stdout.contains("No audit findings"),
+        "human output must print a summary, got: {stdout}"
     );
     assert!(
         serde_json::from_str::<serde_json::Value>(&stdout).is_err(),
         "human output is not JSON"
     );
+}
+
+#[test]
+fn a_locked_action_inside_an_advisory_range_fails_the_command() {
+    // The end-to-end claim, through a real gx.lock on disk: a vulnerable pin is an
+    // error-level finding that fails the build, carrying enough to verify it.
+    let temp = TempDir::new().unwrap();
+    let root = repo_with_lock(&temp, Some(VULNERABLE_LOCK));
+
+    let report = audit_against(
+        &root,
+        Some("token"),
+        vec![Advisory {
+            package: "tj-actions/changed-files".to_owned(),
+            ghsa_id: "GHSA-mrrh-fwg8-r2c3".to_owned(),
+            summary: "leaks secrets via workflow logs".to_owned(),
+            severity: gx::infra::github::AdvisorySeverity::High,
+            permalink: "https://github.com/advisories/GHSA-mrrh-fwg8-r2c3".to_owned(),
+            vulnerable_range: "<= 45.0.7".to_owned(),
+            first_patched: Some("46.0.1".to_owned()),
+        }],
+    )
+    .expect("a successful lookup must produce a report");
+
+    assert_eq!(report.diagnostics.len(), 1);
+    assert_eq!(report.diagnostics[0].rule.as_str(), "known-vulnerability");
+    assert_eq!(report.diagnostics[0].level, Level::Error);
+    assert_eq!(
+        CommandReport::exit_code(&report),
+        1,
+        "a vulnerable pin must fail the build"
+    );
+    assert!(
+        report.diagnostics[0]
+            .message
+            .contains("GHSA-mrrh-fwg8-r2c3"),
+        "got: {}",
+        report.diagnostics[0].message
+    );
+}
+
+#[test]
+fn the_same_lock_is_clean_when_no_advisory_covers_it() {
+    // Paired with the test above over the same fixture, so a check that never ran cannot
+    // satisfy both.
+    let temp = TempDir::new().unwrap();
+    let root = repo_with_lock(&temp, Some(VULNERABLE_LOCK));
+
+    let report = audit_against(
+        &root,
+        Some("token"),
+        vec![Advisory {
+            package: "tj-actions/changed-files".to_owned(),
+            ghsa_id: "GHSA-mrrh-fwg8-r2c3".to_owned(),
+            summary: "leaks secrets via workflow logs".to_owned(),
+            severity: gx::infra::github::AdvisorySeverity::High,
+            permalink: "https://github.com/advisories/GHSA-mrrh-fwg8-r2c3".to_owned(),
+            vulnerable_range: "<= 44.0.0".to_owned(),
+            first_patched: Some("44.0.1".to_owned()),
+        }],
+    )
+    .unwrap();
+
+    assert!(report.diagnostics.is_empty());
+    assert_eq!(CommandReport::exit_code(&report), 0);
 }
 
 #[test]

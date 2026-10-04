@@ -7,7 +7,7 @@
 use super::check_name::CheckName;
 use super::report::Finding;
 use crate::config::Level;
-use crate::domain::action::identity::{ActionId, CommitSha};
+use crate::domain::action::identity::{ActionId, CommitSha, Repository};
 use crate::domain::action::uses_ref::RefType;
 use crate::domain::lock::Lock;
 
@@ -21,6 +21,12 @@ pub struct AuditTarget<'lock> {
     pub sha: &'lock CommitSha,
     /// What kind of reference resolved to `sha`, when the lock recorded one.
     pub ref_type: Option<&'lock RefType>,
+    /// The repository the commit was resolved against, when the lock recorded one.
+    ///
+    /// Separate from `id`, which for a nested-path action such as
+    /// `github/codeql-action/upload-sarif` carries the subpath. Advisories are published
+    /// against the repository, so that is what a lookup must key on.
+    pub repository: Option<&'lock Repository>,
 }
 
 /// Project every lock entry into an [`AuditTarget`], in an order two runs can be diffed.
@@ -32,6 +38,7 @@ pub fn targets(lock: &Lock) -> Vec<AuditTarget<'_>> {
             version: locked.version_label(),
             sha: locked.sha(),
             ref_type: locked.commit().ref_type.as_ref(),
+            repository: locked.repository(),
         })
         .collect();
     found.sort_by_key(|target| (target.id.as_str(), target.version));
