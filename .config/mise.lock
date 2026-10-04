@@ -134,7 +134,6 @@ provenance = "github-attestations"
 
 [[tools."npm:@fission-ai/openspec"]]
 version = "1.8.0"
-aube = { path = "mise/locks/npm-fission-ai-openspec/1.8.0", digest = "sha256:84b5cc69f5370ace30c6b8d8f43dda413527607e47ec36aa36b647b0e3be6992" }
 backend = "npm:@fission-ai/openspec"
 
 [[tools.rust]]
