@@ -275,7 +275,7 @@ fn run_audit(
     let mut lf = if json { None } else { log_file };
     let report = {
         let mut cb = make_cb(spinner.as_ref(), &mut lf, printer.is_ci && !json);
-        audit::Audit.run(repo_root, config, &mut cb)?
+        audit::Audit::from_settings(&config.settings)?.run(repo_root, config, &mut cb)?
     };
     finish_spinner(spinner);
 

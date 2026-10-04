@@ -10,8 +10,11 @@ mod registry;
 mod resolve;
 /// GitHub API response deserialization types.
 mod responses;
+/// Resolving one named tag to the commit it points at, for audit's tag-moved check.
+mod tag_ref;
 /// Tag enumeration: tags for a SHA, version tags, and pagination.
 mod tags;
 
 pub use advisory::{Advisory, AdvisoryQuery, GraphQlAdvisories, Severity as AdvisorySeverity};
 pub use registry::{Error, Registry};
+pub use tag_ref::{FakeTags, GitTags, TagResolver};
