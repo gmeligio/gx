@@ -18,7 +18,7 @@ use serde::Deserialize;
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct RepoMeta {
     /// Whether GitHub reports the repository as archived — accepting no commits, so no
-    /// future version can ever be published.
+    /// future version can be published while archived.
     pub archived: bool,
     /// When the repository was last pushed to, as GitHub sends it.
     ///
@@ -49,18 +49,40 @@ pub struct RestRepoMetadata {
     registry: Registry,
 }
 
+/// Wire identity is checked at the edge, not exposed to audit checks.
+#[derive(Deserialize)]
+struct RepositoryResponse {
+    /// GitHub's canonical owner/repository slug.
+    full_name: String,
+    /// Only the state consumed by checks.
+    #[serde(flatten)]
+    metadata: RepoMeta,
+}
+
 impl RestRepoMetadata {
     /// Wrap an authenticated registry as a repository-state source.
     #[must_use]
     pub const fn new(registry: Registry) -> Self {
         Self { registry }
     }
+
+    /// Fetch from the supplied endpoint; kept separate so HTTP behavior is tested offline.
+    fn metadata_at(&self, url: &str, repo: &str) -> Result<RepoMeta, Error> {
+        let response: RepositoryResponse = self.registry.get_json(url, "repository metadata")?;
+        if !response.full_name.eq_ignore_ascii_case(repo) {
+            return Err(Error::RepositoryIdentityChanged {
+                requested: repo.to_owned(),
+                actual: response.full_name,
+            });
+        }
+        Ok(response.metadata)
+    }
 }
 
 impl RepoMetadata for RestRepoMetadata {
     fn metadata(&self, repo: &str) -> Result<RepoMeta, Error> {
         let url = format!("{GITHUB_API_BASE}/repos/{repo}");
-        self.registry.get_json(&url, "repository metadata")
+        self.metadata_at(&url, repo)
     }
 }
 
@@ -72,6 +94,7 @@ impl RepoMetadata for RestRepoMetadata {
 pub mod fake {
     use super::{Error, GITHUB_API_BASE, RepoMeta, RepoMetadata};
     use std::cell::RefCell;
+    use std::collections::HashSet;
 
     /// Returns pre-seeded repository state without issuing any request, so the check that
     /// judges whether an action is archived can be unit-tested with no network.
@@ -79,6 +102,8 @@ pub mod fake {
         /// What every lookup returns. `Err` models a failed request so callers can be
         /// tested on the path where reporting "not archived" would be a lie.
         result: Result<RepoMeta, ()>,
+        /// Repositories whose lookups fail instead of returning the default result.
+        failures: HashSet<String>,
         /// Slugs passed to `metadata`, in call order. Asserting on these is the only way
         /// to observe that a subpath action was looked up by its base repository.
         pub seen: RefCell<Vec<String>>,
@@ -108,6 +133,7 @@ pub mod fake {
         pub fn returning(meta: RepoMeta) -> Self {
             Self {
                 result: Ok(meta),
+                failures: HashSet::new(),
                 seen: RefCell::new(Vec::new()),
             }
         }
@@ -117,15 +143,28 @@ pub mod fake {
         pub fn failing() -> Self {
             Self {
                 result: Err(()),
+                failures: HashSet::new(),
                 seen: RefCell::new(Vec::new()),
             }
+        }
+
+        /// Fail this repository's lookup while preserving other repositories' results.
+        #[must_use]
+        pub fn with_failure(mut self, repo: &str) -> Self {
+            self.failures.insert(repo.to_owned());
+            self
         }
     }
 
     impl RepoMetadata for CannedRepos {
         fn metadata(&self, repo: &str) -> Result<RepoMeta, Error> {
             self.seen.borrow_mut().push(repo.to_owned());
-            self.result.clone().map_err(|()| Error::NotFound {
+            let result = if self.failures.contains(repo) {
+                Err(())
+            } else {
+                self.result.clone()
+            };
+            result.map_err(|()| Error::NotFound {
                 url: format!("{GITHUB_API_BASE}/repos/{repo}"),
             })
         }
@@ -138,7 +177,121 @@ pub mod fake {
     reason = "tests use unwrap, indexing, and other patterns freely"
 )]
 mod tests {
-    use super::RepoMeta;
+    use super::{Error, Registry, RepoMeta, RestRepoMetadata};
+    use std::io::{Read as _, Write as _};
+    use std::net::TcpListener;
+    use std::time::{Duration, Instant};
+
+    /// Bound local client/server waits so a missing request fails rather than hanging.
+    const HTTP_TEST_TIMEOUT: Duration = Duration::from_secs(5);
+
+    /// Serve a fixed response sequence, including redirects, with no external network.
+    #[expect(
+        clippy::unwrap_in_result,
+        reason = "test server setup failures must panic"
+    )]
+    fn lookup(responses: &[(&str, &str)], repo: &str) -> Result<RepoMeta, Error> {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let wire_responses: Vec<String> = responses
+            .iter()
+            .map(|(status, body)| {
+                format!(
+                    "HTTP/1.1 {status}\r\nLocation: {base}/repos/new/repo\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+            })
+            .collect();
+        let server = std::thread::spawn(move || {
+            for response in wire_responses {
+                let started = Instant::now();
+                let mut stream = loop {
+                    match listener.accept() {
+                        Ok((stream, _)) => break stream,
+                        Err(error) => {
+                            assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
+                            assert!(
+                                started.elapsed() < HTTP_TEST_TIMEOUT,
+                                "metadata request did not reach the local server"
+                            );
+                            std::thread::sleep(Duration::from_millis(1));
+                        }
+                    }
+                };
+                stream.set_read_timeout(Some(HTTP_TEST_TIMEOUT)).unwrap();
+                stream.set_write_timeout(Some(HTTP_TEST_TIMEOUT)).unwrap();
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n") {
+                    let mut byte = [0];
+                    stream.read_exact(&mut byte).unwrap();
+                    request.extend_from_slice(&byte);
+                }
+                stream.write_all(response.as_bytes()).unwrap();
+            }
+        });
+        let adapter = RestRepoMetadata::new(Registry {
+            client: reqwest::blocking::Client::builder()
+                .no_proxy()
+                .timeout(HTTP_TEST_TIMEOUT)
+                .build()
+                .unwrap(),
+            token: None,
+        });
+        let result = adapter.metadata_at(&format!("{base}/repos/{repo}"), repo);
+        server.join().unwrap();
+        result
+    }
+
+    #[test]
+    fn renamed_repository_redirect_is_not_active_metadata() {
+        let result = lookup(
+            &[
+                ("301 Moved Permanently", ""),
+                (
+                    "200 OK",
+                    r#"{"full_name":"new/repo","archived":false,"pushed_at":"2026-08-01T09:15:00Z"}"#,
+                ),
+            ],
+            "old/repo",
+        );
+        let error = result.unwrap_err();
+        assert!(matches!(
+            &error,
+            Error::RepositoryIdentityChanged { requested, actual }
+                if requested == "old/repo" && actual == "new/repo"
+        ));
+        assert_eq!(
+            error.to_string(),
+            "GitHub repository old/repo was renamed or transferred to new/repo"
+        );
+    }
+
+    #[test]
+    fn matching_repository_identity_accepts_case_only_changes() {
+        for repo in ["actions/checkout", "Actions/CheckOut"] {
+            let meta = lookup(
+                &[("200 OK", r#"{"full_name":"actions/checkout","archived":false,"pushed_at":"2026-08-01T09:15:00Z"}"#)],
+                repo,
+            )
+            .unwrap();
+            assert!(!meta.archived);
+            assert_eq!(meta.pushed_at, "2026-08-01T09:15:00Z");
+        }
+    }
+
+    #[test]
+    fn unsuccessful_or_invalid_http_payloads_are_errors() {
+        for (status, body) in [
+            ("404 Not Found", "{}"),
+            ("401 Unauthorized", "{}"),
+            ("200 OK", "not JSON"),
+            ("200 OK", r#"{"archived":false,"pushed_at":"date"}"#),
+            ("200 OK", r#"{"full_name":"old/repo","pushed_at":"date"}"#),
+        ] {
+            lookup(&[(status, body)], "old/repo").unwrap_err();
+        }
+    }
 
     #[test]
     fn parses_the_documented_repository_payload() {
