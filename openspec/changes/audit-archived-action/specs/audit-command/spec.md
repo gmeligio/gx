@@ -1,28 +1,14 @@
 ## ADDED Requirements
 
-### Requirement: Audit reports dependency health, not vulnerabilities alone
+### Requirement: Archived repository metadata belongs to audit, not lint
 
-`gx audit` SHALL report findings about the health of a locked dependency even when no
-vulnerability is known, provided the finding rests on networked, time-varying knowledge
-about the dependency rather than on a deterministic fact about the user's own files.
+`gx audit` SHALL report archived-repository findings even when no vulnerability is known.
+`gx lint` SHALL NOT retrieve or report archived-repository metadata: that state can change
+without edits to the user's files and requires a GitHub lookup. This requirement does not
+change the existing offline `mutable-ref` audit check.
 
-This is the boundary that separates `gx audit` from `gx lint`, and it is drawn around
-*where the knowledge lives*, not around *whether a CVE exists*. A fact that gx can settle
-by reading the user's repository belongs to lint: it is offline, deterministic, and changes
-only when the user edits a file. A fact that requires asking GitHub, and whose answer can
-change while the repository sits untouched, belongs to audit.
-
-**User value:** the user asking "why is a repository being archived reported by a *security*
-command?" deserves a straight answer, and it is this: an archived repository is the reason a
-future vulnerability would be unfixable. Reporting it only once an advisory lands is
-reporting it too late — at that point the user's options have already narrowed to one, and
-they have lost the lead time in which migration was a planned piece of work rather than an
-incident. The precedent is ordinary: `npm audit` reports deprecated packages, and
-`cargo audit` reports unmaintained crates, neither of which is a CVE.
-
-The cost of drawing the boundary here rather than at "vulnerabilities only" is bounded:
-`audit-command-shell` ships no configuration surface, so a check that proves unwelcome can
-be removed or moved without breaking a user's configuration file.
+**User value:** archival signals that fixes cannot be published while the repository
+remains archived, giving users lead time to migrate before a vulnerability is disclosed.
 
 #### Scenario: A dependency-health finding is reported by audit, not lint
 - **GIVEN** a `gx.lock` entry whose action comes from an archived repository
@@ -44,19 +30,15 @@ archived. An entry whose repository is not archived SHALL NOT produce a finding.
 The finding SHALL name the action and SHALL state the date of the repository's last push,
 so the user can judge how long the dependency has been frozen. The finding SHALL direct the
 user toward migrating to a maintained alternative rather than toward upgrading, because for
-an archived repository no newer version can be published.
+an archived repository no newer version can be published while it remains archived.
 
 The severity is `warn`, not `error`. An archived dependency is a risk signal about the
 future, not an exploit in the present; failing a build over it would stop work that is not
 yet unsafe, and would give users a reason to disable the command.
 
 **User value:** the maintainer still using `actions/setup-ruby` or `actions/create-release`
-believes they have an ordinary, if old, dependency. They do not. If a vulnerability is
-disclosed in it tomorrow, no patched version will ever be published, and their only
-remaining option is a migration they have not planned or budgeted. The finding converts a
-latent, invisible risk into a scheduled piece of maintenance, and the last-push date tells
-them how urgent it is: a repository archived last month reads differently from one frozen
-since 2021.
+can plan a migration rather than rely on maintainers resuming development after a
+vulnerability is disclosed. The last-push date helps them assess that maintenance risk.
 
 #### Scenario: An action from an archived repository produces a warning
 - **GIVEN** a `gx.lock` entry whose action's repository is archived
@@ -115,9 +97,10 @@ repository metadata cannot be retrieved — because the request failed, was reje
 limited, was not found, or could not be parsed. It SHALL NOT treat such a failure as
 evidence that the repository is not archived.
 
-A repository that has been renamed or deleted answers with not-found, and is reported the
-same way. gx does not follow a rename: a lock naming a repository that is no longer there
-is itself worth the user's attention.
+GitHub redirects requests for moved or renamed repositories; deleted or inaccessible
+repositories may answer with not-found. For this metadata check, a changed repository
+identity SHALL produce an error rather than a clean result for a different repository.
+A successful lookup differing only in slug casing SHALL be accepted.
 
 **User value:** the same principle that makes a missing token a hard failure rather than an
 empty report. "We could not check" and "we checked and it is fine" are different statements,
@@ -140,11 +123,21 @@ in trouble — the moments a user is most likely to be relying on a green result
   reported
 - **AND** this holds whichever of the two entries is checked first
 
-#### Scenario: A repository that no longer exists is an error, not a clean result
-- **GIVEN** a `gx.lock` entry whose repository has been renamed or deleted, so the lookup
-  answers not-found
+#### Scenario: A deleted or inaccessible repository is an error, not a clean result
+- **GIVEN** a `gx.lock` entry whose repository lookup answers not-found
 - **WHEN** the user runs `gx audit`
 - **THEN** an error-level finding is produced naming the action and the not-found reason
+
+#### Scenario: A moved or renamed repository is an error, not a clean result
+- **GIVEN** a `gx.lock` entry whose repository has moved or been renamed
+- **WHEN** the user runs `gx audit`
+- **THEN** an error-level finding is produced naming the action and the changed identity
+- **AND** the command exits with code 1
+
+#### Scenario: Slug casing alone does not indicate a changed identity
+- **GIVEN** a successful metadata lookup whose repository slug differs only in casing
+- **WHEN** the user runs `gx audit`
+- **THEN** the metadata is checked normally without an identity-change error
 
 ---
 

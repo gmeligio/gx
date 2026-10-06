@@ -1,19 +1,17 @@
 ## Why
 
-An archived GitHub repository accepts no commits and no pull requests. If a vulnerability
-is found in an action published from one, there will never be a patched version — the
-`firstPatchedVersion` an advisory would normally point at does not exist and cannot come to
-exist. Upgrading is not a remediation; migrating off the action is the only one.
+An archived GitHub repository accepts no commits and no pull requests while archived.
+If a vulnerability is found in an action published from one, maintainers cannot publish a
+patch unless they resume maintenance. Migrating to a maintained alternative is the
+recommended remediation rather than waiting for an upgrade.
 
 This is not hypothetical. `actions/setup-ruby`, `actions/create-release`, and
 `actions/upload-release-asset` are archived today and still appear in workflows across the
 ecosystem. A user pinned to one of them has a dependency that is, from a security
-standpoint, permanently frozen — and nothing in their toolchain tells them so.
+standpoint, frozen while archived.
 
-The advisory-based checks in this milestone answer "is this action vulnerable *right now*".
-This check answers a different and prior question: "if it becomes vulnerable, can it be
-fixed at all?" A user who learns the answer is no wants to know before the advisory lands,
-not after.
+Planned advisory-based checks answer "is this action vulnerable *right now*".
+This check gives users lead time to migrate before a vulnerability is disclosed.
 
 ## What Changes
 
@@ -22,7 +20,7 @@ not after.
   repository is archived.
 - The finding includes the date of the repository's last push, so the user can see how
   stale the dependency is, and it names migration — not upgrade — as the remedy, because
-  upgrading is not available.
+  new fixes cannot be published while the repository remains archived.
 - Subpath actions resolve to their base repository before the call
   (`github/codeql-action/upload-sarif` → `github/codeql-action`), since the API endpoint is
   repo-level and the subpath would 404.
@@ -47,9 +45,8 @@ None. This change adds requirements to `audit-command`, the capability introduce
 
 - `audit-command`: gains the `archived-action` check as an `ADDED` requirement — its
   severity, the content of its finding, how subpath actions resolve, and how a failed
-  lookup behaves. Also gains an `ADDED` requirement stating explicitly that audit's scope
-  is dependency *health*, not vulnerabilities alone. No existing requirement changes
-  meaning.
+  lookup behaves. Also gains an `ADDED` requirement placing archived-repository metadata
+  in audit rather than offline lint, without changing the existing mutable-ref audit check.
 
 ## Impact
 

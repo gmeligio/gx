@@ -56,16 +56,18 @@ gx tidy         # Pin actions to commit SHAs and sync manifest if present
 gx upgrade      # Upgrade pinned actions to newer versions (--json for CI/PR automation)
 gx lint         # Check action pinning, security, workflow validity, and run: shell scripts (see docs/lint-rules.md)
 gx init         # Create a manifest and lock file from your current workflows
-gx audit        # Check locked actions against security advisories (requires GITHUB_TOKEN, --json for CI)
+gx audit        # Check locked actions for mutable refs and archived repositories (requires GITHUB_TOKEN)
 ```
 
 All of these cover your workflows and any composite actions in `.github/actions`.
 
-`gx lint` and `gx audit` answer different questions. Lint judges your code against rules
-you own: it is fully offline, and its verdict changes only when you edit a file — safe for
-a pre-commit hook. Audit judges the world's knowledge about your dependencies, so the same
-commit can be clean today and vulnerable tomorrow. It reads `.github/gx.lock` and requires
-a token; without one it fails loudly rather than reporting a false "clean".
+`gx lint` checks your workflows offline — safe for a pre-commit hook. `gx audit` reads
+`.github/gx.lock` and currently checks mutable refs (offline) and archived action
+repositories (through GitHub's authenticated REST API). Archival warnings recommend
+migrating to a maintained alternative: security fixes cannot be published while a
+repository remains archived. Warnings alone exit 0; a failed metadata lookup produces an
+error and exits 1, rather than a false "clean". `--json` provides machine-readable findings.
+Advisory-based vulnerability checks are planned, not yet implemented.
 
 ## Already using another tool?
 
@@ -94,7 +96,7 @@ For teams that want reproducibility, `gx init` creates a manifest (`.github/gx.t
 
 For `gx tidy`, `gx upgrade`, and `gx init`: no, but without one you're limited to 60 GitHub API requests per hour. For most projects that's enough. Set `GITHUB_TOKEN` for CI or large repos.
 
-For `gx audit`: yes, always. It queries GitHub's GraphQL API, which rejects unauthenticated requests, so without a token it exits non-zero rather than reporting a clean audit it never performed. `gx lint` never needs one — it makes no network requests at all.
+For `gx audit`: yes, always. It requires authenticated GitHub API access, including REST repository metadata lookups. Without a token it exits non-zero rather than reporting a clean audit it never performed. `gx lint` never needs one — it makes no network requests at all.
 
 </details>
 
@@ -111,9 +113,9 @@ Add `gx lint` to your workflow to enforce pinning on every PR:
 To keep actions current, copy [docs/gx-upgrade.yml](docs/gx-upgrade.yml) into `.github/workflows/`. It runs
 `gx upgrade` on a schedule and opens a PR with the changes. See [docs/upgrade-workflow.md](docs/upgrade-workflow.md).
 
-`gx audit` belongs on a schedule for the same reason, but answers a different question: its
-verdict changes as advisories are published, not as you edit code, so a nightly run catches a
-dependency that went bad since your last commit.
+`gx audit` also belongs on a schedule: a dependency's repository can become archived
+without any change to your code. A nightly run catches that maintenance risk since your
+last commit; future advisory checks will extend this to newly disclosed vulnerabilities.
 
 ```yaml
 - name: Audit locked actions

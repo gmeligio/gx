@@ -39,3 +39,23 @@ Sleep 8s
 Type "cat .github/workflows/ci.yml"
 Enter
 Sleep 8s
+
+# Create the lock for the maintained actions, then audit it.
+# GITHUB_TOKEN is supplied at runtime by the mise demo task.
+Type "gx init"
+Enter
+Sleep 8s
+Type "gx audit"
+Enter
+Sleep 8s
+
+# Add an archived action to show the migration warning.
+Type `printf '      - uses: actions/setup-ruby@v1\n' >> .github/workflows/ci.yml`
+Enter
+Sleep 2s
+Type "gx tidy"
+Enter
+Sleep 8s
+Type "gx audit"
+Enter
+Sleep 8s

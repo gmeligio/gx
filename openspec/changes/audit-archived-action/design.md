@@ -105,16 +105,11 @@ passing, with zero headroom. Two would break the budget outright and force it to
 The fake is small and is the same module's test double, so co-locating it costs nothing in
 clarity.
 
-`Registry::get_json<T>` **does** exist (`registry.rs:141`) and is the right tool here: it
-sends an authenticated GET, classifies a non-2xx response through `check_status` *before*
-parsing, and decodes the body — exactly the three steps this adapter needs. The adapter uses
-it rather than hand-rolling the sequence. (`advisory.rs` does not, because GraphQL is POST
-and reports failures in a 200 body.)
-
-The directory's actual contents are `advisory.rs`, `dates.rs`, `mod.rs`, `registry.rs`,
-`resolve.rs`, `responses.rs`, `tags.rs`. There is no `advisory_fake.rs` — the advisory fake
-already lives inside `advisory.rs` under `#[cfg(test)]`, for this same budget reason. So
-co-locating this fake follows the directory's precedent rather than departing from it.
+The adapter uses authenticated REST requests and the existing status classification.
+Metadata lookups additionally reject redirects for moved or renamed repositories and
+validate the response's canonical `full_name` against the requested slug, ignoring case.
+These safeguards belong to the metadata path: the shared version resolver continues to
+follow GitHub redirects. (`advisory.rs` uses GraphQL POST and handles failures in a 200 body.)
 
 `pushed_at` is kept as `String`, not parsed into a date type. It is never compared or
 sorted — only displayed — so a real date type would buy nothing behavioral. `CommitDate`
@@ -190,15 +185,15 @@ grades a risk that has already been established, rather than being a risk claim 
 
 ```
 actions/setup-ruby is published from an archived repository (last pushed 2021-04-14);
-it will receive no security fixes, so migrate to a maintained alternative
+it will receive no security fixes while archived, so migrate to a maintained alternative
 ```
 
 Three parts, each earning its place: **what is true** (archived), **how stale**
 (`pushed_at`), and **why it matters plus what to do** (no fixes → migrate). Per the
 constraint that a `warn` a user cannot act on becomes noise they filter out, the message
 must not stop at "is archived" — that names a fact without naming a consequence, and the
-reader's fair response is "so what?". The word "migrate" is chosen over "upgrade" precisely
-because upgrading is the thing that cannot work here.
+reader's fair response is "so what?". Migration is recommended rather than relying on
+maintainers resuming development to publish a fix.
 
 `pushed_at` arrives as an ISO-8601 timestamp (`2021-04-14T18:22:31Z`). Only the date part is
 shown; the time of day is noise at the granularity of "how many years frozen".
@@ -220,10 +215,8 @@ for https://api.github.com/repos/actions/checkout
 
 It leads with the uncertainty rather than the cause, so a user skimming a report cannot read
 it as a verdict about the action. The trailing reason is `Error`'s own `Display`, so
-`Registry::check_status`'s existing classification — `NotFound` vs `RateLimited` vs
-`Unauthorized` — reaches the user without this check restating it. That is what makes a
-rename ("not found") distinguishable from a blip ("rate limit exceeded") despite the shared
-opening clause.
+the existing status classification — `NotFound` vs `RateLimited` vs `Unauthorized` — and
+metadata-specific identity errors reach the user without this check restating them.
 
 ## Automated Test Strategy
 
@@ -250,6 +243,9 @@ module in the tree. No new test infrastructure and no new integration test binar
 5. **The seam parses a real response shape.** The adapter's JSON decoding is tested against
    a literal payload in GitHub's documented format, so a field rename breaks a test rather
    than production.
+6. **Moved or renamed identities are rejected**, including redirects and mismatched
+   canonical names; successful case-only slug differences are accepted. Shared version
+   resolution must retain its redirect behavior.
 
 **Mutation testing:** each scenario above is verified by breaking the corresponding
 behavior, confirming the test fails, and restoring. Results are reported with the change.
@@ -272,7 +268,8 @@ line type and no new JSON key, so existing consumers parse it without modificati
 | Repo archived | `warn` finding | No |
 | Request fails / rejected / rate limited | `error` finding, exit 1 | No |
 | Response unparseable | `error` finding, exit 1 | No |
-| 404 (repo renamed, deleted, or private) | `error` finding, exit 1 | No |
+| 404 (repo deleted or inaccessible) | `error` finding, exit 1 | No |
+| Redirect or changed canonical repository identity | `error` finding, exit 1 | No |
 | No token | Existing `Error::MissingToken`, exit non-zero, no report | No |
 
 The design's central observability property is that **no failure produces a clean result.**
@@ -280,10 +277,9 @@ Every path above is either a finding or a hard error; there is no branch on whic
 returns `None` because something went wrong. `None` is returned in exactly one situation —
 the lookup succeeded and reported `archived: false` — which is a positive statement.
 
-The 404 row deserves note: a renamed repository 404s, and the user sees an error finding
-rather than a redirect being followed. That is the correct default for a security command
-(a repository that is no longer where the lock says it is *is* worth a user's attention),
-though it means a rename produces a noisier result than strictly necessary.
+GitHub redirects moved or renamed repository requests rather than returning 404.
+The metadata check reports that identity change as an error because the lock's repository
+name needs attention; a successful case-only spelling difference is not an identity change.
 
 **Progress:** the existing `on_progress("Auditing locked actions...")` callback is
 unchanged. Per-action progress messages were considered and rejected — under `--json` they
@@ -295,14 +291,13 @@ are suppressed anyway, and in human mode the spinner already indicates liveness.
   not the constraint (5000/hour authenticated); wall-clock is. Accepted for now: matches the
   existing behavior of `gx upgrade`, and Decision 6's cache is available if a real lock
   proves it a problem.
-- **A renamed repository is reported as an error, not followed** → See Observability. Judged
-  the safer default, and the message names the URL so the cause is diagnosable.
+- **A moved or renamed repository is reported as an error** → See Observability. Metadata
+  lookups reject the changed identity without altering shared version-resolution redirects.
 - **A transient network blip turns a green CI run red** → By construction (Decision 3), and
   the alternative is a green run that checked nothing. The message distinguishes a failed
   lookup from a verdict so the user knows to retry rather than to investigate the action.
-- **This check is not a vulnerability check** → The point the proposal and the spec both
-  address head-on. Mitigated by the finding text explaining *why* archived matters, and by
-  the absence of a config surface making removal cheap if it proves unwelcome.
+- **This check is not a vulnerability check** → The finding explains the maintenance risk
+  and recommends migration; its warning severity does not fail an otherwise clean run.
 - **Parallel-change conflict** → Minimized structurally: one line in `check_name.rs`, one
   new file, one line in `mod.rs`'s check pipeline, and *no* change to `target.rs`.
 
