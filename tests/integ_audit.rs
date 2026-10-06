@@ -232,8 +232,60 @@ fn json_output_on_a_clean_repo_is_still_one_document() {
 /// reaches stdout, which only a spawned process shows. `CARGO_BIN_EXE_gx` is set by cargo
 /// for integration tests, so this needs no new dependency.
 fn run_gx(root: &Path, token: Option<&str>, args: &[&str]) -> (String, String, Option<i32>) {
+    // Deny and count requests, including HTTPS CONNECT, rather than trusting a placeholder
+    // token to make a networked audit harmless. Each child owns its proxy environment.
+    use std::io::Write as _;
+    use std::net::TcpListener;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let proxy = format!("http://{}", listener.local_addr().unwrap());
+    let stopped = Arc::new(AtomicBool::new(false));
+    let stop = Arc::clone(&stopped);
+    let probe = std::thread::spawn(move || {
+        let mut requests = 0_u64;
+        loop {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    requests = requests.saturating_add(1);
+                    stream
+                        .write_all(
+                            b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                        )
+                        .unwrap_or_default();
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if stop.load(Ordering::SeqCst) {
+                        return Ok(requests);
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    });
     let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_gx"));
     command.current_dir(root).args(args);
+    let tmp = root.join("tmp");
+    fs::create_dir_all(&tmp).unwrap();
+    for key in ["TMPDIR", "TMP", "TEMP"] {
+        command.env(key, &tmp);
+    }
+    for key in [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+    ] {
+        command.env(key, &proxy);
+    }
+    command.env("NO_PROXY", "").env("no_proxy", "");
     match token {
         Some(value) => command.env("GITHUB_TOKEN", value),
         None => command.env_remove("GITHUB_TOKEN"),
@@ -241,6 +293,12 @@ fn run_gx(root: &Path, token: Option<&str>, args: &[&str]) -> (String, String, O
     // Keep the run deterministic: CI mode changes which lines are printed.
     command.env_remove("CI");
     let output = command.output().expect("gx binary should run");
+    stopped.store(true, Ordering::SeqCst);
+    assert_eq!(
+        probe.join().unwrap().unwrap(),
+        0,
+        "subprocess audit must stay offline"
+    );
     (
         String::from_utf8_lossy(&output.stdout).into_owned(),
         String::from_utf8_lossy(&output.stderr).into_owned(),
@@ -321,26 +379,21 @@ fn a_repo_without_github_is_clean_once_a_token_is_present() {
 
 #[test]
 fn json_mode_writes_one_document_and_no_progress_output() {
+    // These subprocess tests cover output plumbing on an empty lock, not successful
+    // GitHub checks. Finding-bearing locks are covered above with ActiveRepos.
     let temp = TempDir::new().unwrap();
-    let root = repo_with_lock(&temp, Some(BRANCH_LOCK));
+    let root = repo_with_lock(&temp, Some(""));
     git_init(&root);
 
-    let (stdout, _stderr, _code) = run_gx(&root, Some("token"), &["audit", "--json"]);
+    let (stdout, stderr, code) = run_gx(&root, Some("token"), &["audit", "--json"]);
+    assert_eq!(code, Some(0), "clean audit must succeed: {stderr}");
 
-    // Parses whole, so nothing was interleaved with it. The exit code is deliberately not
-    // asserted: the token is a placeholder, so the networked check's lookup fails and
-    // contributes an error-level finding. What this test is about is the document's
-    // integrity, which holds either way.
+    // Parses the entire stream, rejecting interleaved progress or a second document.
     let value: serde_json::Value =
         serde_json::from_str(&stdout).expect("stdout must be exactly one JSON document");
-    assert!(
-        value["findings"]
-            .as_array()
-            .expect("findings is always an array")
-            .iter()
-            .any(|finding| finding["check"] == "mutable-ref"),
-        "the branch pin must still be reported: {stdout}"
-    );
+    assert_eq!(value["findings"], serde_json::json!([]));
+    assert_eq!(value["warning_count"], 0);
+    assert_eq!(value["error_count"], 0);
     // The human-facing lines that would corrupt the document.
     assert!(!stdout.contains("📋"), "log path must be suppressed");
     assert!(!stdout.contains('✓'), "summary must be suppressed");
@@ -349,13 +402,18 @@ fn json_mode_writes_one_document_and_no_progress_output() {
 #[test]
 fn json_mode_writes_no_local_log_file() {
     let temp = TempDir::new().unwrap();
-    let root = repo_with_lock(&temp, Some(TAG_LOCK));
+    let root = repo_with_lock(&temp, Some(""));
     git_init(&root);
 
-    let (stdout, _stderr, _code) = run_gx(&root, Some("token"), &["audit", "--json"]);
+    let (stdout, stderr, code) = run_gx(&root, Some("token"), &["audit", "--json"]);
+    assert_eq!(code, Some(0), "clean audit must succeed: {stderr}");
 
-    // The log path is printed as the last output line when a log file is written, so its
-    // absence from an otherwise-complete document is the observable signal.
+    // Check both the output and the isolated child temp directory: hiding a log path
+    // alone does not prove that no file was written.
+    assert!(
+        !root.join("tmp/gx/audit").exists(),
+        "JSON mode must not create the audit log directory"
+    );
     assert!(
         !stdout.contains(".log"),
         "no log file path may appear in JSON mode, got: {stdout}"
@@ -368,14 +426,15 @@ fn human_mode_still_prints_a_summary() {
     // The counterpart to the suppression tests: without --json the human lines DO appear,
     // so the assertions above are detecting suppression rather than absence.
     let temp = TempDir::new().unwrap();
-    let root = repo_with_lock(&temp, Some(BRANCH_LOCK));
+    let root = repo_with_lock(&temp, Some(""));
     git_init(&root);
 
-    let (stdout, _stderr, _code) = run_gx(&root, Some("token"), &["audit"]);
+    let (stdout, stderr, code) = run_gx(&root, Some("token"), &["audit"]);
+    assert_eq!(code, Some(0), "clean audit must succeed: {stderr}");
 
     assert!(
-        stdout.contains("mutable-ref"),
-        "human output must name the check, got: {stdout}"
+        stdout.contains("No audit findings"),
+        "human output must print the clean summary, got: {stdout}"
     );
     assert!(
         serde_json::from_str::<serde_json::Value>(&stdout).is_err(),

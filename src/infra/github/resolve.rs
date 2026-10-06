@@ -135,16 +135,26 @@ mod tests {
     }
 
     #[test]
-    fn version_resolver_trait() {
-        let client = GithubRegistry::new(None).unwrap();
+    fn version_resolver_preserves_commit_when_date_is_unavailable() {
+        // Port zero refuses connections; the explicit proxy prevents the optional date
+        // lookup from reaching GitHub or depending on this machine's proxy settings.
+        let client = GithubRegistry {
+            client: reqwest::blocking::Client::builder()
+                .no_proxy()
+                .proxy(reqwest::Proxy::all("http://127.0.0.1:0").unwrap())
+                .timeout(std::time::Duration::from_secs(1))
+                .build()
+                .unwrap(),
+            token: None,
+        };
         let id = crate::domain::action::identity::ActionId::from("actions/checkout");
         let sha_version = crate::domain::action::identity::Version::from(
             "a1b2c3d4e5f6789012345678901234567890abcd",
         );
 
-        // Full SHA should pass through
         let result = client.lookup_sha(&id, &sha_version).unwrap();
         assert_eq!(result.sha.as_str(), sha_version.as_str());
         assert_eq!(result.ref_type, Some(RefType::Commit));
+        assert!(result.date.as_str().is_empty());
     }
 }
