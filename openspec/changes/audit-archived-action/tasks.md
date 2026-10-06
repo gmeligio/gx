@@ -3,8 +3,9 @@
 - [x] 1.1 Add `src/infra/github/repo_meta.rs`: the `RepoMeta` struct (`archived`,
       `pushed_at`), the `RepoMetadata` trait, and `RestRepoMetadata`, the real adapter
       wrapping `Registry` and calling `GET /repos/{owner}/{repo}` via `Registry::get_json`,
-      which already sequences authenticate, classify status, then decode. No new dependency.
-- [x] 1.2 Add `FakeRepoMetadata` inside `repo_meta.rs`, under `#[cfg(test)]` — **not** a
+      which already sequences authenticate, classify status, then decode; validate the
+      canonical repository slug before returning metadata. No new dependency.
+- [x] 1.2 Add `CannedRepos` inside `repo_meta.rs`, under `#[cfg(test)]` — **not** a
       `repo_meta_fake.rs` of its own, per design Decision 2. It returns a canned `RepoMeta`
       or a canned failure, recording every repository slug it was asked about so tests can
       assert which lookups happened.
@@ -70,3 +71,34 @@
 - [x] 4.4 `mise run integ` passes.
 - [x] 4.5 Clippy strict gate passes — pedantic, private-item and field docs, `#[expect]`
       fulfilled, `#[cfg(test)]` at file bottom.
+
+## 5. PR review fixes
+
+- [x] 5.1 Reject renamed repository identities in metadata lookups without changing
+      version-resolution redirects; cover a local HTTP redirect with a failing regression test.
+- [x] 5.2 Keep subprocess output/logging tests offline and restore deterministic exit codes.
+- [x] 5.3 Assert `archived-action` identity on findings and in human and JSON output.
+- [x] 5.4 Cover mixed lookup failure and archived warning in both processing orders.
+- [x] 5.5 Update README and demo, narrow the dependency-health requirement, and align
+      proposal/design/spec wording with GitHub redirect and archival behavior.
+- [x] 5.6 Run the project gates and an offline integration probe; verify the new assertions
+      detect incorrect check identity and suppression of mixed outcomes.
+
+Review-fix regression checks:
+
+- The local `301 → 200` rename test failed before canonical-name validation.
+- The subprocess connection guard failed all three formerly networked fixtures before
+  they were changed to empty locks.
+- Incorrect `MutableRef` labels failed the finding and report identity assertions.
+- Suppressing an archived warning after a lookup error failed the first mixed-outcome row;
+  suppressing an error after an archived warning failed the second row. Both mutations
+  were restored.
+- The warning-text assertion failed before qualifying security fixes with “while archived.”
+
+Final verification: `mise run test` and `mise run integ` passed (550 unit, 92 integration,
+28 code-health checks), with zero requests observed by an external rejecting proxy.
+The probe also exposed the existing version-resolver unit test's optional date request;
+that test now uses a refusing loopback proxy and asserts the missing-date fallback.
+OpenSpec strict validation passed. The demo command sequence was exercised against GitHub:
+maintained actions produced a clean exit 0, then `actions/setup-ruby` produced one warning
+and exit 0 with matching human/JSON identity. The GIF was not regenerated.
