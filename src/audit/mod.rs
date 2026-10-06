@@ -1,11 +1,10 @@
 #![expect(clippy::pub_use, reason = "reexport from extracted submodule")]
 
-//! `gx audit` — checks `gx.lock` against knowledge that changes without the repository
-//! changing: today whether a pin is mutable, next security advisories.
+//! `gx audit` checks locked dependencies for mutable refs and archived repositories.
 //!
-//! That is the line against `gx lint`, which is offline and whose verdict changes only when
-//! you edit a file. The same commit is clean today and critical tomorrow here, so audit
-//! requires a token even for the check it ships, which needs no network.
+//! Unlike offline lint, audit queries GitHub for upstream repository state. Its findings
+//! can change without a local edit, so it requires a token rather than offering an
+//! incomplete offline mode.
 
 /// The `archived-action` check.
 mod archived;
@@ -29,8 +28,8 @@ use thiserror::Error;
 /// Errors that can occur during the audit command.
 #[derive(Debug, Error)]
 pub enum Error {
-    /// No GitHub token was available. The GraphQL endpoint rejects unauthenticated
-    /// requests, so there is no degraded mode — only a false "clean".
+    /// No GitHub token was available. Audit requires authenticated upstream lookups
+    /// rather than falling back to an incomplete offline report.
     #[error(
         "gx audit requires a {forge} token, but {var} is not set.\n\
          Set it and run again, e.g. `{var}=$(gh auth token) gx audit`.\n\
@@ -131,7 +130,8 @@ impl Command for Audit {
 
 #[cfg(test)]
 mod tests {
-    use super::{Audit, Command as _, Error, Forge, Report, collect_findings};
+    use super::{Audit, CheckName, Command as _, Error, Forge, Report, collect_findings};
+    use crate::command::CommandReport as _;
     use crate::config::{Config, GitHubToken, Level, Settings};
     use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
     use crate::domain::action::resolved::{Commit, ResolvedRef};
@@ -141,6 +141,7 @@ mod tests {
     use crate::domain::lock::Lock;
     use crate::domain::manifest::Manifest;
     use crate::infra::github::CannedRepos;
+    use crate::output::lines::Line;
     use std::path::{Path, PathBuf};
 
     fn config_with(lock: Lock, token: Option<&str>) -> Config {
@@ -247,6 +248,11 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::expect_used,
+        clippy::indexing_slicing,
+        reason = "tests inspect known report and JSON positions"
+    )]
     fn every_check_runs_over_every_entry() {
         // One entry, both checks firing: the offline check and the networked one are
         // combined rather than one replacing the other.
@@ -257,30 +263,59 @@ mod tests {
 
         assert_eq!(report.diagnostics.len(), 2);
         assert_eq!(report.warning_count, 2);
+        assert_eq!(report.error_count, 0);
+        assert_eq!(report.exit_code(), 0);
+        assert_eq!(report.diagnostics[0].rule, CheckName::MutableRef);
+        assert_eq!(report.diagnostics[1].rule, CheckName::ArchivedAction);
+        assert!(
+            report.render().iter().any(|line| matches!(
+                line,
+                Line::LintDiag { rule, level, .. }
+                    if rule == "archived-action" && *level == Level::Warn
+            )),
+            "human output must name the archived-action check"
+        );
+        let json: serde_json::Value =
+            serde_json::from_str(&report.to_json()).expect("report must serialize");
+        assert_eq!(json["findings"][1]["check"], "archived-action");
+        assert_eq!(json["findings"][1]["level"], "warn");
     }
 
     #[test]
     fn a_failed_lookup_does_not_suppress_other_entries() {
-        // Two entries, the lookup failing for both: the run reports on each rather than
-        // stopping at the first failure. Order-independent by construction — every entry
-        // is checked, so neither position can be the lucky one.
-        let report = report_for(two_entry_lock(), &CannedRepos::failing());
+        // Targets sort by action id, so changing which repository fails covers both
+        // failure-before-warning and warning-before-failure without relying on map order.
+        for (failed_repo, archived_repo) in [
+            ("actions/checkout", "actions/setup-node"),
+            ("actions/setup-node", "actions/checkout"),
+        ] {
+            let source = CannedRepos::archived("2021-04-14T00:00:00Z").with_failure(failed_repo);
+            let report = report_for(two_entry_lock(), &source);
 
-        let errors: Vec<_> = report
-            .diagnostics
-            .iter()
-            .filter(|finding| finding.level == Level::Error)
-            .collect();
-        assert_eq!(errors.len(), 2, "both entries must report: {errors:?}");
-        assert!(
-            errors
+            assert_eq!(report.error_count, 1, "failed repo: {failed_repo}");
+            assert_eq!(report.warning_count, 2, "failed repo: {failed_repo}");
+            assert_eq!(report.diagnostics.len(), 3);
+            assert_eq!(report.exit_code(), 1);
+            let archived_findings: Vec<_> = report
+                .diagnostics
                 .iter()
-                .any(|f| f.message.contains("actions/checkout"))
-        );
-        assert!(
-            errors
-                .iter()
-                .any(|f| f.message.contains("actions/setup-node"))
-        );
+                .filter(|finding| finding.rule == CheckName::ArchivedAction)
+                .collect();
+            assert_eq!(archived_findings.len(), 2);
+            assert!(archived_findings.iter().any(|finding| {
+                finding.level == Level::Error
+                    && finding.message.contains(failed_repo)
+                    && finding.message.contains("could not determine")
+            }));
+            assert!(archived_findings.iter().any(|finding| {
+                finding.level == Level::Warn
+                    && finding.message.contains(archived_repo)
+                    && finding.message.contains("archived repository")
+            }));
+            assert_eq!(
+                source.seen.borrow().as_slice(),
+                ["actions/checkout", "actions/setup-node"]
+            );
+        }
     }
 }
