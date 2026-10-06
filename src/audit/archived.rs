@@ -1,9 +1,7 @@
-//! The `archived-action` check: is this action published from a repository that can no
-//! longer publish?
+//! The `archived-action` check reports actions from archived repositories.
 //!
-//! An archived repository accepts no commits, so a vulnerability found in it will never
-//! get a patched version. Upgrading is not a remedy; migrating off it is the only one —
-//! which is why this check reports before an advisory lands rather than after.
+//! Migration avoids depending on maintainers resuming development before they can
+//! publish a security fix.
 
 use super::check_name::CheckName;
 use super::report::Finding;
@@ -54,7 +52,7 @@ pub fn archived_action(target: &AuditTarget<'_>, source: &dyn RepoMetadata) -> O
         ARCHIVED_SEVERITY,
         format!(
             "{} is published from an archived repository (last pushed {}); \
-             it will receive no security fixes, so migrate to a maintained alternative",
+             it will receive no security fixes while archived, so migrate to a maintained alternative",
             // The action as the user wrote it, subpath included, so they can find it in
             // their workflow — even though the lookup used the base repository.
             target.id,
@@ -79,7 +77,7 @@ fn day_of(timestamp: &str) -> &str {
     reason = "tests use unwrap, indexing, and other patterns freely"
 )]
 mod tests {
-    use super::{AuditTarget, Level, archived_action, day_of};
+    use super::{AuditTarget, CheckName, Level, archived_action, day_of};
     use crate::domain::action::identity::{ActionId, CommitSha};
     use crate::infra::github::CannedRepos;
 
@@ -105,6 +103,7 @@ mod tests {
         let finding =
             archived_action(&target(&id, &sha), &source).expect("archived repo must be reported");
 
+        assert_eq!(finding.rule, CheckName::ArchivedAction);
         assert_eq!(finding.level, Level::Warn);
         assert!(
             finding.message.contains("actions/setup-ruby"),
@@ -119,6 +118,11 @@ mod tests {
         assert!(
             finding.message.contains("migrate"),
             "must point at migration, not upgrade: {}",
+            finding.message
+        );
+        assert!(
+            finding.message.contains("while archived"),
+            "must not imply that a repository cannot be unarchived: {}",
             finding.message
         );
         assert!(
@@ -184,6 +188,7 @@ mod tests {
 
         // Error, not warn: warn leaves the exit code at 0, so CI would stay green having
         // checked nothing.
+        assert_eq!(finding.rule, CheckName::ArchivedAction);
         assert_eq!(finding.level, Level::Error);
         assert!(
             finding.message.contains("could not determine"),
