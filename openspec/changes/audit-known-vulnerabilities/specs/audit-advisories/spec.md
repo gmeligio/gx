@@ -102,11 +102,23 @@ Matching SHALL treat a leading `v` as insignificant on either side, since gx rec
 
 ### Requirement: An unusable version or range never silently passes
 
-When an action **has published advisories** but gx cannot decide whether they apply — the locked version does not parse as a version, the advisory range does not parse, or the locked version is too imprecise to place against the range — gx SHALL NOT treat it as "not affected". gx SHALL emit a `known-vulnerability` finding at **warn** level stating that applicability could not be determined.
+When an action **has published advisories**, gx SHALL emit a `known-vulnerability` finding at **warn** level if the locked version or advisory range cannot be parsed, a prerelease does not match explicitly, or a partial version's zero-padded value does not match but its version line could overlap the range. These cases SHALL NOT silently become "not affected".
 
-Warn rather than error: the action may well be unaffected, and failing a build on an unknown is the false alarm that costs a security tool its credibility. Silence would be the opposite and worse failure — a check reporting "clean" for a reason the user never sees. Warn is the honest middle, visible without being fatal.
+Partial versions whose zero-padded value matches SHALL conservatively produce an error-level finding, even if the actual version could be newer and unaffected. This deliberate over-reporting is distinct from the unmatched-but-overlapping cases that warn.
 
 This is deliberately narrow. An action with no advisories at all is not reported however imprecise its version, because there is nothing whose applicability is in question.
+
+#### Scenario: A matching padded version is conservatively affected
+
+- **WHEN** a locked `v2` is compared with `< 2.5.0`
+- **THEN** the padded `2.0.0` matches and audit emits an error-level finding
+- **AND** this verdict does not claim that the actual version behind the partial tag is known
+
+#### Scenario: A strict partial lower bound excludes the entire locked line
+
+- **WHEN** `v2` is compared with `> 2`, or `v2.5` with `> 2.5`
+- **THEN** audit reports no finding, because those ranges exclude the entire locked version line
+- **AND** `v2` against `> 2.5` and `v2.5` against `> 2.5.3` remain undetermined
 
 #### Scenario: A branch-pinned entry cannot be range-matched
 

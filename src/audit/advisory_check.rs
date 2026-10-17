@@ -222,6 +222,8 @@ mod tests {
             ("v2.5", "=2.5.3"),
             ("v2", "2.5.0"),
             ("v2", "~2.5.0"),
+            ("v2", ">2.5"),
+            ("v2.5", ">2.5.3"),
         ] {
             assert_eq!(matches(pin, range), Match::Undetermined, "{pin}: {range}");
         }
@@ -230,6 +232,8 @@ mod tests {
             ("v2.4", "=2.5.0"),
             ("v2.6", "=2.5.0"),
             ("v2", ">=2.5.0, <2.0.0"),
+            ("v2", ">2"),
+            ("v2.5", ">2.5"),
         ] {
             assert_eq!(matches(pin, range), Match::Unaffected, "{pin}: {range}");
         }

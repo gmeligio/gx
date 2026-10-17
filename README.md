@@ -69,8 +69,11 @@ a token; without one it fails loudly rather than reporting a false "clean".
 
 Audit reports affected versions as `known-vulnerability` errors and ignores withdrawn
 advisories. Repository-wide advisories cover nested actions; advisories naming a specific
-GitHub action URL cover that subpath only. If a branch, prerelease, or partial version
-cannot be placed in an affected range, audit warns instead of silently reporting it safe.
+GitHub action URL cover that subpath only. Unparseable versions and ranges, and prereleases
+not explicitly matched by a range, produce warnings rather than silently passing.
+Partial versions are zero-padded: a matching padded version produces a conservative error
+(for example, `v2` against `< 2.5.0`), even if the actual version may be newer.
+If the padded version does not match but its version line could overlap the range, audit warns.
 Errors exit nonzero; warnings alone do not. `gx audit --json` emits one report without
 creating a local log file; a failed advisory lookup emits no report.
 

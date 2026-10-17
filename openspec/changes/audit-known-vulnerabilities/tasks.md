@@ -65,10 +65,12 @@
 - [x] 9.5 Require the audit token before loading repository configuration; cover malformed manifest and lock files without a token.
 - [x] 9.6 Verify JSON mode creates no log files using a child-process-owned temporary directory and a positive human-mode control.
 - [x] 9.7 Update README, demo, and change artifacts; run unit, integration, formatting, lint, and code-health checks without raising budgets.
+- [x] 9.8 Address independent review: strict partial lower bounds must preserve definitely disjoint verdicts; clarify conservative partial-version errors versus uncertainty warnings.
 
 ### Review-fix verification
 
 - Before their fixes, regression tests failed for prerelease exclusion, partial equality overlap, URL package lookup, withdrawn advisory filtering/query selection, and missing-token precedence over malformed configuration.
+- Independent-review regression: `v2` against `>2` failed expecting `Unaffected`; coverage includes major/minor strict bounds and overlapping counterparts.
 - Replacing production command report assembly with an empty report failed the command tests. Removing JSON log suppression failed the filesystem assertion even with valid JSON stdout. Both mutations were restored.
 - Combined tree: `mise run test` passed (558 unit tests, 28 code-health tests, typecheck, formatting, Clippy, and unchanged lockfile); `mise run integ` passed (96 tests).
 - Strict OpenSpec validation and `git diff --check` passed. Live-network e2e tests and GIF regeneration were not run.

@@ -72,8 +72,16 @@ fn partial_overlap(locked: &Locked, range: &VersionReq) -> bool {
         return false;
     }
     range.comparators.iter().all(|bound| {
+        // `>2` excludes all 2.x releases; `>2.5` excludes all 2.5.x releases.
+        let excludes_line = bound.op == Op::Greater
+            && match locked.precision {
+                Precision::Major => bound.minor.is_none(),
+                Precision::Minor => bound.patch.is_none(),
+                Precision::Exact => false,
+            };
         bound.matches(&locked.version)
-            || (!matches!(bound.op, Op::Less | Op::LessEq)
+            || (!excludes_line
+                && !matches!(bound.op, Op::Less | Op::LessEq)
                 && bound.major == locked.version.major
                 && (locked.precision == Precision::Major
                     || bound.minor.is_none()
