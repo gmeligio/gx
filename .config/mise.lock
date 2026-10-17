@@ -132,6 +132,10 @@ url = "https://github.com/axodotdev/cargo-dist/releases/download/v0.31.0/cargo-d
 url_api = "https://api.github.com/repos/axodotdev/cargo-dist/releases/assets/360963394"
 provenance = "github-attestations"
 
+[[tools."npm:@fission-ai/openspec"]]
+version = "1.8.0"
+backend = "npm:@fission-ai/openspec"
+
 [[tools.rust]]
 version = "1.95.0"
 backend = "core:rust"

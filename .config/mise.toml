@@ -11,6 +11,7 @@ min_version = "2026.8.5"
 "github:EmbarkStudios/cargo-deny" = "0.19.0"
 "aqua:j178/prek" = "0.4.4"
 shellcheck = "0.11.0"
+"npm:@fission-ai/openspec" = "1.8.0"
 
 [settings]
 github.github_attestations = true
