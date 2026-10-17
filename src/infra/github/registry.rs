@@ -81,6 +81,9 @@ pub enum Error {
     #[error("GitHub API not found: {url}")]
     NotFound { url: String },
 
+    #[error("GitHub repository {requested} was renamed or transferred to {actual}")]
+    RepositoryIdentityChanged { requested: String, actual: String },
+
     #[error("GitHub API returned status {status} for {url}")]
     ApiError { status: u16, url: String },
 
@@ -237,6 +240,7 @@ impl VersionRegistry for Registry {
                     | Error::Request { .. }
                     | Error::NotFound { .. }
                     | Error::ApiError { .. }
+                    | Error::RepositoryIdentityChanged { .. }
                     | Error::ParseResponse { .. } => ResolutionError::ResolveFailed {
                         spec: ActionSpec::new(id.clone(), Specifier::from_v1(version.as_str())),
                         reason: e.to_string(),
@@ -293,6 +297,7 @@ impl VersionRegistry for Registry {
                 | Error::Request { .. }
                 | Error::NotFound { .. }
                 | Error::ApiError { .. }
+                | Error::RepositoryIdentityChanged { .. }
                 | Error::ParseResponse { .. } => ResolutionError::ResolveFailed {
                     spec: ActionSpec::new(id.clone(), Specifier::Ref(String::new())),
                     reason: e.to_string(),
@@ -322,6 +327,7 @@ impl VersionRegistry for Registry {
                 | Error::Request { .. }
                 | Error::NotFound { .. }
                 | Error::ApiError { .. }
+                | Error::RepositoryIdentityChanged { .. }
                 | Error::ParseResponse { .. } => ResolutionError::ResolveFailed {
                     spec: ActionSpec::new(id.clone(), Specifier::Sha(sha.as_str().to_owned())),
                     reason: e.to_string(),

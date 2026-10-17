@@ -7,5 +7,6 @@ crate::diagnostic::rule_ids! {
     /// Canonical identifier for an audit check. Add one by adding a line.
     CheckName {
         MutableRef => "mutable-ref",
+        ArchivedAction => "archived-action",
     }
 }
