@@ -39,3 +39,13 @@ Sleep 8s
 Type "cat .github/workflows/ci.yml"
 Enter
 Sleep 8s
+
+# Record the locked versions, then check active advisories using the supplied GITHUB_TOKEN.
+Type "gx init"
+Enter
+Sleep 8s
+
+# JSON mode prints the report without a local log file. Findings depend on current advisories.
+Type "gx audit --json"
+Enter
+Sleep 8s

@@ -4,7 +4,7 @@
 
 `gx audit` SHALL compare every action recorded in `gx.lock` against the GitHub Advisory Database for the `ACTIONS` ecosystem, and SHALL emit an error-level `known-vulnerability` finding for each locked action whose recorded version falls inside a published advisory's affected version range.
 
-The comparison SHALL be keyed on the action's repository and its recorded **version**. It SHALL NOT be keyed on the pinned commit SHA: advisories carry no SHA-shaped ranges, and looking a compromised action up by SHA returns nothing.
+The comparison SHALL be keyed on the action's repository and its recorded **version**. When an advisory package is a GitHub URL naming an action subpath, it SHALL apply only to that action, not unrelated subpaths. Repository names are case-insensitive; action subpaths retain their case. The comparison SHALL NOT be keyed on the pinned commit SHA: advisories carry no SHA-shaped ranges, and looking a compromised action up by SHA returns nothing.
 
 #### Scenario: A pinned version inside an affected range is reported
 
@@ -21,6 +21,37 @@ The comparison SHALL be keyed on the action's repository and its recorded **vers
 
 - **WHEN** the advisory set contains entries for packages absent from `gx.lock`
 - **THEN** `gx audit` emits no finding for those packages
+
+#### Scenario: A GitHub URL identifies a nested action
+
+- **WHEN** an advisory names `https://github.com/pytorch/pytorch/.github/actions/filter-test-configs` with affected range `< 2.0.1`
+- **AND** the lock records `pytorch/pytorch/.github/actions/filter-test-configs` at `v2.0.0`
+- **THEN** audit emits a `known-vulnerability` error for that action
+- **AND** that advisory does not match a different subpath or the repository root action
+
+#### Scenario: A non-GitHub URL does not identify a GitHub action
+
+- **WHEN** a package URL has a host other than `github.com`
+- **THEN** it does not match a locked GitHub action merely because its URL path has the same repository and subpath
+
+### Requirement: Withdrawn advisories do not produce findings
+
+`gx audit` SHALL ignore advisories with a non-null withdrawal timestamp. Response completeness SHALL be checked before withdrawn entries are removed.
+
+#### Scenario: A withdrawn advisory and an active advisory cover the same pin
+
+- **WHEN** both an active advisory and a withdrawn advisory cover a locked action version
+- **THEN** only the active advisory produces a finding
+
+#### Scenario: A complete response contains only withdrawn advisories
+
+- **WHEN** every returned advisory is withdrawn and the response contains the full advertised count
+- **THEN** the lookup succeeds with no active advisories
+
+#### Scenario: A response containing withdrawn advisories is truncated
+
+- **WHEN** the advertised count exceeds the number of returned nodes, including withdrawn nodes
+- **THEN** the lookup fails rather than reporting a complete result
 
 ### Requirement: A finding identifies the advisory actionably
 
@@ -94,6 +125,18 @@ This is deliberately narrow. An action with no advisories at all is not reported
 - **THEN** `gx audit` reports the action as undetermined, because the `v2` tag may resolve above or below `2.5.0`
 - **AND** it does NOT report the action as unaffected
 
+#### Scenario: A partial version overlaps an equality range
+
+- **WHEN** `gx.lock` records `v2` or `v2.5` and an advisory declares that package affected in `= 2.5.0`
+- **THEN** audit reports the pin as affected or undetermined, never unaffected
+- **AND** `v3` and `v2.4` remain unaffected by that equality range
+
+#### Scenario: Dependency prerelease exclusions are not evidence of safety
+
+- **WHEN** a locked prerelease such as `v45.0.7-beta.1` is compared with `<= 45.0.7`
+- **THEN** audit does not report it as unaffected solely because a dependency-range matcher excludes prereleases
+- **AND** if applicability cannot be established, audit emits an undetermined warning
+
 #### Scenario: An unparseable version on an action with no advisories stays silent
 
 - **WHEN** `gx.lock` records a locked version of `main` for an action with no published advisories
@@ -113,6 +156,26 @@ When the advisory lookup does not succeed — network failure, rejected credenti
 
 - **WHEN** the advisory lookup succeeds and returns no advisories
 - **THEN** `gx audit` reports no `known-vulnerability` findings and exits zero
+
+### Requirement: Audit credentials are checked before repository configuration
+
+For an audit invocation, gx SHALL check for `GITHUB_TOKEN` before loading repository configuration or creating a local log file. Help and argument parsing SHALL remain available without a token.
+
+#### Scenario: Missing credentials take precedence over malformed configuration
+
+- **WHEN** `GITHUB_TOKEN` is absent and the repository manifest or lock file is malformed
+- **THEN** `gx audit` fails with the actionable missing-token error
+- **AND** JSON mode emits no findings document and creates no log file
+
+### Requirement: JSON audit does not create a local log
+
+`gx audit --json` SHALL write its successful report to stdout without creating local audit log files. Human-mode audit SHALL retain its existing log behavior.
+
+#### Scenario: JSON output has no filesystem log side effect
+
+- **WHEN** a successful audit runs with `--json`
+- **THEN** stdout contains one JSON report
+- **AND** no audit log file is created, even if a log path would not have been printed
 
 ### Requirement: The advisory set is fetched in one request
 

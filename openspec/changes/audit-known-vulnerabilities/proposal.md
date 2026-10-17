@@ -13,6 +13,9 @@ This meets the relevance gate on both counts — it adds user-facing behavior (a
 - Version-range matching is done **locally** with the `semver` crate. No code path passes a version to OSV — see the design for the verified fail-open behavior that forces this.
 - A failed advisory lookup is an error that aborts the run. It is never rendered as a clean report.
 - `gx audit --json` gains `known-vulnerability` findings under its existing `findings` key. The JSON shape is unchanged.
+- Withdrawn advisories are excluded after validating response completeness. GitHub URL-shaped packages retain their action subpath scope.
+- Prerelease exclusions and ambiguous partial pins, including equality ranges, must not silently become unaffected verdicts.
+- The production command accepts an advisory source so offline tests exercise its actual pipeline. The CLI checks audit credentials before loading configuration, and JSON tests verify that no local log files are created.
 
 ## Capabilities
 
@@ -25,10 +28,11 @@ None. The `audit` capability's spec is introduced by the in-flight `audit-comman
 
 ## Impact
 
-- **New file** `src/audit/advisory_check.rs` — the check plus local range matching. Takes `src/audit/` from 4 files to 5, against a budget of 8.
+- **New files** `src/audit/advisory_check.rs` and `advisory_range.rs` — the check and local range matching, separated to retain existing size budgets. Takes `src/audit/` from 4 files to 6, against a budget of 8.
 - **Modified** `src/audit/check_name.rs` — one line inside `rule_ids!`.
-- **Modified** `src/audit/mod.rs` — `collect_findings` gains an `&dyn AdvisoryQuery` parameter; `Audit::run` constructs the real adapter; a new `Error` variant for a failed lookup.
+- **Modified** `src/audit/mod.rs` — `collect_findings` gains an `&dyn AdvisoryQuery` parameter; the audit command accepts the adapter used by its production run path; a new `Error` variant for a failed lookup.
 - **Modified** `src/audit/target.rs` — adds a `repository` field to `AuditTarget` (which today carries `id`, `version`, `sha`, `ref_type`) plus the one adapter line that populates it.
-- **Modified** `src/infra/github/advisory.rs` and `advisory_fake.rs` — the seam becomes a wholesale `all_actions_advisories()` returning `Advisory` records that carry their package name.
+- **Modified** `src/infra/github/advisory.rs`, including its test-only fake module — the seam becomes a wholesale `all_actions_advisories()` returning active `Advisory` records that carry their package name.
+- **Modified** `src/main.rs` and `tests/integ_audit.rs` — early credential validation and integration coverage of command composition and filesystem side effects.
 - **Dependencies**: none added. `semver = "1"` is already a direct dependency.
 - **Not in scope**: remediation wording (`gx upgrade <action>`), which is a separate change. This change reports `firstPatchedVersion` and stops there.

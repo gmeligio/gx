@@ -6,12 +6,12 @@
 //! could report "not affected" without having established it routes to
 //! [`Match::Undetermined`] instead.
 
+use super::advisory_range::{Match, matches};
 use super::check_name::CheckName;
 use super::report::Finding;
 use super::target::AuditTarget;
 use crate::config::Level;
 use crate::infra::github::{Advisory, AdvisorySeverity};
-use semver::{Op, Version, VersionReq};
 use std::collections::HashMap;
 
 /// A vulnerable pin fails the build: the action is running code a published advisory says
@@ -23,118 +23,6 @@ const VULNERABLE_SEVERITY: Level = Level::Error;
 /// credibility. Silence would be the opposite and worse failure.
 const UNDETERMINED_SEVERITY: Level = Level::Warn;
 
-/// Whether an advisory's range covers a locked version.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Match {
-    /// The locked version falls inside the affected range.
-    Affected,
-    /// The locked version provably falls outside it.
-    Unaffected,
-    /// Neither could be established. Never collapsed into `Unaffected`.
-    Undetermined,
-}
-
-/// How precisely a locked version names a release.
-///
-/// A partial version is a real pin — `v41` is a tag someone wrote — but it names a line,
-/// not a release, and the distinction decides whether padding it is sound.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Precision {
-    /// `41` — the whole 41 line.
-    Major,
-    /// `4.2` — the whole 4.2 line.
-    Minor,
-    /// `4.2.1` — one release.
-    Exact,
-}
-
-/// A locked version parsed for comparison, remembering how precise it was.
-struct Locked {
-    /// The version zero-padded to three components, so `semver` can compare it.
-    version: Version,
-    /// What the original string actually named.
-    precision: Precision,
-}
-
-/// Parse a locked version label into something comparable.
-///
-/// Strips a leading `v`, following the convention
-/// [`crate::domain::action::identity::Version::precision`] already sets, and zero-pads
-/// partial versions so `semver` accepts them. Returns `None` for anything that is not a
-/// version at all — a branch name, a SHA — which the caller reports rather than ignores.
-fn parse_locked(label: &str) -> Option<Locked> {
-    let bare = label
-        .strip_prefix('v')
-        .or_else(|| label.strip_prefix('V'))
-        .unwrap_or(label);
-
-    // Split the pre-release suffix off before counting components, so `3.0.0-beta.2` is
-    // exact rather than unparseable.
-    let (core, suffix) = bare.split_once('-').map_or((bare, ""), |(c, s)| (c, s));
-    let numeric = |part: &&str| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit());
-    let parts: Vec<&str> = core.split('.').collect();
-    if !parts.iter().all(numeric) {
-        return None;
-    }
-
-    let (padded, precision) = match parts.as_slice() {
-        [major] => (format!("{major}.0.0"), Precision::Major),
-        [major, minor] => (format!("{major}.{minor}.0"), Precision::Minor),
-        [major, minor, patch] => (format!("{major}.{minor}.{patch}"), Precision::Exact),
-        _ => return None,
-    };
-    let full = if suffix.is_empty() {
-        padded
-    } else {
-        format!("{padded}-{suffix}")
-    };
-
-    Version::parse(&full)
-        .ok()
-        .map(|version| Locked { version, precision })
-}
-
-/// Whether a partial locked version could sit on either side of one of the range's lower
-/// bounds.
-///
-/// This is the last false-clean route. A `v41` tag points at the 41 line's *head*, not its
-/// floor, so padding it to `41.0.0` is only sound against an upper bound: there it errs
-/// toward reporting, and a false alarm is dismissable. Against a lower bound it errs toward
-/// silence — locked `v2` padded to `2.0.0` reads as outside `>= 2.5.0, < 3.0.0` even though
-/// the 2 line's head may be `2.7.x` and genuinely affected.
-///
-/// So when a lower bound lands inside the locked version's own line, gx cannot tell which
-/// side the tag sits on and says so.
-fn straddles_a_lower_bound(locked: &Locked, range: &VersionReq) -> bool {
-    if locked.precision == Precision::Exact {
-        return false;
-    }
-    range.comparators.iter().any(|bound| {
-        if !matches!(bound.op, Op::Greater | Op::GreaterEq) {
-            return false;
-        }
-        // Same major, and for a `major.minor` pin the same minor too: only then does the
-        // bound fall within the span of releases the tag could resolve to.
-        bound.major == locked.version.major
-            && (locked.precision == Precision::Major || bound.minor == Some(locked.version.minor))
-    })
-}
-
-/// Decide whether an advisory's affected range covers a locked version.
-fn matches(label: &str, range: &str) -> Match {
-    let (Some(locked), Ok(requirement)) = (parse_locked(label), VersionReq::parse(range)) else {
-        return Match::Undetermined;
-    };
-
-    if requirement.matches(&locked.version) {
-        return Match::Affected;
-    }
-    if straddles_a_lower_bound(&locked, &requirement) {
-        return Match::Undetermined;
-    }
-    Match::Unaffected
-}
-
 /// How GitHub's severity reads in a finding.
 const fn severity_label(severity: AdvisorySeverity) -> &'static str {
     match severity {
@@ -145,14 +33,37 @@ const fn severity_label(severity: AdvisorySeverity) -> &'static str {
     }
 }
 
-/// The advisory set, indexed for lookup by repository.
-///
-/// Built once per run rather than scanned per action, and keyed on the lowercased package
-/// name because GitHub slugs are case-insensitive while the published names are mixed case
-/// — comparing them literally would miss a real advisory.
+/// The advisory set, indexed by repository or scoped action identity.
+/// Built once per run with case-insensitive repositories and case-sensitive subpaths.
 pub struct Advisories<'set> {
-    /// Lowercased package name to the advisories published against it.
+    /// Normalized package identity to the advisories published against it.
     by_package: HashMap<String, Vec<&'set Advisory>>,
+}
+
+/// Normalize GitHub package identities without widening a nested action to its repository.
+/// Repository names are case-insensitive; action subpaths are case-sensitive.
+fn package_key(package: &str) -> Option<String> {
+    let slug = if let Some((scheme, rest)) = package.split_once("://") {
+        let (host, path) = rest.split_once('/')?;
+        if !scheme.eq_ignore_ascii_case("https") || !host.eq_ignore_ascii_case("github.com") {
+            return None;
+        }
+        path
+    } else {
+        package
+    };
+    let mut parts = slug.splitn(3, '/');
+    let owner = parts.next()?;
+    let repo = parts.next()?;
+    if owner.is_empty() || repo.is_empty() {
+        return None;
+    }
+    let mut key = format!("{}/{}", owner.to_lowercase(), repo.to_lowercase());
+    if let Some(path) = parts.next().filter(|path| !path.is_empty()) {
+        key.push('/');
+        key.push_str(path);
+    }
+    Some(key)
 }
 
 impl<'set> Advisories<'set> {
@@ -160,10 +71,9 @@ impl<'set> Advisories<'set> {
     pub fn index(advisories: &'set [Advisory]) -> Self {
         let mut by_package: HashMap<String, Vec<&'set Advisory>> = HashMap::new();
         for advisory in advisories {
-            by_package
-                .entry(advisory.package.to_lowercase())
-                .or_default()
-                .push(advisory);
+            if let Some(key) = package_key(&advisory.package) {
+                by_package.entry(key).or_default().push(advisory);
+            }
         }
         Self { by_package }
     }
@@ -176,12 +86,14 @@ impl<'set> Advisories<'set> {
         let Some(repository) = target.repository else {
             return Vec::new();
         };
-        let Some(advisories) = self.by_package.get(&repository.as_str().to_lowercase()) else {
-            return Vec::new();
-        };
-
-        advisories
-            .iter()
+        let repo_key = package_key(repository.as_str());
+        let action_key =
+            package_key(target.id.as_str()).filter(|key| Some(key) != repo_key.as_ref());
+        [repo_key, action_key]
+            .into_iter()
+            .flatten()
+            .filter_map(|key| self.by_package.get(&key))
+            .flatten()
             .filter_map(
                 |advisory| match matches(target.version, &advisory.vulnerable_range) {
                     Match::Affected => Some(vulnerable_finding(target, advisory)),
@@ -292,6 +204,37 @@ mod tests {
     }
 
     // ---- Range matching ----
+
+    #[test]
+    fn prereleases_are_not_silently_excluded_by_dependency_semantics() {
+        assert_eq!(matches("v45.0.7-beta.1", "<=45.0.7"), Match::Undetermined);
+        assert_eq!(
+            matches("v45.0.7-beta.1", ">=45.0.7-beta.0"),
+            Match::Affected
+        );
+    }
+
+    #[test]
+    fn partial_pins_can_overlap_equality_and_implicit_lower_bounds() {
+        for (pin, range) in [
+            ("v2", "=2.5.0"),
+            ("v2", "=2.5"),
+            ("v2.5", "=2.5.3"),
+            ("v2", "2.5.0"),
+            ("v2", "~2.5.0"),
+        ] {
+            assert_eq!(matches(pin, range), Match::Undetermined, "{pin}: {range}");
+        }
+        for (pin, range) in [
+            ("v2", "=3.5.0"),
+            ("v2.4", "=2.5.0"),
+            ("v2.6", "=2.5.0"),
+            ("v2", ">=2.5.0, <2.0.0"),
+        ] {
+            assert_eq!(matches(pin, range), Match::Unaffected, "{pin}: {range}");
+        }
+        assert_eq!(matches("v2", "<2.5.0"), Match::Affected);
+    }
 
     #[test]
     fn boundaries_of_every_live_range_form_are_matched_on_both_sides() {
@@ -511,16 +454,56 @@ mod tests {
     }
 
     #[test]
-    fn a_non_slug_package_name_is_indexed_without_matching_anything() {
-        // One live advisory is published against a URL rather than a slug. It must not
-        // poison the index or match a locked action.
+    fn github_url_packages_preserve_nested_action_scope() {
+        let action = "pytorch/pytorch/.github/actions/filter-test-configs";
         let odd = advisory(
             "https://github.com/pytorch/pytorch/.github/actions/filter-test-configs",
-            "<= 99.0.0",
+            "<2.0.1",
         );
-        let lock = lock_with("pytorch/pytorch", "v1.0.0", RefType::Tag);
-
-        assert!(findings_for(&lock, &[odd]).is_empty());
+        let id = ActionId::from(action);
+        let repository = Repository::from("pytorch/pytorch");
+        let sha = CommitSha::from(SHA);
+        let mut target = AuditTarget {
+            id: &id,
+            version: "v2.0.0",
+            sha: &sha,
+            ref_type: None,
+            repository: Some(&repository),
+        };
+        let advisories = [odd];
+        let index = Advisories::index(&advisories);
+        assert_eq!(index.known_vulnerabilities(&target).len(), 1);
+        let mixed = [advisory(
+            "https://GitHub.com/PyTorch/PyTorch/.github/actions/filter-test-configs",
+            "<2.0.1",
+        )];
+        assert_eq!(
+            Advisories::index(&mixed)
+                .known_vulnerabilities(&target)
+                .len(),
+            1
+        );
+        let wrong_case = [advisory(
+            "https://github.com/pytorch/pytorch/.github/actions/FILTER-test-configs",
+            "<2.0.1",
+        )];
+        assert!(
+            Advisories::index(&wrong_case)
+                .known_vulnerabilities(&target)
+                .is_empty()
+        );
+        let foreign = [advisory(&format!("https://example.com/{action}"), "<2.0.1")];
+        assert!(
+            Advisories::index(&foreign)
+                .known_vulnerabilities(&target)
+                .is_empty()
+        );
+        let other = ActionId::from("pytorch/pytorch/.github/actions/other");
+        target.id = &other;
+        assert!(index.known_vulnerabilities(&target).is_empty());
+        let root = ActionId::from("pytorch/pytorch");
+        target.id = &root;
+        assert!(index.known_vulnerabilities(&target).is_empty());
     }
 
     #[test]

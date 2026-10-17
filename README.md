@@ -67,6 +67,13 @@ a pre-commit hook. Audit judges the world's knowledge about your dependencies, s
 commit can be clean today and vulnerable tomorrow. It reads `.github/gx.lock` and requires
 a token; without one it fails loudly rather than reporting a false "clean".
 
+Audit reports affected versions as `known-vulnerability` errors and ignores withdrawn
+advisories. Repository-wide advisories cover nested actions; advisories naming a specific
+GitHub action URL cover that subpath only. If a branch, prerelease, or partial version
+cannot be placed in an affected range, audit warns instead of silently reporting it safe.
+Errors exit nonzero; warnings alone do not. `gx audit --json` emits one report without
+creating a local log file; a failed advisory lookup emits no report.
+
 ## Already using another tool?
 
 gx works alongside your existing setup.
@@ -94,7 +101,7 @@ For teams that want reproducibility, `gx init` creates a manifest (`.github/gx.t
 
 For `gx tidy`, `gx upgrade`, and `gx init`: no, but without one you're limited to 60 GitHub API requests per hour. For most projects that's enough. Set `GITHUB_TOKEN` for CI or large repos.
 
-For `gx audit`: yes, always. It queries GitHub's GraphQL API, which rejects unauthenticated requests, so without a token it exits non-zero rather than reporting a clean audit it never performed. `gx lint` never needs one — it makes no network requests at all.
+For `gx audit`: yes, always. It queries GitHub's GraphQL API, which rejects unauthenticated requests, so without a token it exits non-zero before loading repository configuration rather than reporting a clean audit it never performed. `gx lint` never needs one — it makes no network requests at all.
 
 </details>
 

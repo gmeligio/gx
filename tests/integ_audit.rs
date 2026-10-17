@@ -12,8 +12,8 @@
 //! because process environment is global and would make these flaky under the parallel
 //! test runner.
 
-use gx::audit::{Error as AuditError, Report, collect_findings, require_token};
-use gx::command::CommandReport;
+use gx::audit::{Audit, Error as AuditError, Report};
+use gx::command::{Command as _, CommandReport};
 use gx::config::{Config, GitHubToken, Level, Lint};
 use gx::domain::lock::Lock;
 use gx::domain::manifest::Manifest;
@@ -103,21 +103,13 @@ impl AdvisoryQuery for CannedAdvisories {
     }
 }
 
-/// Run the command's whole pipeline — token guard, then every check — against canned
-/// advisories. Mirrors `Audit::run`, whose only extra step is constructing the real
-/// advisory adapter.
+/// Run the production command with canned advisories and a lock loaded from disk.
 fn audit_against(
     root: &Path,
     token: Option<&str>,
     advisories: Vec<Advisory>,
 ) -> Result<Report, AuditError> {
-    let config = config_at(root, token);
-    require_token(&config.settings)?;
-    Ok(Report::from_diagnostics(collect_findings(
-        &config,
-        &CannedAdvisories(advisories),
-        &mut |_| {},
-    )?))
+    Audit::new(CannedAdvisories(advisories)).run(root, config_at(root, token), &mut |_| {})
 }
 
 fn audit(root: &Path, token: Option<&str>) -> Result<Report, AuditError> {
@@ -259,6 +251,11 @@ fn run_gx(root: &Path, token: Option<&str>, args: &[&str]) -> (String, String, O
     };
     // Keep the run deterministic: CI mode changes which lines are printed.
     command.env_remove("CI");
+    let child_temp = root.join("child-temp");
+    fs::create_dir_all(&child_temp).unwrap();
+    for variable in ["TMPDIR", "TMP", "TEMP"] {
+        command.env(variable, &child_temp);
+    }
     let output = command.output().expect("gx binary should run");
     (
         String::from_utf8_lossy(&output.stdout).into_owned(),
@@ -367,13 +364,14 @@ fn json_mode_writes_no_local_log_file() {
 
     let (stdout, _stderr, _code) = run_gx(&root, Some("token"), &["audit", "--json"]);
 
-    // The log path is printed as the last output line when a log file is written, so its
-    // absence from an otherwise-complete document is the observable signal.
+    // Check both the document and the filesystem: a suppressed path alone does not
+    // prove that log creation was skipped.
     assert!(
         !stdout.contains(".log"),
         "no log file path may appear in JSON mode, got: {stdout}"
     );
     serde_json::from_str::<serde_json::Value>(&stdout).expect("stdout must remain valid JSON");
+    assert!(!root.join("child-temp/gx/audit").exists());
 }
 
 #[test]
@@ -388,6 +386,13 @@ fn human_mode_still_prints_a_summary() {
 
     assert_eq!(code, Some(0));
     assert!(
+        fs::read_dir(root.join("child-temp/gx/audit"))
+            .unwrap()
+            .next()
+            .is_some(),
+        "human mode must create a local log"
+    );
+    assert!(
         stdout.contains("No audit findings"),
         "human output must print a summary, got: {stdout}"
     );
@@ -395,6 +400,40 @@ fn human_mode_still_prints_a_summary() {
         serde_json::from_str::<serde_json::Value>(&stdout).is_err(),
         "human output is not JSON"
     );
+}
+
+#[test]
+fn missing_token_precedes_malformed_config_and_log_setup() {
+    for filename in ["gx.toml", "gx.lock"] {
+        for args in [vec!["audit"], vec!["audit", "--json"]] {
+            let temp = TempDir::new().unwrap();
+            let root = repo_with_lock(&temp, None);
+            git_init(&root);
+            fs::write(root.join(".github").join(filename), "[invalid").unwrap();
+
+            let (stdout, stderr, code) = run_gx(&root, None, &args);
+
+            assert_eq!(code, Some(1));
+            assert!(stderr.contains("GITHUB_TOKEN"), "{filename}: {stderr}");
+            assert!(stdout.is_empty(), "{stdout}");
+            assert!(!root.join("child-temp/gx/audit").exists());
+        }
+    }
+}
+
+#[test]
+fn token_guard_does_not_intercept_help_or_other_commands() {
+    let temp = TempDir::new().unwrap();
+    let root = repo_with_lock(&temp, None);
+    git_init(&root);
+    fs::write(root.join(".github/gx.toml"), "[invalid").unwrap();
+    let (stdout, stderr, code) = run_gx(&root, None, &["audit", "--help"]);
+    assert_eq!(code, Some(0));
+    assert!(stdout.contains("Usage:"));
+    assert!(stderr.is_empty());
+    let (_, lint_error, lint_code) = run_gx(&root, None, &["lint"]);
+    assert_eq!(lint_code, Some(1));
+    assert!(!lint_error.contains("GITHUB_TOKEN"), "{lint_error}");
 }
 
 #[test]

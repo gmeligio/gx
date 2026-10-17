@@ -273,9 +273,10 @@ fn run_audit(
         printer.spinner("Auditing...")
     };
     let mut lf = if json { None } else { log_file };
+    let audit = audit::Audit::from_settings(&config.settings)?;
     let report = {
         let mut cb = make_cb(spinner.as_ref(), &mut lf, printer.is_ci && !json);
-        audit::Audit.run(repo_root, config, &mut cb)?
+        audit.run(repo_root, config, &mut cb)?
     };
     finish_spinner(spinner);
 
@@ -317,6 +318,9 @@ fn main() {
 /// The real entry point. See [`main`] for why the error is returned rather than propagated.
 fn run() -> Result<(), GxError> {
     let cli = Cli::parse();
+    if matches!(cli.command, Commands::Audit { .. }) {
+        audit::require_token(&Settings::from_env())?;
+    }
 
     let printer = Printer::new();
     let is_ci = printer.is_ci;
@@ -351,13 +355,6 @@ fn run() -> Result<(), GxError> {
     let repo_root = match repo::find_root(&cwd) {
         Ok(root) => root,
         Err(RepoError::GithubFolder) => {
-            // A missing `.github` means there is nothing to audit, but it must not become a
-            // way to skip the token check: without the guard here, `gx audit --json` outside
-            // a gx repo prints an empty findings document and exits 0, which a CI consumer
-            // reads as "audited, clean" on a run that never audited anything.
-            if matches!(cli.command, Commands::Audit { .. }) {
-                audit::require_token(&Settings::from_env())?;
-            }
             if json_mode {
                 // Emit a valid, empty JSON document so a consumer's parser never breaks.
                 // Each command has its own document shape, so the right one must be

@@ -67,20 +67,24 @@ with `Advisory` gaining a `package: String` field (from `package { name }`, whic
 
 `totalCount` is selected and compared against the returned node count. If they disagree, the lookup is an **error**, not a truncated success. This is the one place a silent false-clean could re-enter through the back door, so it is closed explicitly rather than left to a future pagination change.
 
+The query also selects `advisory.withdrawnAt`. GitHub retains withdrawn entries in this feed; they are excluded before matching, but only after checking the raw node count against `totalCount`. Filtering first would incorrectly reject a complete page containing withdrawn advisories.
+
 ### 2. Match ranges locally with `semver`, on a normalized version — but never let a parse failure mean "clean"
 
-`semver` (already a direct dependency, `semver = "1"`) parses `VersionReq` and `Version`. Two adaptations are needed for the real data:
+`semver` (already a direct dependency, `semver = "1"`) parses `VersionReq` and `Version`. Matching must account for both tag precision and dependency-range semantics:
 
 - **`v` prefix.** gx records `v45.0.7`; advisories write `45.0.7`. Strip a leading `v`/`V` from the locked version before parsing. `Version::precision()` in `src/domain/action/identity.rs` already establishes this convention in gx, so the check follows it rather than inventing a second one.
 - **Partial versions.** `semver::Version::parse("40")` fails — but a locked version of `v41` is real, and `< 41` as a `VersionReq` is fine (semver treats a `VersionReq` comparator's missing components as wildcards, which is the correct reading here: `< 41` excludes all of `41.x`). So the *range* needs no padding, but the *locked version* does: `41` → `41.0.0`, `4.2` → `4.2.0`.
 
-**Padding is only sound against an upper bound, and that asymmetry is the last remaining false-clean route.** A `v41` tag points at the 41 line's *head*, not its floor. Against an upper bound this errs toward reporting, which is the safe direction: padded `41.0.0` against `< 41.0.5` matches, and if the real head is `41.9.0` the finding is a false alarm the user can dismiss. Against a **lower** bound it errs toward silence, which is not safe: locked `v2` padded to `2.0.0` against `>= 2.5.0, < 3.0.0` reports clean, even though the 2 line's head may be `2.7.x` and genuinely affected.
+**Padding can over-report against an upper bound and under-report against a lower bound.** A `v41` tag points at the 41 line's *head*, not its floor. Padded `41.0.0` matches `< 41.0.5`, even if the actual version is `41.9.0`. Conversely, padded `v2` reads as outside `>= 2.5.0, < 3.0.0`, even though the actual version may be `2.7.x`.
 
-Since this change's whole premise is that a false clean is the worst outcome, that path is closed rather than accepted: **a partial locked version whose padded value falls below a lower bound that lies inside its own version line is `undetermined`, not unaffected.** Concretely, when the locked version is partial and the range carries a lower bound whose major (and minor, for a minor-precision pin) equals the locked version's, gx cannot tell which side of the bound the tag actually sits on, so it says so. A fully-specified locked version is unaffected by this rule and matches exactly.
+A partial pin that could overlap an affected range must not become unaffected merely because its zero-padded value does not match. This includes equality ranges: `v2` against `= 2.5.0` is undetermined, while `v3` and `v2.4` are disjoint. Existing upper-bound conservatism is retained: if the padded version matches, the advisory is reported.
 
 Whether `semver`'s `VersionReq` handles each real comparator form is verified by unit tests over the exact strings harvested from the live API, not assumed. Any form it cannot parse surfaces as an undetermined finding (decision 3), so a parser gap is loud rather than silent.
 
-**Alternative rejected:** hand-rolling a comparator parser. The forms are simple enough to tempt it, but `semver` is already a dependency, already handles pre-release ordering correctly, and a hand-rolled comparator is exactly the sort of code whose bugs are false negatives.
+`VersionReq::matches` excludes prereleases unless a comparator explicitly opts into the corresponding prerelease version. A failed match due to that dependency-selection rule is not evidence of safety. When prerelease applicability cannot be established, report undetermined rather than unaffected.
+
+**Alternative rejected:** a new comparator parser. Reuse `semver` for syntax and supported matches, retaining an explicit uncertainty outcome instead of reproducing a package manager's entire range language.
 
 ### 3. Undetermined is a third outcome, not a synonym for clean
 
@@ -92,21 +96,31 @@ This is deliberately narrow: it only fires for an action that **has** advisories
 
 Severity of the undetermined finding is `warn`, not `error`: the action may well be fine, and a branch pin already draws an error-adjacent `mutable-ref` warning. Making it `error` would fail builds on an unknown, which is the "false alarm during an incident destroys trust" failure. Making it silent would be the "false clean" failure. `warn` is the honest middle.
 
-### 4. Match packages case-insensitively on the repository, not the action id
+### 4. Match repository advisories and action-scoped packages
 
 Live package names are mixed-case (`Azure/setup-kubectl`), and GitHub slugs are case-insensitive. Comparing case-sensitively would miss a real advisory — a false negative.
 
-The lookup key is the target's **repository**, not its action id: for a nested-path action such as `github/codeql-action/upload-sarif`, the id carries the subpath while the advisory is published against the repository. `AuditTarget` currently has four fields — `id`, `version`, `sha`, `ref_type` — and no `repository`; this change **adds** it, sourced from `entry.commit.repository` by one new line in `targets()`. That is the extension point `audit-command-shell` designed for (`AuditTarget` exists so checks never destructure a lock row themselves), so the check gains a field rather than a competing row type.
+Repository-wide advisories look up the target's **repository**, not its full action id. For example, an advisory for `github/codeql-action` also covers `github/codeql-action/upload-sarif`. `AuditTarget.repository` is sourced from the locked commit.
 
-Advisories are indexed once into a `HashMap<String, Vec<&Advisory>>` keyed on the lowercased package name, so the check is one hash lookup per locked action rather than a scan of 63 per action.
+Some packages explicitly name an action URL, including `https://github.com/pytorch/pytorch/.github/actions/filter-test-configs`. Normalize recognized HTTPS GitHub URLs to repository and optional subpath, preserving case-sensitive subpaths. An action-scoped advisory matches only that action; it must neither disappear nor spread to every action in the repository. Foreign hosts are not GitHub package identities.
 
-### 5. One new file, taking one of four remaining slots
+Advisories are indexed once, with repository and action scopes kept distinct. The same advisory must not be emitted twice when the target is a repository-root action.
 
-`src/audit/` is at 4 of 8 files. This change adds exactly one, `advisory_check.rs`, holding the check and its range matching. The two sibling checks in flight each need one, leaving one spare.
+### 5. Separate matching from finding construction
+
+`advisory_check.rs` owns package lookup and findings; `advisory_range.rs` owns version-range matching. The split keeps each file within existing budgets as regression coverage grows. These additions take `src/audit/` from 4 files to 6, against a budget of 8; no budget is raised.
 
 Adding the check name stays a **one-line edit** inside the `rule_ids!` invocation in `check_name.rs` — the macro generates the enum, `as_str`, `ALL`, `Display`, `FromStr`, `Serialize`, and `Deserialize`. No hand-written impls. This is what lets the three checks be developed concurrently without conflicting.
 
 `collect_findings` gains an `&dyn AdvisoryQuery` parameter and one line per check, matching the shape `audit-command-shell` set up.
+
+### 6. Test production command composition
+
+The audit command accepts its advisory source rather than constructing it inside the only executable pipeline. Production constructs the real adapter; tests supply canned data and call the same `Command::run`. Do not hand-assemble the token/check/report sequence in test helpers.
+
+The CLI checks audit credentials immediately after argument parsing, before repository discovery, configuration loading, or log setup. The command also checks credentials when invoked directly. This keeps malformed files from hiding the missing-token error while preserving `--help` and non-audit behavior.
+
+Subprocess tests use a fixture-owned temporary directory to check log-file side effects. A JSON run must create no audit log; a human-mode run must create one, proving that the assertion examines the actual log location.
 
 ## Automated Test Strategy
 
@@ -133,6 +147,9 @@ The `v` prefix is asserted in **both directions** — prefixed locked version ag
 - A branch-pinned action with advisories yields an undetermined `warn` finding, not silence.
 - A branch-pinned action with **no** advisories yields nothing — the narrowing in decision 3.
 - Locked `v2` against `>= 2.5.0, < 3.0.0` yields undetermined, **not** unaffected — the lower-bound padding hole from decision 2.
+- Prerelease exclusions and partial pins overlapping equality ranges never silently report unaffected; disjoint partial pins remain unaffected.
+- GitHub URL packages match the named subpath, not unrelated subpaths or foreign-host URLs.
+- Withdrawn advisories produce no findings while active advisories still do; raw response completeness is checked before filtering.
 - An advisory with `first_patched: None` still produces a finding.
 - `FakeAdvisories::failing()` makes `Audit::run` return `Err`, and the call count proves exactly one query for a multi-action lock and **zero** for an empty lock.
 
@@ -148,17 +165,19 @@ The `v` prefix is asserted in **both directions** — prefixed locked version ag
 
 | path | surfaces as | silent? |
 |---|---|---|
-| No token | `Error::MissingToken`, before any check runs | no — `Err`, no report printed |
+| No token | `Error::MissingToken`, before repository configuration is loaded | no — `Err`, no report printed |
 | Network failure / rejected credentials | `Error::Advisories`, aborts the run | no — `Err`, no report in either mode |
 | GraphQL 200 with `errors` array | same, carrying the server message | no — already handled in the adapter |
 | `totalCount` exceeds returned nodes | `Error::Advisories`, aborts | no — explicit check, decision 1 |
 | Locked version unparseable | `warn` finding, undetermined | no — decision 3 |
 | Advisory range unparseable | `warn` finding, undetermined | no — decision 3 |
-| Partial version below a lower bound in its own line | `warn` finding, undetermined | no — decision 2 |
+| Partial version ambiguously overlapping a range | `warn` finding, undetermined | no — decision 2 |
+| Prerelease applicability not established | `warn` finding, undetermined | no — decision 2 |
+| Advisory withdrawn | no finding | yes — retracted claims are excluded |
 | Action has no advisories | no finding | yes, and correctly so — a successful lookup that found nothing |
 | Lock is empty | no finding, no query | yes, and correctly so — nothing to check |
 
-The last two rows are the only silent outcomes, and both are cases where silence is a true statement.
+An advisory proven not to cover the locked version also produces no finding.
 
 **The distinction the design turns on:** a failed lookup is an `Err`, structurally a different type from a `Report` with zero findings. It cannot be rendered, serialized, or exit-coded as clean, because it never becomes a report at all. Under `--json` a failed run emits no document rather than an empty one — a consumer parsing `findings: []` is therefore always reading a real result.
 
@@ -168,9 +187,9 @@ The last two rows are the only silent outcomes, and both are cases where silence
 
 - **The advisory set outgrows one page (100 items).** At 63 today. → `totalCount` is compared against node count and a mismatch is a hard error, so the failure is a loud abort rather than a silently partial audit. Pagination becomes a small, obvious follow-up when it trips.
 - **`semver` cannot parse a comparator form GitHub starts publishing.** → Falls into undetermined (`warn`) rather than "not affected". Unit tests cover every form present in the live data today.
-- **Zero-padding a partial locked version (`v41` → `41.0.0`) is an approximation.** A `v41` tag actually points at the 41 line's head, which may be past a `< 41.0.5` boundary. → Against an upper bound, padding to the floor errs toward *reporting*, and a false alarm the user can dismiss beats a false clean. Against a lower bound it would err toward *silence*, so that case is routed to `undetermined` instead (decision 2). Neither direction can produce a silent clean.
+- **Zero-padding a partial locked version (`v41` → `41.0.0`) is an approximation.** Against an upper bound, padding can over-report. Against a lower bound or equality range, ambiguous overlap is undetermined instead of unaffected (decision 2).
 - **False alarms during an incident destroy trust.** → Every finding carries the GHSA permalink and the exact affected range, so a user can verify the claim against the advisory in one click rather than taking gx's word for it.
-- **A nested-path action's advisory is published against the repository.** → Matching on `repository` rather than the action id handles this; the trade-off is that a vulnerability affecting only one subpath of a repository over-reports to all of them. Advisories are not published at subpath granularity, so this is the only available reading.
+- **A repository-wide advisory may concern only part of that repository.** Match its published scope; when the package explicitly names a subpath, preserve that narrower scope.
 
 ## Migration Plan
 
