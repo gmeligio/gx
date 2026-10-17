@@ -55,3 +55,13 @@
 - [x] 8.2 Grep `src/` to prove no code path passes a version to an OSV query and that no OSV endpoint is referenced in code. (Prose references to OSV in the planning artifacts are expected and do not count.)
 - [x] 8.3 Confirm `src/audit/` holds 5 `.rs` files and that no numeric budget in `tests/code_health.rs` was raised.
 - [x] 8.4 Run `mise run test` and `mise run integ`; both must pass.
+
+## 9. Address PR review
+
+- [ ] 9.1 Prevent false-clean results for prereleases and partial pins overlapping equality ranges; demonstrate failing regression tests before fixing matching.
+- [ ] 9.2 Match GitHub URL-shaped advisory packages without losing their action subpaths; replace the test that expects silence with affected and unrelated-action cases.
+- [x] 9.3 Filter withdrawn advisories after checking raw response completeness; cover active, withdrawn, and truncated responses.
+- [ ] 9.4 Exercise the production audit command with injected advisory sources, including nonempty locks and failed lookups, instead of reconstructing its pipeline in tests.
+- [ ] 9.5 Require the audit token before loading repository configuration; cover malformed manifest and lock files without a token.
+- [ ] 9.6 Verify JSON mode creates no log files using a child-process-owned temporary directory and a positive human-mode control.
+- [ ] 9.7 Update README, demo, and change artifacts; run unit, integration, formatting, lint, and code-health checks without raising budgets.

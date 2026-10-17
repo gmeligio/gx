@@ -42,7 +42,7 @@ query {
       vulnerableVersionRange
       firstPatchedVersion { identifier }
       package { name }
-      advisory { ghsaId summary severity permalink }
+      advisory { ghsaId summary severity permalink withdrawnAt }
     }
   }
 }";
@@ -83,7 +83,7 @@ pub struct Advisory {
 ///
 /// Implemented by [`GraphQlAdvisories`] (real) and `FakeAdvisories` (tests).
 pub trait AdvisoryQuery {
-    /// Every advisory published against the `ACTIONS` ecosystem.
+    /// Every non-withdrawn advisory published against the `ACTIONS` ecosystem.
     ///
     /// An empty vec means "no known advisories" — a positive statement that the lookup
     /// happened and found nothing. Any failure to establish that is an `Err`, never an
@@ -180,6 +180,9 @@ struct AdvisoryNode {
     severity: Severity,
     /// Link to the advisory.
     permalink: String,
+    /// Withdrawal timestamp, when GitHub has withdrawn the advisory.
+    #[serde(rename = "withdrawnAt")]
+    withdrawn_at: Option<String>,
 }
 
 /// Real adapter: queries GitHub's GraphQL API over the shared blocking HTTP client.
@@ -231,6 +234,7 @@ impl GraphQlAdvisories {
         Ok(connection
             .nodes
             .into_iter()
+            .filter(|node| node.advisory.withdrawn_at.is_none())
             .map(|node| Advisory {
                 package: node.package.name,
                 ghsa_id: node.advisory.ghsa_id,
@@ -360,6 +364,56 @@ mod tests {
         assert!(query.contains("totalCount"));
         // The package name is what a finding is matched against.
         assert!(query.contains("package { name }"));
+        // Withdrawn advisories must not become findings.
+        assert!(query.contains("withdrawnAt"));
+    }
+
+    #[test]
+    fn withdrawn_advisories_are_filtered_after_completeness_validation() {
+        let node = |id, withdrawn_at| {
+            serde_json::json!({
+                "vulnerableVersionRange": "< 0.1.22",
+                "firstPatchedVersion": null,
+                "package": { "name": "google-github-actions/run-gemini-cli" },
+                "advisory": {
+                    "ghsaId": id,
+                    "summary": "test advisory",
+                    "severity": "HIGH",
+                    "permalink": "https://example.invalid",
+                    "withdrawnAt": withdrawn_at
+                }
+            })
+        };
+        let withdrawn = node("GHSA-jj69-4grx-fqj5", Some("2026-01-01T00:00:00Z"));
+        let active = node("GHSA-active", None);
+        for (nodes, total, expected) in [
+            (
+                vec![withdrawn.clone(), active.clone()],
+                2,
+                Some(vec!["GHSA-active"]),
+            ),
+            (vec![withdrawn.clone()], 1, Some(vec![])),
+            (vec![withdrawn], 2, None),
+            (vec![active], 2, None),
+        ] {
+            let decoded = serde_json::from_value(serde_json::json!({
+                "data": { "securityVulnerabilities": { "totalCount": total, "nodes": nodes } }
+            }))
+            .unwrap();
+            let result = GraphQlAdvisories::interpret(decoded);
+            if let Some(ids) = expected {
+                let advisories = result.unwrap();
+                assert_eq!(
+                    advisories
+                        .iter()
+                        .map(|advisory| advisory.ghsa_id.as_str())
+                        .collect::<Vec<_>>(),
+                    ids
+                );
+            } else {
+                assert!(result.unwrap_err().to_string().contains("returned 1 of 2"));
+            }
+        }
     }
 
     #[test]
@@ -444,37 +498,6 @@ mod tests {
         let raw = r"{}";
         let decoded: Response = serde_json::from_str(raw).unwrap();
         GraphQlAdvisories::interpret(decoded).unwrap_err();
-    }
-
-    #[test]
-    fn a_truncated_page_is_not_a_clean_result() {
-        // The set outgrowing one page would otherwise make the advisories that did not
-        // fit look like advisories that do not exist — the same false-clean, arriving
-        // through pagination rather than a rejected query.
-        let raw = r#"{
-          "data": {
-            "securityVulnerabilities": {
-              "totalCount": 120,
-              "nodes": [{
-                "vulnerableVersionRange": "< 1.0.0",
-                "firstPatchedVersion": null,
-                "package": { "name": "some/action" },
-                "advisory": {
-                  "ghsaId": "GHSA-xxxx-yyyy-zzzz",
-                  "summary": "one of many",
-                  "severity": "LOW",
-                  "permalink": "https://example.invalid"
-                }
-              }]
-            }
-          }
-        }"#;
-        let decoded: Response = serde_json::from_str(raw).unwrap();
-        let err = GraphQlAdvisories::interpret(decoded).unwrap_err();
-        assert!(
-            format!("{err}").contains("120"),
-            "the error must say how much was withheld: {err}"
-        );
     }
 
     #[test]
