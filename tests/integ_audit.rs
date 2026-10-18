@@ -17,7 +17,7 @@ use gx::command::{Command as _, CommandReport};
 use gx::config::{Config, GitHubToken, Level, Lint};
 use gx::domain::lock::Lock;
 use gx::domain::manifest::Manifest;
-use gx::infra::github::{Advisory, AdvisoryQuery, Error as GitHubError};
+use gx::infra::github::{Advisory, AdvisoryQuery, Error as GitHubError, RepoMeta, RepoMetadata};
 use gx::infra::lock::Store as LockStore;
 use std::fs;
 use std::path::Path;
@@ -109,11 +109,31 @@ fn audit_against(
     token: Option<&str>,
     advisories: Vec<Advisory>,
 ) -> Result<Report, AuditError> {
-    Audit::new(CannedAdvisories(advisories)).run(root, config_at(root, token), &mut |_| {})
+    Audit::new(CannedAdvisories(advisories), ActiveRepos).run(
+        root,
+        config_at(root, token),
+        &mut |_| {},
+    )
 }
 
 fn audit(root: &Path, token: Option<&str>) -> Result<Report, AuditError> {
     audit_against(root, token, Vec::new())
+}
+
+/// Reports every repository as active, without a request.
+///
+/// These tests assert what audit does with a lock on disk, not what GitHub says about the
+/// repositories in it — and a suite that reached the real API would be slow, rate-limited,
+/// and red whenever a repository's state changed under it.
+struct ActiveRepos;
+
+impl RepoMetadata for ActiveRepos {
+    fn metadata(&self, _repo: &str) -> Result<RepoMeta, GitHubError> {
+        Ok(RepoMeta {
+            archived: false,
+            pushed_at: "2026-08-01T00:00:00Z".to_owned(),
+        })
+    }
 }
 
 #[test]
@@ -243,8 +263,60 @@ fn json_output_on_a_clean_repo_is_still_one_document() {
 /// reaches stdout, which only a spawned process shows. `CARGO_BIN_EXE_gx` is set by cargo
 /// for integration tests, so this needs no new dependency.
 fn run_gx(root: &Path, token: Option<&str>, args: &[&str]) -> (String, String, Option<i32>) {
+    // Deny and count requests, including HTTPS CONNECT, rather than trusting a placeholder
+    // token to make a networked audit harmless. Each child owns its proxy environment.
+    use std::io::Write as _;
+    use std::net::TcpListener;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let proxy = format!("http://{}", listener.local_addr().unwrap());
+    let stopped = Arc::new(AtomicBool::new(false));
+    let stop = Arc::clone(&stopped);
+    let probe = std::thread::spawn(move || {
+        let mut requests = 0_u64;
+        loop {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    requests = requests.saturating_add(1);
+                    stream
+                        .write_all(
+                            b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                        )
+                        .unwrap_or_default();
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if stop.load(Ordering::SeqCst) {
+                        return Ok(requests);
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    });
     let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_gx"));
     command.current_dir(root).args(args);
+    let tmp = root.join("tmp");
+    fs::create_dir_all(&tmp).unwrap();
+    for key in ["TMPDIR", "TMP", "TEMP"] {
+        command.env(key, &tmp);
+    }
+    for key in [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+    ] {
+        command.env(key, &proxy);
+    }
+    command.env("NO_PROXY", "").env("no_proxy", "");
     match token {
         Some(value) => command.env("GITHUB_TOKEN", value),
         None => command.env_remove("GITHUB_TOKEN"),
@@ -257,6 +329,12 @@ fn run_gx(root: &Path, token: Option<&str>, args: &[&str]) -> (String, String, O
         command.env(variable, &child_temp);
     }
     let output = command.output().expect("gx binary should run");
+    stopped.store(true, Ordering::SeqCst);
+    assert_eq!(
+        probe.join().unwrap().unwrap(),
+        0,
+        "subprocess audit must stay offline"
+    );
     (
         String::from_utf8_lossy(&output.stdout).into_owned(),
         String::from_utf8_lossy(&output.stderr).into_owned(),
@@ -344,13 +422,15 @@ fn json_mode_writes_one_document_and_no_progress_output() {
     let root = repo_with_lock(&temp, Some(""));
     git_init(&root);
 
-    let (stdout, _stderr, code) = run_gx(&root, Some("token"), &["audit", "--json"]);
+    let (stdout, stderr, code) = run_gx(&root, Some("token"), &["audit", "--json"]);
+    assert_eq!(code, Some(0), "clean audit must succeed: {stderr}");
 
-    assert_eq!(code, Some(0), "a clean run exits zero");
-    // Parses whole, so nothing was interleaved with it.
+    // Parses the entire stream, rejecting interleaved progress or a second document.
     let value: serde_json::Value =
         serde_json::from_str(&stdout).expect("stdout must be exactly one JSON document");
     assert_eq!(value["findings"], serde_json::json!([]));
+    assert_eq!(value["warning_count"], 0);
+    assert_eq!(value["error_count"], 0);
     // The human-facing lines that would corrupt the document.
     assert!(!stdout.contains("📋"), "log path must be suppressed");
     assert!(!stdout.contains('✓'), "summary must be suppressed");
@@ -362,7 +442,8 @@ fn json_mode_writes_no_local_log_file() {
     let root = repo_with_lock(&temp, Some(""));
     git_init(&root);
 
-    let (stdout, _stderr, _code) = run_gx(&root, Some("token"), &["audit", "--json"]);
+    let (stdout, stderr, code) = run_gx(&root, Some("token"), &["audit", "--json"]);
+    assert_eq!(code, Some(0), "clean audit must succeed: {stderr}");
 
     // Check both the document and the filesystem: a suppressed path alone does not
     // prove that log creation was skipped.
@@ -382,9 +463,9 @@ fn human_mode_still_prints_a_summary() {
     let root = repo_with_lock(&temp, Some(""));
     git_init(&root);
 
-    let (stdout, _stderr, code) = run_gx(&root, Some("token"), &["audit"]);
+    let (stdout, stderr, code) = run_gx(&root, Some("token"), &["audit"]);
+    assert_eq!(code, Some(0), "clean audit must succeed: {stderr}");
 
-    assert_eq!(code, Some(0));
     assert!(
         fs::read_dir(root.join("child-temp/gx/audit"))
             .unwrap()

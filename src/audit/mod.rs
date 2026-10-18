@@ -1,7 +1,7 @@
 #![expect(clippy::pub_use, reason = "reexport from extracted submodule")]
 
 //! `gx audit` — checks `gx.lock` against knowledge that changes without the repository
-//! changing, including published security advisories.
+//! changing, including published security advisories and archived repositories.
 //!
 //! That is the line against `gx lint`, which is offline and whose verdict changes only when
 //! you edit a file. Audit requires a token for GitHub's advisory API.
@@ -10,6 +10,8 @@
 mod advisory_check;
 /// Conservative local matching of advisory ranges.
 mod advisory_range;
+/// The `archived-action` check.
+mod archived;
 /// The audit check identity, built from `rule_ids!`.
 mod check_name;
 /// Findings, report rendering, and the `--json` contract.
@@ -23,15 +25,18 @@ pub use report::{Finding, Report};
 use crate::command::Command;
 use crate::config::{Config, Settings};
 use crate::domain::resolution::Forge;
-use crate::infra::github::{AdvisoryQuery, Error as GitHubError, GraphQlAdvisories, Registry};
+use crate::infra::github::{
+    AdvisoryQuery, Error as GitHubError, GraphQlAdvisories, Registry, RepoMetadata,
+    RestRepoMetadata,
+};
 use std::path::Path;
 use thiserror::Error;
 
 /// Errors that can occur during the audit command.
 #[derive(Debug, Error)]
 pub enum Error {
-    /// No GitHub token was available. The GraphQL endpoint rejects unauthenticated
-    /// requests, so there is no degraded mode — only a false "clean".
+    /// No GitHub token was available. Audit requires authenticated upstream lookups
+    /// rather than falling back to an incomplete offline report.
     #[error(
         "gx audit requires a {forge} token, but {var} is not set.\n\
          Set it and run again, e.g. `{var}=$(gh auth token) gx audit`.\n\
@@ -55,6 +60,17 @@ pub enum Error {
         #[source]
         source: GitHubError,
     },
+
+    /// The HTTP client could not be built, so no check could issue a request. A
+    /// precondition like the missing token, not a per-action failure.
+    #[error("could not reach {forge}")]
+    Registry {
+        /// The forge whose client could not be built.
+        forge: Forge,
+        /// What went wrong building it.
+        #[source]
+        source: crate::infra::github::Error,
+    },
 }
 
 /// Every offline check audit runs. Adding one is a line here.
@@ -62,8 +78,8 @@ const CHECKS: &[fn(&target::AuditTarget<'_>) -> Option<Finding>] = &[target::mut
 
 /// Run every check over the locked action set.
 ///
-/// Takes the advisory source as a seam so tests drive the whole command with canned data
-/// and no network.
+/// Takes both upstream sources as seams so tests drive the whole command with canned
+/// data and no network.
 ///
 /// # Errors
 ///
@@ -72,6 +88,7 @@ const CHECKS: &[fn(&target::AuditTarget<'_>) -> Option<Finding>] = &[target::mut
 fn collect_findings(
     config: &Config,
     advisories: &dyn AdvisoryQuery,
+    repos: &dyn RepoMetadata,
     on_progress: &mut dyn FnMut(&str),
 ) -> Result<Vec<Finding>, Error> {
     on_progress("Auditing locked actions...");
@@ -96,6 +113,9 @@ fn collect_findings(
                 .iter()
                 .filter_map(move |check| check(target))
                 .chain(index.known_vulnerabilities(target))
+                // A per-action metadata failure is a finding, not a short circuit:
+                // retain this action's advisories and every other action's findings.
+                .chain(archived::archived_action(target, repos))
         })
         .collect())
 }
@@ -119,19 +139,21 @@ pub fn require_token(settings: &Settings) -> Result<(), Error> {
 }
 
 /// The audit command.
-pub struct Audit<A> {
+pub struct Audit<A, R> {
     /// Advisory source shared by every check in a run.
     advisories: A,
+    /// Repository metadata source shared by every check in a run.
+    repos: R,
 }
 
-impl<A> Audit<A> {
-    /// Construct a command with an advisory source.
-    pub const fn new(advisories: A) -> Self {
-        Self { advisories }
+impl<A, R> Audit<A, R> {
+    /// Construct a command with advisory and repository metadata sources.
+    pub const fn new(advisories: A, repos: R) -> Self {
+        Self { advisories, repos }
     }
 }
 
-impl Audit<GraphQlAdvisories> {
+impl Audit<GraphQlAdvisories, RestRepoMetadata> {
     /// Compose the production advisory adapter from configured credentials.
     ///
     /// # Errors
@@ -139,13 +161,19 @@ impl Audit<GraphQlAdvisories> {
     /// Returns an error when credentials are absent or the HTTP client cannot be built.
     pub fn from_settings(settings: &Settings) -> Result<Self, Error> {
         require_token(settings)?;
-        let registry = Registry::new(settings.github_token.clone())
-            .map_err(|source| Error::Advisories { source })?;
-        Ok(Self::new(GraphQlAdvisories::new(registry)))
+        let registry =
+            Registry::new(settings.github_token.clone()).map_err(|source| Error::Registry {
+                forge: Forge::GitHub,
+                source,
+            })?;
+        Ok(Self::new(
+            GraphQlAdvisories::new(registry.clone()),
+            RestRepoMetadata::new(registry),
+        ))
     }
 }
 
-impl<A: AdvisoryQuery> Command for Audit<A> {
+impl<A: AdvisoryQuery, R: RepoMetadata> Command for Audit<A, R> {
     type Report = Report;
     type Error = Error;
 
@@ -159,6 +187,7 @@ impl<A: AdvisoryQuery> Command for Audit<A> {
         Ok(Report::from_diagnostics(collect_findings(
             &config,
             &self.advisories,
+            &self.repos,
             on_progress,
         )?))
     }
@@ -167,12 +196,12 @@ impl<A: AdvisoryQuery> Command for Audit<A> {
 #[cfg(test)]
 #[expect(
     clippy::unwrap_used,
-    reason = "tests use unwrap, indexing, and other patterns freely"
+    reason = "tests require successful canned command runs"
 )]
 mod tests {
-    use super::{Audit, Error, Forge};
-    use crate::command::Command as _;
-    use crate::config::{Config, GitHubToken, Settings};
+    use super::{Audit, CheckName, Error, Forge, Report};
+    use crate::command::{Command as _, CommandReport as _};
+    use crate::config::{Config, GitHubToken, Level, Settings};
     use crate::domain::action::identity::{ActionId, CommitDate, CommitSha, Repository, Version};
     use crate::domain::action::resolved::{Commit, ResolvedRef};
     use crate::domain::action::spec::Spec;
@@ -180,7 +209,8 @@ mod tests {
     use crate::domain::action::uses_ref::RefType;
     use crate::domain::lock::Lock;
     use crate::domain::manifest::Manifest;
-    use crate::infra::github::{Advisory, AdvisorySeverity, FakeAdvisories};
+    use crate::infra::github::{Advisory, AdvisorySeverity, CannedRepos, FakeAdvisories};
+    use crate::output::lines::Line;
     use std::path::PathBuf;
 
     fn config_with(lock: Lock, token: Option<&str>) -> Config {
@@ -213,10 +243,26 @@ mod tests {
         lock
     }
 
+    fn two_entry_lock() -> Lock {
+        let mut lock = branch_lock();
+        let spec = Spec::new(ActionId::from("actions/setup-node"), Specifier::parse("^4"));
+        lock.set(
+            &spec,
+            ResolvedRef::from_stored(Version::from("v4.0.0"), Some(&RefType::Tag)),
+            Commit {
+                sha: CommitSha::from("abc123def456789012345678901234567890abcd"),
+                repository: Repository::from("actions/setup-node"),
+                ref_type: Some(RefType::Tag),
+                date: CommitDate::from("2026-01-01T00:00:00Z"),
+            },
+        );
+        lock
+    }
+
     #[test]
     fn missing_token_is_an_error_not_a_clean_report() {
         let config = config_with(Lock::default(), None);
-        let result = Audit::new(FakeAdvisories::new(Vec::new())).run(
+        let result = Audit::new(FakeAdvisories::new(Vec::new()), CannedRepos::active()).run(
             std::path::Path::new("."),
             config,
             &mut |_| {},
@@ -247,20 +293,25 @@ mod tests {
         // A lock that would produce a finding still yields MissingToken, proving the
         // guard runs first rather than after a partial audit.
         let config = config_with(branch_lock(), None);
-        let audit = Audit::new(FakeAdvisories::failing());
+        let audit = Audit::new(FakeAdvisories::failing(), CannedRepos::failing());
         let result = audit.run(std::path::Path::new("."), config, &mut |_| {});
         assert!(matches!(result, Err(Error::MissingToken { .. })));
         // The guard ran before the lookup, so no query was even attempted.
         assert_eq!(audit.advisories.calls(), 0);
+        assert!(audit.repos.seen.borrow().is_empty());
+    }
+
+    /// Drive the real command with both upstream sources injected.
+    fn report_for(lock: Lock, repos: CannedRepos) -> Report {
+        let config = config_with(lock, Some("token"));
+        Audit::new(FakeAdvisories::new(Vec::new()), repos)
+            .run(std::path::Path::new("."), config, &mut |_| {})
+            .unwrap()
     }
 
     #[test]
     fn branch_entry_produces_a_finding() {
-        let config = config_with(branch_lock(), Some("token"));
-        let report = Audit::new(FakeAdvisories::new(Vec::new()))
-            .run(std::path::Path::new("."), config, &mut |_| {})
-            .unwrap();
-
+        let report = report_for(branch_lock(), CannedRepos::active());
         assert_eq!(report.diagnostics.len(), 1);
         assert_eq!(report.warning_count, 1);
         assert_eq!(report.error_count, 0);
@@ -280,15 +331,18 @@ mod tests {
                     date: CommitDate::from("2026-01-01T00:00:00Z"),
                 },
             );
-            let audit = Audit::new(FakeAdvisories::new(vec![Advisory {
-                package: "actions/checkout".to_owned(),
-                ghsa_id: "GHSA-test".to_owned(),
-                summary: "test vulnerability".to_owned(),
-                severity: AdvisorySeverity::High,
-                permalink: "https://github.com/advisories/GHSA-test".to_owned(),
-                vulnerable_range: "< 5.0.0".to_owned(),
-                first_patched: Some("5.0.0".to_owned()),
-            }]));
+            let audit = Audit::new(
+                FakeAdvisories::new(vec![Advisory {
+                    package: "actions/checkout".to_owned(),
+                    ghsa_id: "GHSA-test".to_owned(),
+                    summary: "test vulnerability".to_owned(),
+                    severity: AdvisorySeverity::High,
+                    permalink: "https://github.com/advisories/GHSA-test".to_owned(),
+                    vulnerable_range: "< 5.0.0".to_owned(),
+                    first_patched: Some("5.0.0".to_owned()),
+                }]),
+                CannedRepos::active(),
+            );
             let report = audit
                 .run(
                     std::path::Path::new("."),
@@ -302,10 +356,16 @@ mod tests {
     }
 
     #[test]
+    fn empty_lock_is_clean() {
+        let report = report_for(Lock::default(), CannedRepos::active());
+        assert!(report.diagnostics.is_empty());
+    }
+
+    #[test]
     fn empty_lock_is_clean_and_issues_no_query() {
         // Nothing to check must not fail for a network reason.
         let config = config_with(Lock::default(), Some("token"));
-        let audit = Audit::new(FakeAdvisories::failing());
+        let audit = Audit::new(FakeAdvisories::failing(), CannedRepos::failing());
 
         let report = audit
             .run(std::path::Path::new("."), config, &mut |_| {})
@@ -313,6 +373,7 @@ mod tests {
 
         assert!(report.diagnostics.is_empty());
         assert_eq!(audit.advisories.calls(), 0);
+        assert!(audit.repos.seen.borrow().is_empty());
     }
 
     #[test]
@@ -321,7 +382,7 @@ mod tests {
         // type from "checked and clean", so it can never be rendered or serialized.
         let config = config_with(branch_lock(), Some("token"));
 
-        let result = Audit::new(FakeAdvisories::failing()).run(
+        let result = Audit::new(FakeAdvisories::failing(), CannedRepos::active()).run(
             std::path::Path::new("."),
             config,
             &mut |_| {},
@@ -351,7 +412,7 @@ mod tests {
                 },
             );
         }
-        let audit = Audit::new(FakeAdvisories::new(Vec::new()));
+        let audit = Audit::new(FakeAdvisories::new(Vec::new()), CannedRepos::active());
 
         audit
             .run(
@@ -362,5 +423,128 @@ mod tests {
             .unwrap();
 
         assert_eq!(audit.advisories.calls(), 1);
+    }
+
+    #[test]
+    #[expect(
+        clippy::expect_used,
+        clippy::indexing_slicing,
+        reason = "tests inspect known report and JSON positions"
+    )]
+    fn every_check_runs_over_every_entry() {
+        // One entry, both checks firing: the offline check and the networked one are
+        // combined rather than one replacing the other.
+        let report = report_for(branch_lock(), CannedRepos::archived("2021-04-14T00:00:00Z"));
+
+        assert_eq!(report.diagnostics.len(), 2);
+        assert_eq!(report.warning_count, 2);
+        assert_eq!(report.error_count, 0);
+        assert_eq!(report.exit_code(), 0);
+        assert_eq!(report.diagnostics[0].rule, CheckName::MutableRef);
+        assert_eq!(report.diagnostics[1].rule, CheckName::ArchivedAction);
+        assert!(
+            report.render().iter().any(|line| matches!(
+                line,
+                Line::LintDiag { rule, level, .. }
+                    if rule == "archived-action" && *level == Level::Warn
+            )),
+            "human output must name the archived-action check"
+        );
+        let json: serde_json::Value =
+            serde_json::from_str(&report.to_json()).expect("report must serialize");
+        assert_eq!(json["findings"][1]["check"], "archived-action");
+        assert_eq!(json["findings"][1]["level"], "warn");
+    }
+
+    #[test]
+    fn a_failed_lookup_does_not_suppress_other_entries() {
+        // Targets sort by action id, so changing which repository fails covers both
+        // failure-before-warning and warning-before-failure without relying on map order.
+        for (failed_repo, archived_repo) in [
+            ("actions/checkout", "actions/setup-node"),
+            ("actions/setup-node", "actions/checkout"),
+        ] {
+            let source = CannedRepos::archived("2021-04-14T00:00:00Z").with_failure(failed_repo);
+            let audit = Audit::new(FakeAdvisories::new(Vec::new()), source);
+            let report = audit
+                .run(
+                    std::path::Path::new("."),
+                    config_with(two_entry_lock(), Some("token")),
+                    &mut |_| {},
+                )
+                .unwrap();
+
+            assert_eq!(report.error_count, 1, "failed repo: {failed_repo}");
+            assert_eq!(report.warning_count, 2, "failed repo: {failed_repo}");
+            assert_eq!(report.diagnostics.len(), 3);
+            assert_eq!(report.exit_code(), 1);
+            let archived_findings: Vec<_> = report
+                .diagnostics
+                .iter()
+                .filter(|finding| finding.rule == CheckName::ArchivedAction)
+                .collect();
+            assert_eq!(archived_findings.len(), 2);
+            assert!(archived_findings.iter().any(|finding| {
+                finding.level == Level::Error
+                    && finding.message.contains(failed_repo)
+                    && finding.message.contains("could not determine")
+            }));
+            assert!(archived_findings.iter().any(|finding| {
+                finding.level == Level::Warn
+                    && finding.message.contains(archived_repo)
+                    && finding.message.contains("archived repository")
+            }));
+            assert_eq!(
+                audit.repos.seen.borrow().as_slice(),
+                ["actions/checkout", "actions/setup-node"]
+            );
+        }
+    }
+
+    #[test]
+    fn archived_advisory_and_mutable_findings_survive_a_metadata_failure() {
+        let audit = Audit::new(
+            FakeAdvisories::new(vec![Advisory {
+                package: "actions/setup-node".to_owned(),
+                ghsa_id: "GHSA-test".to_owned(),
+                summary: "test vulnerability".to_owned(),
+                severity: AdvisorySeverity::High,
+                permalink: "https://github.com/advisories/GHSA-test".to_owned(),
+                vulnerable_range: "< 5.0.0".to_owned(),
+                first_patched: Some("5.0.0".to_owned()),
+            }]),
+            CannedRepos::archived("2021-04-14T00:00:00Z").with_failure("actions/setup-node"),
+        );
+        let report = audit
+            .run(
+                std::path::Path::new("."),
+                config_with(two_entry_lock(), Some("token")),
+                &mut |_| {},
+            )
+            .unwrap();
+
+        assert_eq!(report.diagnostics.len(), 4);
+        assert_eq!(report.warning_count, 2);
+        assert_eq!(report.error_count, 2);
+        assert_eq!(report.exit_code(), 1);
+        for (rule, level) in [
+            (CheckName::MutableRef, Level::Warn),
+            (CheckName::ArchivedAction, Level::Warn),
+            (CheckName::ArchivedAction, Level::Error),
+            (CheckName::KnownVulnerability, Level::Error),
+        ] {
+            assert!(
+                report
+                    .diagnostics
+                    .iter()
+                    .any(|finding| { finding.rule == rule && finding.level == level }),
+                "missing {rule} at {level:?}"
+            );
+        }
+        assert_eq!(audit.advisories.calls(), 1);
+        assert_eq!(
+            audit.repos.seen.borrow().as_slice(),
+            ["actions/checkout", "actions/setup-node"]
+        );
     }
 }

@@ -182,13 +182,19 @@ mod tests {
     fn check_name_round_trips_through_its_literal_string() {
         // The name a user greps for, the name in JSON, and the name in the terminal are
         // one string. This asserts the literal so a rename cannot pass silently.
-        assert_eq!(CheckName::MutableRef.as_str(), "mutable-ref");
-        assert_eq!(CheckName::MutableRef.to_string(), "mutable-ref");
-        assert_eq!(
-            CheckName::from_str("mutable-ref"),
-            Ok(CheckName::MutableRef)
-        );
+        for (check, name) in [
+            (CheckName::MutableRef, "mutable-ref"),
+            (CheckName::KnownVulnerability, "known-vulnerability"),
+            (CheckName::ArchivedAction, "archived-action"),
+        ] {
+            assert_eq!(check.as_str(), name);
+            assert_eq!(check.to_string(), name);
+            assert_eq!(CheckName::from_str(name), Ok(check));
+            assert!(CheckName::ALL.contains(&check));
+        }
         CheckName::from_str("mutable_ref").unwrap_err();
+        CheckName::from_str("known_vulnerability").unwrap_err();
+        CheckName::from_str("archived_action").unwrap_err();
     }
 
     #[test]

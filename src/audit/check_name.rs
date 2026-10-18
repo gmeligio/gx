@@ -8,5 +8,6 @@ crate::diagnostic::rule_ids! {
     CheckName {
         MutableRef => "mutable-ref",
         KnownVulnerability => "known-vulnerability",
+        ArchivedAction => "archived-action",
     }
 }
