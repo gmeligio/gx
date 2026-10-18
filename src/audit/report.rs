@@ -184,6 +184,7 @@ mod tests {
         // one string. This asserts the literal so a rename cannot pass silently.
         for (check, name) in [
             (CheckName::MutableRef, "mutable-ref"),
+            (CheckName::KnownVulnerability, "known-vulnerability"),
             (CheckName::ArchivedAction, "archived-action"),
         ] {
             assert_eq!(check.as_str(), name);
@@ -192,6 +193,7 @@ mod tests {
             assert!(CheckName::ALL.contains(&check));
         }
         CheckName::from_str("mutable_ref").unwrap_err();
+        CheckName::from_str("known_vulnerability").unwrap_err();
         CheckName::from_str("archived_action").unwrap_err();
     }
 

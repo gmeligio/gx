@@ -56,18 +56,27 @@ gx tidy         # Pin actions to commit SHAs and sync manifest if present
 gx upgrade      # Upgrade pinned actions to newer versions (--json for CI/PR automation)
 gx lint         # Check action pinning, security, workflow validity, and run: shell scripts (see docs/lint-rules.md)
 gx init         # Create a manifest and lock file from your current workflows
-gx audit        # Check locked actions for mutable refs and archived repositories (requires GITHUB_TOKEN)
+gx audit        # Check locked actions for vulnerabilities, mutable refs, and archived repos (requires GITHUB_TOKEN)
 ```
 
 All of these cover your workflows and any composite actions in `.github/actions`.
 
 `gx lint` checks your workflows offline — safe for a pre-commit hook. `gx audit` reads
-`.github/gx.lock` and currently checks mutable refs (offline) and archived action
-repositories (through GitHub's authenticated REST API). Archival warnings recommend
+`.github/gx.lock` and checks mutable refs, security advisories (through GitHub's GraphQL
+API), and archived action repositories (through its REST API). Archival warnings recommend
 migrating to a maintained alternative: security fixes cannot be published while a
-repository remains archived. Warnings alone exit 0; a failed metadata lookup produces an
-error and exits 1, rather than a false "clean". `--json` provides machine-readable findings.
-Advisory-based vulnerability checks are planned, not yet implemented.
+repository remains archived. A failed repository metadata lookup produces an error finding
+without discarding findings for other actions.
+
+Audit reports affected versions as `known-vulnerability` errors and ignores withdrawn
+advisories. Repository-wide advisories cover nested actions; advisories naming a specific
+GitHub action URL cover that subpath only. Unparseable versions and ranges, and prereleases
+not explicitly matched by a range, produce warnings rather than silently passing.
+Partial versions are zero-padded: a matching padded version produces a conservative error
+(for example, `v2` against `< 2.5.0`), even if the actual version may be newer.
+If the padded version does not match but its version line could overlap the range, audit warns.
+Errors exit nonzero; warnings alone do not. `gx audit --json` emits one report without
+creating a local log file; a failed advisory lookup emits no report.
 
 ## Already using another tool?
 
@@ -96,7 +105,7 @@ For teams that want reproducibility, `gx init` creates a manifest (`.github/gx.t
 
 For `gx tidy`, `gx upgrade`, and `gx init`: no, but without one you're limited to 60 GitHub API requests per hour. For most projects that's enough. Set `GITHUB_TOKEN` for CI or large repos.
 
-For `gx audit`: yes, always. It requires authenticated GitHub API access, including REST repository metadata lookups. Without a token it exits non-zero rather than reporting a clean audit it never performed. `gx lint` never needs one — it makes no network requests at all.
+For `gx audit`: yes, always. It requires authenticated GitHub API access for advisory and repository metadata lookups. Without a token it exits non-zero before loading repository configuration rather than reporting a clean audit it never performed. `gx lint` never needs one — it makes no network requests at all.
 
 </details>
 
@@ -113,9 +122,9 @@ Add `gx lint` to your workflow to enforce pinning on every PR:
 To keep actions current, copy [docs/gx-upgrade.yml](docs/gx-upgrade.yml) into `.github/workflows/`. It runs
 `gx upgrade` on a schedule and opens a PR with the changes. See [docs/upgrade-workflow.md](docs/upgrade-workflow.md).
 
-`gx audit` also belongs on a schedule: a dependency's repository can become archived
-without any change to your code. A nightly run catches that maintenance risk since your
-last commit; future advisory checks will extend this to newly disclosed vulnerabilities.
+`gx audit` also belongs on a schedule: vulnerabilities can be disclosed and a dependency's
+repository can become archived without any change to your code. A nightly run catches
+those security and maintenance risks since your last commit.
 
 ```yaml
 - name: Audit locked actions

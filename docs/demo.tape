@@ -40,7 +40,7 @@ Type "cat .github/workflows/ci.yml"
 Enter
 Sleep 8s
 
-# Create the lock for the maintained actions, then audit it.
+# Create the lock, then check active advisories and repository state.
 # GITHUB_TOKEN is supplied at runtime by the mise demo task.
 Type "gx init"
 Enter
@@ -57,5 +57,11 @@ Type "gx tidy"
 Enter
 Sleep 8s
 Type "gx audit"
+Enter
+Sleep 8s
+
+# JSON mode prints all findings without a local log file.
+# Findings depend on current advisories and repository state.
+Type "gx audit --json"
 Enter
 Sleep 8s

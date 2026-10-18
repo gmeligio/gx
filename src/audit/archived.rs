@@ -91,6 +91,7 @@ mod tests {
             version: "v1",
             sha,
             ref_type: None,
+            repository: None,
         }
     }
 

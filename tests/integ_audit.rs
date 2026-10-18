@@ -12,12 +12,12 @@
 //! because process environment is global and would make these flaky under the parallel
 //! test runner.
 
-use gx::audit::{Error as AuditError, Report, collect_findings, require_token};
-use gx::command::CommandReport;
+use gx::audit::{Audit, Error as AuditError, Report};
+use gx::command::{Command as _, CommandReport};
 use gx::config::{Config, GitHubToken, Level, Lint};
 use gx::domain::lock::Lock;
 use gx::domain::manifest::Manifest;
-use gx::infra::github::{Error as GithubError, RepoMeta, RepoMetadata};
+use gx::infra::github::{Advisory, AdvisoryQuery, Error as GitHubError, RepoMeta, RepoMetadata};
 use gx::infra::lock::Store as LockStore;
 use std::fs;
 use std::path::Path;
@@ -32,6 +32,18 @@ version = "main"
 sha = "abc123def456789012345678901234567890abcd"
 repository = "actions/checkout"
 ref_type = "branch"
+date = "2026-01-01T00:00:00Z"
+"#;
+
+/// A lock pinning the action from the tj-actions compromise at an affected version.
+const VULNERABLE_LOCK: &str = r#"
+[resolutions."tj-actions/changed-files"."^45"]
+version = "v45.0.7"
+
+[actions."tj-actions/changed-files"."v45.0.7"]
+sha = "abc123def456789012345678901234567890abcd"
+repository = "tj-actions/changed-files"
+ref_type = "tag"
 date = "2026-01-01T00:00:00Z"
 "#;
 
@@ -77,6 +89,37 @@ fn config_at(root: &Path, token: Option<&str>) -> Config {
     }
 }
 
+/// An advisory source that answers from memory.
+///
+/// These tests are about the lock, the command, and the report — not about the advisory
+/// API — so the seam is filled locally. A test that queried GitHub would change verdict
+/// whenever the advisory database changed, which is exactly the property `gx audit` exists
+/// to have and a test must not have.
+struct CannedAdvisories(Vec<Advisory>);
+
+impl AdvisoryQuery for CannedAdvisories {
+    fn all_actions_advisories(&self) -> Result<Vec<Advisory>, GitHubError> {
+        Ok(self.0.clone())
+    }
+}
+
+/// Run the production command with canned advisories and a lock loaded from disk.
+fn audit_against(
+    root: &Path,
+    token: Option<&str>,
+    advisories: Vec<Advisory>,
+) -> Result<Report, AuditError> {
+    Audit::new(CannedAdvisories(advisories), ActiveRepos).run(
+        root,
+        config_at(root, token),
+        &mut |_| {},
+    )
+}
+
+fn audit(root: &Path, token: Option<&str>) -> Result<Report, AuditError> {
+    audit_against(root, token, Vec::new())
+}
+
 /// Reports every repository as active, without a request.
 ///
 /// These tests assert what audit does with a lock on disk, not what GitHub says about the
@@ -85,24 +128,12 @@ fn config_at(root: &Path, token: Option<&str>) -> Config {
 struct ActiveRepos;
 
 impl RepoMetadata for ActiveRepos {
-    fn metadata(&self, _repo: &str) -> Result<RepoMeta, GithubError> {
+    fn metadata(&self, _repo: &str) -> Result<RepoMeta, GitHubError> {
         Ok(RepoMeta {
             archived: false,
             pushed_at: "2026-08-01T00:00:00Z".to_owned(),
         })
     }
-}
-
-/// The command's own sequence — the token guard, then every check — with the network
-/// adapter `Audit::run` would build swapped for [`ActiveRepos`].
-fn audit(root: &Path, token: Option<&str>) -> Result<Report, AuditError> {
-    let config = config_at(root, token);
-    require_token(&config.settings)?;
-    Ok(Report::from_diagnostics(collect_findings(
-        &config,
-        &ActiveRepos,
-        &mut |_| {},
-    )))
 }
 
 #[test]
@@ -292,6 +323,11 @@ fn run_gx(root: &Path, token: Option<&str>, args: &[&str]) -> (String, String, O
     };
     // Keep the run deterministic: CI mode changes which lines are printed.
     command.env_remove("CI");
+    let child_temp = root.join("child-temp");
+    fs::create_dir_all(&child_temp).unwrap();
+    for variable in ["TMPDIR", "TMP", "TEMP"] {
+        command.env(variable, &child_temp);
+    }
     let output = command.output().expect("gx binary should run");
     stopped.store(true, Ordering::SeqCst);
     assert_eq!(
@@ -379,8 +415,9 @@ fn a_repo_without_github_is_clean_once_a_token_is_present() {
 
 #[test]
 fn json_mode_writes_one_document_and_no_progress_output() {
-    // These subprocess tests cover output plumbing on an empty lock, not successful
-    // GitHub checks. Finding-bearing locks are covered above with ActiveRepos.
+    // Driven through an empty lock, the one fixture that reaches rendering without an
+    // advisory query. The rendering path is the same whatever produced the findings, and
+    // a non-empty lock here would mean a real request to GitHub.
     let temp = TempDir::new().unwrap();
     let root = repo_with_lock(&temp, Some(""));
     git_init(&root);
@@ -408,17 +445,14 @@ fn json_mode_writes_no_local_log_file() {
     let (stdout, stderr, code) = run_gx(&root, Some("token"), &["audit", "--json"]);
     assert_eq!(code, Some(0), "clean audit must succeed: {stderr}");
 
-    // Check both the output and the isolated child temp directory: hiding a log path
-    // alone does not prove that no file was written.
-    assert!(
-        !root.join("tmp/gx/audit").exists(),
-        "JSON mode must not create the audit log directory"
-    );
+    // Check both the document and the filesystem: a suppressed path alone does not
+    // prove that log creation was skipped.
     assert!(
         !stdout.contains(".log"),
         "no log file path may appear in JSON mode, got: {stdout}"
     );
     serde_json::from_str::<serde_json::Value>(&stdout).expect("stdout must remain valid JSON");
+    assert!(!root.join("child-temp/gx/audit").exists());
 }
 
 #[test]
@@ -433,13 +467,119 @@ fn human_mode_still_prints_a_summary() {
     assert_eq!(code, Some(0), "clean audit must succeed: {stderr}");
 
     assert!(
+        fs::read_dir(root.join("child-temp/gx/audit"))
+            .unwrap()
+            .next()
+            .is_some(),
+        "human mode must create a local log"
+    );
+    assert!(
         stdout.contains("No audit findings"),
-        "human output must print the clean summary, got: {stdout}"
+        "human output must print a summary, got: {stdout}"
     );
     assert!(
         serde_json::from_str::<serde_json::Value>(&stdout).is_err(),
         "human output is not JSON"
     );
+}
+
+#[test]
+fn missing_token_precedes_malformed_config_and_log_setup() {
+    for filename in ["gx.toml", "gx.lock"] {
+        for args in [vec!["audit"], vec!["audit", "--json"]] {
+            let temp = TempDir::new().unwrap();
+            let root = repo_with_lock(&temp, None);
+            git_init(&root);
+            fs::write(root.join(".github").join(filename), "[invalid").unwrap();
+
+            let (stdout, stderr, code) = run_gx(&root, None, &args);
+
+            assert_eq!(code, Some(1));
+            assert!(stderr.contains("GITHUB_TOKEN"), "{filename}: {stderr}");
+            assert!(stdout.is_empty(), "{stdout}");
+            assert!(!root.join("child-temp/gx/audit").exists());
+        }
+    }
+}
+
+#[test]
+fn token_guard_does_not_intercept_help_or_other_commands() {
+    let temp = TempDir::new().unwrap();
+    let root = repo_with_lock(&temp, None);
+    git_init(&root);
+    fs::write(root.join(".github/gx.toml"), "[invalid").unwrap();
+    let (stdout, stderr, code) = run_gx(&root, None, &["audit", "--help"]);
+    assert_eq!(code, Some(0));
+    assert!(stdout.contains("Usage:"));
+    assert!(stderr.is_empty());
+    let (_, lint_error, lint_code) = run_gx(&root, None, &["lint"]);
+    assert_eq!(lint_code, Some(1));
+    assert!(!lint_error.contains("GITHUB_TOKEN"), "{lint_error}");
+}
+
+#[test]
+fn a_locked_action_inside_an_advisory_range_fails_the_command() {
+    // The end-to-end claim, through a real gx.lock on disk: a vulnerable pin is an
+    // error-level finding that fails the build, carrying enough to verify it.
+    let temp = TempDir::new().unwrap();
+    let root = repo_with_lock(&temp, Some(VULNERABLE_LOCK));
+
+    let report = audit_against(
+        &root,
+        Some("token"),
+        vec![Advisory {
+            package: "tj-actions/changed-files".to_owned(),
+            ghsa_id: "GHSA-mrrh-fwg8-r2c3".to_owned(),
+            summary: "leaks secrets via workflow logs".to_owned(),
+            severity: gx::infra::github::AdvisorySeverity::High,
+            permalink: "https://github.com/advisories/GHSA-mrrh-fwg8-r2c3".to_owned(),
+            vulnerable_range: "<= 45.0.7".to_owned(),
+            first_patched: Some("46.0.1".to_owned()),
+        }],
+    )
+    .expect("a successful lookup must produce a report");
+
+    assert_eq!(report.diagnostics.len(), 1);
+    assert_eq!(report.diagnostics[0].rule.as_str(), "known-vulnerability");
+    assert_eq!(report.diagnostics[0].level, Level::Error);
+    assert_eq!(
+        CommandReport::exit_code(&report),
+        1,
+        "a vulnerable pin must fail the build"
+    );
+    assert!(
+        report.diagnostics[0]
+            .message
+            .contains("GHSA-mrrh-fwg8-r2c3"),
+        "got: {}",
+        report.diagnostics[0].message
+    );
+}
+
+#[test]
+fn the_same_lock_is_clean_when_no_advisory_covers_it() {
+    // Paired with the test above over the same fixture, so a check that never ran cannot
+    // satisfy both.
+    let temp = TempDir::new().unwrap();
+    let root = repo_with_lock(&temp, Some(VULNERABLE_LOCK));
+
+    let report = audit_against(
+        &root,
+        Some("token"),
+        vec![Advisory {
+            package: "tj-actions/changed-files".to_owned(),
+            ghsa_id: "GHSA-mrrh-fwg8-r2c3".to_owned(),
+            summary: "leaks secrets via workflow logs".to_owned(),
+            severity: gx::infra::github::AdvisorySeverity::High,
+            permalink: "https://github.com/advisories/GHSA-mrrh-fwg8-r2c3".to_owned(),
+            vulnerable_range: "<= 44.0.0".to_owned(),
+            first_patched: Some("44.0.1".to_owned()),
+        }],
+    )
+    .unwrap();
+
+    assert!(report.diagnostics.is_empty());
+    assert_eq!(CommandReport::exit_code(&report), 0);
 }
 
 #[test]
