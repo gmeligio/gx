@@ -1,0 +1,28 @@
+## Context
+
+`create-github-app-token` v2.2.1 accepts only `app-id`; `client-id` exists from v3.1.0 and `app-id` is deprecated in v3.3.0 (https://github.com/actions/create-github-app-token/blob/v3.3.0/action.yml). The action is managed by gx itself (`.github/gx.toml`: `"^2"`).
+
+## Goals / Non-Goals
+
+**Goals:** restore release-plz and Homebrew publish auth using the existing `VERIFIED_COMMIT_CLIENT_ID` secret.
+
+**Non-Goals:** centralizing the token step into a reusable workflow/composite action; upgrading other actions.
+
+## Decisions
+
+- **Bump the manifest to `^3` and run `gx upgrade`/`gx tidy`** rather than editing SHAs by hand: keeps `gx.lock` and the workflow pins consistent, dogfooding gx. Alternative: hand-edit the pin, which risks lock drift.
+- **Use `client-id` rather than restoring `VERIFIED_COMMIT_ID`**: the secret already exists, and `app-id` is deprecated.
+- **v3 breaking changes are irrelevant here**: Node 24 runtime and `NODE_USE_ENV_PROXY` for proxies (https://github.com/actions/create-github-app-token/releases/tag/v3.0.0). These are GitHub-hosted `ubuntu-24.04` runners with no proxy.
+
+## Risks / Trade-offs
+
+- [`VERIFIED_COMMIT_CLIENT_ID` holds the wrong value] → the first post-merge Release-plz run fails at the token step; fix the secret and re-run.
+- [Homebrew path only runs on tag] → not exercised until the next release; the same input change covers it, verify on the first tag after merge.
+
+## Automated Test Strategy
+
+No Rust code changes. `gx lint` and the existing workflow checks validate syntax and pinning. The critical path is the post-merge Release-plz run on `main`.
+
+## Observability
+
+A bad or missing secret fails the token step loudly, as now. No silent path: release-plz cannot run without the token output.
