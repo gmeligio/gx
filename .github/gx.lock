@@ -4,8 +4,8 @@ version = "v1.16.1"
 [resolutions."actions/checkout"."^6"]
 version = "v6.0.2"
 
-[resolutions."actions/create-github-app-token"."^2"]
-version = "v2.2.1"
+[resolutions."actions/create-github-app-token"."^3"]
+version = "v3"
 
 [resolutions."actions/download-artifact"."^7"]
 version = "v7.0.0"
@@ -34,11 +34,11 @@ repository = "actions/checkout"
 ref_type = "tag"
 date = "2026-01-09T19:42:23Z"
 
-[actions."actions/create-github-app-token"."v2.2.1"]
-sha = "29824e69f54612133e76f7eaac726eef6c875baf"
+[actions."actions/create-github-app-token".v3]
+sha = "64ab729a6294000f5aa4a4bc0b73d1f32bc45510"
 repository = "actions/create-github-app-token"
 ref_type = "tag"
-date = "2025-12-05T22:53:03Z"
+date = "2026-10-12T23:42:07Z"
 
 [actions."actions/download-artifact"."v7.0.0"]
 sha = "37930b1c2abaa49bbe596cd826c3c89aef350131"

@@ -1,6 +1,6 @@
 ## 1. Upgrade action
 
-- [ ] 1.1 Run `gx upgrade --latest actions/create-github-app-token`; confirm `.github/gx.toml` has `"^3"`, `.github/gx.lock` resolves `^3` to the latest v3 tag, no `^2`/`v2.2.1` entries remain, and all three workflow `uses:` lines carry the locked SHA
+- [x] 1.1 Run `gx upgrade --latest actions/create-github-app-token`; confirm `.github/gx.toml` has `"^3"`, `.github/gx.lock` resolves `^3` to the latest v3 tag, no `^2`/`v2.2.1` entries remain, and all three workflow `uses:` lines carry the locked SHA
 
 ## 2. Switch to client ID
 
