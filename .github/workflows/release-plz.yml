@@ -27,7 +27,7 @@ jobs:
               uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
               id: app-token
               with:
-                  app-id: ${{ secrets.VERIFIED_COMMIT_ID }}
+                  client-id: ${{ secrets.VERIFIED_COMMIT_CLIENT_ID }}
                   private-key: ${{ secrets.VERIFIED_COMMIT_KEY }}
                   repositories: ${{ github.event.repository.name }}
                   owner: ${{ github.repository_owner }}
@@ -58,7 +58,7 @@ jobs:
               uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
               id: app-token
               with:
-                  app-id: ${{ secrets.VERIFIED_COMMIT_ID }}
+                  client-id: ${{ secrets.VERIFIED_COMMIT_CLIENT_ID }}
                   private-key: ${{ secrets.VERIFIED_COMMIT_KEY }}
                   repositories: ${{ github.event.repository.name }}
                   owner: ${{ github.repository_owner }}
