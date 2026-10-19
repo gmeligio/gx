@@ -9,5 +9,7 @@ crate::diagnostic::rule_ids! {
         MutableRef => "mutable-ref",
         KnownVulnerability => "known-vulnerability",
         ArchivedAction => "archived-action",
+        TagMoved => "tag-moved",
+        TagUnverified => "tag-unverified",
     }
 }

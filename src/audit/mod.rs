@@ -16,6 +16,8 @@ mod archived;
 mod check_name;
 /// Findings, report rendering, and the `--json` contract.
 mod report;
+/// The `tag-moved` and `tag-unverified` checks.
+mod tag_moved;
 /// The per-lock-row view checks consume, and the `mutable-ref` check.
 mod target;
 
@@ -26,8 +28,8 @@ use crate::command::Command;
 use crate::config::{Config, Settings};
 use crate::domain::resolution::Forge;
 use crate::infra::github::{
-    AdvisoryQuery, Error as GitHubError, GraphQlAdvisories, Registry, RepoMetadata,
-    RestRepoMetadata,
+    AdvisoryQuery, Error as GitHubError, GitTags, GraphQlAdvisories, Registry, RepoMetadata,
+    RestRepoMetadata, TagResolver,
 };
 use std::path::Path;
 use thiserror::Error;
@@ -89,6 +91,7 @@ fn collect_findings(
     config: &Config,
     advisories: &dyn AdvisoryQuery,
     repos: &dyn RepoMetadata,
+    tags: &dyn TagResolver,
     on_progress: &mut dyn FnMut(&str),
 ) -> Result<Vec<Finding>, Error> {
     on_progress("Auditing locked actions...");
@@ -116,6 +119,7 @@ fn collect_findings(
                 // A per-action metadata failure is a finding, not a short circuit:
                 // retain this action's advisories and every other action's findings.
                 .chain(archived::archived_action(target, repos))
+                .chain(tag_moved::tag_moved(target, tags))
         })
         .collect())
 }
@@ -139,21 +143,27 @@ pub fn require_token(settings: &Settings) -> Result<(), Error> {
 }
 
 /// The audit command.
-pub struct Audit<A, R> {
+pub struct Audit<A, R, T> {
     /// Advisory source shared by every check in a run.
     advisories: A,
     /// Repository metadata source shared by every check in a run.
     repos: R,
+    /// Resolves each pinned tag to the commit it points at now.
+    tags: T,
 }
 
-impl<A, R> Audit<A, R> {
-    /// Construct a command with advisory and repository metadata sources.
-    pub const fn new(advisories: A, repos: R) -> Self {
-        Self { advisories, repos }
+impl<A, R, T> Audit<A, R, T> {
+    /// Construct a command with advisory, repository metadata, and tag sources.
+    pub const fn new(advisories: A, repos: R, tags: T) -> Self {
+        Self {
+            advisories,
+            repos,
+            tags,
+        }
     }
 }
 
-impl Audit<GraphQlAdvisories, RestRepoMetadata> {
+impl Audit<GraphQlAdvisories, RestRepoMetadata, GitTags> {
     /// Compose the production advisory adapter from configured credentials.
     ///
     /// # Errors
@@ -168,12 +178,13 @@ impl Audit<GraphQlAdvisories, RestRepoMetadata> {
             })?;
         Ok(Self::new(
             GraphQlAdvisories::new(registry.clone()),
-            RestRepoMetadata::new(registry),
+            RestRepoMetadata::new(registry.clone()),
+            GitTags::new(registry),
         ))
     }
 }
 
-impl<A: AdvisoryQuery, R: RepoMetadata> Command for Audit<A, R> {
+impl<A: AdvisoryQuery, R: RepoMetadata, T: TagResolver> Command for Audit<A, R, T> {
     type Report = Report;
     type Error = Error;
 
@@ -188,6 +199,7 @@ impl<A: AdvisoryQuery, R: RepoMetadata> Command for Audit<A, R> {
             &config,
             &self.advisories,
             &self.repos,
+            &self.tags,
             on_progress,
         )?))
     }
@@ -209,9 +221,31 @@ mod tests {
     use crate::domain::action::uses_ref::RefType;
     use crate::domain::lock::Lock;
     use crate::domain::manifest::Manifest;
-    use crate::infra::github::{Advisory, AdvisorySeverity, CannedRepos, FakeAdvisories};
+    use crate::infra::github::{Advisory, AdvisorySeverity, CannedRepos, FakeAdvisories, FakeTags};
     use crate::output::lines::Line;
     use std::path::PathBuf;
+
+    const SHA: &str = "abc123def456789012345678901234567890abcd";
+
+    /// The command with every pinned tag still where the lock recorded it.
+    fn audit_of(
+        advisories: FakeAdvisories,
+        repos: CannedRepos,
+    ) -> Audit<FakeAdvisories, CannedRepos, FakeTags> {
+        Audit::new(advisories, repos, FakeTags::resolving(SHA))
+    }
+
+    /// Run `audit` over `lock` with a token present.
+    fn run(
+        audit: &Audit<FakeAdvisories, CannedRepos, FakeTags>,
+        lock: Lock,
+    ) -> Result<Report, Error> {
+        audit.run(
+            std::path::Path::new("."),
+            config_with(lock, Some("token")),
+            &mut |_| {},
+        )
+    }
 
     fn config_with(lock: Lock, token: Option<&str>) -> Config {
         Config {
@@ -262,7 +296,7 @@ mod tests {
     #[test]
     fn missing_token_is_an_error_not_a_clean_report() {
         let config = config_with(Lock::default(), None);
-        let result = Audit::new(FakeAdvisories::new(Vec::new()), CannedRepos::active()).run(
+        let result = audit_of(FakeAdvisories::new(Vec::new()), CannedRepos::active()).run(
             std::path::Path::new("."),
             config,
             &mut |_| {},
@@ -293,7 +327,7 @@ mod tests {
         // A lock that would produce a finding still yields MissingToken, proving the
         // guard runs first rather than after a partial audit.
         let config = config_with(branch_lock(), None);
-        let audit = Audit::new(FakeAdvisories::failing(), CannedRepos::failing());
+        let audit = audit_of(FakeAdvisories::failing(), CannedRepos::failing());
         let result = audit.run(std::path::Path::new("."), config, &mut |_| {});
         assert!(matches!(result, Err(Error::MissingToken { .. })));
         // The guard ran before the lookup, so no query was even attempted.
@@ -303,10 +337,7 @@ mod tests {
 
     /// Drive the real command with both upstream sources injected.
     fn report_for(lock: Lock, repos: CannedRepos) -> Report {
-        let config = config_with(lock, Some("token"));
-        Audit::new(FakeAdvisories::new(Vec::new()), repos)
-            .run(std::path::Path::new("."), config, &mut |_| {})
-            .unwrap()
+        run(&audit_of(FakeAdvisories::new(Vec::new()), repos), lock).unwrap()
     }
 
     #[test]
@@ -331,7 +362,7 @@ mod tests {
                     date: CommitDate::from("2026-01-01T00:00:00Z"),
                 },
             );
-            let audit = Audit::new(
+            let audit = audit_of(
                 FakeAdvisories::new(vec![Advisory {
                     package: "actions/checkout".to_owned(),
                     ghsa_id: "GHSA-test".to_owned(),
@@ -343,13 +374,7 @@ mod tests {
                 }]),
                 CannedRepos::active(),
             );
-            let report = audit
-                .run(
-                    std::path::Path::new("."),
-                    config_with(lock, Some("token")),
-                    &mut |_| {},
-                )
-                .unwrap();
+            let report = run(&audit, lock).unwrap();
             assert_eq!(report.exit_code(), expected_exit, "{version}");
             assert_eq!(audit.advisories.calls(), 1);
         }
@@ -364,12 +389,9 @@ mod tests {
     #[test]
     fn empty_lock_is_clean_and_issues_no_query() {
         // Nothing to check must not fail for a network reason.
-        let config = config_with(Lock::default(), Some("token"));
-        let audit = Audit::new(FakeAdvisories::failing(), CannedRepos::failing());
+        let audit = audit_of(FakeAdvisories::failing(), CannedRepos::failing());
 
-        let report = audit
-            .run(std::path::Path::new("."), config, &mut |_| {})
-            .unwrap();
+        let report = run(&audit, Lock::default()).unwrap();
 
         assert!(report.diagnostics.is_empty());
         assert_eq!(audit.advisories.calls(), 0);
@@ -380,13 +402,9 @@ mod tests {
     fn a_failed_lookup_is_an_error_not_a_clean_report() {
         // The distinction the whole command turns on: "could not check" is a different
         // type from "checked and clean", so it can never be rendered or serialized.
-        let config = config_with(branch_lock(), Some("token"));
+        let audit = audit_of(FakeAdvisories::failing(), CannedRepos::active());
 
-        let result = Audit::new(FakeAdvisories::failing(), CannedRepos::active()).run(
-            std::path::Path::new("."),
-            config,
-            &mut |_| {},
-        );
+        let result = run(&audit, branch_lock());
 
         assert!(matches!(result, Err(Error::Advisories { .. })));
     }
@@ -412,15 +430,9 @@ mod tests {
                 },
             );
         }
-        let audit = Audit::new(FakeAdvisories::new(Vec::new()), CannedRepos::active());
+        let audit = audit_of(FakeAdvisories::new(Vec::new()), CannedRepos::active());
 
-        audit
-            .run(
-                std::path::Path::new("."),
-                config_with(lock, Some("token")),
-                &mut |_| {},
-            )
-            .unwrap();
+        run(&audit, lock).unwrap();
 
         assert_eq!(audit.advisories.calls(), 1);
     }
@@ -465,14 +477,8 @@ mod tests {
             ("actions/setup-node", "actions/checkout"),
         ] {
             let source = CannedRepos::archived("2021-04-14T00:00:00Z").with_failure(failed_repo);
-            let audit = Audit::new(FakeAdvisories::new(Vec::new()), source);
-            let report = audit
-                .run(
-                    std::path::Path::new("."),
-                    config_with(two_entry_lock(), Some("token")),
-                    &mut |_| {},
-                )
-                .unwrap();
+            let audit = audit_of(FakeAdvisories::new(Vec::new()), source);
+            let report = run(&audit, two_entry_lock()).unwrap();
 
             assert_eq!(report.error_count, 1, "failed repo: {failed_repo}");
             assert_eq!(report.warning_count, 2, "failed repo: {failed_repo}");
@@ -503,7 +509,7 @@ mod tests {
 
     #[test]
     fn archived_advisory_and_mutable_findings_survive_a_metadata_failure() {
-        let audit = Audit::new(
+        let audit = audit_of(
             FakeAdvisories::new(vec![Advisory {
                 package: "actions/setup-node".to_owned(),
                 ghsa_id: "GHSA-test".to_owned(),
@@ -515,13 +521,7 @@ mod tests {
             }]),
             CannedRepos::archived("2021-04-14T00:00:00Z").with_failure("actions/setup-node"),
         );
-        let report = audit
-            .run(
-                std::path::Path::new("."),
-                config_with(two_entry_lock(), Some("token")),
-                &mut |_| {},
-            )
-            .unwrap();
+        let report = run(&audit, two_entry_lock()).unwrap();
 
         assert_eq!(report.diagnostics.len(), 4);
         assert_eq!(report.warning_count, 2);

@@ -15,9 +15,12 @@
 use gx::audit::{Audit, Error as AuditError, Report};
 use gx::command::{Command as _, CommandReport};
 use gx::config::{Config, GitHubToken, Level, Lint};
+use gx::domain::action::identity::{ActionId, CommitSha};
 use gx::domain::lock::Lock;
 use gx::domain::manifest::Manifest;
-use gx::infra::github::{Advisory, AdvisoryQuery, Error as GitHubError, RepoMeta, RepoMetadata};
+use gx::infra::github::{
+    Advisory, AdvisoryQuery, Error as GitHubError, RepoMeta, RepoMetadata, TagResolver,
+};
 use gx::infra::lock::Store as LockStore;
 use std::fs;
 use std::path::Path;
@@ -58,6 +61,33 @@ repository = "actions/checkout"
 ref_type = "tag"
 date = "2026-01-01T00:00:00Z"
 "#;
+
+/// A lock with two tag pins, for asserting that one entry's failure does not hide another.
+const TWO_TAG_LOCK: &str = r#"
+[resolutions."actions/checkout"."^4"]
+version = "v4.2.1"
+
+[resolutions."actions/setup-node"."^4"]
+version = "v4.0.0"
+
+[actions."actions/checkout"."v4.2.1"]
+sha = "abc123def456789012345678901234567890abcd"
+repository = "actions/checkout"
+ref_type = "tag"
+date = "2026-01-01T00:00:00Z"
+
+[actions."actions/setup-node"."v4.0.0"]
+sha = "abc123def456789012345678901234567890abcd"
+repository = "actions/setup-node"
+ref_type = "tag"
+date = "2026-01-01T00:00:00Z"
+"#;
+
+/// The SHA every fixture lock records.
+const LOCKED_SHA: &str = "abc123def456789012345678901234567890abcd";
+
+/// A commit that is not [`LOCKED_SHA`], for the moved-tag fixtures.
+const OTHER_SHA: &str = "0e58ed86baaa5f0e5e5e5e5e5e5e5e5e5e5e5e5e";
 
 /// Create `.github/` under a temp dir, optionally writing `gx.lock`.
 fn repo_with_lock(temp: &TempDir, lock_toml: Option<&str>) -> std::path::PathBuf {
@@ -109,9 +139,19 @@ fn audit_against(
     token: Option<&str>,
     advisories: Vec<Advisory>,
 ) -> Result<Report, AuditError> {
-    Audit::new(CannedAdvisories(advisories), ActiveRepos).run(
+    Audit::new(
+        CannedAdvisories(advisories),
+        ActiveRepos,
+        CannedTags::default(),
+    )
+    .run(root, config_at(root, token), &mut |_| {})
+}
+
+/// Run the production command with canned tag targets and no advisories.
+fn audit_with_tags(root: &Path, tags: CannedTags) -> Result<Report, AuditError> {
+    Audit::new(CannedAdvisories(Vec::new()), ActiveRepos, tags).run(
         root,
-        config_at(root, token),
+        config_at(root, Some("token")),
         &mut |_| {},
     )
 }
@@ -133,6 +173,33 @@ impl RepoMetadata for ActiveRepos {
             archived: false,
             pushed_at: "2026-08-01T00:00:00Z".to_owned(),
         })
+    }
+}
+
+/// Resolves tags without a request: `moved` repositories point at [`OTHER_SHA`],
+/// `unreachable` ones fail, and the rest still point at [`LOCKED_SHA`].
+#[derive(Default)]
+struct CannedTags {
+    /// Repositories whose tags were repointed.
+    moved: Vec<&'static str>,
+    /// Repositories whose lookups fail.
+    unreachable: Vec<&'static str>,
+}
+
+impl TagResolver for CannedTags {
+    fn tag_commit(&self, action: &ActionId, tag: &str) -> Result<CommitSha, GitHubError> {
+        let repo = action.as_str();
+        if self.unreachable.contains(&repo) {
+            return Err(GitHubError::NotFound {
+                url: format!("{repo}@{tag}"),
+            });
+        }
+        let sha = if self.moved.contains(&repo) {
+            OTHER_SHA
+        } else {
+            LOCKED_SHA
+        };
+        Ok(CommitSha::from(sha))
     }
 }
 
@@ -611,4 +678,48 @@ fn only_the_lock_decides_what_is_audited() {
         "audit must ignore actions that appear only in workflows, got: {:?}",
         report.diagnostics
     );
+}
+
+#[test]
+fn a_moved_tag_exits_one_and_names_the_check_in_json() {
+    let temp = TempDir::new().unwrap();
+    let root = repo_with_lock(&temp, Some(TAG_LOCK));
+    let tags = CannedTags {
+        moved: vec!["actions/checkout"],
+        ..CannedTags::default()
+    };
+
+    let report = audit_with_tags(&root, tags).unwrap();
+
+    assert_eq!(CommandReport::exit_code(&report), 1);
+    let value: serde_json::Value = serde_json::from_str(&report.to_json()).unwrap();
+    assert_eq!(value["findings"][0]["check"], "tag-moved");
+    assert_eq!(value["findings"][0]["level"], "error");
+    assert_eq!(value["error_count"], 1);
+    assert_eq!(value["warning_count"], 0);
+}
+
+#[test]
+fn tampering_and_unreachability_carry_different_check_names() {
+    // CI must tell "tampered with" from "rate-limited" without parsing prose: the first
+    // pages a human, the second retries the job.
+    let temp = TempDir::new().unwrap();
+    let root = repo_with_lock(&temp, Some(TWO_TAG_LOCK));
+    let tags = CannedTags {
+        moved: vec!["actions/checkout"],
+        unreachable: vec!["actions/setup-node"],
+    };
+
+    let report = audit_with_tags(&root, tags).unwrap();
+
+    assert_eq!(CommandReport::exit_code(&report), 1);
+    let value: serde_json::Value = serde_json::from_str(&report.to_json()).unwrap();
+    let checks: Vec<&str> = value["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|finding| finding["check"].as_str().unwrap())
+        .collect();
+    assert_eq!(checks, ["tag-moved", "tag-unverified"]);
+    assert_eq!(value["error_count"], 2);
 }

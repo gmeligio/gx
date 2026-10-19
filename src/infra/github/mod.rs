@@ -25,3 +25,7 @@ pub use registry::{Error, Registry};
 #[cfg(test)]
 pub use repo_meta::fake::CannedRepos;
 pub use repo_meta::{RepoMeta, RepoMetadata, RestRepoMetadata};
+/// The [`TagResolver`] test double.
+#[cfg(test)]
+pub use resolve::fake::FakeTags;
+pub use resolve::{GitTags, TagResolver};
