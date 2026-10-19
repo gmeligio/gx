@@ -10,7 +10,7 @@
 ## 3. Verify
 
 - [x] 3.1 `gx lint` passes; pre-commit hooks pass (no new findings; 2 pre-existing errors tracked in #226)
-- [ ] 3.2 Open PR `ci(release): authenticate app token with client ID`
+- [x] 3.2 Open PR `ci(release): authenticate app token with client ID`
 
 ## Post-merge (not tracked here)
 
