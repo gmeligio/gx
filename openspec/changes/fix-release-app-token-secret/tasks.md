@@ -1,7 +1,6 @@
 ## 1. Upgrade action
 
-- [ ] 1.1 Set `"actions/create-github-app-token" = "^3"` in `.github/gx.toml`
-- [ ] 1.2 Run gx to re-resolve and re-pin; confirm `.github/gx.lock` and all three workflow uses point at v3.3.0 (`64ab729a6294000f5aa4a4bc0b73d1f32bc45510`)
+- [ ] 1.1 Run `gx upgrade --latest actions/create-github-app-token`; confirm `.github/gx.toml` has `"^3"`, `.github/gx.lock` resolves `^3` to the latest v3 tag, no `^2`/`v2.2.1` entries remain, and all three workflow `uses:` lines carry the locked SHA
 
 ## 2. Switch to client ID
 
@@ -12,4 +11,8 @@
 
 - [ ] 3.1 `gx lint` passes; pre-commit hooks pass
 - [ ] 3.2 Open PR `ci(release): authenticate app token with client ID`
-- [ ] 3.3 After merge, Release-plz run on `main` passes the token step
+
+## Post-merge (not tracked here)
+
+- Release-plz run on `main` passes the token step.
+- Next tag: `publish-homebrew-formula` passes the token step.
