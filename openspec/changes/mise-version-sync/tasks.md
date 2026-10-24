@@ -6,7 +6,7 @@
 ## 2. Drop the mise version pin
 
 - [x] 2.1 In every workflow that uses `jdx/mise-action` (today `build.yml`, `release.yml`, `release-plz.yml`): replace the `MISE_VERSION` env entry and its "Generated from min_version" comment with `MISE_LOCKED: 1`, and delete every `version: ${{ env.MISE_VERSION }}` input
-- [ ] 2.2 Delete `min_version` and its comment from `.config/mise.toml`
+- [x] 2.2 Delete `min_version` and its comment from `.config/mise.toml`
 - [ ] 2.3 Delete `.config/mise/tasks/mise-version` and the `mise-version` hook in `.pre-commit-config.yaml`
 
 ## 3. Make CI read-only on mise.lock
