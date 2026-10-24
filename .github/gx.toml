@@ -4,6 +4,6 @@
 "actions/create-github-app-token" = "^3"
 "actions/download-artifact" = "^7"
 "actions/upload-artifact" = "^6"
-"jdx/mise-action" = "^3"
+"jdx/mise-action" = "^5"
 "release-plz/action" = "^0.5"
 "rust-lang/crates-io-auth-action" = "~1.0.3"
