@@ -13,8 +13,8 @@ version = "v7.0.0"
 [resolutions."actions/upload-artifact"."^6"]
 version = "v6.0.0"
 
-[resolutions."jdx/mise-action"."^3"]
-version = "v3.6.1"
+[resolutions."jdx/mise-action"."^5"]
+version = "v5"
 
 [resolutions."release-plz/action"."^0.5"]
 version = "v0.5.128"
@@ -52,11 +52,11 @@ repository = "actions/upload-artifact"
 ref_type = "tag"
 date = "2025-12-12T17:58:04Z"
 
-[actions."jdx/mise-action"."v3.6.1"]
-sha = "6d1e696aa24c1aa1bcc1adea0212707c71ab78a8"
+[actions."jdx/mise-action".v5]
+sha = "82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e"
 repository = "jdx/mise-action"
 ref_type = "tag"
-date = "2026-01-20T12:32:53Z"
+date = "2026-10-24T10:05:12Z"
 
 [actions."release-plz/action"."v0.5.128"]
 sha = "1528104d2ca23787631a1c1f022abb64b34c1e11"
