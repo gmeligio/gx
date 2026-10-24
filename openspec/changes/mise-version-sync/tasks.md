@@ -1,7 +1,7 @@
 ## 1. Upgrade mise-action
 
 - [x] 1.1 Run `cargo run -- upgrade --latest jdx/mise-action` and confirm `.github/gx.toml`/`gx.lock` and every workflow `uses:` point at a v5 SHA
-- [ ] 1.2 Confirm with `grep -A3 jdx/mise-action .github/workflows/*.yml` that no step passes a mise-action input other than `version` (removed in 2.1). Confirm the GitHub-API steps still set their own token: `mise run e2e` (`GITHUB_TOKEN`), release-plz (app token), `release.yml` (`GH_TOKEN`)
+- [x] 1.2 Confirm with `grep -A3 jdx/mise-action .github/workflows/*.yml` that no step passes a mise-action input other than `version` (removed in 2.1). Confirm the GitHub-API steps still set their own token: `mise run e2e` (`GITHUB_TOKEN`), release-plz (app token), `release.yml` (`GH_TOKEN`)
 
 ## 2. Drop the mise version pin
 
