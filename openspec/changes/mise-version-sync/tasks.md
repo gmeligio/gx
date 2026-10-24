@@ -18,6 +18,6 @@
 ## 4. Verify
 
 - [x] 4.1 Locally: `mise run test` and `prek run --all-files` pass
-- [ ] 4.2 Open the PR; every CI job's locked install passes and no job leaves `.config/mise.lock` dirty
+- [x] 4.2 Open the PR; every CI job's locked install passes and no job leaves `.config/mise.lock` dirty
 - [ ] 4.3 If the locked install of `core:rust` passes in CI, delete `locked = false` and its comment from `.config/mise.toml`; otherwise pause and revise design.md
 - [ ] 4.4 After merge, confirm the first release-plz run on main passes; open a GitHub issue to check the macOS/Windows `release.yml` jobs on the next tag
