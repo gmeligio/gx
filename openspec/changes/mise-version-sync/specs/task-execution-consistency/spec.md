@@ -2,7 +2,7 @@
 
 ### Requirement: Developer checks have one definition invoked by every environment
 
-Every project check (format, clippy, supply-chain/deny, lockfile tidy, lockfile sync, compile check) SHALL be defined exactly once as a mise task. The local shell, the pre-commit hooks, and CI SHALL all invoke that check through `mise run <task>` rather than re-spelling the underlying `cargo`/`clippy`/`rustfmt`/`mise` command. No `build.yml` step and no pre-commit hook SHALL invoke `cargo`, `clippy`, `rustfmt`, or `mise install` directly for a check that has a mise task.
+Every project check (format, clippy, supply-chain/deny, lockfile tidy, lockfile sync, compile check) SHALL be defined exactly once as a mise task. The local shell, the pre-commit hooks, and CI SHALL all invoke that check through `mise run <task>` rather than re-spelling the underlying `cargo`/`clippy`/`rustfmt`/`mise` command. No `build.yml` step and no pre-commit hook SHALL invoke `cargo`, `clippy`, `rustfmt`, or `mise install` directly for a check that has a mise task. The one exception is CI's verification of `.config/mise.lock`. It has no task: CI performs it inside its tool-install step, through the locked mode the workflows set.
 
 **User value:** Contributors never get a CI failure caused by a check that passed locally but used different flags than CI. That is the drift class behind the PR #102 `cargo-deny unmatched-skip-root` failure, where the `-D warnings` flag lived only in the mise task. Changing a check's flags in one place moves every environment at once. This is the same contributor-facing guarantee as `lockfile-integrity`, applied to check definitions.
 
@@ -29,7 +29,7 @@ Every project check (format, clippy, supply-chain/deny, lockfile tidy, lockfile 
 
 ### Requirement: Local and pre-commit mutate; CI verifies
 
-Checks that can fix their target (format, clippy, lockfile sync) SHALL mutate in the local and pre-commit environments and SHALL be verified non-mutating in CI. The mutating task and its verification SHALL share the same configuration (same `rustfmt.toml`, same `--all` scope, same lint set, same lockfile settings), so that only the verb differs. CI SHALL NOT modify the working tree. The mise lockfile is verified by CI's locked tool install rather than by a dedicated `:check` task.
+Checks that can fix their target (format, clippy, lockfile sync) SHALL mutate in the local and pre-commit environments and SHALL be verified non-mutating in CI. The mutating task and its verification SHALL share the same configuration (same `rustfmt.toml`, same `--all` scope, same lint set, same lockfile settings), so that only the verb differs. For the mise lockfile, the verb is unlocked (hook writes) versus locked (CI reads). CI SHALL NOT modify the working tree. The mise lockfile is verified by CI's locked tool install rather than by a dedicated `:check` task.
 
 **User value:**
 - A contributor's commit is auto-formatted and its lockfiles auto-synced in one shot, instead of being told they are wrong.
@@ -57,7 +57,7 @@ Checks that can fix their target (format, clippy, lockfile sync) SHALL mutate in
 
 - **GIVEN** any CI job that installs the project's tools
 - **WHEN** it installs them
-- **THEN** the install runs in locked mode, so it fails on a missing lock entry or a checksum mismatch
+- **THEN** the install runs in the locked mode set by the workflow's own env, so it fails on a missing lock entry or a checksum mismatch
 - **AND** it never writes `.config/mise.lock`
 
 #### Scenario: The mutating task repairs rather than merely writing
