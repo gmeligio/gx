@@ -9,8 +9,9 @@ min_version = "2026.8.5"
 [tools]
 "github:axodotdev/cargo-dist" = "0.31.0"
 "github:EmbarkStudios/cargo-deny" = "0.19.0"
-"aqua:j178/prek" = "0.4.4"
+prek = "0.4.4"
 shellcheck = "0.11.0"
+jq = "1.8.2"
 "npm:@fission-ai/openspec" = "1.8.0"
 
 [settings]
