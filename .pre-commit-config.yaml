@@ -35,10 +35,10 @@ repos:
             language: system
           - id: mise-lockfile
             name: mise Lockfile
-            description: Regenerate .config/mise.lock via the mise lock task and stage only it, since this runs on every commit.
+            description: Regenerate .config/mise.lock via the mise lock task when its inputs change, and re-stage it.
             entry: bash -c 'mise run lock && git add .config/mise.lock'
             pass_filenames: false
-            always_run: true
+            files: ^(\.config/mise\.(toml|lock)|rust-toolchain\.toml)$
             language: system
           - id: cargo-deny
             name: Cargo Deny
