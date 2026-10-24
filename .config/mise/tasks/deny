@@ -1,5 +1,15 @@
 #!/usr/bin/env bash
 #MISE description="Check supply chain"
+set -euo pipefail
+cd "$MISE_PROJECT_ROOT"
+
+# Release targets live in dist-workspace.toml; check only crates those ship.
+mapfile -t targets < <(dist plan --output-format=json | jq -r '.ci.github.artifacts_matrix.include[].targets[]')
+if [ ${#targets[@]} -eq 0 ]; then
+    echo "dist plan reported no targets" >&2
+    exit 1
+fi
+
 # -D warnings fails on stale config (unmatched allows, unnecessary skips) so
 # the exception lists stay honest as the dependency tree shifts.
-cargo deny --locked check -D warnings
+cargo deny --locked "${targets[@]/#/--target=}" check -D warnings
