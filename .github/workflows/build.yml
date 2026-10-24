@@ -8,9 +8,8 @@ on:
 permissions:
     contents: read
 
-# Generated from min_version in .config/mise.toml; edit it there instead.
 env:
-    MISE_VERSION: 2026.8.5
+    MISE_LOCKED: 1
 
 jobs:
     check:
@@ -19,8 +18,6 @@ jobs:
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
             - uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5
-              with:
-                  version: ${{ env.MISE_VERSION }}
             - run: mise run check
 
     fmt:
@@ -33,8 +30,6 @@ jobs:
             # before mise sets RUSTUP_TOOLCHAIN.
             - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.16.1
             - uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5
-              with:
-                  version: ${{ env.MISE_VERSION }}
             - run: mise run format:check
 
     clippy:
@@ -47,8 +42,6 @@ jobs:
             # before mise sets RUSTUP_TOOLCHAIN.
             - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.16.1
             - uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5
-              with:
-                  version: ${{ env.MISE_VERSION }}
             - run: mise run clippy:check
 
     unit-tests:
@@ -57,8 +50,6 @@ jobs:
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
             - uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5
-              with:
-                  version: ${{ env.MISE_VERSION }}
             - run: mise run test:unit
 
     size:
@@ -67,8 +58,6 @@ jobs:
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
             - uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5
-              with:
-                  version: ${{ env.MISE_VERSION }}
             - run: mise run lint:size
 
     integration-tests:
@@ -77,8 +66,6 @@ jobs:
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
             - uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5
-              with:
-                  version: ${{ env.MISE_VERSION }}
             - run: mise run integ
 
     e2e-tests:
@@ -87,8 +74,6 @@ jobs:
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
             - uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5
-              with:
-                  version: ${{ env.MISE_VERSION }}
             - run: mise run e2e
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -99,8 +84,6 @@ jobs:
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
             - uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5
-              with:
-                  version: ${{ env.MISE_VERSION }}
             - run: mise run deny
 
     lockfile:
@@ -109,6 +92,4 @@ jobs:
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
             - uses: jdx/mise-action@82a612c5ab8bcda7cc5db6b7e81a8e7584c3dc6e # v5
-              with:
-                  version: ${{ env.MISE_VERSION }}
             - run: mise run lock:check
