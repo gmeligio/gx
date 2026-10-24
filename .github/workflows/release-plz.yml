@@ -7,7 +7,7 @@ on:
 
 # Generated from min_version in .config/mise.toml; edit it there instead.
 env:
-    MISE_VERSION: 2026.8.5
+    MISE_VERSION: 2026.10.13
 
 jobs:
     release-plz-release:
