@@ -2,8 +2,8 @@
 # so CI never installs them and cannot dirty .config/mise.lock.
 
 # Every mise version writes .config/mise.lock slightly differently, so local and
-# CI runs have to agree on one. This is where that version is chosen; `mise run
-# mise-version` pins CI to it.
+# CI runs have to agree on one. `mise run lock` (a pre-commit hook) sets this to
+# the mise that wrote the lockfile; `mise run mise-version` pins CI to it.
 min_version = "2026.10.13"
 
 [tools]

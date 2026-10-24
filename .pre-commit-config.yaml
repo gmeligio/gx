@@ -42,8 +42,8 @@ repos:
             language: system
           - id: mise-lockfile
             name: mise Lockfile
-            description: Regenerate .config/mise.lock via the mise lock task and stage only it, since this runs on every commit.
-            entry: bash -c 'mise run lock && git add .config/mise.lock'
+            description: Regenerate .config/mise.lock via the mise lock task, which also pins min_version and MISE_VERSION to the mise that wrote it, and stage only those files, since this runs on every commit.
+            entry: bash -c 'mise run lock && git add .config/mise.lock .config/mise.toml .github/workflows'
             pass_filenames: false
             always_run: true
             language: system

@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
-#MISE description="Sync .config/mise.lock with the installed tools"
+#MISE description="Sync .config/mise.lock with the installed tools, and pin CI to the mise that wrote it"
 # Don't rename: the `_default` filename is what gives this the bare `lock` name.
+set -euo pipefail
+cd "$MISE_PROJECT_ROOT"
+
+# Each mise version writes the lockfile differently, so CI must run the one
+# that wrote it. min_version rejects older mise, so this only ever moves forward.
+running=$(mise --version | awk '{print $1}')
+sed -i "s/^min_version = \".*\"$/min_version = \"$running\"/" .config/mise.toml
+mise run mise-version
+
 # `mise install` only writes entries for the tools it installs, so it leaves
 # stale ones untouched. `mise lock` rewrites every platform.
 mise lock
