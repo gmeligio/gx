@@ -5,6 +5,8 @@ on:
         branches:
             - main
 
+permissions: {}
+
 env:
     MISE_LOCKED: 1
 
