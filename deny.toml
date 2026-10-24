@@ -1,5 +1,8 @@
 # https://embarkstudios.github.io/cargo-deny/
 
+[graph]
+targets = ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-unknown-linux-musl", "x86_64-pc-windows-msvc"]
+
 [advisories]
 ignore = []
 
@@ -10,7 +13,6 @@ allow = [
     "BSD-2-Clause",
     "BSD-3-Clause",
     "CC0-1.0",
-    "CDLA-Permissive-2.0",
     "ISC",
     "MIT",
     "MIT-0",
@@ -30,15 +32,9 @@ highlight = "all"
 skip = [
     # Transitive duplicates we can't resolve — all pulled by reqwest's dependency tree
     { crate = "core-foundation@0.9", reason = "system-configuration pulls old version" },
-    { crate = "thiserror@1", reason = "jni still on thiserror 1.x" },
-    { crate = "thiserror-impl@1", reason = "jni still on thiserror 1.x" },
     { crate = "toml_datetime@0.6", reason = "toml_edit still on 0.6" },
     { crate = "windows-sys@0.60", reason = "socket2/tokio still on 0.60" },
     { crate = "hashbrown@0.17", reason = "gix-hashtable on 0.17, rest of tree on 0.16" },
-]
-skip-tree = [
-    # jni pulls windows-sys 0.45 → old windows-targets tree
-    { crate = "windows-sys@0.45", reason = "jni → rustls-platform-verifier transitive" },
 ]
 
 [sources]
