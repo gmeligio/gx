@@ -12,7 +12,7 @@
 ## 3. Make CI read-only on mise.lock
 
 - [x] 3.1 Delete the `lockfile` job from `build.yml` and `.config/mise/tasks/lock/check`
-- [ ] 3.2 Remove `lock:check` from `depends` and the description of `.config/mise/tasks/test/_default`
+- [x] 3.2 Remove `lock:check` from `depends` and the description of `.config/mise/tasks/test/_default`
 - [ ] 3.3 Replace `always_run: true` on the `mise-lockfile` hook with `files: ^(\.config/mise\.(toml|lock)|rust-toolchain\.toml)$` and update its description
 
 ## 4. Verify
