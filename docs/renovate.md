@@ -99,11 +99,33 @@ Two pieces, each doing only what it can do well.
       "description": "Bump out-of-range (major) GitHub Actions in gx.toml",
       "managerFilePatterns": ["/^\\.github/gx\\.toml$/"],
       "matchStrings": ["\"(?<depName>[^\"]+?)\"\\s*=\\s*\"(?<currentValue>[^\"]+?)\""],
-      "datasourceTemplate": "github-tags"
+      "datasourceTemplate": "github-tags",
+      "versioningTemplate": "cargo",
+      "extractVersionTemplate": "^v?(?<version>.+)$"
     }
   ]
 }
 ```
+
+**Use `cargo` versioning.** It is the only Renovate versioning that reads `gx.toml` ranges the way gx does:
+
+- **Same range rules.** gx parses `^`/`~` specifiers with Rust's
+  [`semver::VersionReq`](https://docs.rs/semver/latest/semver/struct.VersionReq.html), which implements
+  Cargo's syntax, so Renovate's idea of "in range" matches gx's.
+- **Same precision.** Under the default `replace` range strategy, Renovate's
+  [cargo versioning](https://github.com/renovatebot/renovate/blob/main/lib/modules/versioning/cargo/index.ts)
+  keeps the number of parts in the range: `^4` becomes `^5`, `^4.1` becomes `^5.0`, and `~4.1.2` becomes
+  `~5.0.0`. That is what `gx upgrade --latest` does too.
+
+The precision is not cosmetic. gx reads it as your update policy: `gx upgrade` keeps a one- or two-part
+range within its major, but a three-part range within its major.minor. With `npm` versioning, Renovate
+rewrites `^4` as `^5.0.0`, and from then on `gx upgrade` only moves that action across `5.0.x` patches.
+Leaving `versioningTemplate` out is worse: Renovate's default, `semver-coerced`, replaces the whole value with
+the new version, so `^4` becomes a bare `v5.0.0`, which gx then reads as a literal tag instead of a range. The
+`github-actions` versioning is built for `uses: x@v7` refs, not `^`/`~` ranges.
+
+Keep every range in `gx.toml` prefixed with `^` or `~`: gx treats a bare value as a literal tag or branch,
+while cargo versioning would read a bare `4.0.1` as `^4.0.1`.
 
 Validate it before committing:
 
