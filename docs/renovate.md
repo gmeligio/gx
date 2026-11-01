@@ -100,32 +100,25 @@ Two pieces, each doing only what it can do well.
       "managerFilePatterns": ["/^\\.github/gx\\.toml$/"],
       "matchStrings": ["\"(?<depName>[^\"]+?)\"\\s*=\\s*\"(?<currentValue>[^\"]+?)\""],
       "datasourceTemplate": "github-tags",
-      "versioningTemplate": "cargo",
+      "versioningTemplate": "composer",
       "extractVersionTemplate": "^v?(?<version>.+)$"
     }
   ]
 }
 ```
 
-**Use `cargo` versioning.** It is the only Renovate versioning that reads `gx.toml` ranges the way gx does:
+**Use `composer` versioning.** It bumps a range while keeping the number of parts you wrote: `^4` becomes
+`^5`, `^4.1` becomes `^5.0`, and `~4.1.2` becomes `~5.0.0`, the same as `gx upgrade --latest`. Its `^` and
+three-part `~` mean the same as gx's ranges, which gx parses with Rust's
+[`semver::VersionReq`](https://docs.rs/semver/latest/semver/struct.VersionReq.html).
 
-- **Same range rules.** gx parses `^`/`~` specifiers with Rust's
-  [`semver::VersionReq`](https://docs.rs/semver/latest/semver/struct.VersionReq.html), which implements
-  Cargo's syntax, so Renovate's idea of "in range" matches gx's.
-- **Same precision.** Under the default `replace` range strategy, Renovate's
-  [cargo versioning](https://github.com/renovatebot/renovate/blob/main/lib/modules/versioning/cargo/index.ts)
-  keeps the number of parts in the range: `^4` becomes `^5`, `^4.1` becomes `^5.0`, and `~4.1.2` becomes
-  `~5.0.0`. That is what `gx upgrade --latest` does too.
+The number of parts matters because gx reads it as your update policy: `gx upgrade` keeps a one- or two-part
+range within its major, and a three-part range within its major.minor.
 
-The precision is not cosmetic. gx reads it as your update policy: `gx upgrade` keeps a one- or two-part
-range within its major, but a three-part range within its major.minor. With `npm` versioning, Renovate
-rewrites `^4` as `^5.0.0`, and from then on `gx upgrade` only moves that action across `5.0.x` patches.
-Leaving `versioningTemplate` out is worse: Renovate's default, `semver-coerced`, replaces the whole value with
-the new version, so `^4` becomes a bare `v5.0.0`, which gx then reads as a literal tag instead of a range. The
-`github-actions` versioning is built for `uses: x@v7` refs, not `^`/`~` ranges.
+Keep every range in `gx.toml` prefixed with `^` or `~`, and write `~` with three parts (`~4.1.0`):
 
-Keep every range in `gx.toml` prefixed with `^` or `~`: gx treats a bare value as a literal tag or branch,
-while cargo versioning would read a bare `4.0.1` as `^4.0.1`.
+- gx treats a bare value as a literal tag or branch, while composer reads a bare `4.0.1` as that exact version.
+- A two-part `~4.1` means `>=4.1.0 <4.2.0` to gx but `>=4.1.0 <5.0.0` to composer.
 
 Validate it before committing:
 
